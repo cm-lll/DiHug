@@ -1,0 +1,41 @@
+# @package _global_
+# 使用 ACM 数据集，wandb 项目为 sparse_acm_subgraphs
+defaults:
+  - override /dataset: acm_subgraphs
+general:
+    name : 'acm_train'
+    sparse: True
+    gpus : 5
+    wandb: 'online'
+    check_val_every_n_epochs: 10        # 验证每 10 个 epoch 运行一次
+    enable_val_sampling: false        # 关闭验证阶段“采样生成图”（sample_batch）
+    enable_val_pred_metrics: false    # 关闭验证阶段“预测图”采样指标（日志里显示 Sampling metrics 预测）
+    sample_every_val: 5
+    samples_to_generate: 10
+    samples_to_save: 5
+    chains_to_save: 1
+    remove_h: True
+    number_chain_steps: 10
+    sample_num_nodes: null
+    final_model_samples_to_generate: 10
+    final_model_samples_to_save: 10
+train:
+    batch_size: 2   # 单图/步，避免大图合并 OOM；80 train 图 → 80 steps/epoch
+    save_model: True
+    n_epochs: 200   # 正式长训 200 epoch
+    num_workers: 8  # 减少 DataLoader 瓶颈警告；机器核多可改为 16 或 24
+    # lr 使用 train_default 的 0.0002，长训更稳；不在此覆盖
+    # train_metrics_every_n_steps: 10  # 若 step 卡在 train_metrics/backward，可设为 10 或 20 以每 N 步才算一次 train_metrics，加速训练
+model:
+    n_layers: 4
+    # 纯 edge-only：节点只作为固定条件输入，不再更新节点分支
+    edge_only_model: true
+    diffusion_noise_schedule: 'cosine'
+    diffusion_steps: 100
+    hidden_mlp_dims: { 'X': 128, 'E': 64, 'y': 64 }
+    hidden_dims: {'dx': 128, 'de': 64, 'dy': 64, 'n_head': 8, 'dim_ffX': 256, 'dim_ffE': 128, 'dim_ffy': 128}
+    extra_features: 'all'
+    # 每步 query 边比例（10%），减少 query 边总数避免 OOM
+    edge_fraction: 0.1
+    # query 边数量上限：超过时随机子采样到该数量，避免显存崩溃；0 表示不限制
+    max_query_edges_per_batch: 50000

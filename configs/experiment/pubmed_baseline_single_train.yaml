@@ -1,0 +1,97 @@
+# @package _global_
+# HGEN 对齐版 PubMed：1565 节点全图，train/val/test 共用 subgraph_000
+# 异质扩散 + HGT denoiser + hetero_metis block query
+# 数据：无向 GT -> 每对 1 条 canonical 有向边（16 族）；MP 反向边仅在 comp graph 内 to_undirected 展开
+defaults:
+  - override /dataset: pubmed_baseline_subgraphs
+dataset:
+  single_graph: true
+  single_graph_split: 'train'
+  single_graph_index: 0
+general:
+  name: 'dihug_pubmed_baseline_single_train'
+  wandb: 'disabled'
+  sparse: true
+  log_every_n_steps: 1
+  checkpoint_monitor: 'train_epoch/NLL'
+  # 当前 PubMed 单图实验默认不跑训练中采样验证，避免耗时且避免旧 val_sampling_style 口径干扰。
+  val_sampling_style: false
+  enable_val_sampling: false
+  enable_val_pred_metrics: false
+  remove_h: true
+  # test/full graph sampling
+  sampling_skip: 5
+  test_sampling_full_steps: true
+  test_sampling_metrics_every: 0
+  skip_first_validation: true
+  run_test_after_train: true
+  enable_test_sampling: true
+  test_variance: 1
+  cond_edge_gen_fixed_nodes: true
+  cond_edge_gen_use_test_graph: true
+train:
+  n_epochs: 300
+  batch_size: 1
+  save_model: True
+model:
+  denoiser: hgt
+  n_layers: 4
+  diffusion_steps: 100
+  edge_fraction: 0.5
+  extra_features: null
+
+  # Heterogeneous block-query training. For PubMed single-graph training, each noisy graph
+  # sees every block once with a backward/step per block.
+  block_query: true
+  block_partition_mode: hetero_metis
+  hetero_metis_relation_balance_power: 0.5
+  hetero_metis_refine_degree_balance: true
+  hetero_metis_refine_max_iter: 200
+  hetero_metis_log_top_blocks: 5
+  block_query_full_block: true
+  block_query_inter_fill: true
+  block_query_include_uniform: false
+  block_query_max_edges_per_family: 0
+  query_block_train_mode: none
+  query_family_balanced_sampling: true
+  query_include_all_positive_edges: false
+  train_query_repeats: 1
+  train_all_blocks_per_noise: true
+  train_all_blocks_step_mode: sequential
+  train_all_blocks_shuffle: true
+  train_all_blocks_count: 0
+  train_t_schedule: random
+  train_t_cycle_repeats: 1
+
+  # Denoiser / objective.
+  use_edge_phi_fusion: false
+  use_dual_softmax: true
+  use_time_film: true
+  use_edge_state_update: true
+  edge_state_update_mode: 'last'
+  structure_only_global: false
+  training_mode: edge_prediction
+  autoregressive: false
+  exist_loss_type: bce
+  exist_pos_weight: 50
+  edge_count_loss_weight: 0.3
+  edge_count_loss_warmup_epochs: 80
+  degree_loss_weight: 0.0
+  closure_pos_loss_weight: 0.0
+
+  # Sampling defaults for current PubMed full-graph evaluation.
+  sampling_block_mode: type_template
+  sampling_block_template_init: false
+  sampling_block_marginal_init: true
+  sampling_block_family_budget_projection: false
+  sampling_block_family_budget_source: marginal
+  sampling_block_family_budget_multiplier: 1.0
+  sampling_block_family_budget_intra_multiplier: 1.0
+  sampling_block_family_budget_inter_multiplier: 1.0
+  sampling_block_family_budget_keep_policy: random
+  sampling_edge_selection: topk_structure
+  sampling_degree_pair_bins: 5
+  sampling_degree_pair_strength: 0.5
+  sampling_degree_pair_min_bin_edges: 0
+  sampling_exist_logit_bias: 0.0
+  sampling_exist_temperature: 1.0

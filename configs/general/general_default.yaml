@@ -1,0 +1,59 @@
+# General settings
+name: 'graph-tf-model'      # Warning: 'debug' and 'test' are reserved name that have a special behavior
+
+wandb: 'disabled'           # online | offline | disabled (uses proxy from environment if available)
+gpus: 1                     # Number of GPUs to use (8x RTX 2080)
+
+resume: null            # 从 checkpoint 恢复训练 If resume, path to ckpt file from outputs directory in main directory
+resume_full: false      # true=Lightning 原生完整恢复 epoch/optimizer；false=仅 strict=False warm-start 权重
+test_only: null         # 只做测试、不训练 Use absolute path
+test_variance: 1        # 测试时重复采样次数；最终测样可设为 >1（如 3）做多轮采样取均/方差
+generated_path: null    # path of generated samples, this file should be of pickle type
+
+check_val_every_n_epochs: 50  # 每 N 个 epoch 做一次验证
+val_max_query_edges_per_fam: null  # 异质图验证时每个关系族每图最多采样的边数（用于 NLL）；null=全量可能边
+val_apply_max_query_edges_per_batch: false  # 验证是否沿用 model.max_query_edges_per_batch 截断总 query；false=不截断（与训练同图时一般无需截断）
+val_sampling_style: false  # Deprecated/ignored: validation sampling is controlled only by enable_val_sampling.
+enable_val_sampling: false  # 是否在验证时做采样生成图；false 则只做预测指标（不跑采样）
+enable_test_sampling: false  # 是否在测试时做采样生成图；test_only 跑最终测样时请设为 true，并配合 test_variance 多轮
+sample_every_val: 4  # 每 N 个 epoch 采样一次（仅当 enable_val_sampling 为 true 时有效）
+val_check_interval: null  # 按步数做验证的间隔 Trainer(val_check_interval=...)；若设成小数（如 0.25）表示按训练进度比例；null 表示只用 check_val_every_n_epoch。
+samples_to_generate: 512  # 验证阶段采样时，一次生成多少张图（用于看训练过程中的生成质量） We advise to set it to 2 x batch_size maximum
+samples_to_save: 20  # 上述生成的图中，保存到本地/可视化/Wandb 的数量（例如只保存前 20 张）。
+chains_to_save: 1  # 保存多少条“从噪声到图”的完整链（常做成 gif 或视频），用于观察去噪过程。
+enable_visualization: false  # 是否执行采样后的图像/gif可视化与保存（false=完全跳过Visualizing chains/molecules步骤）
+log_every_steps: 50  # 每 N 个 step 打印一次日志
+log_every_n_steps: 50  # Trainer 的 log_every_n_steps；单 batch/epoch 时建议设为 1
+number_chain_steps: 50  # Number of frames in each gif
+
+final_model_samples_to_generate: 1  # 训练结束后最终采样生成的图数量	训练
+final_model_samples_to_save: 1  # 最终采样中保存的图数量
+final_model_chains_to_save: 1  # 最终采样时保存的 chain 数量
+
+evaluate_all_checkpoints: False  # 是否评估目录下所有 checkpoint，仅在 test_only 非空时有效：以 test_only 所在目录为 ckpt 目录，对该目录下所有 .ckpt 文件依次跑 trainer.test(..., ckpt_path=...)，用于批量评估。
+
+run_test_after_train: true  # 训练结束后是否自动跑 trainer.test()（含采样等）；设为 false 则只 fit 不 test，可事后用 test_only=ckpt 单独测
+
+# sampling skip（训练与采样共用；采样时可单独加大以加速，如 sampling_skip: 5 则 100 步变 20 步）
+skip: 1
+# 仅采样时使用的步长，null 表示用 skip；设为 10 即 10 步去噪（跳步实验）
+sampling_skip: null
+# 测试采样时强制逐时间步去噪；true 时忽略 sampling_skip/skip，使用 step=1。
+test_sampling_full_steps: true
+# 测试采样时每隔多少个去噪步记录一次中间图采样指标；0=关闭。
+test_sampling_metrics_every: 0
+# 是否在采样时每步打印详情：模型预测、后验、结果评估（边数、连通分量数）
+verbose_sampling: false
+# 记录采样过程中每个 t 步的全图三角形数量及增量，并写入 sampling_log.json
+log_sampling_triangle_trace: false
+# 记录采样时“模型预测 argmax / 解析后验后 argmax / 最终采样结果”的三角形差异，用于判断后验是否压低三角形
+log_sampling_posterior_triangle_gap: false
+# 采样时是否使用解析后验（p(z_s|z_t,z_0)）；false 则仅用模型预测采样（等价于后验为单位阵）
+# 注意：关闭解析后验会显著增加“边爆炸/全预测正边”的风险，尤其在稀疏异质图上。
+use_analytic_posterior: true
+
+# 测试采样模式：cond_edge_gen_fixed_nodes=固定节点只生成边；cond_edge_gen_sample_nodes=从真实分布抽样节点及子类别
+# cond_edge_gen_use_test_graph：固定节点时用 test 图节点（与评估时的真实图一致，便于单独看边生成质量）
+cond_edge_gen_fixed_nodes: false
+cond_edge_gen_sample_nodes: false
+cond_edge_gen_use_test_graph: true

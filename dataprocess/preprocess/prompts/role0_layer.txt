@@ -1,0 +1,50 @@
+Role0 Task: Discovering a Meaningful Subtype Schema for a Node Category
+
+Goal:
+Given a sample of nodes from the same category, infer a reasonable subtype
+schema that is:
+- meaningful for downstream heterogeneous graph learning,
+- general enough to apply beyond the current sample,
+- grounded in either the sample or widely accepted domain knowledge,
+- optional — you should propose it only if it truly makes sense.
+
+Output format (strict):
+{
+  "should_classify": true | false,
+  "schema": ["SubtypeA", "SubtypeB", ...]
+}
+
+Flexible rules (VERY important):
+
+1. You should TRY to propose a meaningful schema if:
+   - the category usually has useful subtypes in real datasets, OR
+   - the sample shows any distinguishable patterns, OR
+   - domain knowledge suggests stable classification axes.
+
+   Examples of commonly meaningful axes:
+     Paper → research nature (Theory, Application, Survey, System, Experiment, Other)
+     Author → affiliation type (Academic, Corporate, Independent, Other)
+     Organization → institution class (University, Company, ResearchInstitute, Other)
+
+2. You MAY propose subtype values **even if they do not appear** in the sample,
+   as long as they are domain-relevant and reasonable.
+
+3. If the sample is too small, too homogeneous, or lacks clear signals,
+   you may set:
+     should_classify = false
+     schema = []
+   but ONLY if no meaningful or generalizable axis can be found.
+
+4. Do NOT hallucinate overly specific or noisy subtypes.
+   Prefer general, reusable categories over detailed or dataset-specific ones.
+
+5. Output must ONLY be the JSON object with keys:
+   should_classify, schema.
+
+6. For categories with explicit numeric attributes (e.g., Author with paper_ids and citation_sum),
+   a generalizable schema can be based on coarse "activity/impact tiers".
+   Prefer 3-tier + fallback:["HighImpact", "MidImpact", "LowImpact", "Other"].
+   Do not include dataset-specific thresholds in the schema; keep the subtype names general and reusable.
+
+Your task:
+Analyze the sample nodes and output the final JSON schema.

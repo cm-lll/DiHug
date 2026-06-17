@@ -1,0 +1,248 @@
+# Model settings
+diffusion_steps: 500
+diffusion_noise_schedule: 'cosine'              # 'cosine', 'polynomial_2'
+n_layers: 5
+dropout: 0.1
+
+output_y: False                              # if the model contain last layer to output y
+scaling_layer: False
+
+extra_features: 'all'        # 'all', 'cycles', or null
+eigenfeatures: True
+edge_features: 'all'          # 两者都有或者路径特征（path / 距离）和局部邻居特征（local neighbors）二选一。'all', 'dist', 'localngbs' or null
+num_eigenvectors: 8       # eigenvectors
+num_eigenvalues: 5      # eigenvalues
+use_charge: False
+num_degree: 10
+dist_feat: True
+positional_encoding: False  # True for ablations, to keep the equivariance, it should be False!
+
+# sign net
+sign_net: False
+sn_hidden_dim: 32
+
+# sparse generation settings
+edge_fraction: 0.5
+# 采样时内层循环是否每轮用上一轮采样结果更新当前图（true=每轮基于上一轮结果，false=多轮共用同一 t 时刻图）
+autoregressive: false
+
+# DiHuG denoiser / query settings
+# denoiser: graph_transformer keeps the inherited SparseDiff layer; hgt uses pyHGT-style HGTConv.
+denoiser: hgt
+# HGT time conditioning: SparseDiff-style y/t FiLM on node/edge hidden states.
+use_time_film: false
+# Per-layer edge-state update for HGT, closer to SparseDiff's joint X/E/y updates.
+use_edge_state_update: false
+# Edge state update mode: "all" = update at every layer; "last" = only update at the last layer (saves VRAM).
+edge_state_update_mode: "all"
+block_query: false
+block_partition_mode: connected_bfs
+block_partition_rho: null
+# hetero_metis: relation family frequency normalization power. 0=no balance, 0.5=1/sqrt(freq), 1=1/freq.
+hetero_metis_relation_balance_power: 0.5
+# After hetero_metis, swap same-type nodes between blocks to balance degree load/hub mass.
+hetero_metis_refine_degree_balance: false
+hetero_metis_refine_max_iter: 200
+# hetero_metis 首次划分时打印前几个块的类型/关系摘要；0 表示只打印总体块大小。
+hetero_metis_log_top_blocks: 5
+# true=选中真实图局部块后，query 块内所有合法边；false=仍按 edge_fraction 抽块内一部分边。
+block_query_full_block: false
+# true=block full query 后，如果块内边少于 edge_fraction 原预算，从该块到其它块的块间候选边中随机补足。
+block_query_inter_fill: false
+# block_query_full_block 可能使某些关系族块内合法边过多；>0 时对每个关系族的 selected query 做上限截断。
+block_query_max_edges_per_family: 0
+# true=block query 之外继续拼接原来的全局 uniform query；false=训练只用 block query。
+block_query_include_uniform: true
+train_partition_source: noisy
+sampling_partition: auto
+# sampling block query mode: uniform | type_template. type_template uses train-time block type-count templates, not true block members.
+sampling_block_mode: uniform
+# true=采样初始化时按训练 block/family 边数模板随机生成初始边，而不是只用全局 family 平均边数。
+sampling_block_template_init: false
+# true=采样初始化时用全局 family marginal 密度作用到 block/block-pair 候选池，不使用真实 block 边数模板。
+sampling_block_marginal_init: false
+sampling_block_family_budget_projection: false
+sampling_block_family_budget_source: marginal
+sampling_block_family_budget_multiplier: 1.0
+sampling_block_family_budget_intra_multiplier: 1.0
+sampling_block_family_budget_inter_multiplier: 1.0
+sampling_block_family_budget_keep_policy: random
+block_partition_workers: 0
+use_edge_phi_fusion: true
+use_dual_softmax: true
+subtype_dim: 32
+
+# The dimensions should satisfy dx % n_head == 0
+hidden_dims : {'dx': 128, 'de': 64, 'dy': 64, 'n_head': 8, 'dim_ffX': 256, 'dim_ffE': 128, 'dim_ffy': 128}
+# dim_ffX	节点分支里 FFN 的中间维。
+# loss = loss_X + lambda_train[0]*loss_E + lambda_train[1]*loss_y + lambda_train[2]*loss_charge
+lambda_train: [5, 0, 2] # 这是训练总损失里各项的权重（节点损失固定为 1，不写进列表）, E = lambda[0], y = lambda[1]
+
+# existence BCE 正类权重（存在性损失里正负边权重调节，当前唯一生效的项）
+# - null: 不加权（默认）
+# - 'auto': 每个 step 在当前 query 上用 neg/pos 动态计算 pos_weight
+# - 数值: 固定 pos_weight（例如 5.0, 10.0, 20.0）
+exist_pos_weight: 1
+# existence loss: bce | focal. focal 用于 query 正负极度不平衡时抑制 easy negatives。
+exist_loss_type: bce
+exist_focal_gamma: 2.0
+exist_focal_alpha: 0.75
+# Sampling-only existence calibration. Positive bias reduces sampled edge count:
+# p_exist = sigmoid((logsumexp(pos)-noedge) / temperature - bias).
+sampling_exist_logit_bias: 0.0
+sampling_exist_temperature: 1.0
+# Sampling edge decision:
+# - bernoulli: sample each query edge independently from p_exist.
+# - topk_density: within each query relation family, keep the top-k p_exist edges where
+#   k follows the training graph family density. This prevents high-noise Bernoulli
+#   probabilities from exploding sparse graph edge counts.
+# - topk_degree_pair: like topk_density, but split each relation-family quota by the
+#   training graph's endpoint degree-bin pair distribution to preserve disassortative
+#   hub-to-low-degree mixing.
+sampling_edge_selection: bernoulli
+sampling_degree_pair_bins: 5
+# Fraction of each family quota allocated by degree-pair bins; the rest falls back
+# to ordinary family top-k. Lower this if connectivity/LCC drops too much.
+sampling_degree_pair_strength: 1.0
+sampling_degree_pair_min_bin_edges: 1
+# Query-level calibration loss: |mean(P(edge)) - mean(true_edge)|.
+# This keeps Bernoulli sampling probabilities aligned with sparse graph density.
+edge_count_loss_weight: 0.0
+# 辅助边数校准 warmup；>0 时从 0 线性升到 edge_count_loss_weight，避免前期正边排序被稀疏校准压垮
+edge_count_loss_warmup_epochs: 0
+# Closure-aware positive auxiliary loss: 对真实图中共同邻居多的正边额外加权，强化局部闭包/三角形关键边。
+closure_pos_loss_weight: 0.0
+closure_pos_loss_warmup_epochs: 0
+closure_pos_score_log1p: true
+closure_pos_score_normalize: true
+# 只保留 closure score 位于该分位数以上的正边；0 表示不筛选，0.8 表示 top 20%。
+closure_pos_top_quantile: 0.0
+# closure score 封顶；<=0 表示不封顶。
+closure_pos_score_cap: 0.0
+
+# true=进入全图 ideal 分支；false=SparseDiff 原版目标，直接 CE(pred, real)。
+structure_only_global: false
+# ideal 优化时 query soft 的梯度步长（仅 structure_only_global 时有效）；三角形不足时可略提高到 0.15
+structure_ideal_lr: 0.15
+# ideal 优化梯度下降迭代步数；原图三角形多、生成少时可提高到 10~12
+structure_ideal_steps: 10
+# true=ideal 固定 query 显式边数 k=k_noisy（仅优化「哪 k 条为 1」），边数中性，多轮采样时场景边数一致；false=sigmoid 独立概率
+# 异质图下 fix_k 时默认在关系族内限制边数（每族 k_fam 不变）
+structure_ideal_fix_k: true
+# fix_k=false 时生效：ideal 边数偏置。null/1.0=不偏置；>1 促使 ideal 有更多边（如 1.2=偏多 20%）；<1 促使更少边。配合 exist_pos_weight 可调节预测边数。
+structure_ideal_edge_count_ratio: null
+structure_ideal_edge_count_loss_weight: 0.0
+# 结构指标类型：legacy=relation_matrix/metapath2/3/subtype_degree；graph_metrics=DegreeMMD/Clustering/Triangles/EdgeTypesTV
+structure_loss_type: 'graph_metrics'
+degree_mmd_loss_weight: 0.0
+clustering_loss_weight: 0.0
+# ideal 优化时三角形项权重；原图 300+ 三角形、生成仅几十时可提高到 5~8
+triangles_loss_weight: 0.0
+# 楔形闭包损失权重：在真实图存在 2-hop 路径的位置，约束预测边是否闭合；用于补足“只看三角形总量”的不足
+wedge_closure_loss_weight: 0.0
+# true=三角形数用相对误差归一化，避免原始计数（10^4~10^6）主导 ideal 梯度；false=原始 L1
+structure_triangles_normalize: true
+edge_types_tv_loss_weight: 0.0
+structure_loss_max_nodes: 3000
+# 三角形辅助损失权重：0=关闭；>0 时在 ideal 模式下对「预测全图 vs 真实图」再加一项三角形+聚类损失，直接推高生成三角形数（ACM 等可设 0.5~1.0）
+triangle_aux_loss_weight: 0.0
+# 三角形辅助损失在训练进度 [start, end] 内线性 ramp（0~1）；用于前期稳住全局结构、后期再拉三角形
+triangle_aux_ramp_start: 0.0
+triangle_aux_ramp_end: 1.0
+# ideal 内循环的“离散一致性校验”：
+# true 时每次梯度步后把候选 ideal 投影到硬图并复算结构损失，仅接受硬图损失不变差的更新（否则回退）。
+ideal_hard_consistency_check: false
+# 硬图一致性接受阈值：candidate_hard_loss <= best_hard_loss + tol 即接受
+ideal_hard_accept_tolerance: 1.0e-8
+# 记录 ideal 行为日志（accept/reject 次数、hard loss 改善）
+ideal_log_actions: false
+# ideal 更新策略：
+# - soft: 现有连续 logits 梯度更新
+# - greedy_swap: fix_k=true 下，按梯度贪心选 m 对删加边（swap）
+# - greedy_add_del: fix_k=true 下，先加后删（数量对称）
+# - greedy_del_add: fix_k=true 下，先删后加（数量对称）
+ideal_update_strategy: soft
+# greedy 策略每步执行的动作对数 m（删m加m）
+ideal_greedy_m: 1
+# greedy 策略候选池大小（add/del 各取 top-k）
+ideal_greedy_candidate_k: 8
+# greedy 策略对 logits 的硬更新步长
+ideal_hard_step_size: 0.15
+# greedy 策略的 motif 闭包增益权重（0=关闭；建议 0.1~1.0 做对照）
+ideal_motif_gain_weight: 0.0
+# motif 三角形门控容忍区间（|tri_target-tri_current|<=tol 时不施加 motif 偏置，避免在目标附近过冲）
+ideal_motif_tri_tolerance: 0
+# 异质图 query 边按关系族均衡分配预算，避免大类别组合挤掉小类别组合。
+query_family_balanced_sampling: true
+# query 边采样是否启用“子类别分块优先”（同类型关系族内优先同子类别节点对）
+query_subtype_block_sampling: false
+# 子类别分块采样中块内（同子类别）边的目标比例，剩余预算给跨子类别
+query_subtype_intra_ratio: 0.8
+# 训练阶段 query 分块模式：
+# - none: 不分块
+# - random_ab: 每步随机训练 A 或 B
+# - sequential_ab: 按 step 奇偶交替训练 A/B（单步单前向的稳定近似）
+query_block_train_mode: none
+# A/B 分块时保留在两块中的共享边比例（用于跨块桥接，建议 0.1~0.2）
+query_block_overlap_ratio: 0.0
+# true=记录训练/采样时每次预测行为（n_query,n_pred_exist,n_ideal_exist 等），便于比较 loop0/loop1 与训练是否一致
+log_predict_behavior: false
+
+# 单图/极稀疏图训练增强：将所有真实正边追加到每步 query 中作为监督目标。
+# 注意：正边只作为 query target，输入计算图中仍是 no-edge query 占位，不直接泄漏标签。
+query_include_all_positive_edges: false
+# 单图训练增强：每个 Lightning step 内重复采样 query K 次，平均 loss 后反传。
+train_query_repeats: 1
+# 训练噪声时间步调度：random=原始随机采样；cycle=按训练步循环覆盖 1..diffusion_steps。
+train_t_schedule: random
+# cycle 调度下每个 t 连续重复多少个训练 step/epoch；单图时 repeats=5 表示 t=1 连续 5 个 epoch，再到 t=2。
+train_t_cycle_repeats: 1
+# 单图块训练增强：一次加噪后顺序训练多个 true blocks，使每个 noisy graph 覆盖完整块集合。
+train_all_blocks_per_noise: false
+# sequential: 每个 block 单独 backward+optimizer.step；accumulate 预留，当前等价于 sequential 前的旧式手动平均不启用。
+train_all_blocks_step_mode: sequential
+# true=每次加噪后随机打乱 block 顺序。
+train_all_blocks_shuffle: true
+# <=0 时使用 ceil(1 / edge_fraction) 作为 block 数。
+train_all_blocks_count: 0
+# 轻量 degree-aware loss：约束 query 上预测存在概率形成的节点度分布。
+degree_loss_weight: 0.0
+# degree 辅助项 warmup；建议和 edge_count_loss_warmup_epochs 一起使用
+degree_loss_warmup_epochs: 0
+degree_loss_type: l1
+degree_loss_normalize: true
+# degree_loss_mode:
+# - distribution: 原行为，只对齐 query 内归一化节点度分布
+# - raw: 对齐 query 内每个节点的原始期望度/真实度
+# - mixed: distribution + raw，适合单图稀疏异质图，避免边均匀撒开
+degree_loss_mode: distribution
+# mixed/raw 模式下 raw 项权重；建议 0.5~1.0 起步
+degree_loss_raw_weight: 1.0
+# raw 项 hub 加权强度；0 表示不加权，0.5 会更重视高真实度节点
+degree_loss_hub_power: 0.5
+# raw 项按节点类型分别归一，避免大节点类型支配 degree loss
+degree_loss_type_balanced: true
+
+# 异质图节点嵌入调制方式（边关系预测以子类别为基底）
+# use_type_modulation: True  -> Q = (1 + γ_Q(T)) ⊙ W^Q_t X + β_Q(T)，类别调制子类别
+# use_type_modulation: False -> Q = W^Q_t X，纯子类别基底，无类别调制
+# 两种方案可对比实验以提升边关系准确率
+use_type_modulation: True
+
+# 边预测在语义上始终是「双层」：先存在性再子类型（existence + subtype）。
+# edge_only_model: true = 全部层只更新边 E，节点 X 仅作条件输入（固定节点、只生成边）；false = 正常 XEy，每层同时更新 X 和 E。
+edge_only_model: true
+
+# 训练范式开关（隔离两种方式，避免相互干扰）：
+# - edge_prediction: 精简主线，仅直接预测 query 边真实标签
+# - edge_only_ideal: ideal 结构目标实验
+# - joint_structure: 在上述基础上额外加入「节点子类别分布损失」（不做节点CE逐点对齐）
+training_mode: edge_prediction
+# joint_structure 下节点分布损失权重（0=关闭，不影响 edge_only_ideal）
+node_dist_loss_weight: 0.0
+# joint_structure 下条件分布项权重：L_node = TV(global_subtype) + w * TV(subtype|type)
+node_dist_conditional_weight: 0.5
+# 是否启用 subtype|type 条件分布项
+node_dist_include_conditional: true
+# 节点分布损失 warmup epoch 数（0=不warmup）
+node_dist_warmup_epochs: 0

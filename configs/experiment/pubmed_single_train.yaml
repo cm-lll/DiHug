@@ -1,0 +1,39 @@
+# @package _global_
+# PubMed 单图：一张子图 train/val/test
+# 若 OOM，可指定空闲 GPU：CUDA_VISIBLE_DEVICES=1 python main.py +experiment=pubmed_single_train
+defaults:
+  - override /dataset: pubmed_subgraphs
+dataset:
+  single_graph: true
+  single_graph_split: 'train'
+  single_graph_index: 0
+general:
+  name: 'dihug_pubmed_single_train'
+  wandb: 'disabled'
+  sparse: true
+  log_every_n_steps: 1          # 单图每 epoch 仅 1 batch，需 1 才看得到 step 日志
+  checkpoint_monitor: 'train_epoch/NLL'
+  val_sampling_style: true     # 验证与测试一致：多步去噪采样
+  enable_val_pred_metrics: false
+  remove_h: true
+  sampling_skip: 5
+  skip_first_validation: true
+  cond_edge_gen_fixed_nodes: true
+train:
+  n_epochs: 200
+  batch_size: 1
+  save_model: True
+model:
+  denoiser: hgt
+  block_query: true
+  block_partition_mode: connected_bfs
+  sampling_partition: auto
+  use_edge_phi_fusion: true
+  use_dual_softmax: true
+  query_block_train_mode: random_ab
+  structure_only_global: false
+  n_layers: 6          # 若仍 OOM 可改为 4
+  diffusion_steps: 100
+  exist_pos_weight: 3
+  extra_features: null
+  autoregressive: true

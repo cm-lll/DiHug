@@ -1,0 +1,61 @@
+# @package _global_
+# 单图 DBLP 训练：边子类别 CE + 结构损失（关系矩阵 / metapath2 / metapath3 / 度分布）
+# 避免纯结构时波动大、无明显优化趋势，用 CE 提供稳定梯度，结构项约束高阶统计
+defaults:
+  - override /dataset: dblp_single
+general:
+  name: 'dblp_train'
+  log_every_n_steps: 1  # 单 batch/epoch，设为 1 才能看到 step 级日志
+  sparse: True
+  gpus: 1   # 单图训练：每 rank 一份整图，多卡会重复占内存且无 batch 可分，用 1 卡即可
+  wandb: 'online'
+  # 验证：CE 训练下与 [SparseDiff](https://github.com/qym7/SparseDiff) 一致，用 val NLL 选 best；异质图验证按关系族采样 query
+  enable_validation: false
+  # 有 val 时与原文一致用 val/epoch_NLL；无 val 时改用 train 指标（如 train_loss/query_ideal_CE）
+  checkpoint_monitor: 'val/epoch_NLL'
+  # val_max_query_edges_per_fam: null  # 不设则用 general 默认 null（全量可能边）；若验证过慢可设如 5000 限制每族 query 数
+  # 测试采样
+  cond_edge_gen_sample_nodes: true
+  cond_edge_gen_fixed_nodes: false
+  check_val_every_n_epochs: 5
+  enable_val_sampling: false
+  # 验证与测试一致：多步、每步分批、解析后验，再对生成图算结构损失（见 SparseDiff 测试流程）
+  val_sampling_style: true
+  enable_val_pred_metrics: false
+  sample_every_val: 5
+  samples_to_generate: 1
+  samples_to_save: 3
+  chains_to_save: 1
+  remove_h: True
+  number_chain_steps: 10
+  sample_num_nodes: null
+  final_model_samples_to_generate: 10
+  final_model_samples_to_save: 5
+  # 训练结束后用 test_only 或 run_dblp_edge_gen.sh 做生成采样；若不想训练完自动跑采样可设 run_test_after_train: false
+  enable_test_sampling: true
+  # 重跑生成很慢（~100 步 × 11k 节点/图）：可加 sampling_skip: 5 或 10 将步数减为 20/10，约 5–10 倍加速（质量略降）
+  # sampling_skip: 5
+train:
+  batch_size: 1   # 单图，每步就是这一张图
+  save_model: True
+  n_epochs: 200   # 完整训练 200 个 epoch（若中途结束多为进程被 kill，建议 nohup 或 screen 后台跑）
+  num_workers: 0
+model:
+  n_layers: 4
+  edge_only_model: true
+  diffusion_noise_schedule: 'cosine'
+  diffusion_steps: 100
+  hidden_mlp_dims: { 'X': 128, 'E': 64, 'y': 64 }
+  hidden_dims: { 'dx': 128, 'de': 64, 'dy': 64, 'n_head': 8, 'dim_ffX': 256, 'dim_ffE': 128, 'dim_ffy': 128 }
+  # 单图大图场景避免 dense 邻接特征导致显存爆炸（E_t[...,1:] 在 11k 节点上是 O(n^2)）
+  extra_features: null
+  structure_only_global: true   # 全图分支，目标=ideal（固定 query 边数、结构损失近似）
+  # 负样本损失乘数：>1 加重「预测错负边」惩罚，抑制容易预测有边（建议 1.2~2.0）
+  edge_neg_weight: 1.5
+  # 度分布目标：true=用全图真实度做目标（稳定），false=用本 step 子集上的真实度（与 pred 同集）
+  subtype_degree_use_full_graph_true: true
+  edge_fraction: 0.02
+  max_query_edges_per_batch: 0  # 0=不限制；若显存不足可设如 25000 做随机子采样
+  train_query_supplement_real_edges: false
+  # 采样时内层多轮覆盖全量边（验证/测试一致）
+  autoregressive: true

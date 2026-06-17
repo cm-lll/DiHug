@@ -1,0 +1,14 @@
+name: 'acm_subgraphs'
+datadir: 'data/ACM_subgraphs'
+remove_h: null  # 	是否去掉氢原子
+molecules: False  # 是否是分子图
+spectre: False  # 是否按 SPECTRE 图数据集处理，SPECTRE 是图生成领域的一个项目/论文，提供了一批合成/结构图数据集和对应的评估方式。
+pin_memory: False  # DataLoader 是否锁页内存，锁页内存：向系统申请“不许换页”的物理页，CUDA 可以直接对这块内存做 DMA（Direct Memory Access），CPU→GPU 传输更快、有时还能和计算重叠。
+directed: True  # 是否是有向图
+diffuse: 'subtype'   # 'type' (default codebase) | 'subtype' (ACM subgraph setting) 扩散方式
+heterogeneous: True  # True: 异质图（类别隔离空间，每条边在自己的关系族空间内扩散）
+                     # False: 同质图（全局空间，所有边共享一个扩散空间）
+# 单图模式：train/val/test 都只用同一张图（与 dblp_single 一致，便于对比）
+single_graph: False
+single_graph_split: 'train'  # 从哪个 split 取图：train / val / test
+single_graph_index: 0        # 该 split 中第几张图（从 0 开始）

@@ -1,0 +1,38 @@
+# @package _global_
+# DBLP 子图单图训练（与 acm_single_train / imdb_single_train 一致）
+defaults:
+  - override /dataset: dblp_subgraphs
+dataset:
+  single_graph: true
+  single_graph_split: 'train'
+  single_graph_index: 0
+general:
+  name: 'dihug_dblp_single_train'
+  wandb: 'disabled'
+  sparse: true
+  log_every_n_steps: 1
+  checkpoint_monitor: 'train_epoch/NLL'
+  val_sampling_style: true
+  enable_val_pred_metrics: false
+  remove_h: true
+  sampling_skip: 5
+  skip_first_validation: true
+  cond_edge_gen_fixed_nodes: true
+train:
+  n_epochs: 200
+  batch_size: 1
+  save_model: True
+model:
+  denoiser: hgt
+  block_query: true
+  block_partition_mode: connected_bfs
+  sampling_partition: auto
+  use_edge_phi_fusion: true
+  use_dual_softmax: true
+  query_block_train_mode: random_ab
+  structure_only_global: false
+  n_layers: 4
+  diffusion_steps: 100
+  exist_pos_weight: 3
+  extra_features: null
+  autoregressive: true

@@ -1,0 +1,49 @@
+# @package _global_
+# IMDB 多图分布生成训练（图级划分）
+defaults:
+  - override /dataset: imdb_subgraphs
+
+dataset:
+  single_graph: false
+
+general:
+  name: 'imdb_multi_train'
+  sparse: true
+  log_every_n_steps: 20
+  checkpoint_monitor: train_epoch/NLL
+  val_sampling_style: true
+  enable_validation: false
+  enable_val_sampling: false
+  enable_val_pred_metrics: false
+  check_val_every_n_epochs: 9999
+  sample_every_val: 9999
+  enable_test_sampling: true
+  run_test_after_train: true
+  test_variance: 1
+  final_model_samples_to_generate: 8
+  final_model_samples_to_save: 0
+  final_model_chains_to_save: 0
+  sampling_skip: 5
+  skip_first_validation: true
+  cond_edge_gen_fixed_nodes: false
+  enable_visualization: false
+  samples_to_generate: 1
+  samples_to_save: 0
+  chains_to_save: 0
+  number_chain_steps: 1
+
+train:
+  n_epochs: 220
+  batch_size: 1
+  save_model: true
+
+model:
+  structure_only_global: false
+  n_layers: 4
+  # Multi-graph OOM guard: reduce per-edge/per-node hidden width.
+  hidden_dims: {'dx': 96, 'de': 32, 'dy': 48, 'n_head': 4, 'dim_ffX': 192, 'dim_ffE': 96, 'dim_ffy': 96}
+  diffusion_steps: 100
+  exist_pos_weight: 3
+  extra_features: null
+  autoregressive: true
+  edge_fraction: 0.5
