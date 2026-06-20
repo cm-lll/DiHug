@@ -581,7 +581,9 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             for fam_id, fam_name in id2edge_family.items():
                 if fam_name not in fam_endpoints:
                     continue
-                density = self._family_density_from_marginal(fam_name, marginals)
+                density = self._family_density_from_marginal(
+                    fam_name, marginals, canonical_candidates=True
+                )
                 if density is None or density <= 0.0:
                     continue
                 src_type = str(fam_endpoints[fam_name]["src_type"])
@@ -729,7 +731,9 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             for fam_id, fam_name in id2edge_family.items():
                 if fam_name not in fam_endpoints:
                     continue
-                density = self._family_density_from_marginal(fam_name, marginals)
+                density = self._family_density_from_marginal(
+                    fam_name, marginals, canonical_candidates=True
+                )
                 if density is None:
                     continue
                 src_type = str(fam_endpoints[fam_name]["src_type"])
@@ -1201,6 +1205,151 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 mask[rows, lo:hi] = True
         return logits.masked_fill(~mask, -1e10)
 
+    def _lookup_query_edge_labels(
+        self,
+        query_edge_index,
+        current_edge_index,
+        current_edge_labels,
+        total_nodes,
+    ):
+        """Return current E_t labels for canonical query edges; absent edges map to zero."""
+        if query_edge_index is None or query_edge_index.numel() == 0:
+            return torch.empty((0,), dtype=torch.long, device=self.device)
+        qei = query_edge_index.long().to(self.device)
+        qu = torch.minimum(qei[0], qei[1])
+        qv = torch.maximum(qei[0], qei[1])
+        query_keys = qu * int(total_nodes) + qv
+        out = torch.zeros(query_keys.numel(), dtype=torch.long, device=self.device)
+        if current_edge_index is None or current_edge_index.numel() == 0:
+            return out
+
+        cei = current_edge_index.long().to(self.device)
+        cu = torch.minimum(cei[0], cei[1])
+        cv = torch.maximum(cei[0], cei[1])
+        current_keys = cu * int(total_nodes) + cv
+        order = torch.argsort(current_keys)
+        sorted_keys = current_keys[order]
+        locations = torch.searchsorted(sorted_keys, query_keys)
+        valid = locations < sorted_keys.numel()
+        matched = torch.zeros_like(valid)
+        matched[valid] = sorted_keys[locations[valid]] == query_keys[valid]
+        if matched.any():
+            labels = current_edge_labels.long().to(self.device)
+            out[matched] = labels[order[locations[matched]]]
+        return out
+
+    def _edge_reverse_posterior_logits(
+        self,
+        clean_logits,
+        query_edge_family,
+        query_edge_batch,
+        current_edge_labels,
+        s_float,
+        t_float,
+    ):
+        """Convert p(E_0|E_t) logits into log p(E_s|E_t) per relation family."""
+        if (
+            clean_logits is None
+            or clean_logits.numel() == 0
+            or query_edge_family is None
+            or not bool(getattr(self.cfg.model, "sampling_use_reverse_posterior", False))
+        ):
+            return clean_logits
+
+        clean_logits = self._mask_edge_logits_by_query_family(
+            clean_logits, query_edge_family
+        )
+        qfam = query_edge_family.long().to(clean_logits.device).reshape(-1)
+        qbatch = query_edge_batch.long().to(clean_logits.device).reshape(-1)
+        current_edge_labels = current_edge_labels.long().to(clean_logits.device).reshape(-1)
+        if (
+            qfam.numel() != clean_logits.shape[0]
+            or qbatch.numel() != clean_logits.shape[0]
+            or current_edge_labels.numel() != clean_logits.shape[0]
+        ):
+            return clean_logits
+
+        alpha_s_bar = self.noise_schedule.get_alpha_bar(t_normalized=s_float)
+        alpha_t_bar = self.noise_schedule.get_alpha_bar(t_normalized=t_float)
+        alpha_step = (alpha_t_bar / alpha_s_bar.clamp(min=1e-12)).clamp(
+            min=1e-8, max=1.0
+        )
+        beta_step = (1.0 - alpha_step).clamp(min=0.0, max=0.9999)
+        family_qt = self.transition_model.get_all_family_Qt(
+            beta_step, device=clean_logits.device
+        )
+        family_qsb = self.transition_model.get_all_family_Qt_bar(
+            alpha_s_bar, device=clean_logits.device
+        )
+        family_qtb = self.transition_model.get_all_family_Qt_bar(
+            alpha_t_bar, device=clean_logits.device
+        )
+
+        edge_family2id = getattr(self.dataset_info, "edge_family2id", {}) or {}
+        id2edge_family = {int(v): str(k) for k, v in edge_family2id.items()}
+        family_ranges = self._edge_family_label_ranges()
+        posterior_logits = torch.full_like(clean_logits, -1e10)
+        handled = torch.zeros(clean_logits.shape[0], dtype=torch.bool, device=clean_logits.device)
+
+        for fam_id, fam_name in id2edge_family.items():
+            rows = qfam == int(fam_id)
+            if (
+                not rows.any()
+                or fam_name not in family_ranges
+                or fam_name not in family_qt
+                or fam_name not in family_qsb
+                or fam_name not in family_qtb
+            ):
+                continue
+            idx = rows.nonzero(as_tuple=True)[0]
+            lo, hi = family_ranges[fam_name]
+            local_clean_logits = torch.cat(
+                [clean_logits[idx, :1], clean_logits[idx, lo:hi]], dim=-1
+            )
+            pred_x0 = torch.softmax(local_clean_logits, dim=-1)
+            num_states = int(pred_x0.shape[-1])
+
+            labels = current_edge_labels[idx]
+            local_t = torch.zeros_like(labels)
+            positive = (labels >= int(lo)) & (labels < int(hi))
+            local_t[positive] = labels[positive] - int(lo) + 1
+            local_t_onehot = F.one_hot(
+                local_t.clamp(0, num_states - 1), num_classes=num_states
+            ).float()
+            local_batch = qbatch[idx]
+            posterior_over_x0 = (
+                diffusion_utils.compute_sparse_batched_over0_posterior_distribution(
+                    input_data=local_t_onehot,
+                    batch=local_batch,
+                    Qt=family_qt[fam_name].E,
+                    Qsb=family_qsb[fam_name].E,
+                    Qtb=family_qtb[fam_name].E,
+                )
+            )
+            prob_s = (pred_x0.unsqueeze(-1) * posterior_over_x0).sum(dim=1)
+            prob_s = prob_s / prob_s.sum(dim=-1, keepdim=True).clamp(min=1e-12)
+            local_log = torch.log(prob_s.clamp(min=1e-12))
+            posterior_logits[idx, 0] = local_log[:, 0]
+            posterior_logits[idx, lo:hi] = local_log[:, 1:]
+            handled[idx] = True
+
+        if (~handled).any():
+            posterior_logits[~handled] = clean_logits[~handled]
+        if (
+            getattr(self, "local_rank", 0) == 0
+            and not getattr(self, "_logged_reverse_posterior_sampling", False)
+        ):
+            beta_mean = float(beta_step.mean().detach().cpu())
+            print(
+                "[采样-POSTERIOR] enabled "
+                f"s={float(s_float.mean().detach().cpu()):.4f} "
+                f"t={float(t_float.mean().detach().cpu()):.4f} "
+                f"beta_step={beta_mean:.6f} handled={int(handled.sum().item())}/"
+                f"{int(handled.numel())}"
+            )
+            self._logged_reverse_posterior_sampling = True
+        return posterior_logits
+
     def _align_query_family_to_edges(self, original_edge_index, original_family, aligned_edge_index):
         if original_family is None or original_edge_index is None or aligned_edge_index is None:
             return original_family
@@ -1304,19 +1453,10 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 continue
             mean_p = float(exist_prob[mask].mean().detach().cpu())
             sampled_rate = float((sampled_labels[mask] > 0).float().mean().detach().cpu())
-            real_density = None
-            ratio = None
-            if fam_name in marginals:
-                m = marginals[fam_name]
-                try:
-                    if not torch.is_tensor(m):
-                        m = torch.tensor(m)
-                    if m.numel() > 0:
-                        real_density = max(0.0, min(1.0, 1.0 - float(m.reshape(-1)[0].detach().cpu().item())))
-                        ratio = sampled_rate / max(real_density, 1e-12)
-                except Exception:
-                    real_density = None
-                    ratio = None
+            real_density = self._family_density_from_marginal(
+                fam_name, marginals, canonical_candidates=True
+            )
+            ratio = sampled_rate / max(real_density, 1e-12) if real_density is not None else None
             if real_density is None:
                 print(
                     f"[采样-FAM] {fam_name}: query={int(mask.sum().item())} "
@@ -1445,7 +1585,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             self._logged_sampling_degree_pair_reference = True
         return ref
 
-    def _family_density_from_marginal(self, fam_name, marginals):
+    def _family_density_from_marginal(self, fam_name, marginals, canonical_candidates=False):
         if fam_name not in marginals:
             return None
         m = marginals[fam_name]
@@ -1453,7 +1593,18 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             if not torch.is_tensor(m):
                 m = torch.tensor(m)
             if m.numel() > 0:
-                return max(0.0, min(1.0, 1.0 - float(m.reshape(-1)[0].detach().cpu().item())))
+                density = 1.0 - float(m.reshape(-1)[0].detach().cpu().item())
+                if canonical_candidates:
+                    endpoints = (getattr(self.dataset_info, "fam_endpoints", {}) or {}).get(str(fam_name), {})
+                    if (
+                        endpoints
+                        and str(endpoints.get("src_type")) == str(endpoints.get("dst_type"))
+                    ):
+                        # Dataset marginals use ordered n*(n-1) pairs for same-type
+                        # families, while block/query sampling uses one canonical
+                        # undirected candidate per pair: n*(n-1)/2.
+                        density *= 2.0
+                return max(0.0, min(1.0, density))
         except Exception:
             return None
         return None
@@ -1471,7 +1622,9 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 n = int(mask.sum().item())
                 if n <= 0:
                     continue
-                density = self._family_density_from_marginal(fam_name, marginals)
+                density = self._family_density_from_marginal(
+                    fam_name, marginals, canonical_candidates=True
+                )
                 if density is None:
                     local_idx = mask.nonzero(as_tuple=True)[0]
                     has_edge[local_idx] = torch.rand_like(exist_prob[local_idx]) < exist_prob[local_idx]
@@ -1487,6 +1640,572 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         if fallback.any():
             has_edge[fallback] = torch.rand_like(exist_prob[fallback]) < exist_prob[fallback]
         return has_edge
+
+    def _merge_conservative_topk_pool(self, old, edge_index, logits, scores, quota, total_nodes):
+        """Merge one query round into a bounded, deduplicated online Top-K pool."""
+        quota = max(0, int(quota))
+        if quota <= 0 or edge_index.numel() == 0:
+            return old
+        take = min(quota, int(scores.numel()))
+        top = torch.topk(scores, k=take, largest=True).indices
+        edge_index = edge_index[:, top]
+        logits = logits[top]
+        scores = scores[top]
+        if old is not None:
+            edge_index = torch.cat([old["edge_index"], edge_index], dim=1)
+            logits = torch.cat([old["logits"], logits], dim=0)
+            scores = torch.cat([old["scores"], scores], dim=0)
+
+        order = torch.argsort(scores, descending=True)
+        keys = (
+            edge_index[0, order].long() * int(total_nodes)
+            + edge_index[1, order].long()
+        ).detach().cpu().tolist()
+        keep_pos = []
+        seen = set()
+        for pos, key in enumerate(keys):
+            if key in seen:
+                continue
+            seen.add(key)
+            keep_pos.append(pos)
+            if len(keep_pos) >= quota:
+                break
+        keep_pos = torch.tensor(keep_pos, dtype=torch.long, device=edge_index.device)
+        chosen = order[keep_pos]
+        return {
+            "edge_index": edge_index[:, chosen],
+            "logits": logits[chosen],
+            "scores": scores[chosen],
+        }
+
+    def _update_topk_density_repair_candidates(
+        self,
+        candidate_parts,
+        logits,
+        query_edge_family,
+        query_edge_index,
+        query_edge_batch,
+        total_nodes,
+    ):
+        """Cache compact final-step candidates for global Top-K and connectivity repair."""
+        logits = self._mask_edge_logits_by_query_family(logits, query_edge_family)
+        pos_logits = logits[:, 1:]
+        valid = torch.isfinite(pos_logits).any(dim=-1)
+        if not valid.any():
+            return
+
+        idx = valid.nonzero(as_tuple=True)[0]
+        no_edge_logit = logits[idx, 0]
+        valid_pos_logits = pos_logits[idx]
+        scores = torch.logsumexp(valid_pos_logits, dim=-1) - no_edge_logit
+        temp = max(
+            float(getattr(self.cfg.model, "sampling_exist_temperature", 1.0) or 1.0),
+            1e-6,
+        )
+        bias = float(getattr(self.cfg.model, "sampling_exist_logit_bias", 0.0) or 0.0)
+        scores = scores / temp - bias
+
+        edge_index = query_edge_index[:, idx].long()
+        u = torch.minimum(edge_index[0], edge_index[1])
+        v = torch.maximum(edge_index[0], edge_index[1])
+        edge_keys = u * int(total_nodes) + v
+        labels = valid_pos_logits.argmax(dim=-1).long() + 1
+        candidate_parts.append(
+            {
+                "edge_index": edge_index.detach().cpu(),
+                "edge_keys": edge_keys.detach().cpu(),
+                "scores": scores.detach().float().cpu(),
+                "family": query_edge_family[idx].long().detach().cpu(),
+                "batch": query_edge_batch[idx].long().detach().cpu(),
+                "labels": labels.detach().cpu(),
+            }
+        )
+
+    def _finalize_topk_density_repair_candidates(
+        self,
+        data,
+        candidate_parts,
+        base_edge_index,
+        base_edge_labels,
+    ):
+        """Minimally repair the ordinary final-step Top-K graph."""
+        if not candidate_parts:
+            return None, None
+
+        edge_index = torch.cat([part["edge_index"] for part in candidate_parts], dim=1)
+        edge_keys = torch.cat([part["edge_keys"] for part in candidate_parts])
+        scores = torch.cat([part["scores"] for part in candidate_parts])
+        families = torch.cat([part["family"] for part in candidate_parts])
+        edge_batch = torch.cat([part["batch"] for part in candidate_parts])
+        labels = torch.cat([part["labels"] for part in candidate_parts])
+        candidate_count_before = int(scores.numel())
+
+        # Keep the highest-scoring orientation/occurrence of each canonical edge.
+        _, inverse = torch.unique(edge_keys, sorted=False, return_inverse=True)
+        num_unique = int(inverse.max().item()) + 1 if inverse.numel() else 0
+        max_scores = torch.full((num_unique,), -float("inf"), dtype=scores.dtype)
+        max_scores.scatter_reduce_(0, inverse, scores, reduce="amax", include_self=True)
+        is_max = scores == max_scores[inverse]
+        positions = torch.arange(scores.numel(), dtype=torch.long)
+        sentinel = int(scores.numel())
+        first_max = torch.full((num_unique,), sentinel, dtype=torch.long)
+        first_max.scatter_reduce_(
+            0,
+            inverse,
+            torch.where(is_max, positions, torch.full_like(positions, sentinel)),
+            reduce="amin",
+            include_self=True,
+        )
+        chosen = first_max[first_max < sentinel]
+        edge_index = edge_index[:, chosen]
+        edge_keys = edge_keys[chosen]
+        scores = scores[chosen]
+        families = families[chosen]
+        edge_batch = edge_batch[chosen]
+        labels = labels[chosen]
+        candidate_count = int(scores.numel())
+
+        selected = torch.zeros(candidate_count, dtype=torch.bool)
+        base_edge_index = base_edge_index.long().detach().cpu()
+        base_edge_labels = base_edge_labels.long().detach().cpu()
+        base_u = torch.minimum(base_edge_index[0], base_edge_index[1])
+        base_v = torch.maximum(base_edge_index[0], base_edge_index[1])
+        base_keys = base_u * int(data.node.shape[0]) + base_v
+
+        # Map the already-sampled ordinary Top-K graph into the full candidate pool.
+        key_order = torch.argsort(edge_keys)
+        sorted_candidate_keys = edge_keys[key_order]
+        locations = torch.searchsorted(sorted_candidate_keys, base_keys)
+        valid_location = locations < sorted_candidate_keys.numel()
+        matched = torch.zeros_like(valid_location)
+        matched[valid_location] = (
+            sorted_candidate_keys[locations[valid_location]] == base_keys[valid_location]
+        )
+        if not matched.all():
+            missing = int((~matched).sum().item())
+            raise RuntimeError(
+                f"topk_density_repair missing {missing} selected edges from final candidate pool"
+            )
+        base_candidate_idx = key_order[locations]
+        selected[base_candidate_idx] = True
+        # Preserve the subtype labels sampled by the original topk_density path.
+        labels[base_candidate_idx] = base_edge_labels
+
+        family_targets = {}
+        for graph_idx, fam_id in zip(
+            edge_batch[selected].tolist(), families[selected].tolist()
+        ):
+            key = (int(graph_idx), int(fam_id))
+            family_targets[key] = family_targets.get(key, 0) + 1
+        graph_ids = edge_batch.unique(sorted=True).tolist()
+
+        total_nodes = int(data.node.shape[0])
+        batch = data.batch.long().detach().cpu()
+        parent = list(range(total_nodes))
+        rank = [0] * total_nodes
+        comp_size = [1] * total_nodes
+
+        def find(x):
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        def union(a, b):
+            ra, rb = find(a), find(b)
+            if ra == rb:
+                return False
+            if rank[ra] < rank[rb]:
+                ra, rb = rb, ra
+            parent[rb] = ra
+            comp_size[ra] += comp_size[rb]
+            if rank[ra] == rank[rb]:
+                rank[ra] += 1
+            return True
+
+        forest = torch.zeros(candidate_count, dtype=torch.bool)
+        selected_idx = selected.nonzero(as_tuple=True)[0]
+        selected_order = selected_idx[torch.argsort(scores[selected_idx], descending=True)]
+        for pos in selected_order.tolist():
+            u = int(edge_index[0, pos].item())
+            v = int(edge_index[1, pos].item())
+            if union(u, v):
+                forest[pos] = True
+
+        def component_stats():
+            counts = {}
+            for graph_idx in graph_ids:
+                nodes = torch.where(batch == int(graph_idx))[0].tolist()
+                roots = [find(int(node)) for node in nodes]
+                counts[int(graph_idx)] = {
+                    "components": len(set(roots)),
+                    "lcc": max((comp_size[find(int(node))] for node in nodes), default=0),
+                }
+            return counts
+
+        before = component_stats()
+        current_components = {
+            graph_idx: int(info["components"]) for graph_idx, info in before.items()
+        }
+        delete_pools = {}
+        for key in family_targets:
+            graph_idx, fam_id = key
+            mask = (
+                selected
+                & (~forest)
+                & (edge_batch == int(graph_idx))
+                & (families == int(fam_id))
+            )
+            pool = mask.nonzero(as_tuple=True)[0]
+            if pool.numel() > 0:
+                pool = pool[torch.argsort(scores[pool], descending=False)]
+            delete_pools[key] = pool.tolist()
+
+        repair_added = []
+        repair_removed = []
+        repair_score_delta = 0.0
+        infeasible_families = set()
+        unselected_idx = (~selected).nonzero(as_tuple=True)[0]
+        repair_order = unselected_idx[torch.argsort(scores[unselected_idx], descending=True)]
+        for pos in repair_order.tolist():
+            graph_idx = int(edge_batch[pos].item())
+            if current_components.get(graph_idx, 1) <= 1:
+                continue
+            u = int(edge_index[0, pos].item())
+            v = int(edge_index[1, pos].item())
+            if find(u) == find(v):
+                continue
+            key = (graph_idx, int(families[pos].item()))
+            pool = delete_pools.get(key, [])
+            while pool and not selected[pool[0]]:
+                pool.pop(0)
+            if not pool:
+                infeasible_families.add(key)
+                continue
+            removed = pool.pop(0)
+            selected[removed] = False
+            selected[pos] = True
+            forest[pos] = True
+            union(u, v)
+            current_components[graph_idx] = max(
+                1, current_components.get(graph_idx, 1) - 1
+            )
+            repair_added.append(pos)
+            repair_removed.append(removed)
+            repair_score_delta += float(scores[pos].item() - scores[removed].item())
+            if all(count <= 1 for count in current_components.values()):
+                break
+
+        after = component_stats()
+        unresolved = {
+            graph_idx: info["components"]
+            for graph_idx, info in after.items()
+            if info["components"] > 1
+        }
+
+        # Assert that every atomic exchange preserved the ordinary Top-K quotas exactly.
+        final_counts = {}
+        for graph_idx, fam_id in zip(
+            edge_batch[selected].tolist(), families[selected].tolist()
+        ):
+            key = (int(graph_idx), int(fam_id))
+            final_counts[key] = final_counts.get(key, 0) + 1
+        quota_mismatch = {
+            str(key): (int(family_targets[key]), int(final_counts.get(key, 0)))
+            for key in family_targets
+            if int(family_targets[key]) != int(final_counts.get(key, 0))
+        }
+        if quota_mismatch:
+            raise RuntimeError(
+                f"topk_density_repair changed family quotas: {quota_mismatch}"
+            )
+
+        if getattr(self, "local_rank", 0) == 0:
+            before_components = {g: v["components"] for g, v in before.items()}
+            after_components = {g: v["components"] for g, v in after.items()}
+            before_lcc = {g: v["lcc"] for g, v in before.items()}
+            after_lcc = {g: v["lcc"] for g, v in after.items()}
+            print(
+                "[采样-REPAIR] "
+                f"components={before_components}->{after_components} "
+                f"lcc={before_lcc}->{after_lcc} "
+                f"added={len(repair_added)} removed={len(repair_removed)} "
+                f"score_delta={repair_score_delta:.6f} "
+                f"infeasible_family_count={len(infeasible_families)} "
+                f"unresolved_components={unresolved} "
+                f"candidates={candidate_count_before}->{candidate_count}"
+            )
+
+        final_idx = selected.nonzero(as_tuple=True)[0]
+        return (
+            edge_index[:, final_idx].to(self.device),
+            labels[final_idx].long().to(self.device),
+        )
+
+    def _prepare_connectivity_candidates(self, sparse_sampled_data):
+        """Preserve initialized edges as same-family fallback candidates."""
+        selection = str(getattr(self.cfg.model, "sampling_edge_selection", "") or "").lower()
+        pseudo_blocks = getattr(sparse_sampled_data, "pseudo_blocks", None)
+        if selection != "connectivity_topk" or not pseudo_blocks:
+            return sparse_sampled_data
+
+        edge_index = sparse_sampled_data.edge_index.long().to(self.device)
+        edge_attr = sparse_sampled_data.edge_attr
+        edge_labels = edge_attr.argmax(dim=-1).long() if edge_attr.dim() > 1 else edge_attr.long()
+        edge_labels = edge_labels.to(self.device)
+        batch = sparse_sampled_data.batch.long().to(self.device)
+        num_nodes = int(sparse_sampled_data.node.shape[0])
+        block_of = torch.full((num_nodes,), -1, dtype=torch.long, device=self.device)
+        for block_idx, block_nodes in enumerate(pseudo_blocks):
+            if block_nodes is not None and block_nodes.numel() > 0:
+                block_of[block_nodes.long().to(self.device)] = int(block_idx)
+
+        label_to_fam = self._label_to_family_lookup().to(self.device)
+        valid = (edge_labels > 0) & (edge_labels < int(label_to_fam.numel()))
+        edge_family = torch.full_like(edge_labels, -1)
+        edge_family[valid] = label_to_fam[edge_labels[valid]]
+        edge_batch = batch[edge_index[0]]
+
+        family_targets = {}
+        avg_counts = getattr(self.dataset_info, "edge_family_avg_edge_counts", {}) or {}
+        edge_family2id = getattr(self.dataset_info, "edge_family2id", {}) or {}
+        bs = int(batch.max().item()) + 1 if batch.numel() else 1
+        for fam_name, fam_id in edge_family2id.items():
+            target = max(0, int(round(float(avg_counts.get(fam_name, 0.0) or 0.0))))
+            for graph_idx in range(bs):
+                family_targets[(int(graph_idx), int(fam_id))] = target
+
+        sparse_sampled_data.connectivity_init_edge_index = edge_index[:, valid]
+        sparse_sampled_data.connectivity_init_edge_labels = edge_labels[valid]
+        sparse_sampled_data.connectivity_init_family = edge_family[valid]
+        sparse_sampled_data.connectivity_init_batch = edge_batch[valid]
+        sparse_sampled_data.connectivity_block_of = block_of
+        sparse_sampled_data.connectivity_family_targets = family_targets
+        return sparse_sampled_data
+
+    def _update_connectivity_candidate_pools(
+        self,
+        pools,
+        stats,
+        data,
+        logits,
+        query_edge_family,
+        query_edge_index,
+        query_edge_batch,
+        total_nodes,
+    ):
+        """Online-cache family Top-K and block-pair/family Top-m candidates."""
+        logits = self._mask_edge_logits_by_query_family(logits, query_edge_family)
+        no_edge_logit = logits[:, 0]
+        pos_logits = logits[:, 1:]
+        valid = torch.isfinite(pos_logits).any(dim=-1)
+        scores = torch.logsumexp(pos_logits, dim=-1) - no_edge_logit
+        temp = max(float(getattr(self.cfg.model, "sampling_exist_temperature", 1.0) or 1.0), 1e-6)
+        bias = float(getattr(self.cfg.model, "sampling_exist_logit_bias", 0.0) or 0.0)
+        scores = scores / temp - bias
+        qfam = query_edge_family.long().to(logits.device).reshape(-1)
+        qbatch = query_edge_batch.long().to(logits.device).reshape(-1)
+        block_of = data.connectivity_block_of.long().to(logits.device)
+        bu = block_of[query_edge_index[0].long()]
+        bv = block_of[query_edge_index[1].long()]
+        pair_topm = max(1, int(getattr(self.cfg.model, "sampling_connectivity_pair_topm", 32) or 32))
+        target_map = getattr(data, "connectivity_family_targets", {}) or {}
+        stats["candidate_count_before"] = int(stats.get("candidate_count_before", 0)) + int(valid.sum().item())
+
+        for (graph_idx, fam_id), target in target_map.items():
+            mask = valid & (qbatch == int(graph_idx)) & (qfam == int(fam_id))
+            if not mask.any():
+                continue
+            idx = mask.nonzero(as_tuple=True)[0]
+            family_key = ("family", int(graph_idx), int(fam_id))
+            pools[family_key] = self._merge_conservative_topk_pool(
+                pools.get(family_key),
+                query_edge_index[:, idx],
+                logits[idx],
+                scores[idx],
+                max(1, int(target)),
+                total_nodes,
+            )
+
+            pair_a = torch.minimum(bu[idx], bv[idx])
+            pair_b = torch.maximum(bu[idx], bv[idx])
+            pair_ids = torch.stack([pair_a, pair_b], dim=1).unique(dim=0)
+            for pair in pair_ids:
+                a, b = int(pair[0].item()), int(pair[1].item())
+                pmask = (pair_a == a) & (pair_b == b)
+                pidx = idx[pmask]
+                pair_key = ("pair", int(graph_idx), int(fam_id), a, b)
+                pools[pair_key] = self._merge_conservative_topk_pool(
+                    pools.get(pair_key),
+                    query_edge_index[:, pidx],
+                    logits[pidx],
+                    scores[pidx],
+                    pair_topm,
+                    total_nodes,
+                )
+
+    def _finalize_connectivity_candidate_pools(self, data, pools, stats):
+        """Greedy family-constrained maximum-spanning forest, then family Top-K fill."""
+        total_nodes = int(data.node.shape[0])
+        batch = data.batch.long().to(self.device)
+        target_map = getattr(data, "connectivity_family_targets", {}) or {}
+
+        # Merge family and pair caches by canonical endpoint key, retaining max score.
+        candidate_map = {}
+        for key, item in pools.items():
+            graph_idx = int(key[1])
+            fam_id = int(key[2])
+            for idx in range(int(item["scores"].numel())):
+                u = int(item["edge_index"][0, idx].item())
+                v = int(item["edge_index"][1, idx].item())
+                edge_key = u * total_nodes + v
+                score = float(item["scores"][idx].item())
+                old = candidate_map.get(edge_key)
+                if old is None or score > old["score"]:
+                    candidate_map[edge_key] = {
+                        "u": u,
+                        "v": v,
+                        "graph": graph_idx,
+                        "family": fam_id,
+                        "score": score,
+                        "logits": item["logits"][idx],
+                    }
+        candidates = sorted(candidate_map.values(), key=lambda x: x["score"], reverse=True)
+        stats["candidate_count_after_cache"] = len(candidates)
+
+        parent = list(range(total_nodes))
+        rank = [0] * total_nodes
+
+        def find(x):
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        def union(a, b):
+            ra, rb = find(a), find(b)
+            if ra == rb:
+                return False
+            if rank[ra] < rank[rb]:
+                ra, rb = rb, ra
+            parent[rb] = ra
+            if rank[ra] == rank[rb]:
+                rank[ra] += 1
+            return True
+
+        graph_nodes = {}
+        for graph_idx in range(int(batch.max().item()) + 1 if batch.numel() else 1):
+            graph_nodes[graph_idx] = torch.where(batch == graph_idx)[0].detach().cpu().tolist()
+        components_before = {g: len(nodes) for g, nodes in graph_nodes.items()}
+        quota_used = {key: 0 for key in target_map}
+        selected_keys = set()
+        selected_model = []
+
+        # Family-constrained greedy maximum-spanning forest.
+        for cand in candidates:
+            quota_key = (cand["graph"], cand["family"])
+            if quota_used.get(quota_key, 0) >= int(target_map.get(quota_key, 0)):
+                continue
+            if union(cand["u"], cand["v"]):
+                edge_key = cand["u"] * total_nodes + cand["v"]
+                selected_keys.add(edge_key)
+                selected_model.append(cand)
+                quota_used[quota_key] = quota_used.get(quota_key, 0) + 1
+
+        # Fallback: initialized same-family candidates that still bridge components.
+        fallback = []
+        init_ei = data.connectivity_init_edge_index.long().to(self.device)
+        init_labels = data.connectivity_init_edge_labels.long().to(self.device)
+        init_fam = data.connectivity_init_family.long().to(self.device)
+        init_batch = data.connectivity_init_batch.long().to(self.device)
+        perm = torch.randperm(init_labels.numel(), device=self.device)
+        for pos in perm.detach().cpu().tolist():
+            u, v = int(init_ei[0, pos].item()), int(init_ei[1, pos].item())
+            graph_idx, fam_id = int(init_batch[pos].item()), int(init_fam[pos].item())
+            quota_key = (graph_idx, fam_id)
+            edge_key = u * total_nodes + v
+            if edge_key in selected_keys or quota_used.get(quota_key, 0) >= int(target_map.get(quota_key, 0)):
+                continue
+            if union(u, v):
+                selected_keys.add(edge_key)
+                fallback.append((u, v, int(init_labels[pos].item()), graph_idx, fam_id))
+                quota_used[quota_key] = quota_used.get(quota_key, 0) + 1
+
+        skeleton_count = len(selected_model) + len(fallback)
+        skeleton_quota_used = {str(k): int(v) for k, v in quota_used.items() if int(v) > 0}
+        components_after = {}
+        for graph_idx, nodes in graph_nodes.items():
+            components_after[graph_idx] = len({find(int(n)) for n in nodes})
+
+        # Fill each family's remaining exact quota by descending model score.
+        for cand in candidates:
+            quota_key = (cand["graph"], cand["family"])
+            if quota_used.get(quota_key, 0) >= int(target_map.get(quota_key, 0)):
+                continue
+            edge_key = cand["u"] * total_nodes + cand["v"]
+            if edge_key in selected_keys:
+                continue
+            selected_keys.add(edge_key)
+            selected_model.append(cand)
+            quota_used[quota_key] = quota_used.get(quota_key, 0) + 1
+
+        # Fill any remaining family quota from initialized same-family edges.
+        for pos in perm.detach().cpu().tolist():
+            u, v = int(init_ei[0, pos].item()), int(init_ei[1, pos].item())
+            graph_idx, fam_id = int(init_batch[pos].item()), int(init_fam[pos].item())
+            quota_key = (graph_idx, fam_id)
+            edge_key = u * total_nodes + v
+            if edge_key in selected_keys or quota_used.get(quota_key, 0) >= int(target_map.get(quota_key, 0)):
+                continue
+            selected_keys.add(edge_key)
+            fallback.append((u, v, int(init_labels[pos].item()), graph_idx, fam_id))
+            quota_used[quota_key] = quota_used.get(quota_key, 0) + 1
+
+        out_edges = []
+        out_labels = []
+        for cand in selected_model:
+            logits = self._mask_edge_logits_by_query_family(
+                cand["logits"].unsqueeze(0),
+                torch.tensor([cand["family"]], dtype=torch.long, device=self.device),
+            )
+            label = int(torch.softmax(logits[:, 1:], dim=-1).multinomial(1).item()) + 1
+            out_edges.append((cand["u"], cand["v"]))
+            out_labels.append(label)
+        for u, v, label, _graph_idx, _fam_id in fallback:
+            out_edges.append((u, v))
+            out_labels.append(label)
+
+        unfilled = {
+            str(key): max(0, int(target_map[key]) - int(quota_used.get(key, 0)))
+            for key in target_map
+            if int(quota_used.get(key, 0)) < int(target_map[key])
+        }
+        stats.update(
+            {
+                "skeleton_edges": skeleton_count,
+                "components_before": components_before,
+                "components_after": components_after,
+                "family_quota_used_by_skeleton": skeleton_quota_used,
+                "fallback_edges": len(fallback),
+                "unfilled_family_quota": unfilled,
+            }
+        )
+        if getattr(self, "local_rank", 0) == 0:
+            print(
+                "[采样-CONNECT] "
+                f"skeleton_edges={skeleton_count} components={components_before}->{components_after} "
+                f"fallback_edges={len(fallback)} unfilled={sum(unfilled.values())} "
+                f"candidates={stats.get('candidate_count_before', 0)}->{stats.get('candidate_count_after_cache', 0)}"
+            )
+            print(f"[采样-CONNECT-FAMILY] {stats['family_quota_used_by_skeleton']}")
+
+        if not out_edges:
+            return None, None
+        return (
+            torch.tensor(out_edges, dtype=torch.long, device=self.device).t().contiguous(),
+            torch.tensor(out_labels, dtype=torch.long, device=self.device),
+        )
+
 
     def _sample_topk_structure_by_family(self, exist_prob, has_valid_pos, query_edge_family):
         """Structure-aware topk sampling per family WITHOUT true graph statistics.
@@ -1559,7 +2278,9 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 n = int(mask.sum().item())
                 if n <= 0:
                     continue
-                density = self._family_density_from_marginal(fam_name, marginals)
+                density = self._family_density_from_marginal(
+                    fam_name, marginals, canonical_candidates=True
+                )
                 if density is None or fam_id not in pair_counts or family_totals.get(fam_id, 0) <= 0:
                     local_idx = mask.nonzero(as_tuple=True)[0]
                     has_edge[local_idx] = torch.rand_like(exist_prob[local_idx]) < exist_prob[local_idx]
@@ -1628,7 +2349,13 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             self._logged_sampling_degree_pair_rates = True
         return has_edge
 
-    def _sample_edge_labels_hierarchical(self, logits, query_edge_family=None, query_edge_index=None):
+    def _sample_edge_labels_hierarchical(
+        self,
+        logits,
+        query_edge_family=None,
+        query_edge_index=None,
+        selection_override=None,
+    ):
         """Sample edge labels with the same existence/subtype factorization used in training."""
         if logits is None or logits.numel() == 0:
             return torch.empty((0,), dtype=torch.long, device=self.device)
@@ -1643,9 +2370,13 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         bias = float(getattr(self.cfg.model, "sampling_exist_logit_bias", 0.0) or 0.0)
         exist_logits = exist_logits / temp - bias
         exist_prob = torch.sigmoid(exist_logits).clamp(min=0.0, max=1.0)
-        selection = str(getattr(self.cfg.model, "sampling_edge_selection", "bernoulli") or "bernoulli").lower()
+        selection = str(
+            selection_override
+            or getattr(self.cfg.model, "sampling_edge_selection", "bernoulli")
+            or "bernoulli"
+        ).lower()
         has_edge = torch.zeros_like(exist_prob, dtype=torch.bool)
-        if selection == "topk_density" and query_edge_family is not None:
+        if selection in ("topk_density", "topk_density_repair") and query_edge_family is not None:
             has_edge = self._sample_topk_density_by_family(exist_prob, has_valid_pos, query_edge_family)
         elif selection == "topk_degree_pair" and query_edge_family is not None:
             has_edge = self._sample_topk_degree_pair_by_family(
@@ -4670,6 +5401,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                     )
                     sparse_sampled_data = self._apply_block_marginal_initial_edges(sparse_sampled_data)
                     sparse_sampled_data = self._apply_block_template_initial_edges(sparse_sampled_data)
+                    sparse_sampled_data = self._prepare_connectivity_candidates(sparse_sampled_data)
 
         assert number_chain_steps < self.T
         chain = utils.SparseChainPlaceHolder(keep_chain=keep_chain)
@@ -4705,7 +5437,9 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         time_range = torch.arange(0, self.T, step)
         n_steps = len(time_range)
         disable_tqdm = self.local_rank != 0 if hasattr(self, 'local_rank') else False
-        for s_int in tqdm(reversed(time_range), total=n_steps, disable=disable_tqdm):
+        for step_index, s_int in enumerate(
+            tqdm(reversed(time_range), total=n_steps, disable=disable_tqdm)
+        ):
             s_array = (s_int * torch.ones((batch_size, 1))).to(self.device)
             t_array = s_array + step
             s_norm = s_array / self.T
@@ -4714,7 +5448,10 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
 
             # Sample z_s
             sparse_sampled_data = self.sample_p_zs_given_zt(
-                    s_norm, t_norm, sparse_sampled_data
+                    s_norm,
+                    t_norm,
+                    sparse_sampled_data,
+                    is_final_sampling_step=(step_index == n_steps - 1),
             )
             
             # 记录采样过程：每一步的状态
@@ -4856,6 +5593,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             )
             sparse_sampled_data = self._apply_block_marginal_initial_edges(sparse_sampled_data)
             sparse_sampled_data = self._apply_block_template_initial_edges(sparse_sampled_data)
+            sparse_sampled_data = self._prepare_connectivity_candidates(sparse_sampled_data)
 
         chain = utils.SparseChainPlaceHolder(keep_chain=keep_chain)
         step = self._sampling_step_size()
@@ -4874,7 +5612,12 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             t_array = s_array + step
             s_norm = s_array / self.T
             t_norm = t_array / self.T
-            sparse_sampled_data = self.sample_p_zs_given_zt(s_norm, t_norm, sparse_sampled_data)
+            sparse_sampled_data = self.sample_p_zs_given_zt(
+                s_norm,
+                t_norm,
+                sparse_sampled_data,
+                is_final_sampling_step=(step_index == n_steps - 1),
+            )
             if verbose_sampling and hasattr(self, "local_rank") and self.local_rank == 0:
                     self._verbose_step_index = None
                     self._verbose_total_steps = None
@@ -5044,7 +5787,13 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
 
         return sampled_node, sampled_edge, sampled_charge
 
-    def sample_p_zs_given_zt(self, s_float, t_float, data):
+    def sample_p_zs_given_zt(
+        self,
+        s_float,
+        t_float,
+        data,
+        is_final_sampling_step=False,
+    ):
         """One sparse denoising step.
 
         For type-template block sampling this follows SparseDiff-original's block-round
@@ -5125,6 +5874,30 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         cur_edge_attr_ids = edge_attr_ids
         cur_edge_attr_onehot = edge_attr_onehot
         use_autoregressive_context = bool(getattr(self.cfg.model, "autoregressive", False))
+        selection_mode = str(
+            getattr(self.cfg.model, "sampling_edge_selection", "bernoulli") or "bernoulli"
+        ).lower()
+        use_connectivity_topk = (
+            selection_mode == "connectivity_topk"
+            and query_rounds
+            and query_rounds[0][2] is not None
+            and hasattr(data, "connectivity_family_targets")
+            and not use_autoregressive_context
+        )
+        repair_final_only = bool(
+            getattr(self.cfg.model, "sampling_connectivity_repair_final_only", True)
+        )
+        use_topk_density_repair = (
+            selection_mode == "topk_density_repair"
+            and (bool(is_final_sampling_step) or not repair_final_only)
+            and query_rounds
+            and query_rounds[0][2] is not None
+            and not use_autoregressive_context
+        )
+        connectivity_pools = {}
+        connectivity_stats = {}
+        repair_candidate_parts = []
+        total_nodes = int(node_onehot.shape[0])
 
         for query_edge_index, _query_edge_batch, query_edge_family in query_rounds:
             if query_edge_index is None or query_edge_index.numel() == 0:
@@ -5169,7 +5942,61 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             )
             if query_logits.numel() == 0 or selected_query_edge_index.numel() == 0:
                 continue
-            query_sample = self._sample_edge_labels_hierarchical(query_logits, selected_query_family, selected_query_edge_index)
+            selected_query_batch = batch[selected_query_edge_index[0].long()]
+            current_query_labels = self._lookup_query_edge_labels(
+                selected_query_edge_index,
+                fw_edge_index,
+                fw_edge_attr_onehot.argmax(dim=-1).long(),
+                total_nodes,
+            )
+            query_logits = self._edge_reverse_posterior_logits(
+                query_logits,
+                selected_query_family,
+                selected_query_batch,
+                current_query_labels,
+                s_float,
+                t_float,
+            )
+            if use_connectivity_topk:
+                self._update_connectivity_candidate_pools(
+                    connectivity_pools,
+                    connectivity_stats,
+                    data,
+                    query_logits,
+                    selected_query_family,
+                    selected_query_edge_index,
+                    selected_query_batch,
+                    total_nodes,
+                )
+                continue
+            if use_topk_density_repair:
+                self._update_topk_density_repair_candidates(
+                    repair_candidate_parts,
+                    query_logits,
+                    selected_query_family,
+                    selected_query_edge_index,
+                    selected_query_batch,
+                    total_nodes,
+                )
+            selection_override = None
+            if (
+                bool(getattr(self.cfg.model, "sampling_use_reverse_posterior", False))
+                and bool(
+                    getattr(
+                        self.cfg.model,
+                        "sampling_reverse_posterior_stochastic_steps",
+                        True,
+                    )
+                )
+                and not bool(is_final_sampling_step)
+            ):
+                selection_override = "bernoulli"
+            query_sample = self._sample_edge_labels_hierarchical(
+                query_logits,
+                selected_query_family,
+                selected_query_edge_index,
+                selection_override=selection_override,
+            )
 
             cur_edge_index, cur_edge_attr_ids = self._replace_edges_with_labels(
                 cur_edge_index,
@@ -5182,6 +6009,36 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             cur_edge_attr_ids = cur_edge_attr_ids[keep].clamp(0, self.out_dims.E - 1)
             cur_edge_attr_onehot = F.one_hot(cur_edge_attr_ids, num_classes=self.out_dims.E).float()
 
+        if use_connectivity_topk:
+            selected_edges, selected_labels = self._finalize_connectivity_candidate_pools(
+                data, connectivity_pools, connectivity_stats
+            )
+            cur_edge_index = torch.empty((2, 0), dtype=torch.long, device=self.device)
+            cur_edge_attr_ids = torch.empty((0,), dtype=torch.long, device=self.device)
+            if selected_edges is not None and selected_labels is not None:
+                cur_edge_index, cur_edge_attr_ids = self._replace_edges_with_labels(
+                    cur_edge_index, cur_edge_attr_ids, selected_edges, selected_labels
+                )
+            keep = cur_edge_attr_ids != 0
+            cur_edge_index = cur_edge_index[:, keep]
+            cur_edge_attr_ids = cur_edge_attr_ids[keep].clamp(0, self.out_dims.E - 1)
+            cur_edge_attr_onehot = F.one_hot(
+                cur_edge_attr_ids, num_classes=self.out_dims.E
+            ).float()
+        elif use_topk_density_repair:
+            selected_edges, selected_labels = self._finalize_topk_density_repair_candidates(
+                data,
+                repair_candidate_parts,
+                cur_edge_index,
+                cur_edge_attr_ids,
+            )
+            if selected_edges is not None and selected_labels is not None:
+                cur_edge_index = selected_edges
+                cur_edge_attr_ids = selected_labels.clamp(0, self.out_dims.E - 1)
+                cur_edge_attr_onehot = F.one_hot(
+                    cur_edge_attr_ids, num_classes=self.out_dims.E
+                ).float()
+
         out = utils.SparsePlaceHolder(
             node=node_onehot,
             edge_index=cur_edge_index,
@@ -5193,6 +6050,16 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         )
         out.anchor_node_subtype = anchor_node_subtype
         out.pseudo_blocks = pseudo_blocks
+        for attr_name in (
+            "connectivity_init_edge_index",
+            "connectivity_init_edge_labels",
+            "connectivity_init_family",
+            "connectivity_init_batch",
+            "connectivity_block_of",
+            "connectivity_family_targets",
+        ):
+            if hasattr(data, attr_name):
+                setattr(out, attr_name, getattr(data, attr_name))
         out = self._apply_block_family_budget_projection(out)
         return out
 

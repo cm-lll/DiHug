@@ -91,6 +91,13 @@ exist_focal_alpha: 0.75
 # p_exist = sigmoid((logsumexp(pos)-noedge) / temperature - bias).
 sampling_exist_logit_bias: 0.0
 sampling_exist_temperature: 1.0
+# Convert model p(E_0|E_t) predictions to the diffusion-consistent reverse
+# posterior p(E_s|E_t) before applying the configured edge selection policy.
+sampling_use_reverse_posterior: false
+# When reverse posterior sampling is enabled, use stochastic Bernoulli decisions
+# on intermediate steps as in SparseDiff; retain the configured Top-K policy only
+# on the explicitly marked final step.
+sampling_reverse_posterior_stochastic_steps: true
 # Sampling edge decision:
 # - bernoulli: sample each query edge independently from p_exist.
 # - topk_density: within each query relation family, keep the top-k p_exist edges where
@@ -99,7 +106,18 @@ sampling_exist_temperature: 1.0
 # - topk_degree_pair: like topk_density, but split each relation-family quota by the
 #   training graph's endpoint degree-bin pair distribution to preserve disassortative
 #   hub-to-low-degree mixing.
+# - connectivity_topk: cache family Top-K plus block-pair bridge candidates,
+#   build a family-constrained maximum-spanning forest, then fill exact family quotas.
+# - topk_density_repair: use ordinary topk_density on preceding steps; on the explicit
+#   final sampling step, run global family Top-K and minimally exchange same-family
+#   non-forest edges for high-score component-bridging candidates.
 sampling_edge_selection: bernoulli
+# topk_density_repair only: repair connectivity only after the explicitly marked
+# final denoising step. Set false only for an every-step ablation.
+sampling_connectivity_repair_final_only: true
+# connectivity_topk only: high-logit candidates retained per
+# (graph, family, pseudo-block pair), in addition to the global family pool.
+sampling_connectivity_pair_topm: 32
 sampling_degree_pair_bins: 5
 # Fraction of each family quota allocated by degree-pair bins; the rest falls back
 # to ordinary family top-k. Lower this if connectivity/LCC drops too much.
