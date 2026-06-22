@@ -70,6 +70,14 @@ sampling_block_family_budget_keep_policy: random
 block_partition_workers: 0
 use_edge_phi_fusion: true
 use_dual_softmax: true
+# Split visible G_t edges and temporary no-edge query links into separately
+# normalized attention channels, then learn their mixture per HGT layer/head.
+use_query_context_gate: false
+query_context_gate_init: 0.2
+# Add a learned residual to query logits from current-G_t common-neighbor
+# closure, endpoint degree scale, and endpoint degree imbalance.
+use_two_hop_structure: false
+two_hop_structure_hidden_dim: 64
 subtype_dim: 32
 
 # The dimensions should satisfy dx % n_head == 0
@@ -83,6 +91,11 @@ lambda_train: [5, 0, 2] # 这是训练总损失里各项的权重（节点损失
 # - 'auto': 每个 step 在当前 query 上用 neg/pos 动态计算 pos_weight
 # - 数值: 固定 pos_weight（例如 5.0, 10.0, 20.0）
 exist_pos_weight: 1
+# Sampling-only correction for a model trained with fixed positive-class BCE
+# weight w. Before reverse-posterior computation, subtract log(w) from every
+# positive edge-class logit so the existence score recovers an unweighted
+# probability interpretation. Unsupported for exist_pos_weight='auto'.
+sampling_calibrate_exist_pos_weight: false
 # existence loss: bce | focal. focal 用于 query 正负极度不平衡时抑制 easy negatives。
 exist_loss_type: bce
 exist_focal_gamma: 2.0
@@ -91,15 +104,71 @@ exist_focal_alpha: 0.75
 # p_exist = sigmoid((logsumexp(pos)-noedge) / temperature - bias).
 sampling_exist_logit_bias: 0.0
 sampling_exist_temperature: 1.0
+# Convert model p(E_0|E_t) predictions to the diffusion-consistent reverse
+# posterior p(E_s|E_t) before applying the configured edge selection policy.
+sampling_use_reverse_posterior: false
+# When reverse posterior sampling is enabled, use stochastic Bernoulli decisions
+# on intermediate steps as in SparseDiff for legacy local selection policies.
+# Global gumbel_exact_k/deterministic_exact_k remain global exact-K at every step.
+sampling_reverse_posterior_stochastic_steps: true
 # Sampling edge decision:
 # - bernoulli: sample each query edge independently from p_exist.
+# - bernoulli_expected_density: before Bernoulli sampling, solve one additive
+#   intercept per relation family so the sum of probabilities matches that
+#   family's canonical marginal expected edge count in the current query pool.
+# - gumbel_exact_k: collect all block-query candidates, deduplicate canonical
+#   edges, then select exactly K_f per family by posterior_logit / temperature
+#   plus one Gumbel draw per unique edge.
+# - deterministic_exact_k: the same global candidate path without Gumbel noise.
 # - topk_density: within each query relation family, keep the top-k p_exist edges where
 #   k follows the training graph family density. This prevents high-noise Bernoulli
 #   probabilities from exploding sparse graph edge counts.
 # - topk_degree_pair: like topk_density, but split each relation-family quota by the
 #   training graph's endpoint degree-bin pair distribution to preserve disassortative
 #   hub-to-low-degree mixing.
+# - connectivity_topk: cache family Top-K plus block-pair bridge candidates,
+#   build a family-constrained maximum-spanning forest, then fill exact family quotas.
+# - topk_density_repair: use ordinary topk_density on preceding steps; on the explicit
+#   final sampling step, run global family Top-K and minimally exchange same-family
+#   non-forest edges for high-score component-bridging candidates.
 sampling_edge_selection: bernoulli
+# Gumbel exact-K only. Lower values approach deterministic family Top-K.
+sampling_gumbel_temperature: 1.0
+# Optional sampling-only partition-view experiment. Both views receive exactly
+# the same canonical query pool and frozen G_t; only the grouping of queries
+# inside the HGT computation graph differs.
+# off | metis_only | random_only | mean
+sampling_partition_ensemble: off
+# Weight of the current-G_t hetero-METIS clean logits in mean mode.
+sampling_partition_ensemble_metis_weight: 0.5
+# Spearman diagnostics use at most this many evenly sampled candidates per step.
+sampling_partition_ensemble_diag_max_candidates: 100000
+# Training counterpart of the partition-view experiment. A single noisy G_t
+# and one shared canonical query pool are split by both views. Gradients are
+# accumulated across small rounds and one optimizer step is taken per G_t.
+train_partition_ensemble: false
+train_partition_ensemble_metis_weight: 0.5
+train_partition_ensemble_num_blocks: 0
+# Context visible to each partition view: all within-block G_t edges plus this
+# fraction of cross-block G_t edges. The two views use one shared total budget.
+partition_context_cross_edge_ratio: 0.1
+# Optional fixed context budget. 0 derives one shared budget from both views:
+# max(intra_metis, intra_random) + ratio * remaining G_t edges.
+partition_context_edge_budget: 0
+# gumbel_exact_k / deterministic_exact_k only. On the final denoising step,
+# minimally connect components by exchanging a high-posterior bridge candidate
+# for the lowest-posterior selected non-forest edge in the same family. Exact
+# family quotas and the total edge count remain unchanged.
+sampling_exact_k_connectivity_repair: false
+# Maximum number of same-family exchanges during final exact-K repair.
+# 0 means no explicit limit (at most components_before - 1 exchanges).
+sampling_exact_k_repair_max_swaps: 0
+# topk_density_repair only: repair connectivity only after the explicitly marked
+# final denoising step. Set false only for an every-step ablation.
+sampling_connectivity_repair_final_only: true
+# connectivity_topk only: high-logit candidates retained per
+# (graph, family, pseudo-block pair), in addition to the global family pool.
+sampling_connectivity_pair_topm: 32
 sampling_degree_pair_bins: 5
 # Fraction of each family quota allocated by degree-pair bins; the rest falls back
 # to ordinary family top-k. Lower this if connectivity/LCC drops too much.

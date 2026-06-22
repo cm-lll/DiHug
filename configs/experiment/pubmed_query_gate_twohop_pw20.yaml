@@ -1,0 +1,12 @@
+# @package _global_
+defaults:
+  - pubmed_query_gate_pw20
+
+general:
+  name: dihug_pubmed1565_ef050_querygate_twohop_pw20_ep300
+
+model:
+  # The residual uses only the current noisy graph G_t. It exposes exact
+  # common-neighbor closure and endpoint degree roles to the query decoder.
+  use_two_hop_structure: true
+  two_hop_structure_hidden_dim: 64

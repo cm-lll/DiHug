@@ -40,6 +40,8 @@ class HGTConv(MessagePassing):
         num_edge_families: int = 0,
         max_edge_phi: int = 0,
         use_dual_softmax: bool = False,
+        use_query_context_gate: bool = False,
+        query_context_gate_init: float = 0.2,
         **kwargs,
     ):
         super().__init__(node_dim=0, aggr="add", **kwargs)
@@ -53,6 +55,7 @@ class HGTConv(MessagePassing):
         self.use_norm = use_norm
         self.use_edge_phi_fusion = bool(use_edge_phi_fusion and num_edge_families > 0 and max_edge_phi > 0)
         self.use_dual_softmax = bool(use_dual_softmax)
+        self.use_query_context_gate = bool(use_query_context_gate)
 
         self.k_linears = nn.ModuleList()
         self.q_linears = nn.ModuleList()
@@ -80,7 +83,76 @@ class HGTConv(MessagePassing):
             self.phi_msg = nn.Parameter(torch.zeros(num_edge_families, max_edge_phi, n_heads, self.d_k, self.d_k))
         if self.use_dual_softmax:
             self.dual_softmax_mu = nn.Parameter(torch.full((n_heads,), 2.0))
+        if self.use_query_context_gate:
+            init = min(max(float(query_context_gate_init), 1e-4), 1.0 - 1e-4)
+            self.query_context_gate_logit = nn.Parameter(
+                torch.full((n_heads,), math.log(init / (1.0 - init)))
+            )
         self.att = None
+
+    def _channel_attention(
+        self,
+        logits: Tensor,
+        edge_index_i: Tensor,
+        edge_family: Optional[Tensor],
+        mask: Tensor,
+    ) -> Tensor:
+        out = torch.zeros_like(logits)
+        if not mask.any():
+            return out
+        if self.use_dual_softmax and edge_family is not None:
+            out[mask] = apply_dual_softmax(
+                logits[mask],
+                edge_index_i[mask],
+                edge_family[mask],
+                self.dual_softmax_mu,
+            )
+        else:
+            out[mask] = softmax(logits[mask], edge_index_i[mask])
+        return out
+
+    def _query_context_attention(
+        self,
+        logits: Tensor,
+        edge_index_i: Tensor,
+        edge_family: Optional[Tensor],
+        edge_subtype: Tensor,
+    ) -> Tensor:
+        """Normalize visible G_t edges and no-edge query links separately."""
+        query_mask = edge_subtype == 0
+        context_mask = ~query_mask
+        query_att = self._channel_attention(
+            logits, edge_index_i, edge_family, query_mask
+        )
+        context_att = self._channel_attention(
+            logits, edge_index_i, edge_family, context_mask
+        )
+
+        num_nodes = (
+            int(edge_index_i.max().item()) + 1 if edge_index_i.numel() else 0
+        )
+        query_count = torch.bincount(
+            edge_index_i[query_mask], minlength=num_nodes
+        )
+        context_count = torch.bincount(
+            edge_index_i[context_mask], minlength=num_nodes
+        )
+        has_query = query_count[edge_index_i] > 0
+        has_context = context_count[edge_index_i] > 0
+        both = has_query & has_context
+
+        query_gate = torch.sigmoid(self.query_context_gate_logit).view(1, -1)
+        query_coeff = torch.where(
+            both.view(-1, 1),
+            query_gate,
+            torch.ones_like(query_gate),
+        )
+        context_coeff = torch.where(
+            both.view(-1, 1),
+            1.0 - query_gate,
+            torch.ones_like(query_gate),
+        )
+        return query_att * query_coeff + context_att * context_coeff
 
     def forward(
         self,
@@ -185,7 +257,15 @@ class HGTConv(MessagePassing):
             v_transformed = v_transformed + phi_v
 
         res_att = (qi * k_transformed).sum(dim=-1) * self.relation_pri[edge_type] / self.sqrt_dk
-        if self.use_dual_softmax and edge_family is not None:
+        if (
+            self.use_query_context_gate
+            and edge_subtype is not None
+            and edge_subtype.numel() == res_att.shape[0]
+        ):
+            self.att = self._query_context_attention(
+                res_att, edge_index_i, edge_family, edge_subtype
+            )
+        elif self.use_dual_softmax and edge_family is not None:
             self.att = apply_dual_softmax(res_att, edge_index_i, edge_family, self.dual_softmax_mu)
         else:
             self.att = softmax(res_att, edge_index_i)
@@ -317,6 +397,10 @@ class PyHGTDenoiser(nn.Module):
         subtype_dim: int = 32,
         use_edge_phi_fusion: bool = True,
         use_dual_softmax: bool = True,
+        use_query_context_gate: bool = False,
+        query_context_gate_init: float = 0.2,
+        use_two_hop_structure: bool = False,
+        two_hop_structure_hidden_dim: int = 64,
         use_time_film: bool = False,
         use_edge_state_update: bool = False,
         edge_state_update_mode: str = "all",
@@ -330,6 +414,7 @@ class PyHGTDenoiser(nn.Module):
         self.n_layers = int(n_layers)
         self.use_time_film = bool(use_time_film)
         self.use_edge_state_update = bool(use_edge_state_update)
+        self.use_two_hop_structure = bool(use_two_hop_structure)
         self.edge_state_update_mode = str(edge_state_update_mode or "all").lower()
         if self.edge_state_update_mode not in {"all", "last"}:
             self.edge_state_update_mode = "all"
@@ -403,6 +488,8 @@ class PyHGTDenoiser(nn.Module):
                     num_edge_families=num_edge_families,
                     max_edge_phi=max_edge_phi,
                     use_dual_softmax=use_dual_softmax,
+                    use_query_context_gate=use_query_context_gate,
+                    query_context_gate_init=query_context_gate_init,
                 )
                 for _ in range(n_layers)
             ]
@@ -414,6 +501,20 @@ class PyHGTDenoiser(nn.Module):
             nn.Dropout(dropout),
             nn.Linear(hidden_dims["dim_ffE"], output_dims.E),
         )
+        if self.use_two_hop_structure:
+            structure_hidden = max(int(two_hop_structure_hidden_dim), 8)
+            self.two_hop_structure_head = nn.Sequential(
+                nn.LayerNorm(4 + dy),
+                nn.Linear(4 + dy, structure_hidden),
+                nn.GELU(),
+                nn.Dropout(dropout),
+                nn.Linear(structure_hidden, output_dims.E),
+            )
+            nn.init.zeros_(self.two_hop_structure_head[-1].weight)
+            nn.init.zeros_(self.two_hop_structure_head[-1].bias)
+        else:
+            self.two_hop_structure_head = None
+        self.last_two_hop_residual_mean = 0.0
         self.y_head = nn.Linear(dy, output_dims.y) if output_y else None
 
     @staticmethod
@@ -501,6 +602,127 @@ class PyHGTDenoiser(nn.Module):
         local = edge_global - starts[fam] + 1
         return local.clamp(min=0)
 
+    @staticmethod
+    def _sparse_values_for_keys(
+        sparse_matrix: Tensor,
+        row: Tensor,
+        col: Tensor,
+        num_nodes: int,
+    ) -> Tensor:
+        """Gather sparse matrix entries without materializing an NxN tensor."""
+        if row.numel() == 0 or sparse_matrix._nnz() == 0:
+            return torch.zeros(row.shape, device=row.device, dtype=torch.float)
+        matrix = sparse_matrix.coalesce()
+        matrix_keys = (
+            matrix.indices()[0].long() * int(num_nodes)
+            + matrix.indices()[1].long()
+        )
+        order = torch.argsort(matrix_keys)
+        matrix_keys = matrix_keys[order]
+        matrix_values = matrix.values()[order]
+        query_keys = row.long() * int(num_nodes) + col.long()
+        positions = torch.searchsorted(matrix_keys, query_keys)
+        valid = positions < matrix_keys.numel()
+        safe_positions = positions.clamp(max=max(matrix_keys.numel() - 1, 0))
+        valid = valid & (matrix_keys[safe_positions] == query_keys)
+        out = matrix_values.new_zeros(query_keys.shape)
+        out[valid] = matrix_values[safe_positions[valid]]
+        return out
+
+    def _two_hop_structure_features(
+        self,
+        query_edge_index: Tensor,
+        context_edge_index: Tensor,
+        num_nodes: int,
+    ) -> Tensor:
+        """Compute permutation-equivariant closure and endpoint-role features."""
+        if query_edge_index.numel() == 0:
+            return torch.zeros(
+                (0, 4), device=query_edge_index.device, dtype=torch.float
+            )
+        if context_edge_index.numel() == 0 or num_nodes <= 0:
+            return torch.zeros(
+                (query_edge_index.size(1), 4),
+                device=query_edge_index.device,
+                dtype=torch.float,
+            )
+
+        src = context_edge_index[0].long()
+        dst = context_edge_index[1].long()
+        non_loop = src != dst
+        src = src[non_loop]
+        dst = dst[non_loop]
+        lo = torch.minimum(src, dst)
+        hi = torch.maximum(src, dst)
+        canonical = torch.unique(lo * int(num_nodes) + hi)
+        lo = torch.div(canonical, int(num_nodes), rounding_mode="floor")
+        hi = canonical.remainder(int(num_nodes))
+        adjacency_index = torch.stack(
+            [torch.cat([lo, hi]), torch.cat([hi, lo])], dim=0
+        )
+        adjacency = torch.sparse_coo_tensor(
+            adjacency_index,
+            torch.ones(
+                adjacency_index.size(1),
+                device=query_edge_index.device,
+                dtype=torch.float,
+            ),
+            (num_nodes, num_nodes),
+            device=query_edge_index.device,
+        ).coalesce()
+        degree = torch.sparse.sum(adjacency, dim=1).to_dense()
+        two_hop = torch.sparse.mm(adjacency, adjacency).coalesce()
+
+        query_src = query_edge_index[0].long()
+        query_dst = query_edge_index[1].long()
+        common = self._sparse_values_for_keys(
+            two_hop, query_src, query_dst, num_nodes
+        )
+        degree_src = degree[query_src]
+        degree_dst = degree[query_dst]
+        degree_sum = degree_src + degree_dst
+        union = (degree_sum - common).clamp_min(1.0)
+        log_scale = math.log1p(max(int(num_nodes), 1))
+        return torch.stack(
+            [
+                torch.log1p(common) / log_scale,
+                common / union,
+                torch.log1p(degree_sum) / log_scale,
+                (degree_src - degree_dst).abs() / degree_sum.clamp_min(1.0),
+            ],
+            dim=-1,
+        )
+
+    def _two_hop_structure_residual(
+        self,
+        encoded: dict,
+        query_edge_index: Tensor,
+        batch: Tensor,
+    ) -> Tensor:
+        if not self.use_two_hop_structure or self.two_hop_structure_head is None:
+            return encoded["h"].new_zeros(
+                (query_edge_index.size(1), self.out_dim_E)
+            )
+        structure = self._two_hop_structure_features(
+            query_edge_index=query_edge_index,
+            context_edge_index=encoded["structure_edge_index"],
+            num_nodes=int(encoded["h"].size(0)),
+        )
+        y_h = encoded["y_h"]
+        if y_h.numel() and query_edge_index.numel():
+            edge_y = y_h[batch[query_edge_index[0].long()].long()]
+        else:
+            edge_y = structure.new_zeros(
+                (structure.size(0), int(self.lin_in_y.out_features))
+            )
+        residual = self.two_hop_structure_head(
+            torch.cat([structure, edge_y], dim=-1)
+        )
+        self.last_two_hop_residual_mean = float(
+            residual.detach().abs().mean().cpu()
+        ) if residual.numel() else 0.0
+        return residual
+
     def forward(
         self,
         X: Tensor,
@@ -513,6 +735,54 @@ class PyHGTDenoiser(nn.Module):
         relation_type_ids: Optional[Tensor] = None,
         edge_family_ids: Optional[Tensor] = None,
     ) -> utils.SparsePlaceHolder:
+        encoded = self.encode_context(
+            X=X,
+            edge_attr=edge_attr,
+            edge_index=edge_index,
+            y=y,
+            batch=batch,
+            node_type_ids=node_type_ids,
+            node_subtype_ids=node_subtype_ids,
+            relation_type_ids=relation_type_ids,
+            edge_family_ids=edge_family_ids,
+        )
+        src_h = encoded["h"][edge_index[0].long()]
+        dst_h = encoded["h"][edge_index[1].long()]
+        edge_logits = (
+            self.edge_head(
+                torch.cat([src_h, dst_h, encoded["context_e"]], dim=-1)
+            )
+            + self._two_hop_structure_residual(
+                encoded, edge_index, batch
+            )
+            + edge_attr[:, : self.out_dim_E]
+        )
+        return utils.SparsePlaceHolder(
+            node=encoded["node_logits"],
+            edge_attr=edge_logits,
+            edge_index=edge_index,
+            y=encoded["y_out"],
+            batch=batch,
+            charge=encoded["charge_logits"],
+        )
+
+    def encode_context(
+        self,
+        X: Tensor,
+        edge_attr: Tensor,
+        edge_index: Tensor,
+        y: Tensor,
+        batch: Tensor,
+        node_type_ids: Optional[Tensor] = None,
+        node_subtype_ids: Optional[Tensor] = None,
+        relation_type_ids: Optional[Tensor] = None,
+        edge_family_ids: Optional[Tensor] = None,
+    ) -> dict:
+        """Encode nodes using context edges only.
+
+        Query candidates must never be passed through this method unless they
+        are actual visible edges in G_t.
+        """
         node_type_ids = (
             node_type_ids.long().to(X.device)
             if node_type_ids is not None
@@ -551,6 +821,7 @@ class PyHGTDenoiser(nn.Module):
             h = self._film_node_with_y(h, y_h, batch, self.time_x_add, self.time_x_mul)
             e = self._film_edge_with_y(e, y_h, edge_index, batch)
         edge_subtype = self._edge_subtype_from_attr(edge_attr, edge_family_ids)
+        structure_edge_index = edge_index[:, edge_subtype > 0]
 
         for layer_idx, conv in enumerate(self.gcs):
             h = conv(h, node_type_ids, edge_index, relation_type_ids, edge_subtype, edge_family_ids)
@@ -571,16 +842,62 @@ class PyHGTDenoiser(nn.Module):
                 if self.out_dim_charge > 0
                 else charge0
             )
-        src_h = h[edge_index[0].long()]
-        dst_h = h[edge_index[1].long()]
-        edge_logits = self.edge_head(torch.cat([src_h, dst_h, e], dim=-1)) + edge_attr[:, : self.out_dim_E]
         y_out = self.y_head(y_h) + y[:, : self.out_dim_y] if self.y_head is not None else y
+        return {
+            "h": h,
+            "y_h": y_h,
+            "context_e": e,
+            "node_logits": node_logits,
+            "charge_logits": charge_logits,
+            "y_out": y_out,
+            "structure_edge_index": structure_edge_index,
+        }
 
-        return utils.SparsePlaceHolder(
-            node=node_logits,
-            edge_attr=edge_logits,
-            edge_index=edge_index,
-            y=y_out,
-            batch=batch,
-            charge=charge_logits,
+    def decode_queries(
+        self,
+        encoded: dict,
+        query_edge_attr: Tensor,
+        query_edge_index: Tensor,
+        batch: Tensor,
+    ) -> Tensor:
+        """Decode candidate edges without using them for message passing."""
+        h = encoded["h"]
+        y_h = encoded["y_h"]
+        query_edge_attr = query_edge_attr.float()
+        expected = int(self.lin_in_E.in_features)
+        if query_edge_attr.shape[-1] < expected:
+            query_edge_attr = torch.cat(
+                [
+                    query_edge_attr,
+                    query_edge_attr.new_zeros(
+                        (query_edge_attr.shape[0], expected - query_edge_attr.shape[-1])
+                    ),
+                ],
+                dim=-1,
+            )
+        elif query_edge_attr.shape[-1] > expected:
+            query_edge_attr = query_edge_attr[:, :expected]
+        e = self.lin_in_E(query_edge_attr)
+        if y_h.numel() and query_edge_index.numel():
+            edge_y = y_h[batch[query_edge_index[0].long()].long()]
+            e = e + self.edge_context(torch.cat([e, edge_y], dim=-1))
+            if self.use_time_film:
+                e = self._film_edge_with_y(
+                    e, y_h, query_edge_index, batch
+                )
+        if self.use_edge_state_update and query_edge_index.numel():
+            # Query states are not propagated. They may still be refined from
+            # final endpoint embeddings, preserving E_t^{ij} in the decoder.
+            for layer_idx in range(self.n_layers):
+                e = self._update_edge_state_with_layer(
+                    e, h, y_h, query_edge_index, batch, layer_idx
+                )
+        src_h = h[query_edge_index[0].long()]
+        dst_h = h[query_edge_index[1].long()]
+        return (
+            self.edge_head(torch.cat([src_h, dst_h, e], dim=-1))
+            + self._two_hop_structure_residual(
+                encoded, query_edge_index, batch
+            )
+            + query_edge_attr[:, : self.out_dim_E]
         )

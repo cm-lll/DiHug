@@ -1,0 +1,39 @@
+# @package _global_
+defaults:
+  - pubmed_baseline_single_train
+
+general:
+  name: dihug_pubmed1565_ef050_querygate_pw20_ep300
+  run_test_after_train: true
+  enable_test_sampling: true
+  test_variance: 3
+  test_sampling_full_steps: false
+  sampling_skip: 25
+
+train:
+  n_epochs: 300
+
+model:
+  edge_fraction: 0.5
+
+  # Keep the original candidate-conditioned sparse HGT path. Query links remain
+  # temporary attention channels, but cannot overwhelm visible G_t messages.
+  train_partition_ensemble: false
+  use_query_context_gate: true
+  query_context_gate_init: 0.2
+  use_edge_state_update: false
+
+  exist_loss_type: bce
+  exist_pos_weight: 20
+  edge_count_loss_weight: 0.0
+  edge_count_loss_warmup_epochs: 0
+  degree_loss_weight: 0.0
+  closure_pos_loss_weight: 0.0
+
+  sampling_partition_ensemble: off
+  sampling_use_reverse_posterior: true
+  sampling_calibrate_exist_pos_weight: true
+  sampling_edge_selection: gumbel_exact_k
+  sampling_gumbel_temperature: 0.01
+  sampling_exact_k_connectivity_repair: true
+  sampling_exact_k_repair_max_swaps: 0
