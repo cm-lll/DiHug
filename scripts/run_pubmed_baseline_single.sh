@@ -26,4 +26,5 @@ fi
 
 # shellcheck source=scripts/activate_env.sh
 source "$ROOT/scripts/activate_env.sh"
-python -m dihug.main +experiment=pubmed_baseline_single_train general.wandb=disabled "$@"
+EXPERIMENT="${EXPERIMENT:-pubmed_baseline_single_train}"
+python -m dihug.main "+experiment=${EXPERIMENT}" general.wandb=disabled "$@"
