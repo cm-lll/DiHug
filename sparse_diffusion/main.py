@@ -2,6 +2,12 @@ import io
 import os
 import sys
 
+# Ensure the project root is on sys.path so that `sparse_diffusion` is importable
+# as a top-level package when this script is run directly.
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 import pathlib
 

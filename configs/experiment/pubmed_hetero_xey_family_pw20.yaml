@@ -1,0 +1,70 @@
+# @package _global_
+defaults:
+  - pubmed_baseline_single_train
+
+general:
+  name: dihug_pubmed1565_hetero_xey_family_pw20
+
+train:
+  n_epochs: 100
+
+model:
+  # SparseDiff/DiGress-style sparse X-E-y denoiser with heterogeneous typed
+  # attention. This path maintains edge states through every layer instead of
+  # decoding edges only from final node embeddings.
+  denoiser: graph_transformer
+  edge_only_model: false
+  output_y: false
+
+  # Heterogeneous node update: per-node-type Q/K/V plus family-internal softmax
+  # and outer normalization are implemented in HeterogeneousTransformerConv.
+  use_type_modulation: true
+
+  # New family-aware edge-state options. family_film isolates E->attention FiLM
+  # by relation family. family_edge_update is the optional EdgeUpdate_f([A,E])
+  # block; keep it false for the closest DiGress-style baseline.
+  use_family_film: true
+  use_family_edge_update: false
+  family_edge_update_hidden_dim: 128
+
+  # This model path already maintains E through the transformer layers, so do
+  # not add PyHGT decoder-only adapters.
+  use_family_edge_adapters: false
+  use_edge_phi_fusion: false
+  use_edge_state_update: false
+
+  # Use the original sparse diffusion block-query training/sampling path first.
+  train_family_staged_queryfree: false
+  train_partition_ensemble: false
+  edge_fraction: 0.1
+  block_query: true
+  block_partition_mode: hetero_metis
+  hetero_metis_relation_balance_power: 0.5
+  hetero_metis_refine_degree_balance: true
+  hetero_metis_refine_max_iter: 200
+  block_query_full_block: true
+  block_query_inter_fill: true
+  block_query_include_uniform: false
+  block_query_max_edges_per_family: 0
+  query_block_train_mode: none
+  query_include_all_positive_edges: false
+  train_all_blocks_per_noise: true
+  train_all_blocks_step_mode: accumulate
+  train_all_blocks_shuffle: true
+  train_all_blocks_count: 0
+
+  # Sampling cannot use clean METIS membership. Reuse the train-time block type
+  # templates only as query chunks; keep z_T as the normal full-graph
+  # initialization unless an explicit initialization ablation enables these.
+  sampling_block_mode: type_template
+  sampling_block_template_init: false
+  sampling_block_marginal_init: false
+
+  exist_loss_type: bce
+  exist_pos_weight: 20
+  sampling_calibrate_exist_pos_weight: true
+  sampling_edge_selection: gumbel_exact_k
+  sampling_use_reverse_posterior: true
+  sampling_reverse_posterior_mix_mode: alpha_bar_s
+  sampling_reverse_posterior_mix_scale: 0.2
+  sampling_gumbel_temperature: 0.01

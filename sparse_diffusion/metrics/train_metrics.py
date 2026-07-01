@@ -16,6 +16,8 @@ class TrainLossDiscrete(nn.Module):
         exist_loss_type="bce",
         exist_focal_gamma=2.0,
         exist_focal_alpha=0.75,
+        edge_exist_weight=1.0,
+        edge_subtype_weight=1.2,
         edge_neg_weight=1.0,
         relation_matrix_loss_weight=1.0,
         relation_matrix_loss_normalize=True,
@@ -46,8 +48,8 @@ class TrainLossDiscrete(nn.Module):
         self.lambda_train[0] = self.lambda_train[0] / edge_fraction
 
         # Loss weights (λ1, λ2)
-        self.edge_exist_weight = 1.0
-        self.edge_subtype_weight = 1.2
+        self.edge_exist_weight = float(edge_exist_weight)
+        self.edge_subtype_weight = float(edge_subtype_weight)
         # Existence loss: BCE by default; optional focal BCE for highly imbalanced query edges.
         self.exist_pos_weight = exist_pos_weight
         self.exist_loss_type = str(exist_loss_type).lower()

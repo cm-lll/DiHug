@@ -37,6 +37,15 @@ def _build_self_attn_block(
     edge_family_offsets: Optional[dict],
     use_type_modulation: bool,
     edge_only: bool,
+    use_family_film: bool,
+    use_family_edge_update: bool,
+    use_relation_attention_matrix: bool,
+    use_relation_message_matrix: bool,
+    use_family_y_film: bool,
+    use_family_y_in_attention: bool,
+    use_family_y_in_edge_film: bool,
+    family_y_dim: int,
+    family_edge_update_hidden_dim: int,
 ):
     if heterogeneous:
         return HeterogeneousTransformerConv(
@@ -58,6 +67,15 @@ def _build_self_attn_block(
             edge_family_offsets=edge_family_offsets,
             use_type_modulation=use_type_modulation,
             edge_only=edge_only,
+            use_family_film=use_family_film,
+            use_family_edge_update=use_family_edge_update,
+            use_relation_attention_matrix=use_relation_attention_matrix,
+            use_relation_message_matrix=use_relation_message_matrix,
+            use_family_y_film=use_family_y_film,
+            use_family_y_in_attention=use_family_y_in_attention,
+            use_family_y_in_edge_film=use_family_y_in_edge_film,
+            family_y_dim=family_y_dim,
+            family_edge_update_hidden_dim=family_edge_update_hidden_dim,
         )
     return TransformerConv(
         dx=dx,
@@ -108,6 +126,15 @@ class XEyTransformerLayer(nn.Module):
         edge_family_offsets: Optional[dict] = None,
         use_type_modulation: bool = True,  # 是否使用类别调制子类别
         edge_only: bool = False,  # 若 True：只更新边 E=f(QK,E)，不更新节点 X（用于最后几层「E=QK+E」重复）
+        use_family_film: bool = False,
+        use_family_edge_update: bool = False,
+        use_relation_attention_matrix: bool = False,
+        use_relation_message_matrix: bool = False,
+        use_family_y_film: bool = False,
+        use_family_y_in_attention: bool = False,
+        use_family_y_in_edge_film: bool = False,
+        family_y_dim: int = 0,
+        family_edge_update_hidden_dim: int = 128,
     ) -> None:
         kw = {"device": device, "dtype": dtype}
         super().__init__()
@@ -133,6 +160,15 @@ class XEyTransformerLayer(nn.Module):
             edge_family_offsets=edge_family_offsets,
             use_type_modulation=use_type_modulation,
             edge_only=edge_only,
+            use_family_film=use_family_film,
+            use_family_edge_update=use_family_edge_update,
+            use_relation_attention_matrix=use_relation_attention_matrix,
+            use_relation_message_matrix=use_relation_message_matrix,
+            use_family_y_film=use_family_y_film,
+            use_family_y_in_attention=use_family_y_in_attention,
+            use_family_y_in_edge_film=use_family_y_in_edge_film,
+            family_y_dim=family_y_dim,
+            family_edge_update_hidden_dim=family_edge_update_hidden_dim,
         )
 
         self.linX1 = Linear(dx, dim_ffX, **kw)
@@ -165,6 +201,7 @@ class XEyTransformerLayer(nn.Module):
         node_subtype_ids: Optional[Tensor] = None,
         relation_type_ids: Optional[Tensor] = None,
         edge_family_ids: Optional[Tensor] = None,
+        family_y_hidden: Optional[Tensor] = None,
         type_offsets: Optional[dict] = None,
     ):
         """Pass the input through the encoder layer.
@@ -181,6 +218,7 @@ class XEyTransformerLayer(nn.Module):
                 node_subtype_ids=node_subtype_ids,
                 relation_type_ids=relation_type_ids,
                 edge_family_ids=edge_family_ids,
+                family_y_hidden=family_y_hidden,
                 type_offsets=type_offsets,
             )
         else:
@@ -246,6 +284,15 @@ class EdgeOnlyTransformerLayer(nn.Module):
         relation_embed_dim: int = 64,
         edge_family_offsets: Optional[dict] = None,
         use_type_modulation: bool = True,
+        use_family_film: bool = False,
+        use_family_edge_update: bool = False,
+        use_relation_attention_matrix: bool = False,
+        use_relation_message_matrix: bool = False,
+        use_family_y_film: bool = False,
+        use_family_y_in_attention: bool = False,
+        use_family_y_in_edge_film: bool = False,
+        family_y_dim: int = 0,
+        family_edge_update_hidden_dim: int = 128,
     ) -> None:
         kw = {"device": device, "dtype": dtype}
         super().__init__()
@@ -268,6 +315,15 @@ class EdgeOnlyTransformerLayer(nn.Module):
             edge_family_offsets=edge_family_offsets,
             use_type_modulation=use_type_modulation,
             edge_only=True,
+            use_family_film=use_family_film,
+            use_family_edge_update=use_family_edge_update,
+            use_relation_attention_matrix=use_relation_attention_matrix,
+            use_relation_message_matrix=use_relation_message_matrix,
+            use_family_y_film=use_family_y_film,
+            use_family_y_in_attention=use_family_y_in_attention,
+            use_family_y_in_edge_film=use_family_y_in_edge_film,
+            family_y_dim=family_y_dim,
+            family_edge_update_hidden_dim=family_edge_update_hidden_dim,
         )
 
         self.linE1 = Linear(de, dim_ffE, **kw)
@@ -292,6 +348,7 @@ class EdgeOnlyTransformerLayer(nn.Module):
         node_subtype_ids: Optional[Tensor] = None,
         relation_type_ids: Optional[Tensor] = None,
         edge_family_ids: Optional[Tensor] = None,
+        family_y_hidden: Optional[Tensor] = None,
         type_offsets: Optional[dict] = None,
     ):
         if self.heterogeneous:
@@ -305,6 +362,7 @@ class EdgeOnlyTransformerLayer(nn.Module):
                 node_subtype_ids=node_subtype_ids,
                 relation_type_ids=relation_type_ids,
                 edge_family_ids=edge_family_ids,
+                family_y_hidden=family_y_hidden,
                 type_offsets=type_offsets,
             )
         else:
@@ -346,6 +404,20 @@ class GraphTransformerConv(nn.Module):
         type_offsets: Optional[dict] = None,
         use_type_modulation: bool = True,
         edge_only_model: bool = False,  # True：所有层仅更新边，节点仅作条件输入（固定节点、只生成边）
+        use_family_film: bool = False,
+        use_family_edge_update: bool = False,
+        use_relation_attention_matrix: bool = False,
+        use_relation_message_matrix: bool = False,
+        use_family_y_film: bool = False,
+        use_family_y_in_attention: bool = False,
+        use_family_y_in_edge_film: bool = False,
+        family_y_dim: int = 0,
+        family_edge_update_hidden_dim: int = 128,
+        use_edge_struct_features: bool = False,
+        edge_struct_feature_dim: int = 8,
+        edge_struct_hidden_dim: int = 64,
+        edge_struct_residual_scale: float = 1.0,
+        edge_struct_use_family_y: bool = False,
     ):
         super().__init__()
         self.n_layers = n_layers
@@ -358,6 +430,11 @@ class GraphTransformerConv(nn.Module):
         self.dropout = dropout
         self.heterogeneous = heterogeneous
         self.type_offsets = type_offsets
+        self.family_y_dim = max(int(family_y_dim or 0), 0)
+        self.use_edge_struct_features = bool(use_edge_struct_features)
+        self.edge_struct_feature_dim = max(int(edge_struct_feature_dim or 0), 0)
+        self.edge_struct_residual_scale = float(edge_struct_residual_scale or 0.0)
+        self.edge_struct_use_family_y = bool(edge_struct_use_family_y)
 
         # 调试信息：记录模型初始化时的input_dims
         print(f"[DEBUG] GraphTransformerConv.__init__: input_dims.X = {input_dims.X}, input_dims.E = {input_dims.E}, input_dims.charge = {input_dims.charge}, sn_hidden_dim = {sn_hidden_dim}")
@@ -371,6 +448,15 @@ class GraphTransformerConv(nn.Module):
         )
         self.lin_in_E = nn.Linear(input_dims.E, hidden_dims["de"])
         self.lin_in_y = nn.Linear(input_dims.y, hidden_dims["dy"])
+        if self.family_y_dim > 0:
+            self.lin_in_family_y = nn.Sequential(
+                nn.LayerNorm(self.family_y_dim),
+                nn.Linear(self.family_y_dim, hidden_dims["dy"]),
+                nn.GELU(),
+                nn.Linear(hidden_dims["dy"], hidden_dims["dy"]),
+            )
+        else:
+            self.lin_in_family_y = None
 
         # last layer is True when we keep the last output layers of y
         self.tf_layers = nn.ModuleList([])
@@ -392,6 +478,15 @@ class GraphTransformerConv(nn.Module):
                 relation_embed_dim=relation_embed_dim,
                 edge_family_offsets=edge_family_offsets,
                 use_type_modulation=use_type_modulation,
+                use_family_film=use_family_film,
+                use_family_edge_update=use_family_edge_update,
+                use_relation_attention_matrix=use_relation_attention_matrix,
+                use_relation_message_matrix=use_relation_message_matrix,
+                use_family_y_film=use_family_y_film,
+                use_family_y_in_attention=use_family_y_in_attention,
+                use_family_y_in_edge_film=use_family_y_in_edge_film,
+                family_y_dim=hidden_dims["dy"] if self.family_y_dim > 0 else 0,
+                family_edge_update_hidden_dim=family_edge_update_hidden_dim,
             )
             if self.edge_only_model:
                 layer = EdgeOnlyTransformerLayer(**common_kwargs)
@@ -412,6 +507,20 @@ class GraphTransformerConv(nn.Module):
         if self.output_y:
             self.out_ln_y = nn.LayerNorm(hidden_dims["dy"])
             self.lin_out_y = nn.Linear(hidden_dims["dy"], output_dims.y)
+        if self.use_edge_struct_features and self.edge_struct_feature_dim > 0:
+            edge_struct_in = self.edge_struct_feature_dim
+            if self.edge_struct_use_family_y:
+                edge_struct_in += hidden_dims["dy"]
+            self.edge_struct_residual_head = nn.Sequential(
+                nn.LayerNorm(edge_struct_in),
+                nn.Linear(edge_struct_in, edge_struct_hidden_dim),
+                nn.GELU(),
+                nn.Linear(edge_struct_hidden_dim, output_dims.E),
+            )
+            init.zeros_(self.edge_struct_residual_head[-1].weight)
+            init.zeros_(self.edge_struct_residual_head[-1].bias)
+        else:
+            self.edge_struct_residual_head = None
 
     def forward(
         self, 
@@ -425,6 +534,9 @@ class GraphTransformerConv(nn.Module):
         node_subtype_ids: Optional[Tensor] = None,
         relation_type_ids: Optional[Tensor] = None,
         edge_family_ids: Optional[Tensor] = None,
+        family_y_table: Optional[Tensor] = None,
+        edge_struct_features: Optional[Tensor] = None,
+        **_,
     ):
         # Save for residual connection
         X0 = X.clone()
@@ -443,6 +555,13 @@ class GraphTransformerConv(nn.Module):
         X = self.lin_in_X(X)
         edge_attr = self.lin_in_E(edge_attr)
         y = self.lin_in_y(y)
+        family_y_hidden = None
+        if (
+            self.lin_in_family_y is not None
+            and family_y_table is not None
+            and family_y_table.numel() > 0
+        ):
+            family_y_hidden = self.lin_in_family_y(family_y_table.float())
 
         # Transformer layers
         for layer in self.tf_layers:
@@ -453,6 +572,7 @@ class GraphTransformerConv(nn.Module):
                     node_subtype_ids=node_subtype_ids,
                     relation_type_ids=relation_type_ids,
                     edge_family_ids=edge_family_ids,
+                    family_y_hidden=family_y_hidden,
                     type_offsets=self.type_offsets,
                 )
             else:
@@ -485,6 +605,47 @@ class GraphTransformerConv(nn.Module):
             edge_attr_out = top_edge_attr + bot_edge_attr
 
         edge_attr = edge_attr_out + edge_attr0[:, : self.out_dim_E]
+        if (
+            self.edge_struct_residual_head is not None
+            and edge_struct_features is not None
+            and edge_struct_features.numel() > 0
+            and edge_struct_features.shape[0] == edge_attr.shape[0]
+        ):
+            struct_input = edge_struct_features.to(
+                device=edge_attr.device, dtype=edge_attr.dtype
+            )
+            if struct_input.size(-1) != self.edge_struct_feature_dim:
+                if struct_input.size(-1) > self.edge_struct_feature_dim:
+                    struct_input = struct_input[:, : self.edge_struct_feature_dim]
+                else:
+                    pad = struct_input.new_zeros(
+                        struct_input.size(0),
+                        self.edge_struct_feature_dim - struct_input.size(-1),
+                    )
+                    struct_input = torch.cat([struct_input, pad], dim=-1)
+            if self.edge_struct_use_family_y:
+                fam_cond = struct_input.new_zeros((struct_input.size(0), y.size(-1)))
+                if (
+                    family_y_hidden is not None
+                    and edge_family_ids is not None
+                    and edge_family_ids.numel() == struct_input.size(0)
+                ):
+                    edge_batch = batch[edge_index_out[0].long()].long()
+                    fam_ids = edge_family_ids.to(edge_attr.device).long()
+                    valid = (
+                        (edge_batch >= 0)
+                        & (edge_batch < family_y_hidden.size(0))
+                        & (fam_ids >= 0)
+                        & (fam_ids < family_y_hidden.size(1))
+                    )
+                    if valid.any():
+                        fam_cond[valid] = family_y_hidden[
+                            edge_batch[valid], fam_ids[valid]
+                        ].to(dtype=edge_attr.dtype)
+                struct_input = torch.cat([struct_input, fam_cond], dim=-1)
+            edge_attr = edge_attr + self.edge_struct_residual_scale * self.edge_struct_residual_head(
+                struct_input
+            )
 
         if self.output_y:
             y = y + y0[:, : self.out_dim_y]

@@ -35,6 +35,9 @@ use_time_film: false
 use_edge_state_update: false
 # Edge state update mode: "all" = update at every layer; "last" = only update at the last layer (saves VRAM).
 edge_state_update_mode: "all"
+# Scale of the raw input edge-state residual added to edge logits during
+# training/forward. SparseDiff-style residual denoising uses 1.0.
+edge_input_residual_scale: 1.0
 block_query: false
 block_partition_mode: connected_bfs
 block_partition_rho: null
@@ -43,6 +46,13 @@ hetero_metis_relation_balance_power: 0.5
 # After hetero_metis, swap same-type nodes between blocks to balance degree load/hub mass.
 hetero_metis_refine_degree_balance: false
 hetero_metis_refine_max_iter: 200
+# Optional structure-preserving refinement: when balancing degree load, penalize
+# swaps that cut same-type high-degree/high-degree edges from intra-block to
+# cross-block. This keeps hub-core relation patterns visible during training
+# without hard-coding a PubMed-specific node or relation name.
+hetero_metis_refine_preserve_high_high: false
+hetero_metis_refine_preserve_high_quantile: 0.8
+hetero_metis_refine_preserve_penalty_weight: 0.0
 # hetero_metis 首次划分时打印前几个块的类型/关系摘要；0 表示只打印总体块大小。
 hetero_metis_log_top_blocks: 5
 # true=选中真实图局部块后，query 块内所有合法边；false=仍按 edge_fraction 抽块内一部分边。
@@ -55,6 +65,22 @@ block_query_max_edges_per_family: 0
 block_query_include_uniform: true
 train_partition_source: noisy
 sampling_partition: auto
+# Query-free staged family training: encode full visible G_t once, then decode
+# same-type families first and cross-type families second. Query candidates do
+# not participate in message passing.
+train_family_staged_queryfree: false
+train_family_staged_query_chunk_size: 65536
+train_family_staged_max_chunks: 0
+# current | no_edge. Applies to query-free training losses: no_edge asks the
+# decoder to rank candidates from context/node embeddings rather than the
+# candidate's current noisy E_t state.
+train_queryfree_query_state: current
+# Family-specific residual adapters on top of the shared edge head.
+# The final adapter layer is zero-initialized, so enabling this starts from the
+# base head behavior and learns per-family corrections.
+use_family_edge_adapters: false
+family_edge_adapter_hidden_dim: 64
+train_family_staged_balance_by_family: true
 # sampling block query mode: uniform | type_template. type_template uses train-time block type-count templates, not true block members.
 sampling_block_mode: uniform
 # true=采样初始化时按训练 block/family 边数模板随机生成初始边，而不是只用全局 family 平均边数。
@@ -70,6 +96,45 @@ sampling_block_family_budget_keep_policy: random
 block_partition_workers: 0
 use_edge_phi_fusion: true
 use_dual_softmax: true
+# Sparse GraphTransformerConv hetero X/E/y layer options. These are used when
+# model.denoiser=graph_transformer. They keep the DiGress/SparseDiff X-E-y
+# update path while adding HGT-style family/type specialization.
+use_family_film: false
+use_family_edge_update: false
+family_edge_update_hidden_dim: 128
+# HGT-style relation matrices in the node message channel. These are distinct
+# from E->attention FiLM: relation matrices transform K/V for each edge family,
+# while edge FiLM still modulates attention with the current noisy edge state.
+use_relation_attention_matrix: false
+use_relation_message_matrix: false
+# Sparse hetero graph-level y features computed from the current sparse noisy
+# graph: family counts/densities, same-vs-cross edge ratio, and type degree
+# statistics. This avoids dense spectral/cycle features for large hetero graphs.
+use_sparse_hetero_y: false
+# Add a per-graph, per-relation-family conditioning table computed once from
+# the current noisy graph. The model projects this raw table into dy; the two
+# switches below decide whether it conditions node message attention, E update,
+# or both.
+use_sparse_family_y: false
+sparse_family_y_degree_bins: 5
+# Add family_y[edge_family] to edge_attr before the E->attention FiLM.
+use_family_y_in_attention: false
+# Add family_y[edge_family] to global y before the y->E FiLM.
+use_family_y_in_edge_film: false
+# Apply y->E FiLM with per-family linear maps. This lets the same global y
+# vector guide each relation family differently.
+use_family_y_film: false
+# Candidate-edge structural residual for model.denoiser=graph_transformer.
+# These query-level features are computed from the current noisy visible graph
+# and added as a zero-initialized residual on edge logits, so enabling the
+# module starts from the base denoiser behavior.
+use_edge_struct_features: false
+edge_struct_feature_dim: 8
+edge_struct_hidden_dim: 64
+edge_struct_residual_scale: 1.0
+# If true, concatenate projected family_y[f] to the candidate-edge structural
+# features before predicting the residual.
+edge_struct_use_family_y: false
 # Split visible G_t edges and temporary no-edge query links into separately
 # normalized attention channels, then learn their mixture per HGT layer/head.
 use_query_context_gate: false
@@ -78,6 +143,28 @@ query_context_gate_init: 0.2
 # closure, endpoint degree scale, and endpoint degree imbalance.
 use_two_hop_structure: false
 two_hop_structure_hidden_dim: 64
+# Add typed two-hop path counts to the two-hop residual: common-neighbor
+# counts by middle node type, plus first-leg and second-leg family counts.
+use_typed_two_hop_structure: false
+# Scale the learned structural residual before adding it to edge logits.
+two_hop_structure_scale: 1.0
+# fixed | linear_t | quadratic_t | alpha_bar_squared
+# The effective residual scale is two_hop_structure_scale times this
+# time-dependent reliability factor.
+two_hop_structure_schedule: fixed
+# A-stage experiment: expose current-G_t endpoint roles to the edge decoder
+# without adding any role-distribution supervision.
+use_endpoint_role_residual: false
+endpoint_role_hidden_dim: 64
+endpoint_role_family_dim: 16
+endpoint_role_scale: 1.0
+# B-stage experiment: teach the endpoint-role residual how to use degree roles
+# through a soft family-role ranking/distribution objective on current query
+# edges. Disabled by default.
+family_role_loss_weight: 0.0
+family_role_loss_warmup_epochs: 0
+family_role_loss_min_reliability: 0.0
+family_role_loss_temperature: 1.0
 subtype_dim: 32
 
 # The dimensions should satisfy dx % n_head == 0
@@ -91,6 +178,11 @@ lambda_train: [5, 0, 2] # 这是训练总损失里各项的权重（节点损失
 # - 'auto': 每个 step 在当前 query 上用 neg/pos 动态计算 pos_weight
 # - 数值: 固定 pos_weight（例如 5.0, 10.0, 20.0）
 exist_pos_weight: 1
+# Edge-level supervised loss weights. Lower edge_exist_weight tests whether
+# exact edge recovery can be softened while structural objectives carry more of
+# the denoising signal.
+edge_exist_weight: 1.0
+edge_subtype_weight: 1.2
 # Sampling-only correction for a model trained with fixed positive-class BCE
 # weight w. Before reverse-posterior computation, subtract log(w) from every
 # positive edge-class logit so the existence score recovers an unweighted
@@ -107,6 +199,31 @@ sampling_exist_temperature: 1.0
 # Convert model p(E_0|E_t) predictions to the diffusion-consistent reverse
 # posterior p(E_s|E_t) before applying the configured edge selection policy.
 sampling_use_reverse_posterior: false
+# Optional probability-space posterior weights aligned with the reverse
+# transitions returned by the sampling schedule. For a 4-step path
+# 100->75->50->25->0, [0,0,0.25,0.75] trusts the clean model prediction early
+# and gradually restores posterior stabilization late. null means full
+# posterior weight 1.0 at every transition.
+sampling_reverse_posterior_mix_weights: null
+# Continuous alternative to explicit weights:
+# full | alpha_bar_s | alpha_bar_s_squared.
+sampling_reverse_posterior_mix_mode: full
+sampling_reverse_posterior_mix_scale: 1.0
+# Compute clean-vs-mixed exact-K intervention diagnostics without another
+# model forward. Intended for sampling mechanism experiments.
+sampling_ranking_intervention_diag: false
+# Sampling-only override for the raw input edge-state residual added to edge
+# logits. null keeps model.edge_input_residual_scale. Use 0.0 for exact-K/top-K
+# ablations where the residual can lock the selected edge set across steps.
+sampling_edge_input_residual_scale: null
+# Sampling-only global exact-K path: encode the current visible G_t once, then
+# decode candidate edges without inserting query candidates into message passing.
+# This matches query-free training and avoids current-query-state lock-in.
+sampling_queryfree_decode: false
+# current | no_edge. For exact-K clean re-ranking, no_edge prevents the decoder
+# from using the candidate's current E_t state as a shortcut. Posterior logic
+# still receives the true current label separately.
+sampling_queryfree_query_state: current
 # When reverse posterior sampling is enabled, use stochastic Bernoulli decisions
 # on intermediate steps as in SparseDiff for legacy local selection policies.
 # Global gumbel_exact_k/deterministic_exact_k remain global exact-K at every step.
@@ -120,18 +237,30 @@ sampling_reverse_posterior_stochastic_steps: true
 #   edges, then select exactly K_f per family by posterior_logit / temperature
 #   plus one Gumbel draw per unique edge.
 # - deterministic_exact_k: the same global candidate path without Gumbel noise.
+# - gumbel_exact_k_degree_pair / deterministic_exact_k_degree_pair: same exact-K
+#   quotas, but add a family degree-bin-pair prior to the global ranking score.
+# - gumbel_exact_k_degree_pair_quota / deterministic_exact_k_degree_pair_quota:
+#   same exact-K family quotas, but allocate a configurable fraction of each
+#   family K by the training graph degree-bin-pair distribution before filling
+#   the rest by ordinary score ranking.
 # - topk_density: within each query relation family, keep the top-k p_exist edges where
 #   k follows the training graph family density. This prevents high-noise Bernoulli
 #   probabilities from exploding sparse graph edge counts.
 # - topk_degree_pair: like topk_density, but split each relation-family quota by the
 #   training graph's endpoint degree-bin pair distribution to preserve disassortative
 #   hub-to-low-degree mixing.
+# - topk_structure: self-adjusting per-family top-K where K follows the current
+#   posterior mean p_exist in that family. Set
+#   sampling_topk_structure_family_balance=equal_quota for a multi-category
+#   comparison that gives same-type families equal selected-edge budgets, or
+#   target_count to use the training graph family edge counts as per-family K.
 # - connectivity_topk: cache family Top-K plus block-pair bridge candidates,
 #   build a family-constrained maximum-spanning forest, then fill exact family quotas.
 # - topk_density_repair: use ordinary topk_density on preceding steps; on the explicit
 #   final sampling step, run global family Top-K and minimally exchange same-family
 #   non-forest edges for high-score component-bridging candidates.
 sampling_edge_selection: bernoulli
+sampling_topk_structure_family_balance: none
 # Gumbel exact-K only. Lower values approach deterministic family Top-K.
 sampling_gumbel_temperature: 1.0
 # Optional sampling-only partition-view experiment. Both views receive exactly
@@ -174,11 +303,54 @@ sampling_degree_pair_bins: 5
 # to ordinary family top-k. Lower this if connectivity/LCC drops too much.
 sampling_degree_pair_strength: 1.0
 sampling_degree_pair_min_bin_edges: 1
+# Clamp for the global exact-K degree-pair log-prior before multiplying by
+# sampling_degree_pair_strength.
+sampling_degree_pair_bias_clip: 4.0
+# Sampling-time structural ranking prior for global exact-K. These terms do
+# not use true edge membership: closure/connect are computed from the current
+# sampled graph, while degree-pair/assortativity use training-graph distribution
+# statistics. Effective weight = base * (remaining_step / T) ** power.
+sampling_structure_guidance_closure_weight: 0.0
+sampling_structure_guidance_connect_weight: 0.0
+sampling_structure_guidance_degree_pair_weight: 0.0
+sampling_structure_guidance_assort_weight: 0.0
+sampling_structure_guidance_power: 1.0
+sampling_structure_guidance_min_step_frac: 0.0
+sampling_structure_guidance_max_step_frac: 1.0
+# null means infer sign from the reference graph when available; negative target
+# favors dissimilar endpoint degree bins, positive target favors similar bins.
+sampling_structure_guidance_assort_target: null
 # Query-level calibration loss: |mean(P(edge)) - mean(true_edge)|.
 # This keeps Bernoulli sampling probabilities aligned with sparse graph density.
 edge_count_loss_weight: 0.0
 # 辅助边数校准 warmup；>0 时从 0 线性升到 edge_count_loss_weight，避免前期正边排序被稀疏校准压垮
 edge_count_loss_warmup_epochs: 0
+# Training-only soft endpoint degree-pair supervision. For each relation family,
+# aggregate predicted p(edge) over endpoint clean-degree-bin pairs and align the
+# resulting distribution with the clean graph reference, restricted to bins
+# represented in the current query set. This teaches the model the role-mixing
+# signal exposed by oracle degree-pair quota sampling without using quotas at
+# sampling time.
+degree_pair_dist_loss_weight: 0.0
+degree_pair_dist_loss_warmup_epochs: 0
+degree_pair_dist_loss_type: js  # js | kl | l1 | mse
+# block: match the clean degree-pair distribution restricted to the current
+# query block. reference: match the full training-graph degree-pair prior,
+# restricted to bins present in the current query block.
+degree_pair_dist_target: block  # block | reference
+degree_pair_dist_min_query_edges: 32
+degree_pair_dist_target_smoothing: 0.0
+# Optional high-noise emphasis for soft structural objectives. 0 keeps the
+# weight constant; 1 multiplies by t/T; 2 by (t/T)^2.
+degree_pair_dist_loss_t_power: 0.0
+# Family-wise expected edge-count supervision. This is a low-order structural
+# moment: for each relation family, align sum P(edge) on the query candidates
+# with the clean family density represented in the same query set.
+family_count_loss_weight: 0.0
+family_count_loss_warmup_epochs: 0
+family_count_loss_type: l1  # l1 | mse
+family_count_loss_min_query_edges: 32
+family_count_loss_t_power: 0.0
 # Closure-aware positive auxiliary loss: 对真实图中共同邻居多的正边额外加权，强化局部闭包/三角形关键边。
 closure_pos_loss_weight: 0.0
 closure_pos_loss_warmup_epochs: 0
@@ -188,6 +360,28 @@ closure_pos_score_normalize: true
 closure_pos_top_quantile: 0.0
 # closure score 封顶；<=0 表示不封顶。
 closure_pos_score_cap: 0.0
+# Closure ranking does not require recovering a specific clean edge. Within
+# each relation family it only asks high-clean-common-neighbor candidates to
+# outrank low-clean-common-neighbor candidates, using a pairwise logistic loss.
+closure_rank_loss_weight: 0.0
+closure_rank_loss_warmup_epochs: 0
+closure_rank_loss_t_power: 1.0
+closure_rank_min_query_edges: 64
+closure_rank_pairs_per_family: 2048
+closure_rank_top_quantile: 0.8
+closure_rank_bottom_quantile: 0.5
+closure_rank_min_common_neighbors: 1.0
+closure_rank_score_log1p: true
+closure_rank_margin: 0.0
+# Common-neighbor counts for closure_rank are computed in chunks to avoid
+# materializing query_edges x num_nodes at once.
+closure_rank_common_neighbor_chunk_size: 65536
+# Training-time hard top-K structure probe. This does not affect gradients.
+# Every N epochs, select K query edges by model existence score where K equals
+# the number of clean positives in the query block, then log structural proxies
+# of the selected set.
+train_structure_probe_every_epochs: 0
+train_structure_probe_min_query_edges: 256
 
 # true=进入全图 ideal 分支；false=SparseDiff 原版目标，直接 CE(pred, real)。
 structure_only_global: false
@@ -268,7 +462,10 @@ train_t_schedule: random
 train_t_cycle_repeats: 1
 # 单图块训练增强：一次加噪后顺序训练多个 true blocks，使每个 noisy graph 覆盖完整块集合。
 train_all_blocks_per_noise: false
-# sequential: 每个 block 单独 backward+optimizer.step；accumulate 预留，当前等价于 sequential 前的旧式手动平均不启用。
+# sequential: 每个 block 单独 backward+optimizer.step。
+# accumulate: 同一 noisy graph 覆盖所有 blocks，逐块 backward 累梯度，最后 optimizer.step。
+# accumulate_global: 所有 blocks 的计算图保留到最后，拼接 query logits 后算严格全覆盖结构 loss；最贴近全图目标但最容易 OOM。
+# accumulate_streaming_global: 先无梯度扫全块估计全局结构统计，再逐块反传并释放计算图；近似 global，适合正式跑。
 train_all_blocks_step_mode: sequential
 # true=每次加噪后随机打乱 block 顺序。
 train_all_blocks_shuffle: true

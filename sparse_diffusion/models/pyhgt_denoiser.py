@@ -400,10 +400,20 @@ class PyHGTDenoiser(nn.Module):
         use_query_context_gate: bool = False,
         query_context_gate_init: float = 0.2,
         use_two_hop_structure: bool = False,
+        use_typed_two_hop_structure: bool = False,
         two_hop_structure_hidden_dim: int = 64,
+        two_hop_structure_scale: float = 1.0,
+        two_hop_structure_schedule: str = "fixed",
+        use_endpoint_role_residual: bool = False,
+        endpoint_role_hidden_dim: int = 64,
+        endpoint_role_family_dim: int = 16,
+        endpoint_role_scale: float = 1.0,
+        use_family_edge_adapters: bool = False,
+        family_edge_adapter_hidden_dim: int = 64,
         use_time_film: bool = False,
         use_edge_state_update: bool = False,
         edge_state_update_mode: str = "all",
+        edge_input_residual_scale: float = 1.0,
         edge_only_model: bool = True,
         **_,
     ):
@@ -414,7 +424,20 @@ class PyHGTDenoiser(nn.Module):
         self.n_layers = int(n_layers)
         self.use_time_film = bool(use_time_film)
         self.use_edge_state_update = bool(use_edge_state_update)
+        self.edge_input_residual_scale = float(edge_input_residual_scale)
         self.use_two_hop_structure = bool(use_two_hop_structure)
+        self.use_typed_two_hop_structure = bool(
+            use_typed_two_hop_structure
+        )
+        self.two_hop_structure_scale = float(two_hop_structure_scale)
+        self.two_hop_structure_schedule = str(
+            two_hop_structure_schedule or "fixed"
+        ).lower()
+        self.use_endpoint_role_residual = bool(
+            use_endpoint_role_residual
+        )
+        self.use_family_edge_adapters = bool(use_family_edge_adapters)
+        self.endpoint_role_scale = float(endpoint_role_scale)
         self.edge_state_update_mode = str(edge_state_update_mode or "all").lower()
         if self.edge_state_update_mode not in {"all", "last"}:
             self.edge_state_update_mode = "all"
@@ -495,17 +518,51 @@ class PyHGTDenoiser(nn.Module):
             ]
         )
         self.node_head = nn.Sequential(nn.LayerNorm(dx), nn.Linear(dx, output_dims.X + output_dims.charge))
-        self.edge_head = nn.Sequential(
-            nn.Linear(2 * dx + de, hidden_dims["dim_ffE"]),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dims["dim_ffE"], output_dims.E),
+        self.edge_head = self._make_edge_head(
+            dx=dx,
+            de=de,
+            hidden_dim=hidden_dims["dim_ffE"],
+            dropout=dropout,
+            out_dim=output_dims.E,
         )
+        # Low-rank bilinear: project src/dst to rank-16, elementwise product, MLP → scalar
+        self.bilinear_rank = 16
+        self.bilinear_proj_src = nn.Linear(dx, self.bilinear_rank, bias=False)
+        self.bilinear_proj_dst = nn.Linear(dx, self.bilinear_rank, bias=False)
+        self.bilinear_out = nn.Sequential(
+            nn.Linear(self.bilinear_rank, self.bilinear_rank),
+            nn.GELU(),
+            nn.Linear(self.bilinear_rank, 1),
+        )
+        if self.use_family_edge_adapters and num_edge_families > 0:
+            adapter_hidden = max(int(family_edge_adapter_hidden_dim), 8)
+            self.family_edge_adapters = nn.ModuleList(
+                [
+                    nn.Sequential(
+                        nn.LayerNorm(2 * dx + de),
+                        nn.Linear(2 * dx + de, adapter_hidden),
+                        nn.GELU(),
+                        nn.Dropout(dropout),
+                        nn.Linear(adapter_hidden, output_dims.E),
+                    )
+                    for _ in range(num_edge_families)
+                ]
+            )
+            for adapter in self.family_edge_adapters:
+                nn.init.zeros_(adapter[-1].weight)
+                nn.init.zeros_(adapter[-1].bias)
+        else:
+            self.family_edge_adapters = nn.ModuleList()
         if self.use_two_hop_structure:
             structure_hidden = max(int(two_hop_structure_hidden_dim), 8)
+            self.two_hop_structure_feature_dim = 4
+            if self.use_typed_two_hop_structure:
+                self.two_hop_structure_feature_dim += int(
+                    max(num_node_types, 1)
+                ) + 2 * int(max(num_edge_families, 1))
             self.two_hop_structure_head = nn.Sequential(
-                nn.LayerNorm(4 + dy),
-                nn.Linear(4 + dy, structure_hidden),
+                nn.LayerNorm(self.two_hop_structure_feature_dim + dy),
+                nn.Linear(self.two_hop_structure_feature_dim + dy, structure_hidden),
                 nn.GELU(),
                 nn.Dropout(dropout),
                 nn.Linear(structure_hidden, output_dims.E),
@@ -513,9 +570,72 @@ class PyHGTDenoiser(nn.Module):
             nn.init.zeros_(self.two_hop_structure_head[-1].weight)
             nn.init.zeros_(self.two_hop_structure_head[-1].bias)
         else:
+            self.two_hop_structure_feature_dim = 4
             self.two_hop_structure_head = None
+        if self.use_endpoint_role_residual:
+            role_family_dim = max(int(endpoint_role_family_dim), 4)
+            role_hidden = max(int(endpoint_role_hidden_dim), 8)
+            self.endpoint_role_family_embedding = nn.Embedding(
+                max(num_edge_families, 1), role_family_dim
+            )
+            # 5 symmetric + 4 directed features for total degree, repeated
+            # for family degree, plus a same-type indicator.
+            self.endpoint_role_head = nn.Sequential(
+                nn.LayerNorm(19 + role_family_dim + dy),
+                nn.Linear(19 + role_family_dim + dy, role_hidden),
+                nn.GELU(),
+                nn.Dropout(dropout),
+                nn.Linear(role_hidden, output_dims.E),
+            )
+            nn.init.zeros_(self.endpoint_role_head[-1].weight)
+            nn.init.zeros_(self.endpoint_role_head[-1].bias)
+        else:
+            self.endpoint_role_family_embedding = None
+            self.endpoint_role_head = None
+        self.last_two_hop_base_residual_mean = 0.0
+        self.last_two_hop_effective_residual_mean = 0.0
+        self.last_two_hop_effective_scale_mean = 0.0
+        # Backwards-compatible aliases used by older logging/checkpoints.
         self.last_two_hop_residual_mean = 0.0
+        self.last_two_hop_scale_factor_mean = 1.0
+        self.last_endpoint_role_base_residual_mean = 0.0
+        self.last_endpoint_role_effective_residual_mean = 0.0
+        self.last_endpoint_role_effective_scale_mean = 0.0
         self.y_head = nn.Linear(dy, output_dims.y) if output_y else None
+
+    @staticmethod
+    def _make_edge_head(dx: int, de: int, hidden_dim: int, dropout: float, out_dim: int) -> nn.Sequential:
+        return nn.Sequential(
+            nn.Linear(2 * dx + de, hidden_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, out_dim),
+        )
+
+    def _edge_head_logits(
+        self,
+        edge_features: Tensor,
+        query_edge_stage_ids: Optional[Tensor] = None,
+        query_edge_family_ids: Optional[Tensor] = None,
+    ) -> Tensor:
+        out = self.edge_head(edge_features)
+        if (
+            self.use_family_edge_adapters
+            and query_edge_family_ids is not None
+            and len(self.family_edge_adapters) > 0
+        ):
+            fam = query_edge_family_ids.long().to(edge_features.device).reshape(-1)
+            if fam.numel() == edge_features.shape[0]:
+                for family_id in torch.unique(fam).tolist():
+                    family_id = int(family_id)
+                    if family_id < 0 or family_id >= len(self.family_edge_adapters):
+                        continue
+                    mask = fam == family_id
+                    if mask.any():
+                        out[mask] = out[mask] + self.family_edge_adapters[family_id](
+                            edge_features[mask]
+                        )
+        return out
 
     @staticmethod
     def _infer_type_sizes(type_offsets: Optional[Dict[str, int]], num_node_subtypes: int) -> list[int]:
@@ -629,61 +749,484 @@ class PyHGTDenoiser(nn.Module):
         out[valid] = matrix_values[safe_positions[valid]]
         return out
 
+    @staticmethod
+    def _lookup_values_for_keys(
+        lookup: dict,
+        row: Tensor,
+        col: Tensor,
+        num_nodes: int,
+    ) -> Tensor:
+        """Gather values from a pre-sorted sparse key/value lookup."""
+        keys = lookup["two_hop_keys"]
+        values = lookup["two_hop_values"]
+        if row.numel() == 0 or keys.numel() == 0:
+            return values.new_zeros(row.shape)
+        query_keys = row.long() * int(num_nodes) + col.long()
+        positions = torch.searchsorted(keys, query_keys)
+        valid = positions < keys.numel()
+        safe_positions = positions.clamp(max=max(keys.numel() - 1, 0))
+        valid = valid & (keys[safe_positions] == query_keys)
+        out = values.new_zeros(query_keys.shape)
+        out[valid] = values[safe_positions[valid]]
+        return out
+
+    @staticmethod
+    def _lookup_matrix_values_for_keys(
+        lookup: dict,
+        value_name: str,
+        row: Tensor,
+        col: Tensor,
+        num_nodes: int,
+        feature_dim: int,
+    ) -> Tensor:
+        """Gather vector-valued sparse lookup entries by sorted two-hop keys."""
+        keys = lookup.get("two_hop_keys")
+        values = lookup.get(value_name)
+        if (
+            row.numel() == 0
+            or keys is None
+            or values is None
+            or keys.numel() == 0
+        ):
+            return torch.zeros(
+                (row.numel(), int(feature_dim)),
+                device=row.device,
+                dtype=torch.float,
+            )
+        query_keys = row.long() * int(num_nodes) + col.long()
+        positions = torch.searchsorted(keys, query_keys)
+        valid = positions < keys.numel()
+        safe_positions = positions.clamp(max=max(keys.numel() - 1, 0))
+        valid = valid & (keys[safe_positions] == query_keys)
+        out = values.new_zeros((query_keys.numel(), values.shape[-1]))
+        out[valid] = values[safe_positions[valid]]
+        return out
+
+    def _augment_typed_two_hop_lookup(
+        self,
+        lookup: dict,
+        adjacency,
+        adjacency_index: Tensor,
+        adjacency_family: Optional[Tensor],
+        node_type_ids: Optional[Tensor],
+        num_nodes: int,
+    ) -> None:
+        """Attach typed two-hop path counts to an existing base lookup."""
+        if not self.use_typed_two_hop_structure:
+            return
+        keys = lookup.get("two_hop_keys")
+        device = adjacency_index.device
+        num_types = int(max(self.num_node_types, 1))
+        num_families = int(max(self.family_starts.numel(), 1))
+        typed_dim = num_types + 2 * num_families
+        if keys is None or keys.numel() == 0:
+            lookup["typed_two_hop_values"] = torch.empty(
+                (0, typed_dim),
+                dtype=torch.float,
+                device=device,
+            )
+            return
+
+        node_type = (
+            node_type_ids.long().to(device)
+            if node_type_ids is not None
+            else torch.zeros(num_nodes, dtype=torch.long, device=device)
+        ).clamp(0, num_types - 1)
+        family = (
+            adjacency_family.long().to(device)
+            if adjacency_family is not None
+            else torch.zeros(adjacency_index.size(1), dtype=torch.long, device=device)
+        ).clamp(0, num_families - 1)
+
+        features = torch.zeros(
+            (keys.numel(), typed_dim),
+            dtype=torch.float,
+            device=device,
+        )
+
+        def add_sparse_counts(mat, feature_offset: int):
+            mat = mat.coalesce()
+            if mat._nnz() == 0:
+                return
+            mat_keys = (
+                mat.indices()[0].long() * int(num_nodes)
+                + mat.indices()[1].long()
+            )
+            pos = torch.searchsorted(keys, mat_keys)
+            valid = pos < keys.numel()
+            safe = pos.clamp(max=max(keys.numel() - 1, 0))
+            valid = valid & (keys[safe] == mat_keys)
+            if valid.any():
+                features[safe[valid], feature_offset] = mat.values()[valid]
+
+        dst_type = node_type[adjacency_index[1].long()]
+        for type_id in range(num_types):
+            values = (dst_type == type_id).to(dtype=torch.float, device=device)
+            typed_adjacency = torch.sparse_coo_tensor(
+                adjacency_index,
+                values,
+                (num_nodes, num_nodes),
+                device=device,
+            ).coalesce()
+            add_sparse_counts(
+                torch.sparse.mm(typed_adjacency, adjacency),
+                type_id,
+            )
+
+        for fam_id in range(num_families):
+            values = (family == fam_id).to(dtype=torch.float, device=device)
+            family_adjacency = torch.sparse_coo_tensor(
+                adjacency_index,
+                values,
+                (num_nodes, num_nodes),
+                device=device,
+            ).coalesce()
+            add_sparse_counts(
+                torch.sparse.mm(family_adjacency, adjacency),
+                num_types + fam_id,
+            )
+            add_sparse_counts(
+                torch.sparse.mm(adjacency, family_adjacency),
+                num_types + num_families + fam_id,
+            )
+
+        lookup["typed_two_hop_values"] = features.detach()
+
+    def build_two_hop_structure_lookup(
+        self,
+        context_edge_index: Tensor,
+        num_nodes: int,
+        node_type_ids: Optional[Tensor] = None,
+        edge_family_ids: Optional[Tensor] = None,
+        batch: Optional[Tensor] = None,
+    ) -> dict:
+        """Build one detached current-G_t lookup reusable by all query blocks."""
+        device = context_edge_index.device
+        degree = torch.zeros(max(int(num_nodes), 0), dtype=torch.float, device=device)
+        if context_edge_index.numel() == 0 or num_nodes <= 0:
+            lookup = {
+                "degree": degree,
+                "two_hop_keys": torch.empty(0, dtype=torch.long, device=device),
+                "two_hop_values": torch.empty(0, dtype=torch.float, device=device),
+                "adjacency_nnz": 0,
+                "two_hop_nnz": 0,
+            }
+            if self.use_typed_two_hop_structure:
+                lookup["typed_two_hop_values"] = torch.empty(
+                    (
+                        0,
+                        int(max(self.num_node_types, 1))
+                        + 2 * int(max(self.family_starts.numel(), 1)),
+                    ),
+                    dtype=torch.float,
+                    device=device,
+                )
+            if self.use_endpoint_role_residual:
+                lookup.update(
+                    self._build_endpoint_role_lookup(
+                        context_edge_index,
+                        num_nodes,
+                        node_type_ids,
+                        edge_family_ids,
+                        batch,
+                    )
+                )
+            return lookup
+
+        with torch.no_grad():
+            src = context_edge_index[0].long()
+            dst = context_edge_index[1].long()
+            non_loop = src != dst
+            src = src[non_loop]
+            dst = dst[non_loop]
+            lo = torch.minimum(src, dst)
+            hi = torch.maximum(src, dst)
+            canonical = torch.unique(lo * int(num_nodes) + hi)
+            raw_keys = lo * int(num_nodes) + hi
+            raw_order = torch.argsort(raw_keys)
+            raw_keys_sorted = raw_keys[raw_order]
+            raw_first = torch.ones_like(raw_keys_sorted, dtype=torch.bool)
+            raw_first[1:] = raw_keys_sorted[1:] != raw_keys_sorted[:-1]
+            chosen = raw_order[raw_first]
+            canonical = raw_keys_sorted[raw_first]
+            lo = torch.div(canonical, int(num_nodes), rounding_mode="floor")
+            hi = canonical.remainder(int(num_nodes))
+            canonical_family = None
+            if edge_family_ids is not None:
+                canonical_family = edge_family_ids.long().to(device)[
+                    non_loop
+                ][chosen]
+            adjacency_index = torch.stack(
+                [torch.cat([lo, hi]), torch.cat([hi, lo])], dim=0
+            )
+            adjacency_family = None
+            if canonical_family is not None:
+                adjacency_family = torch.cat(
+                    [canonical_family, canonical_family], dim=0
+                )
+            adjacency = torch.sparse_coo_tensor(
+                adjacency_index,
+                torch.ones(
+                    adjacency_index.size(1),
+                    device=device,
+                    dtype=torch.float,
+                ),
+                (num_nodes, num_nodes),
+                device=device,
+            ).coalesce()
+            degree = torch.sparse.sum(adjacency, dim=1).to_dense()
+            two_hop = torch.sparse.mm(adjacency, adjacency).coalesce()
+            keys = (
+                two_hop.indices()[0].long() * int(num_nodes)
+                + two_hop.indices()[1].long()
+            )
+            order = torch.argsort(keys)
+            lookup = {
+                "degree": degree.detach(),
+                "two_hop_keys": keys[order].detach(),
+                "two_hop_values": two_hop.values()[order].detach(),
+                "adjacency_nnz": int(adjacency._nnz()),
+                "two_hop_nnz": int(two_hop._nnz()),
+            }
+            self._augment_typed_two_hop_lookup(
+                lookup,
+                adjacency,
+                adjacency_index,
+                adjacency_family,
+                node_type_ids,
+                int(num_nodes),
+            )
+            if self.use_endpoint_role_residual:
+                lookup.update(
+                    self._build_endpoint_role_lookup(
+                        context_edge_index,
+                        num_nodes,
+                        node_type_ids,
+                        edge_family_ids,
+                        batch,
+                    )
+                )
+            return lookup
+
+    def _build_endpoint_role_lookup(
+        self,
+        context_edge_index: Tensor,
+        num_nodes: int,
+        node_type_ids: Optional[Tensor],
+        edge_family_ids: Optional[Tensor],
+        batch: Optional[Tensor],
+    ) -> dict:
+        device = context_edge_index.device
+        node_type = (
+            node_type_ids.long().to(device)
+            if node_type_ids is not None
+            else torch.zeros(num_nodes, dtype=torch.long, device=device)
+        )
+        graph_batch = (
+            batch.long().to(device)
+            if batch is not None
+            else torch.zeros(num_nodes, dtype=torch.long, device=device)
+        )
+        num_families = max(
+            int(self.endpoint_role_family_embedding.num_embeddings), 1
+        )
+        family_degree = torch.zeros(
+            (num_families, num_nodes), dtype=torch.float, device=device
+        )
+        total_degree = torch.zeros(
+            num_nodes, dtype=torch.float, device=device
+        )
+        if context_edge_index.numel():
+            src = context_edge_index[0].long()
+            dst = context_edge_index[1].long()
+            lo = torch.minimum(src, dst)
+            hi = torch.maximum(src, dst)
+            keys = lo * int(num_nodes) + hi
+            order = torch.argsort(keys)
+            keys = keys[order]
+            first = torch.ones_like(keys, dtype=torch.bool)
+            first[1:] = keys[1:] != keys[:-1]
+            chosen = order[first]
+            src = lo[chosen]
+            dst = hi[chosen]
+            ones = torch.ones(src.numel(), dtype=torch.float, device=device)
+            total_degree.scatter_add_(0, src, ones)
+            total_degree.scatter_add_(0, dst, ones)
+            if edge_family_ids is not None:
+                family = edge_family_ids.long().to(device)[chosen].clamp(
+                    0, num_families - 1
+                )
+                flat = family_degree.reshape(-1)
+                flat.scatter_add_(0, family * num_nodes + src, ones)
+                flat.scatter_add_(0, family * num_nodes + dst, ones)
+
+        def normalize_by_type(values):
+            normalized = torch.zeros_like(values)
+            graph_count = (
+                int(graph_batch.max().item()) + 1
+                if graph_batch.numel()
+                else 1
+            )
+            for graph_id in range(graph_count):
+                for type_id in range(self.num_node_types):
+                    mask = (graph_batch == graph_id) & (node_type == type_id)
+                    if not mask.any():
+                        continue
+                    local = torch.log1p(values[..., mask])
+                    mean = local.mean(dim=-1, keepdim=True)
+                    std = local.std(dim=-1, keepdim=True, unbiased=False)
+                    normalized[..., mask] = (local - mean) / (
+                        std + 1e-6
+                    )
+            return normalized
+
+        return {
+            "endpoint_role_total_z": normalize_by_type(total_degree).detach(),
+            "endpoint_role_family_z": normalize_by_type(
+                family_degree
+            ).detach(),
+            "endpoint_role_node_type": node_type.detach(),
+        }
+
+    @staticmethod
+    def _endpoint_pair_features(src_value, dst_value, same_type):
+        symmetric = torch.stack(
+            [
+                src_value + dst_value,
+                (src_value - dst_value).abs(),
+                src_value * dst_value,
+                torch.minimum(src_value, dst_value),
+                torch.maximum(src_value, dst_value),
+            ],
+            dim=-1,
+        )
+        directed = torch.stack(
+            [
+                src_value,
+                dst_value,
+                src_value * dst_value,
+                (src_value - dst_value).abs(),
+            ],
+            dim=-1,
+        )
+        same = same_type.float().unsqueeze(-1)
+        return torch.cat(
+            [symmetric * same, directed * (1.0 - same)], dim=-1
+        )
+
+    def _endpoint_role_residual(
+        self,
+        encoded: dict,
+        query_edge_index: Tensor,
+        edge_family_ids: Optional[Tensor],
+        batch: Tensor,
+    ) -> Tensor:
+        if (
+            not self.use_endpoint_role_residual
+            or self.endpoint_role_head is None
+            or query_edge_index.numel() == 0
+        ):
+            return encoded["h"].new_zeros(
+                (query_edge_index.size(1), self.out_dim_E)
+            )
+        lookup = encoded.get("two_hop_structure_lookup") or {}
+        total_z = lookup.get("endpoint_role_total_z")
+        family_z = lookup.get("endpoint_role_family_z")
+        node_type = lookup.get("endpoint_role_node_type")
+        if total_z is None or family_z is None or node_type is None:
+            return encoded["h"].new_zeros(
+                (query_edge_index.size(1), self.out_dim_E)
+            )
+        src = query_edge_index[0].long()
+        dst = query_edge_index[1].long()
+        family = (
+            edge_family_ids.long().to(src.device)
+            if edge_family_ids is not None
+            else torch.zeros_like(src)
+        ).clamp(0, family_z.size(0) - 1)
+        same_type = node_type[src] == node_type[dst]
+        total_features = self._endpoint_pair_features(
+            total_z[src], total_z[dst], same_type
+        )
+        family_features = self._endpoint_pair_features(
+            family_z[family, src],
+            family_z[family, dst],
+            same_type,
+        )
+        role_features = torch.cat(
+            [total_features, family_features, same_type.float().unsqueeze(-1)],
+            dim=-1,
+        )
+        family_embedding = self.endpoint_role_family_embedding(family)
+        y_h = encoded["y_h"]
+        edge_y = (
+            y_h[batch[src].long()]
+            if y_h.numel()
+            else role_features.new_zeros(
+                (role_features.size(0), int(self.lin_in_y.out_features))
+            )
+        )
+        base = self.endpoint_role_head(
+            torch.cat([role_features, family_embedding, edge_y], dim=-1)
+        )
+        factor_by_graph = encoded.get("endpoint_role_scale_factor")
+        factor = (
+            factor_by_graph.reshape(-1, 1)[batch[src].long()]
+            if factor_by_graph is not None
+            else base.new_ones((base.size(0), 1))
+        )
+        effective_scale = self.endpoint_role_scale * factor
+        residual = effective_scale * base
+        self.last_endpoint_role_base_residual_mean = float(
+            base.detach().abs().mean().cpu()
+        )
+        self.last_endpoint_role_effective_scale_mean = float(
+            effective_scale.detach().mean().cpu()
+        )
+        self.last_endpoint_role_effective_residual_mean = float(
+            residual.detach().abs().mean().cpu()
+        )
+        return residual
+
     def _two_hop_structure_features(
         self,
         query_edge_index: Tensor,
         context_edge_index: Tensor,
         num_nodes: int,
+        lookup: Optional[dict] = None,
     ) -> Tensor:
         """Compute permutation-equivariant closure and endpoint-role features."""
         if query_edge_index.numel() == 0:
             return torch.zeros(
-                (0, 4), device=query_edge_index.device, dtype=torch.float
+                (0, int(self.two_hop_structure_feature_dim)),
+                device=query_edge_index.device,
+                dtype=torch.float,
             )
-        if context_edge_index.numel() == 0 or num_nodes <= 0:
+        if num_nodes <= 0:
             return torch.zeros(
-                (query_edge_index.size(1), 4),
+                (query_edge_index.size(1), int(self.two_hop_structure_feature_dim)),
                 device=query_edge_index.device,
                 dtype=torch.float,
             )
 
-        src = context_edge_index[0].long()
-        dst = context_edge_index[1].long()
-        non_loop = src != dst
-        src = src[non_loop]
-        dst = dst[non_loop]
-        lo = torch.minimum(src, dst)
-        hi = torch.maximum(src, dst)
-        canonical = torch.unique(lo * int(num_nodes) + hi)
-        lo = torch.div(canonical, int(num_nodes), rounding_mode="floor")
-        hi = canonical.remainder(int(num_nodes))
-        adjacency_index = torch.stack(
-            [torch.cat([lo, hi]), torch.cat([hi, lo])], dim=0
-        )
-        adjacency = torch.sparse_coo_tensor(
-            adjacency_index,
-            torch.ones(
-                adjacency_index.size(1),
-                device=query_edge_index.device,
-                dtype=torch.float,
-            ),
-            (num_nodes, num_nodes),
-            device=query_edge_index.device,
-        ).coalesce()
-        degree = torch.sparse.sum(adjacency, dim=1).to_dense()
-        two_hop = torch.sparse.mm(adjacency, adjacency).coalesce()
+        if lookup is None:
+            lookup = self.build_two_hop_structure_lookup(
+                context_edge_index=context_edge_index,
+                num_nodes=num_nodes,
+            )
+        degree = lookup["degree"]
 
         query_src = query_edge_index[0].long()
         query_dst = query_edge_index[1].long()
-        common = self._sparse_values_for_keys(
-            two_hop, query_src, query_dst, num_nodes
+        common = self._lookup_values_for_keys(
+            lookup, query_src, query_dst, num_nodes
         )
         degree_src = degree[query_src]
         degree_dst = degree[query_dst]
         degree_sum = degree_src + degree_dst
         union = (degree_sum - common).clamp_min(1.0)
         log_scale = math.log1p(max(int(num_nodes), 1))
-        return torch.stack(
+        base = torch.stack(
             [
                 torch.log1p(common) / log_scale,
                 common / union,
@@ -692,6 +1235,25 @@ class PyHGTDenoiser(nn.Module):
             ],
             dim=-1,
         )
+        if not self.use_typed_two_hop_structure:
+            return base
+        typed_dim = int(self.two_hop_structure_feature_dim) - 4
+        typed = self._lookup_matrix_values_for_keys(
+            lookup,
+            "typed_two_hop_values",
+            query_src,
+            query_dst,
+            num_nodes,
+            typed_dim,
+        )
+        typed = torch.log1p(typed) / log_scale
+        if typed.shape[-1] != typed_dim:
+            fixed = typed.new_zeros((typed.size(0), typed_dim))
+            take = min(int(typed.shape[-1]), typed_dim)
+            if take > 0:
+                fixed[:, :take] = typed[:, :take]
+            typed = fixed
+        return torch.cat([base, typed], dim=-1)
 
     def _two_hop_structure_residual(
         self,
@@ -707,6 +1269,7 @@ class PyHGTDenoiser(nn.Module):
             query_edge_index=query_edge_index,
             context_edge_index=encoded["structure_edge_index"],
             num_nodes=int(encoded["h"].size(0)),
+            lookup=encoded.get("two_hop_structure_lookup"),
         )
         y_h = encoded["y_h"]
         if y_h.numel() and query_edge_index.numel():
@@ -715,12 +1278,36 @@ class PyHGTDenoiser(nn.Module):
             edge_y = structure.new_zeros(
                 (structure.size(0), int(self.lin_in_y.out_features))
             )
-        residual = self.two_hop_structure_head(
+        factor_by_graph = encoded.get("two_hop_scale_factor")
+        if factor_by_graph is None:
+            edge_factor = structure.new_ones((structure.size(0), 1))
+        elif query_edge_index.numel():
+            graph_idx = batch[query_edge_index[0].long()].long()
+            edge_factor = factor_by_graph.reshape(-1, 1)[graph_idx]
+        else:
+            edge_factor = structure.new_ones((structure.size(0), 1))
+        base_residual = self.two_hop_structure_head(
             torch.cat([structure, edge_y], dim=-1)
         )
-        self.last_two_hop_residual_mean = float(
+        effective_scale = self.two_hop_structure_scale * edge_factor
+        residual = effective_scale * base_residual
+        self.last_two_hop_scale_factor_mean = (
+            float(edge_factor.detach().mean().cpu())
+            if edge_factor.numel()
+            else 1.0
+        )
+        self.last_two_hop_base_residual_mean = float(
+            base_residual.detach().abs().mean().cpu()
+        ) if base_residual.numel() else 0.0
+        self.last_two_hop_effective_scale_mean = float(
+            effective_scale.detach().mean().cpu()
+        ) if effective_scale.numel() else 0.0
+        self.last_two_hop_effective_residual_mean = float(
             residual.detach().abs().mean().cpu()
         ) if residual.numel() else 0.0
+        self.last_two_hop_residual_mean = (
+            self.last_two_hop_effective_residual_mean
+        )
         return residual
 
     def forward(
@@ -734,7 +1321,16 @@ class PyHGTDenoiser(nn.Module):
         node_subtype_ids: Optional[Tensor] = None,
         relation_type_ids: Optional[Tensor] = None,
         edge_family_ids: Optional[Tensor] = None,
+        two_hop_structure_lookup: Optional[dict] = None,
+        two_hop_scale_factor: Optional[Tensor] = None,
+        endpoint_role_scale_factor: Optional[Tensor] = None,
+        edge_input_residual_scale: Optional[float] = None,
     ) -> utils.SparsePlaceHolder:
+        residual_scale = (
+            self.edge_input_residual_scale
+            if edge_input_residual_scale is None
+            else float(edge_input_residual_scale)
+        )
         encoded = self.encode_context(
             X=X,
             edge_attr=edge_attr,
@@ -745,17 +1341,24 @@ class PyHGTDenoiser(nn.Module):
             node_subtype_ids=node_subtype_ids,
             relation_type_ids=relation_type_ids,
             edge_family_ids=edge_family_ids,
+            two_hop_structure_lookup=two_hop_structure_lookup,
+            two_hop_scale_factor=two_hop_scale_factor,
+            endpoint_role_scale_factor=endpoint_role_scale_factor,
         )
         src_h = encoded["h"][edge_index[0].long()]
         dst_h = encoded["h"][edge_index[1].long()]
         edge_logits = (
-            self.edge_head(
-                torch.cat([src_h, dst_h, encoded["context_e"]], dim=-1)
+            self._edge_head_logits(
+                torch.cat([src_h, dst_h, encoded["context_e"]], dim=-1),
+                query_edge_family_ids=edge_family_ids,
             )
             + self._two_hop_structure_residual(
                 encoded, edge_index, batch
             )
-            + edge_attr[:, : self.out_dim_E]
+            + self._endpoint_role_residual(
+                encoded, edge_index, edge_family_ids, batch
+            )
+            + residual_scale * edge_attr[:, : self.out_dim_E]
         )
         return utils.SparsePlaceHolder(
             node=encoded["node_logits"],
@@ -777,6 +1380,9 @@ class PyHGTDenoiser(nn.Module):
         node_subtype_ids: Optional[Tensor] = None,
         relation_type_ids: Optional[Tensor] = None,
         edge_family_ids: Optional[Tensor] = None,
+        two_hop_structure_lookup: Optional[dict] = None,
+        two_hop_scale_factor: Optional[Tensor] = None,
+        endpoint_role_scale_factor: Optional[Tensor] = None,
     ) -> dict:
         """Encode nodes using context edges only.
 
@@ -851,6 +1457,10 @@ class PyHGTDenoiser(nn.Module):
             "charge_logits": charge_logits,
             "y_out": y_out,
             "structure_edge_index": structure_edge_index,
+            "two_hop_structure_lookup": two_hop_structure_lookup,
+            "two_hop_scale_factor": two_hop_scale_factor,
+            "endpoint_role_scale_factor": endpoint_role_scale_factor,
+            "context_edge_family_ids": edge_family_ids,
         }
 
     def decode_queries(
@@ -859,10 +1469,18 @@ class PyHGTDenoiser(nn.Module):
         query_edge_attr: Tensor,
         query_edge_index: Tensor,
         batch: Tensor,
+        query_edge_family_ids: Optional[Tensor] = None,
+        query_edge_stage_ids: Optional[Tensor] = None,
+        edge_input_residual_scale: Optional[float] = None,
     ) -> Tensor:
         """Decode candidate edges without using them for message passing."""
         h = encoded["h"]
         y_h = encoded["y_h"]
+        residual_scale = (
+            self.edge_input_residual_scale
+            if edge_input_residual_scale is None
+            else float(edge_input_residual_scale)
+        )
         query_edge_attr = query_edge_attr.float()
         expected = int(self.lin_in_E.in_features)
         if query_edge_attr.shape[-1] < expected:
@@ -894,10 +1512,24 @@ class PyHGTDenoiser(nn.Module):
                 )
         src_h = h[query_edge_index[0].long()]
         dst_h = h[query_edge_index[1].long()]
+        # Low-rank bilinear score: captures structural similarity
+        bilinear_feat = self.bilinear_proj_src(src_h) * self.bilinear_proj_dst(dst_h)
+        bilinear_score = self.bilinear_out(bilinear_feat)  # (E, 1)
         return (
-            self.edge_head(torch.cat([src_h, dst_h, e], dim=-1))
+            self._edge_head_logits(
+                torch.cat([src_h, dst_h, e], dim=-1),
+                query_edge_stage_ids=query_edge_stage_ids,
+                query_edge_family_ids=query_edge_family_ids,
+            )
+            + torch.cat([bilinear_score, bilinear_score.new_zeros(bilinear_score.shape[0], self.out_dim_E - 1)], dim=-1)
             + self._two_hop_structure_residual(
                 encoded, query_edge_index, batch
             )
-            + query_edge_attr[:, : self.out_dim_E]
+            + self._endpoint_role_residual(
+                encoded,
+                query_edge_index,
+                query_edge_family_ids,
+                batch,
+            )
+            + residual_scale * query_edge_attr[:, : self.out_dim_E]
         )

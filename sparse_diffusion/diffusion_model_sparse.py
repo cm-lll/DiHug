@@ -69,10 +69,24 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             and not bool(
                 getattr(cfg.model, "train_partition_ensemble", False)
             )
+            and not bool(
+                getattr(cfg.model, "train_family_staged_queryfree", False)
+            )
         )
 
         self.in_dims = dataset_infos.input_dims
         self.out_dims = dataset_infos.output_dims
+        self.cfg = cfg
+        self.dataset_info = dataset_infos
+        self.sparse_hetero_y_dim = self._sparse_hetero_y_dim()
+        self.sparse_family_y_dim = self._sparse_family_y_dim()
+        if self.sparse_hetero_y_dim > 0:
+            self.in_dims = utils.PlaceHolder(
+                X=self.in_dims.X,
+                E=self.in_dims.E,
+                y=self.in_dims.y + self.sparse_hetero_y_dim,
+                charge=self.in_dims.charge,
+            )
         self.use_charge = cfg.model.use_charge and self.out_dims.charge > 1
         self.node_dist = dataset_infos.nodes_dist
         self.extra_features = extra_features
@@ -94,9 +108,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         self._true_block_cache = {}
         self._inter_block_pool_cache = {}
 
-        self.cfg = cfg
         self.test_variance = cfg.general.test_variance
-        self.dataset_info = dataset_infos
         self.visualization_tools = Visualizer(dataset_infos)
         self.name = cfg.general.name
         self.T = cfg.model.diffusion_steps
@@ -109,6 +121,8 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             exist_loss_type=getattr(cfg.model, "exist_loss_type", "bce"),
             exist_focal_gamma=getattr(cfg.model, "exist_focal_gamma", 2.0),
             exist_focal_alpha=getattr(cfg.model, "exist_focal_alpha", 0.75),
+            edge_exist_weight=getattr(cfg.model, "edge_exist_weight", 1.0),
+            edge_subtype_weight=getattr(cfg.model, "edge_subtype_weight", 1.2),
             edge_neg_weight=getattr(cfg.model, "edge_neg_weight", 1.0),
             relation_matrix_loss_weight=getattr(cfg.model, "relation_matrix_loss_weight", 1.0),
             relation_matrix_loss_normalize=getattr(cfg.model, "relation_matrix_loss_normalize", True),
@@ -217,7 +231,43 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             edge_family_offsets=edge_family_offsets,
             type_offsets=type_offsets,
             use_type_modulation=getattr(cfg.model, "use_type_modulation", True),
+            use_family_film=getattr(cfg.model, "use_family_film", False),
+            use_family_edge_update=getattr(
+                cfg.model, "use_family_edge_update", False
+            ),
+            use_relation_attention_matrix=getattr(
+                cfg.model, "use_relation_attention_matrix", False
+            ),
+            use_relation_message_matrix=getattr(
+                cfg.model, "use_relation_message_matrix", False
+            ),
+            use_family_y_film=getattr(cfg.model, "use_family_y_film", False),
+            use_family_y_in_attention=getattr(
+                cfg.model, "use_family_y_in_attention", False
+            ),
+            use_family_y_in_edge_film=getattr(
+                cfg.model, "use_family_y_in_edge_film", False
+            ),
+            family_y_dim=getattr(self, "sparse_family_y_dim", 0),
+            family_edge_update_hidden_dim=getattr(
+                cfg.model, "family_edge_update_hidden_dim", 128
+            ),
             edge_only_model=getattr(cfg.model, "edge_only_model", False),
+            use_edge_struct_features=getattr(
+                cfg.model, "use_edge_struct_features", False
+            ),
+            edge_struct_feature_dim=getattr(
+                cfg.model, "edge_struct_feature_dim", 8
+            ),
+            edge_struct_hidden_dim=getattr(
+                cfg.model, "edge_struct_hidden_dim", 64
+            ),
+            edge_struct_residual_scale=getattr(
+                cfg.model, "edge_struct_residual_scale", 1.0
+            ),
+            edge_struct_use_family_y=getattr(
+                cfg.model, "edge_struct_use_family_y", False
+            ),
         )
         if denoiser_cls is PyHGTDenoiser:
             model_kwargs.update(
@@ -233,12 +283,42 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 use_two_hop_structure=getattr(
                     cfg.model, "use_two_hop_structure", False
                 ),
+                use_typed_two_hop_structure=getattr(
+                    cfg.model, "use_typed_two_hop_structure", False
+                ),
                 two_hop_structure_hidden_dim=getattr(
                     cfg.model, "two_hop_structure_hidden_dim", 64
+                ),
+                two_hop_structure_scale=getattr(
+                    cfg.model, "two_hop_structure_scale", 1.0
+                ),
+                two_hop_structure_schedule=getattr(
+                    cfg.model, "two_hop_structure_schedule", "fixed"
+                ),
+                use_endpoint_role_residual=getattr(
+                    cfg.model, "use_endpoint_role_residual", False
+                ),
+                endpoint_role_hidden_dim=getattr(
+                    cfg.model, "endpoint_role_hidden_dim", 64
+                ),
+                endpoint_role_family_dim=getattr(
+                    cfg.model, "endpoint_role_family_dim", 16
+                ),
+                endpoint_role_scale=getattr(
+                    cfg.model, "endpoint_role_scale", 1.0
+                ),
+                use_family_edge_adapters=getattr(
+                    cfg.model, "use_family_edge_adapters", False
+                ),
+                family_edge_adapter_hidden_dim=getattr(
+                    cfg.model, "family_edge_adapter_hidden_dim", 64
                 ),
                 use_time_film=getattr(cfg.model, "use_time_film", False),
                 use_edge_state_update=getattr(cfg.model, "use_edge_state_update", False),
                 edge_state_update_mode=getattr(cfg.model, "edge_state_update_mode", "all"),
+                edge_input_residual_scale=getattr(
+                    cfg.model, "edge_input_residual_scale", 1.0
+                ),
             )
         self.model = denoiser_cls(**model_kwargs)
 
@@ -324,6 +404,547 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         if rho is None:
             rho = self.edge_fraction
         return float(min(max(float(rho), 1e-8), 1.0))
+
+    def _sparse_hetero_y_dim(self) -> int:
+        if not bool(getattr(self.cfg.model, "use_sparse_hetero_y", False)):
+            return 0
+        if not bool(getattr(self.dataset_info, "heterogeneous", False)):
+            return 0
+        num_families = len(getattr(self.dataset_info, "edge_family2id", {}) or {})
+        num_types = len(getattr(self.dataset_info, "type_offsets", {}) or {})
+        if num_families <= 0 or num_types <= 0:
+            return 0
+        return 2 * num_families + 2 + 2 * num_types
+
+    def _sparse_family_y_dim(self) -> int:
+        if not bool(getattr(self.cfg.model, "use_sparse_family_y", False)):
+            return 0
+        if not bool(getattr(self.dataset_info, "heterogeneous", False)):
+            return 0
+        num_families = len(getattr(self.dataset_info, "edge_family2id", {}) or {})
+        num_types = len(getattr(self.dataset_info, "type_offsets", {}) or {})
+        if num_families <= 0 or num_types <= 0:
+            return 0
+        bins = max(1, int(getattr(self.cfg.model, "sparse_family_y_degree_bins", 5) or 5))
+        # family one-hot + src/dst type one-hot + same-type flag + scalar stats
+        # + src/dst family-degree mean/std + endpoint degree-bin-pair histogram
+        # + current edge subtype distribution.
+        return num_families + 2 * num_types + 1 + 7 + 4 + bins * bins + int(self.out_dims.E)
+
+    def _node_type_ids_from_onehot(self, node_onehot: torch.Tensor) -> torch.Tensor:
+        node_subtype = (
+            node_onehot.argmax(dim=-1).long()
+            if node_onehot.dim() > 1
+            else node_onehot.long()
+        )
+        return self._node_type_ids_from_subtype(node_subtype)
+
+    def _compute_sparse_hetero_y(self, sparse_noisy_data) -> torch.Tensor:
+        cached = sparse_noisy_data.get("_sparse_hetero_y")
+        if cached is not None:
+            return cached.to(self.device)
+        dim = int(getattr(self, "sparse_hetero_y_dim", 0) or 0)
+        batch = sparse_noisy_data["batch"].long().to(self.device)
+        bs = int(batch.max().item()) + 1 if batch.numel() else 1
+        node = sparse_noisy_data["node_t"].to(self.device)
+        out = node.new_zeros((bs, dim), dtype=torch.float32)
+        def cache_and_return(value):
+            sparse_noisy_data["_sparse_hetero_y"] = value
+            return value
+        if dim <= 0:
+            return cache_and_return(out)
+
+        edge_family2id = getattr(self.dataset_info, "edge_family2id", {}) or {}
+        fam_endpoints = getattr(self.dataset_info, "fam_endpoints", {}) or {}
+        type_offsets = getattr(self.dataset_info, "type_offsets", {}) or {}
+        if not (edge_family2id and fam_endpoints and type_offsets):
+            return cache_and_return(out)
+
+        id2family = {
+            int(v): str(k)
+            for k, v in sorted(edge_family2id.items(), key=lambda item: int(item[1]))
+        }
+        family_ids = sorted(id2family)
+        family_pos = {fam_id: pos for pos, fam_id in enumerate(family_ids)}
+        num_families = len(family_ids)
+        sorted_types = sorted(((str(k), int(v)) for k, v in type_offsets.items()), key=lambda x: x[1])
+        type_name_to_id = {name: idx for idx, (name, _) in enumerate(sorted_types)}
+        num_types = len(sorted_types)
+
+        node_type = self._node_type_ids_from_onehot(node).to(self.device)
+        edge_index = sparse_noisy_data["edge_index_t"].long().to(self.device)
+        edge_attr = sparse_noisy_data["edge_attr_t"].to(self.device)
+        if edge_index.numel() == 0 or edge_attr.numel() == 0:
+            return cache_and_return(out)
+        labels = (
+            edge_attr.argmax(dim=-1).long()
+            if edge_attr.dim() > 1
+            else edge_attr.long().reshape(-1)
+        )
+        visible = labels > 0
+        if not visible.any():
+            return cache_and_return(out)
+
+        metadata = self._heterogeneous_metadata_for_edges(node, edge_attr, edge_index)
+        edge_family = metadata.get("edge_family_ids")
+        if edge_family is None:
+            return cache_and_return(out)
+        edge_family = edge_family.long().to(self.device)
+        visible_edge_index = edge_index[:, visible]
+        visible_family = edge_family[visible]
+        edge_batch = batch[visible_edge_index[0].long()]
+
+        fam_counts = out.new_zeros((bs, num_families))
+        for fam_id, pos in family_pos.items():
+            mask = visible_family == int(fam_id)
+            if not mask.any():
+                continue
+            fam_counts[:, pos] = torch.bincount(
+                edge_batch[mask], minlength=bs
+            ).to(out.dtype)
+
+        type_counts = out.new_zeros((bs, num_types))
+        for type_id in range(num_types):
+            mask = node_type == int(type_id)
+            if mask.any():
+                type_counts[:, type_id] = torch.bincount(
+                    batch[mask], minlength=bs
+                ).to(out.dtype)
+
+        fam_possible = out.new_zeros((bs, num_families))
+        for fam_id, fam_name in id2family.items():
+            pos = family_pos.get(int(fam_id))
+            endpoints = fam_endpoints.get(fam_name, {})
+            src_type = endpoints.get("src_type")
+            dst_type = endpoints.get("dst_type")
+            if pos is None or src_type not in type_name_to_id or dst_type not in type_name_to_id:
+                continue
+            src_count = type_counts[:, type_name_to_id[src_type]]
+            dst_count = type_counts[:, type_name_to_id[dst_type]]
+            possible = src_count * dst_count
+            if src_type == dst_type:
+                possible = (possible - src_count).clamp_min(0)
+            fam_possible[:, pos] = possible.clamp_min(1)
+
+        fam_density = fam_counts / fam_possible.clamp_min(1)
+        fam_log_count = torch.log1p(fam_counts) / torch.log1p(fam_possible).clamp_min(1.0)
+
+        src_type = node_type[visible_edge_index[0].long()]
+        dst_type = node_type[visible_edge_index[1].long()]
+        valid_type_edge = (src_type >= 0) & (dst_type >= 0)
+        same_count = out.new_zeros((bs,))
+        cross_count = out.new_zeros((bs,))
+        if valid_type_edge.any():
+            same_mask = valid_type_edge & (src_type == dst_type)
+            cross_mask = valid_type_edge & (src_type != dst_type)
+            if same_mask.any():
+                same_count = torch.bincount(edge_batch[same_mask], minlength=bs).to(out.dtype)
+            if cross_mask.any():
+                cross_count = torch.bincount(edge_batch[cross_mask], minlength=bs).to(out.dtype)
+        edge_total = (same_count + cross_count).clamp_min(1.0)
+        same_cross = torch.stack([same_count / edge_total, cross_count / edge_total], dim=1)
+
+        deg = out.new_zeros((node_type.shape[0],))
+        deg.index_add_(0, visible_edge_index[0].long(), out.new_ones(visible_edge_index.shape[1]))
+        deg.index_add_(0, visible_edge_index[1].long(), out.new_ones(visible_edge_index.shape[1]))
+        type_deg_mean = out.new_zeros((bs, num_types))
+        type_deg_std = out.new_zeros((bs, num_types))
+        graph_sizes = torch.bincount(batch, minlength=bs).to(out.dtype).clamp_min(1.0)
+        for graph_idx in range(bs):
+            graph_mask = batch == int(graph_idx)
+            scale = graph_sizes[graph_idx].clamp_min(1.0)
+            for type_id in range(num_types):
+                mask = graph_mask & (node_type == int(type_id))
+                if not mask.any():
+                    continue
+                vals = deg[mask] / scale
+                type_deg_mean[graph_idx, type_id] = vals.mean()
+                type_deg_std[graph_idx, type_id] = (
+                    vals.std(unbiased=False) if vals.numel() > 1 else 0.0
+                )
+
+        features = torch.cat(
+            [fam_log_count, fam_density, same_cross, type_deg_mean, type_deg_std],
+            dim=1,
+        )
+        return cache_and_return(features)
+
+    def _compute_sparse_family_y(self, sparse_noisy_data) -> torch.Tensor:
+        cached = sparse_noisy_data.get("_sparse_family_y")
+        if cached is not None:
+            return cached.to(self.device)
+        dim = int(getattr(self, "sparse_family_y_dim", 0) or 0)
+        batch = sparse_noisy_data["batch"].long().to(self.device)
+        bs = int(batch.max().item()) + 1 if batch.numel() else 1
+        edge_family2id = getattr(self.dataset_info, "edge_family2id", {}) or {}
+        fam_endpoints = getattr(self.dataset_info, "fam_endpoints", {}) or {}
+        type_offsets = getattr(self.dataset_info, "type_offsets", {}) or {}
+        num_families = max((max(edge_family2id.values()) + 1) if edge_family2id else 0, 0)
+        out = torch.zeros((bs, max(num_families, 1), dim), device=self.device, dtype=torch.float32)
+
+        def cache_and_return(value):
+            sparse_noisy_data["_sparse_family_y"] = value
+            return value
+
+        if dim <= 0 or num_families <= 0 or not (edge_family2id and fam_endpoints and type_offsets):
+            return cache_and_return(out)
+
+        node = sparse_noisy_data["node_t"].to(self.device)
+        node_type = self._node_type_ids_from_onehot(node).to(self.device)
+        sorted_types = sorted(((str(k), int(v)) for k, v in type_offsets.items()), key=lambda x: x[1])
+        type_name_to_id = {name: idx for idx, (name, _) in enumerate(sorted_types)}
+        num_types = len(sorted_types)
+        bins = max(1, int(getattr(self.cfg.model, "sparse_family_y_degree_bins", 5) or 5))
+        edge_index = sparse_noisy_data["edge_index_t"].long().to(self.device)
+        edge_attr = sparse_noisy_data["edge_attr_t"].to(self.device)
+        labels = (
+            edge_attr.argmax(dim=-1).long()
+            if edge_attr.dim() > 1
+            else edge_attr.long().reshape(-1)
+        )
+        metadata = self._heterogeneous_metadata_for_edges(node, edge_attr, edge_index)
+        edge_family = metadata.get("edge_family_ids")
+        edge_family = (
+            edge_family.long().to(self.device)
+            if edge_family is not None
+            else torch.full((edge_index.shape[1],), -1, device=self.device, dtype=torch.long)
+        )
+        visible = (labels > 0) & (edge_family >= 0)
+        edge_batch = batch[edge_index[0].long()] if edge_index.numel() else batch.new_zeros((0,))
+        graph_sizes = torch.bincount(batch, minlength=bs).float().to(self.device).clamp_min(1.0)
+
+        type_counts = torch.zeros((bs, num_types), device=self.device, dtype=torch.float32)
+        for type_id in range(num_types):
+            mask = node_type == int(type_id)
+            if mask.any():
+                type_counts[:, type_id] = torch.bincount(batch[mask], minlength=bs).float()
+
+        expected_counts = torch.zeros((num_families,), device=self.device, dtype=torch.float32)
+        avg_counts = getattr(self.dataset_info, "edge_family_avg_edge_counts", {}) or {}
+        for fam_name, fam_id in edge_family2id.items():
+            expected_counts[int(fam_id)] = float(avg_counts.get(fam_name, 0.0) or 0.0)
+
+        family_counts = torch.zeros((bs, num_families), device=self.device, dtype=torch.float32)
+        if visible.any():
+            flat = edge_batch[visible].long() * num_families + edge_family[visible].long().clamp(0, num_families - 1)
+            family_counts.reshape(-1).index_add_(0, flat, torch.ones_like(flat, dtype=torch.float32))
+
+        deg_by_family = torch.zeros((bs, num_families, node.shape[0]), device=self.device, dtype=torch.float32)
+        if visible.any():
+            src = edge_index[0, visible].long()
+            dst = edge_index[1, visible].long()
+            fam = edge_family[visible].long().clamp(0, num_families - 1)
+            gb = edge_batch[visible].long()
+            flat = deg_by_family.reshape(-1)
+            stride = num_families * node.shape[0]
+            flat.index_add_(0, gb * stride + fam * node.shape[0] + src, torch.ones_like(src, dtype=torch.float32))
+            flat.index_add_(0, gb * stride + fam * node.shape[0] + dst, torch.ones_like(dst, dtype=torch.float32))
+
+        cursor = 0
+        family_eye = torch.eye(num_families, device=self.device, dtype=torch.float32)
+        type_eye = torch.eye(num_types, device=self.device, dtype=torch.float32)
+        id2family = {int(v): str(k) for k, v in edge_family2id.items()}
+        for fam_id in range(num_families):
+            fam_name = id2family.get(fam_id, "")
+            endpoints = fam_endpoints.get(fam_name, {}) or {}
+            src_name = str(endpoints.get("src_type", ""))
+            dst_name = str(endpoints.get("dst_type", ""))
+            src_type_id = int(type_name_to_id.get(src_name, 0))
+            dst_type_id = int(type_name_to_id.get(dst_name, 0))
+            same_type = 1.0 if src_type_id == dst_type_id else 0.0
+            src_count = type_counts[:, src_type_id] if num_types else torch.ones((bs,), device=self.device)
+            dst_count = type_counts[:, dst_type_id] if num_types else torch.ones((bs,), device=self.device)
+            possible = (src_count * dst_count).clamp_min(1.0)
+            if same_type:
+                possible = (possible - src_count).clamp_min(1.0)
+            count = family_counts[:, fam_id]
+            expected = expected_counts[fam_id].clamp_min(0.0)
+            expected_safe = expected.clamp_min(1.0)
+            density = count / possible
+            expected_density = expected / possible
+            log_count = torch.log1p(count) / torch.log1p(possible).clamp_min(1.0)
+            count_ratio = (count / expected_safe).clamp(0.0, 10.0) / 10.0
+            log_ratio = torch.log((count + 1.0) / (expected + 1.0)).clamp(-5.0, 5.0) / 5.0
+            diff_norm = ((count - expected) / possible).clamp(-1.0, 1.0)
+
+            out[:, fam_id, cursor : cursor + num_families] = family_eye[fam_id]
+            cursor2 = cursor + num_families
+            out[:, fam_id, cursor2 : cursor2 + num_types] = type_eye[src_type_id]
+            cursor2 += num_types
+            out[:, fam_id, cursor2 : cursor2 + num_types] = type_eye[dst_type_id]
+            cursor2 += num_types
+            out[:, fam_id, cursor2] = same_type
+            cursor2 += 1
+            scalars = torch.stack(
+                [count / graph_sizes, density, log_count, expected_density, count_ratio, log_ratio, diff_norm],
+                dim=1,
+            )
+            out[:, fam_id, cursor2 : cursor2 + 7] = scalars
+            cursor2 += 7
+
+            src_mask_nodes = node_type == src_type_id
+            dst_mask_nodes = node_type == dst_type_id
+            for graph_idx in range(bs):
+                graph_mask = batch == int(graph_idx)
+                vals_src = deg_by_family[graph_idx, fam_id, graph_mask & src_mask_nodes]
+                vals_dst = deg_by_family[graph_idx, fam_id, graph_mask & dst_mask_nodes]
+                scale = graph_sizes[graph_idx].clamp_min(1.0)
+                if vals_src.numel():
+                    out[graph_idx, fam_id, cursor2] = vals_src.mean() / scale
+                    out[graph_idx, fam_id, cursor2 + 1] = vals_src.std(unbiased=False) / scale if vals_src.numel() > 1 else 0.0
+                if vals_dst.numel():
+                    out[graph_idx, fam_id, cursor2 + 2] = vals_dst.mean() / scale
+                    out[graph_idx, fam_id, cursor2 + 3] = vals_dst.std(unbiased=False) / scale if vals_dst.numel() > 1 else 0.0
+            cursor2 += 4
+
+            fam_visible = visible & (edge_family == fam_id)
+            if fam_visible.any():
+                src = edge_index[0, fam_visible].long()
+                dst = edge_index[1, fam_visible].long()
+                gb = edge_batch[fam_visible].long()
+                deg_src = deg_by_family[gb, fam_id, src]
+                deg_dst = deg_by_family[gb, fam_id, dst]
+                bin_src = torch.bucketize(deg_src, torch.tensor([0.5, 1.5, 3.5, 7.5], device=self.device)).clamp(0, bins - 1)
+                bin_dst = torch.bucketize(deg_dst, torch.tensor([0.5, 1.5, 3.5, 7.5], device=self.device)).clamp(0, bins - 1)
+                if same_type:
+                    lo = torch.minimum(bin_src, bin_dst)
+                    hi = torch.maximum(bin_src, bin_dst)
+                    bin_src, bin_dst = lo, hi
+                pair_flat = gb * (bins * bins) + bin_src * bins + bin_dst
+                hist = torch.zeros((bs, bins * bins), device=self.device, dtype=torch.float32)
+                hist.reshape(-1).index_add_(0, pair_flat, torch.ones_like(pair_flat, dtype=torch.float32))
+                hist = hist / hist.sum(dim=1, keepdim=True).clamp_min(1.0)
+                out[:, fam_id, cursor2 : cursor2 + bins * bins] = hist
+
+                label_hist = torch.zeros((bs, int(self.out_dims.E)), device=self.device, dtype=torch.float32)
+                lbl = labels[fam_visible].long().clamp(0, int(self.out_dims.E) - 1)
+                label_flat = gb * int(self.out_dims.E) + lbl
+                label_hist.reshape(-1).index_add_(0, label_flat, torch.ones_like(label_flat, dtype=torch.float32))
+                label_hist = label_hist / label_hist.sum(dim=1, keepdim=True).clamp_min(1.0)
+                out[:, fam_id, cursor2 + bins * bins : cursor2 + bins * bins + int(self.out_dims.E)] = label_hist
+            cursor = 0
+
+        return cache_and_return(out)
+
+    def _compute_edge_struct_features(self, sparse_noisy_data) -> torch.Tensor:
+        cached = sparse_noisy_data.get("_edge_struct_features")
+        if cached is not None:
+            return cached.to(self.device)
+        dim = int(getattr(self.cfg.model, "edge_struct_feature_dim", 8) or 8)
+        comp_edge_index = sparse_noisy_data["comp_edge_index_t"].long().to(self.device)
+        num_edges = int(comp_edge_index.shape[1])
+        out = torch.zeros((num_edges, dim), device=self.device, dtype=torch.float32)
+
+        def cache_and_return(value):
+            sparse_noisy_data["_edge_struct_features"] = value
+            return value
+
+        if dim <= 0 or num_edges <= 0:
+            return cache_and_return(out)
+
+        batch = sparse_noisy_data["batch"].long().to(self.device)
+        ptr = sparse_noisy_data.get("ptr")
+        if ptr is None:
+            counts = torch.bincount(batch, minlength=int(batch.max().item()) + 1)
+            ptr = torch.cat([counts.new_zeros(1), counts.cumsum(0)], dim=0)
+        ptr = ptr.long().to(self.device)
+        visible_edge_index = sparse_noisy_data["edge_index_t"].long().to(self.device)
+        visible_edge_attr = sparse_noisy_data["edge_attr_t"].to(self.device)
+        if visible_edge_attr.numel() == 0 or visible_edge_index.numel() == 0:
+            return cache_and_return(out)
+        labels = (
+            visible_edge_attr.argmax(dim=-1).long()
+            if visible_edge_attr.dim() > 1
+            else visible_edge_attr.long().reshape(-1)
+        )
+        visible = labels > 0
+        if not visible.any():
+            return cache_and_return(out)
+        visible_edge_index = visible_edge_index[:, visible]
+
+        num_graphs = max(int(ptr.numel()) - 1, 1)
+        eps = 1e-6
+        for graph_idx in range(num_graphs):
+            start = int(ptr[graph_idx].item())
+            end = int(ptr[graph_idx + 1].item())
+            n = end - start
+            if n <= 1:
+                continue
+            edge_mask = (
+                (comp_edge_index[0] >= start)
+                & (comp_edge_index[0] < end)
+                & (comp_edge_index[1] >= start)
+                & (comp_edge_index[1] < end)
+            )
+            if not edge_mask.any():
+                continue
+            vis_mask = (
+                (visible_edge_index[0] >= start)
+                & (visible_edge_index[0] < end)
+                & (visible_edge_index[1] >= start)
+                & (visible_edge_index[1] < end)
+            )
+            adj = torch.zeros((n, n), device=self.device, dtype=torch.float32)
+            if vis_mask.any():
+                src_vis = visible_edge_index[0, vis_mask] - start
+                dst_vis = visible_edge_index[1, vis_mask] - start
+                adj[src_vis, dst_vis] = 1.0
+                adj[dst_vis, src_vis] = 1.0
+            adj.fill_diagonal_(0.0)
+            deg = adj.sum(dim=1)
+            common = adj.matmul(adj)
+
+            idx = torch.where(edge_mask)[0]
+            src = comp_edge_index[0, idx] - start
+            dst = comp_edge_index[1, idx] - start
+            deg_s = deg[src]
+            deg_d = deg[dst]
+            cn = common[src, dst]
+            deg_sum = deg_s + deg_d
+            max_log_n = math.log1p(max(n, 1))
+            max_log_n2 = math.log1p(max(n * n, 1))
+            feats = [
+                torch.log1p(cn) / max_log_n,
+                cn / torch.sqrt((deg_s * deg_d).clamp_min(eps)),
+                torch.log1p(deg_s) / max_log_n,
+                torch.log1p(deg_d) / max_log_n,
+                (deg_s - deg_d).abs() / (deg_sum + 1.0),
+                torch.log1p(deg_s * deg_d) / max_log_n2,
+                adj[src, dst],
+            ]
+            if dim > 7:
+                if vis_mask.any():
+                    parent = list(range(n))
+
+                    def find(x):
+                        while parent[x] != x:
+                            parent[x] = parent[parent[x]]
+                            x = parent[x]
+                        return x
+
+                    def union(a, b):
+                        ra, rb = find(a), find(b)
+                        if ra != rb:
+                            parent[rb] = ra
+
+                    src_cpu = (visible_edge_index[0, vis_mask] - start).detach().cpu().tolist()
+                    dst_cpu = (visible_edge_index[1, vis_mask] - start).detach().cpu().tolist()
+                    for a, b in zip(src_cpu, dst_cpu):
+                        if a != b:
+                            union(int(a), int(b))
+                    comp_id = torch.tensor(
+                        [find(i) for i in range(n)],
+                        device=self.device,
+                        dtype=torch.long,
+                    )
+                    same_component = (comp_id[src] == comp_id[dst]).to(out.dtype)
+                else:
+                    same_component = torch.zeros_like(cn)
+                feats.append(same_component)
+            feat_tensor = torch.stack(feats, dim=1)
+            if feat_tensor.size(1) < dim:
+                pad = feat_tensor.new_zeros((feat_tensor.size(0), dim - feat_tensor.size(1)))
+                feat_tensor = torch.cat([feat_tensor, pad], dim=1)
+            out[idx] = feat_tensor[:, :dim]
+        return cache_and_return(out)
+
+    def _profile_training_efficiency_enabled(self) -> bool:
+        if not bool(
+            getattr(self.cfg.general, "profile_training_efficiency", False)
+        ):
+            return False
+        every = max(
+            1,
+            int(
+                getattr(
+                    self.cfg.general,
+                    "profile_training_efficiency_every_n_epochs",
+                    1,
+                )
+                or 1
+            ),
+        )
+        return int(getattr(self, "current_epoch", 0)) % every == 0
+
+    def _profile_time(self, enabled: bool) -> float:
+        if not enabled:
+            return 0.0
+        if self.device.type == "cuda":
+            torch.cuda.synchronize(self.device)
+        return time.perf_counter()
+
+    def _build_training_two_hop_lookup(
+        self,
+        sparse_noisy_data,
+        num_nodes: int,
+    ):
+        if not (
+            bool(getattr(self.cfg.model, "use_two_hop_structure", False))
+            or bool(
+                getattr(
+                    self.cfg.model, "use_endpoint_role_residual", False
+                )
+            )
+        ):
+            return None
+        if not isinstance(self.model, PyHGTDenoiser):
+            return None
+        edge_index = sparse_noisy_data["edge_index_t"].long()
+        edge_attr = sparse_noisy_data["edge_attr_t"]
+        labels = (
+            edge_attr.argmax(dim=-1).long()
+            if edge_attr.dim() > 1
+            else edge_attr.long().reshape(-1)
+        )
+        visible_edges = edge_index[:, labels > 0]
+        visible_attr = edge_attr[labels > 0]
+        node = sparse_noisy_data["node_t"]
+        metadata = self._heterogeneous_metadata_for_edges(
+            node,
+            visible_attr,
+            visible_edges,
+        )
+        return self.model.build_two_hop_structure_lookup(
+            context_edge_index=visible_edges,
+            num_nodes=int(num_nodes),
+            node_type_ids=metadata.get("node_type_ids"),
+            edge_family_ids=metadata.get("edge_family_ids"),
+            batch=sparse_noisy_data.get("batch"),
+        )
+
+    def _two_hop_reliability_factor(self, t_float):
+        if not bool(getattr(self.cfg.model, "use_two_hop_structure", False)):
+            return None
+        schedule = str(
+            getattr(self.cfg.model, "two_hop_structure_schedule", "fixed")
+            or "fixed"
+        ).lower()
+        t = t_float.to(device=self.device, dtype=torch.float32).clamp(0.0, 1.0)
+        if schedule == "fixed":
+            return torch.ones_like(t)
+        if schedule == "linear_t":
+            return 1.0 - t
+        if schedule == "quadratic_t":
+            return (1.0 - t).square()
+        if schedule == "alpha_bar_squared":
+            alpha_bar = self.noise_schedule.get_alpha_bar(t_normalized=t)
+            return alpha_bar.to(dtype=torch.float32).square()
+        raise ValueError(
+            "Unknown model.two_hop_structure_schedule="
+            f"{schedule!r}; expected fixed, linear_t, quadratic_t, "
+            "or alpha_bar_squared"
+        )
+
+    def _endpoint_role_reliability_factor(self, t_float):
+        if not bool(
+            getattr(self.cfg.model, "use_endpoint_role_residual", False)
+        ):
+            return None
+        t = t_float.to(
+            device=self.device, dtype=torch.float32
+        ).clamp(0.0, 1.0)
+        alpha_bar = self.noise_schedule.get_alpha_bar(t_normalized=t)
+        return alpha_bar.to(dtype=torch.float32).square()
 
 
 
@@ -1349,6 +1970,10 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         clean_logits = self._mask_edge_logits_by_query_family(
             clean_logits, query_edge_family
         )
+        posterior_mix_weight = self._reverse_posterior_mix_weight(
+            s_float=s_float,
+            t_float=t_float,
+        )
         qfam = query_edge_family.long().to(clean_logits.device).reshape(-1)
         qbatch = query_edge_batch.long().to(clean_logits.device).reshape(-1)
         current_edge_labels = current_edge_labels.long().to(clean_logits.device).reshape(-1)
@@ -1418,6 +2043,14 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             )
             prob_s = (pred_x0.unsqueeze(-1) * posterior_over_x0).sum(dim=1)
             prob_s = prob_s / prob_s.sum(dim=-1, keepdim=True).clamp(min=1e-12)
+            if posterior_mix_weight < 1.0:
+                prob_s = (
+                    (1.0 - posterior_mix_weight) * pred_x0
+                    + posterior_mix_weight * prob_s
+                )
+                prob_s = prob_s / prob_s.sum(
+                    dim=-1, keepdim=True
+                ).clamp(min=1e-12)
             local_log = torch.log(prob_s.clamp(min=1e-12))
             posterior_logits[idx, 0] = local_log[:, 0]
             posterior_logits[idx, lo:hi] = local_log[:, 1:]
@@ -1425,20 +2058,94 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
 
         if (~handled).any():
             posterior_logits[~handled] = clean_logits[~handled]
+        transition_key = (
+            int(round(float(t_float.mean().detach().cpu()) * self.T)),
+            int(round(float(s_float.mean().detach().cpu()) * self.T)),
+        )
+        logged_transitions = getattr(
+            self, "_logged_reverse_posterior_transitions", set()
+        )
         if (
             getattr(self, "local_rank", 0) == 0
-            and not getattr(self, "_logged_reverse_posterior_sampling", False)
+            and transition_key not in logged_transitions
         ):
             beta_mean = float(beta_step.mean().detach().cpu())
             print(
                 "[采样-POSTERIOR] enabled "
                 f"s={float(s_float.mean().detach().cpu()):.4f} "
                 f"t={float(t_float.mean().detach().cpu()):.4f} "
+                f"mix={posterior_mix_weight:.4f} "
                 f"beta_step={beta_mean:.6f} handled={int(handled.sum().item())}/"
                 f"{int(handled.numel())}"
             )
-            self._logged_reverse_posterior_sampling = True
+            logged_transitions.add(transition_key)
+            self._logged_reverse_posterior_transitions = logged_transitions
         return posterior_logits
+
+    def _reverse_posterior_mix_weight(self, s_float, t_float) -> float:
+        configured = getattr(
+            self.cfg.model,
+            "sampling_reverse_posterior_mix_weights",
+            None,
+        )
+        if configured is None:
+            mode = str(
+                getattr(
+                    self.cfg.model,
+                    "sampling_reverse_posterior_mix_mode",
+                    "full",
+                )
+                or "full"
+            ).lower()
+            scale = float(
+                getattr(
+                    self.cfg.model,
+                    "sampling_reverse_posterior_mix_scale",
+                    1.0,
+                )
+                or 0.0
+            )
+            if mode == "full":
+                return min(max(scale, 0.0), 1.0)
+            alpha_s_bar = self.noise_schedule.get_alpha_bar(
+                t_normalized=s_float
+            )
+            reliability = float(alpha_s_bar.mean().detach().cpu())
+            if mode == "alpha_bar_s_squared":
+                reliability = reliability * reliability
+            elif mode != "alpha_bar_s":
+                raise ValueError(
+                    "Unsupported posterior mix mode: "
+                    f"{mode}. Expected full, alpha_bar_s, or "
+                    "alpha_bar_s_squared."
+                )
+            return min(max(scale * reliability, 0.0), 1.0)
+        weights = [float(value) for value in list(configured)]
+        transitions = self._sampling_time_transitions()
+        if len(weights) != len(transitions):
+            raise ValueError(
+                "model.sampling_reverse_posterior_mix_weights must contain "
+                f"one value per reverse transition ({len(transitions)}), "
+                f"got {weights}."
+            )
+        if any(value < 0.0 or value > 1.0 for value in weights):
+            raise ValueError(
+                "Posterior mix weights must lie in [0, 1], "
+                f"got {weights}."
+            )
+        t_int = int(
+            round(float(t_float.mean().detach().cpu()) * self.T)
+        )
+        s_int = int(
+            round(float(s_float.mean().detach().cpu()) * self.T)
+        )
+        for index, transition in enumerate(transitions):
+            if transition == (t_int, s_int):
+                return weights[index]
+        raise ValueError(
+            "Current reverse transition is absent from the configured "
+            f"sampling path: {(t_int, s_int)} not in {transitions}."
+        )
 
     def _align_query_family_to_edges(self, original_edge_index, original_family, aligned_edge_index):
         if original_family is None or original_edge_index is None or aligned_edge_index is None:
@@ -1919,6 +2626,267 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             }
         )
 
+    @staticmethod
+    def _canonical_edge_key_set(edge_index, total_nodes):
+        if edge_index is None or edge_index.numel() == 0:
+            return set()
+        u = torch.minimum(edge_index[0], edge_index[1]).detach().cpu()
+        v = torch.maximum(edge_index[0], edge_index[1]).detach().cpu()
+        return set((u * int(total_nodes) + v).tolist())
+
+    def _degree_role_reference_context(self, total_nodes, device):
+        cached = getattr(self, "_degree_role_reference_cache", None)
+        if cached is not None and int(cached["num_nodes"]) == int(total_nodes):
+            return cached
+        datamodule = getattr(self.dataset_info, "datamodule", None)
+        dataset = (
+            getattr(datamodule, "train_dataset", None)
+            if datamodule is not None
+            else None
+        )
+        if dataset is None or len(dataset) == 0:
+            return None
+        reference = dataset[0]
+        node_type = getattr(reference, "node_type", None)
+        if node_type is None:
+            return None
+        node_type = node_type.long().to(device)
+        edge_index = reference.edge_index.long().to(device)
+        degree = torch.zeros(int(total_nodes), dtype=torch.float, device=device)
+        if edge_index.numel():
+            endpoints = torch.cat([edge_index[0], edge_index[1]])
+            degree.scatter_add_(
+                0, endpoints, torch.ones_like(endpoints, dtype=torch.float)
+            )
+        num_types = int(node_type.max().item()) + 1
+        p50 = torch.zeros(num_types, dtype=torch.float, device=device)
+        p80 = torch.zeros(num_types, dtype=torch.float, device=device)
+        max_real = torch.zeros(num_types, dtype=torch.float, device=device)
+        for type_id in range(num_types):
+            values = degree[node_type == type_id]
+            if values.numel():
+                p50[type_id] = torch.quantile(values, 0.5)
+                p80[type_id] = torch.quantile(values, 0.8)
+                max_real[type_id] = values.max()
+        cached = {
+            "num_nodes": int(total_nodes),
+            "node_type": node_type,
+            "p50": p50,
+            "p80": p80,
+            "max_real": max_real,
+        }
+        self._degree_role_reference_cache = cached
+        return cached
+
+    def _log_exact_k_ranking_intervention(
+        self,
+        clean_selected_edges,
+        mixed_selected_edges,
+        current_edge_index,
+        candidate_parts,
+        total_nodes,
+        s_float,
+        t_float,
+    ):
+        clean = self._canonical_edge_key_set(
+            clean_selected_edges, total_nodes
+        )
+        mixed = self._canonical_edge_key_set(
+            mixed_selected_edges, total_nodes
+        )
+        current = self._canonical_edge_key_set(
+            current_edge_index, total_nodes
+        )
+        key_to_family = {}
+        for part in candidate_parts:
+            keys = part["edge_keys"].detach().cpu().tolist()
+            families = part["family"].detach().cpu().tolist()
+            for key, family in zip(keys, families):
+                key_to_family[int(key)] = int(family)
+        family_stats = {}
+        edge_family2id = getattr(
+            self.dataset_info, "edge_family2id", {}
+        ) or {}
+        for family_name, family_id in edge_family2id.items():
+            clean_family = {
+                key for key in clean
+                if key_to_family.get(int(key)) == int(family_id)
+            }
+            mixed_family = {
+                key for key in mixed
+                if key_to_family.get(int(key)) == int(family_id)
+            }
+            family_union = clean_family | mixed_family
+            family_stats[str(family_name)] = {
+                "jaccard": (
+                    len(clean_family & mixed_family)
+                    / max(len(family_union), 1)
+                ),
+                "intervention": len(clean_family ^ mixed_family) // 2,
+            }
+
+        degree = torch.zeros(
+            int(total_nodes), dtype=torch.float, device=current_edge_index.device
+        )
+        if current_edge_index.numel():
+            endpoints = torch.cat(
+                [current_edge_index[0], current_edge_index[1]]
+            ).long()
+            degree.scatter_add_(
+                0,
+                endpoints,
+                torch.ones_like(endpoints, dtype=torch.float),
+            )
+        role_reference = self._degree_role_reference_context(
+            total_nodes, current_edge_index.device
+        )
+        intervention_rows = []
+        if role_reference is not None:
+            node_type = role_reference["node_type"]
+            p50 = role_reference["p50"]
+            p80 = role_reference["p80"]
+
+            def role_id(node):
+                type_id = int(node_type[node].item())
+                value = float(degree[node].item())
+                if value <= float(p50[type_id].item()):
+                    return 0
+                if value <= float(p80[type_id].item()):
+                    return 1
+                return 2
+
+            role_names = ("low", "mid", "high")
+            id2family = {
+                int(value): str(key)
+                for key, value in edge_family2id.items()
+            }
+            for family_id, family_name in sorted(id2family.items()):
+                clean_family = {
+                    key for key in clean
+                    if key_to_family.get(int(key)) == family_id
+                }
+                mixed_family = {
+                    key for key in mixed
+                    if key_to_family.get(int(key)) == family_id
+                }
+                same_type = False
+                endpoints = getattr(
+                    self.dataset_info, "fam_endpoints", {}
+                ).get(family_name, {})
+                same_type = (
+                    endpoints.get("src_type")
+                    == endpoints.get("dst_type")
+                )
+                for src_role in range(3):
+                    for dst_role in range(3):
+                        if same_type and src_role > dst_role:
+                            continue
+
+                        def keys_for_roles(keys):
+                            selected = set()
+                            for key in keys:
+                                src = int(key) // int(total_nodes)
+                                dst = int(key) % int(total_nodes)
+                                left, right = role_id(src), role_id(dst)
+                                if same_type and left > right:
+                                    left, right = right, left
+                                if left == src_role and right == dst_role:
+                                    selected.add(key)
+                            return selected
+
+                        clean_role = keys_for_roles(clean_family)
+                        mixed_role = keys_for_roles(mixed_family)
+                        clean_existing = clean_role & current
+                        mixed_existing = mixed_role & current
+                        clean_new = clean_role - current
+                        mixed_new = mixed_role - current
+                        intervention_rows.append(
+                            {
+                                "family": family_name,
+                                "src_role": role_names[src_role],
+                                "dst_role": role_names[dst_role],
+                                "clean_selected": len(clean_role),
+                                "mixed_selected": len(mixed_role),
+                                "retained_extra": max(
+                                    len(mixed_existing)
+                                    - len(clean_existing),
+                                    0,
+                                ),
+                                "addition_blocked": max(
+                                    len(clean_new) - len(mixed_new),
+                                    0,
+                                ),
+                            }
+                        )
+
+        def degree_role_stats(selected_edges):
+            if selected_edges is None or selected_edges.numel() == 0:
+                return 0.0, 0.0
+            src_degree = degree[selected_edges[0].long()]
+            dst_degree = degree[selected_edges[1].long()]
+            return (
+                float((src_degree * dst_degree).mean().detach().cpu()),
+                float(
+                    (src_degree - dst_degree)
+                    .abs()
+                    .mean()
+                    .detach()
+                    .cpu()
+                ),
+            )
+
+        clean_degree_product, clean_degree_diff = degree_role_stats(
+            clean_selected_edges
+        )
+        mixed_degree_product, mixed_degree_diff = degree_role_stats(
+            mixed_selected_edges
+        )
+        union = clean | mixed
+        intersection = clean & mixed
+        intervention = len(clean ^ mixed) // 2
+        clean_retained = len(clean & current)
+        mixed_retained = len(mixed & current)
+        alpha_s_bar = self.noise_schedule.get_alpha_bar(
+            t_normalized=s_float
+        )
+        mix_weight = self._reverse_posterior_mix_weight(
+            s_float=s_float, t_float=t_float
+        )
+        print(
+            "[采样-RANK-INTERVENTION] "
+            f"t={float(t_float.mean().detach().cpu()):.4f} "
+            f"s={float(s_float.mean().detach().cpu()):.4f} "
+            f"alpha_bar_s={float(alpha_s_bar.mean().detach().cpu()):.6f} "
+            f"lambda={mix_weight:.6f} "
+            f"jaccard={len(intersection) / max(len(union), 1):.6f} "
+            f"intervention={intervention} "
+            f"clean_keep/add/del={clean_retained}/"
+            f"{len(clean-current)}/{len(current-clean)} "
+            f"mix_keep/add/del={mixed_retained}/"
+            f"{len(mixed-current)}/{len(current-mixed)} "
+            f"posterior_extra_keep={max(mixed_retained-clean_retained, 0)} "
+            f"posterior_blocked_add={max(len(clean-current)-len(mixed-current), 0)} "
+            f"degree_product={clean_degree_product:.4f}->{mixed_degree_product:.4f} "
+            f"degree_diff={clean_degree_diff:.4f}->{mixed_degree_diff:.4f} "
+            f"families={json.dumps(family_stats, ensure_ascii=False)}"
+        )
+        if intervention_rows:
+            record = {
+                "t": float(t_float.mean().detach().cpu()),
+                "s": float(s_float.mean().detach().cpu()),
+                "alpha_bar_s": float(alpha_s_bar.mean().detach().cpu()),
+                "lambda": mix_weight,
+                "rows": intervention_rows,
+            }
+            with open(
+                "posterior_intervention.jsonl",
+                "a",
+                encoding="utf-8",
+            ) as handle:
+                handle.write(
+                    json.dumps(record, ensure_ascii=False) + "\n"
+                )
+
     def _finalize_global_exact_k_candidates(
         self,
         data,
@@ -1926,6 +2894,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         selection_mode,
         sampling_step,
         apply_connectivity_repair=False,
+        log_selection=True,
     ):
         """Deduplicate candidates, then select exact family quotas globally."""
         if not candidate_parts:
@@ -1997,8 +2966,33 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         candidate_count_after = int(raw_scores.numel())
 
         mode = str(selection_mode).lower()
-        base_seed = int(getattr(self.cfg.train, "seed", 0) or 0)
-        if mode == "gumbel_exact_k":
+        base_seed = self._current_sampling_seed()
+        degree_pair_bias = None
+        if mode in ("gumbel_exact_k_degree_pair", "deterministic_exact_k_degree_pair"):
+            degree_pair_bias = self._degree_pair_exact_k_score_bias(edge_index, families)
+            if degree_pair_bias is not None:
+                raw_scores = raw_scores + degree_pair_bias.to(
+                    device=raw_scores.device,
+                    dtype=raw_scores.dtype,
+                )
+        structure_guidance_bias = self._sampling_structure_guidance_bias(
+            data=data,
+            edge_index=edge_index,
+            families=families,
+            edge_batch=edge_batch,
+            sampling_step=sampling_step,
+        )
+        if structure_guidance_bias is not None:
+            raw_scores = raw_scores + structure_guidance_bias.to(
+                device=raw_scores.device,
+                dtype=raw_scores.dtype,
+            )
+
+        if mode in (
+            "gumbel_exact_k",
+            "gumbel_exact_k_degree_pair",
+            "gumbel_exact_k_degree_pair_quota",
+        ):
             temperature = max(
                 float(
                     getattr(
@@ -2077,7 +3071,11 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 dtype=raw_scores.dtype,
             )
             selection_scores = raw_scores / temperature + gumbel
-        elif mode == "deterministic_exact_k":
+        elif mode in (
+            "deterministic_exact_k",
+            "deterministic_exact_k_degree_pair",
+            "deterministic_exact_k_degree_pair_quota",
+        ):
             temperature = None
             selection_scores = raw_scores
         else:
@@ -2092,30 +3090,43 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         selected_parts = []
         log_parts = []
         unfilled = {}
-        for graph_idx_tensor in graph_ids:
-            graph_idx = int(graph_idx_tensor.item())
-            for fam_id, fam_name in id2edge_family.items():
-                mask = (edge_batch == graph_idx) & (families == int(fam_id))
-                local_idx = mask.nonzero(as_tuple=True)[0]
-                target = max(
-                    0,
-                    int(round(float(avg_counts.get(fam_name, 0.0) or 0.0))),
-                )
-                take = min(target, int(local_idx.numel()))
-                if take > 0:
-                    top_local = torch.topk(
-                        selection_scores[local_idx],
-                        k=take,
-                        largest=True,
-                    ).indices
-                    selected_parts.append(local_idx[top_local])
-                if take != target:
-                    unfilled[(graph_idx, fam_name)] = (target, take)
-                if getattr(self, "local_rank", 0) == 0 and target > 0:
-                    log_parts.append(
-                        f"g{graph_idx}/{fam_name}:target={target},"
-                        f"candidates={int(local_idx.numel())},selected={take}"
+        if mode in ("gumbel_exact_k_degree_pair_quota", "deterministic_exact_k_degree_pair_quota"):
+            quota_result = self._select_exact_k_with_degree_pair_quotas(
+                selection_scores=selection_scores,
+                edge_index=edge_index,
+                families=families,
+                edge_batch=edge_batch,
+                avg_counts=avg_counts,
+                id2edge_family=id2edge_family,
+            )
+            if quota_result[0] is not None:
+                selected_parts, log_parts, unfilled = quota_result
+
+        if not selected_parts:
+            for graph_idx_tensor in graph_ids:
+                graph_idx = int(graph_idx_tensor.item())
+                for fam_id, fam_name in id2edge_family.items():
+                    mask = (edge_batch == graph_idx) & (families == int(fam_id))
+                    local_idx = mask.nonzero(as_tuple=True)[0]
+                    target = max(
+                        0,
+                        int(round(float(avg_counts.get(fam_name, 0.0) or 0.0))),
                     )
+                    take = min(target, int(local_idx.numel()))
+                    if take > 0:
+                        top_local = torch.topk(
+                            selection_scores[local_idx],
+                            k=take,
+                            largest=True,
+                        ).indices
+                        selected_parts.append(local_idx[top_local])
+                    if take != target:
+                        unfilled[(graph_idx, fam_name)] = (target, take)
+                    if getattr(self, "local_rank", 0) == 0 and target > 0:
+                        log_parts.append(
+                            f"g{graph_idx}/{fam_name}:target={target},"
+                            f"candidates={int(local_idx.numel())},selected={take}"
+                        )
 
         if selected_parts:
             selected = torch.cat(selected_parts)
@@ -2126,7 +3137,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             selected = torch.empty(
                 0, dtype=torch.long, device=edge_index.device
             )
-        if getattr(self, "local_rank", 0) == 0:
+        if log_selection and getattr(self, "local_rank", 0) == 0:
             temp_text = "deterministic" if temperature is None else f"{temperature:g}"
             print(
                 "[采样-EXACT-K] "
@@ -2974,6 +3985,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         id2edge_family = {int(v): str(k) for k, v in edge_family2id.items()}
         used_mask = torch.zeros_like(has_edge)
         base_frac = float(self.edge_fraction)
+        family_infos = []
         if qfam.numel() == exist_prob.shape[0] and id2edge_family:
             for fam_id, fam_name in id2edge_family.items():
                 mask = (qfam == int(fam_id)) & has_valid_pos
@@ -2983,10 +3995,68 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 mean_conf = float(exist_prob[mask].mean().item())
                 k = int(round(base_frac * max(mean_conf, 1e-6) * n))
                 k = max(1, min(k, n))
+                family_infos.append((int(fam_id), str(fam_name), mask, n, k))
+            balance_mode = str(
+                getattr(
+                    self.cfg.model,
+                    "sampling_topk_structure_family_balance",
+                    "none",
+                )
+                or "none"
+            ).lower()
+            if balance_mode in {"equal", "equal_quota"} and family_infos:
+                target_k = int(
+                    round(
+                        sum(int(info[4]) for info in family_infos)
+                        / float(len(family_infos))
+                    )
+                )
+                family_infos = [
+                    (fam_id, fam_name, mask, n, max(1, min(int(target_k), int(n))))
+                    for fam_id, fam_name, mask, n, _k in family_infos
+                ]
+            elif balance_mode in {"target", "target_count", "family_target", "avg_count"} and family_infos:
+                avg_counts = (
+                    getattr(self.dataset_info, "edge_family_avg_edge_counts", None)
+                    or getattr(self.dataset_info, "edge_family_avg_counts", None)
+                    or {}
+                )
+                target_infos = []
+                for fam_id, fam_name, mask, n, k in family_infos:
+                    target = avg_counts.get(fam_name, None)
+                    if target is None and fam_name.startswith("link_"):
+                        target = avg_counts.get(fam_name[len("link_"):], None)
+                    if target is None:
+                        target_k = int(k)
+                    else:
+                        target_k = int(round(float(target)))
+                    target_infos.append(
+                        (fam_id, fam_name, mask, n, max(0, min(int(target_k), int(n))))
+                    )
+                family_infos = [
+                    info
+                    for info in target_infos
+                    if int(info[4]) > 0
+                ]
+            for fam_id, fam_name, mask, n, k in family_infos:
                 local_idx = mask.nonzero(as_tuple=True)[0]
                 top_local = torch.topk(exist_prob[local_idx], k=k, largest=True).indices
                 has_edge[local_idx[top_local]] = True
                 used_mask |= mask
+            if (
+                getattr(self, "local_rank", 0) == 0
+                and family_infos
+                and not getattr(self, "_logged_sampling_topk_structure_balance", False)
+            ):
+                print(
+                    "[采样-TOPK-STRUCTURE] "
+                    f"balance={balance_mode} "
+                    + "; ".join(
+                        f"{fam_name}:n={n},k={k}"
+                        for _fam_id, fam_name, _mask, n, k in family_infos
+                    )
+                )
+                self._logged_sampling_topk_structure_balance = True
         fallback = (~used_mask) & has_valid_pos
         if fallback.any():
             has_edge[fallback] = torch.rand_like(exist_prob[fallback]) < exist_prob[fallback]
@@ -3102,6 +4172,485 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             print("[采样-DEGPAIR] " + "; ".join(log_parts[:10]))
             self._logged_sampling_degree_pair_rates = True
         return has_edge
+
+    def _degree_pair_exact_k_score_bias(self, edge_index, families, strength_override=None):
+        """Return a per-candidate log-prior bias for global exact-K selection.
+
+        Unlike ``topk_degree_pair``, this does not choose edges directly. It only
+        nudges the global exact-K ranking toward the reference graph's
+        family-specific endpoint degree-bin-pair distribution, so family quotas
+        and total edge count remain controlled by exact-K.
+        """
+        strength = (
+            float(strength_override)
+            if strength_override is not None
+            else float(getattr(self.cfg.model, "sampling_degree_pair_strength", 0.0) or 0.0)
+        )
+        if strength <= 0.0 or edge_index is None or edge_index.numel() == 0:
+            return None
+        ref = self._ensure_sampling_degree_pair_reference()
+        degree_bins = ref.get("degree_bins") if ref else None
+        pair_counts = ref.get("pair_counts", {}) if ref else {}
+        family_totals = ref.get("family_totals", {}) if ref else {}
+        if degree_bins is None or degree_bins.numel() == 0 or not pair_counts:
+            return None
+
+        device = edge_index.device
+        dbins = degree_bins.to(device)
+        max_node = int(dbins.numel())
+        valid_endpoint = (
+            (edge_index[0] >= 0)
+            & (edge_index[0] < max_node)
+            & (edge_index[1] >= 0)
+            & (edge_index[1] < max_node)
+        )
+        if not bool(valid_endpoint.any()):
+            return None
+
+        fam = families.long().to(device).reshape(-1)
+        bin_u = torch.zeros_like(fam)
+        bin_v = torch.zeros_like(fam)
+        bin_u[valid_endpoint] = dbins[edge_index[0, valid_endpoint]]
+        bin_v[valid_endpoint] = dbins[edge_index[1, valid_endpoint]]
+        pair_a = torch.minimum(bin_u, bin_v)
+        pair_b = torch.maximum(bin_u, bin_v)
+        num_bins = max(2, int(getattr(self.cfg.model, "sampling_degree_pair_bins", 5) or 5))
+        pair_id = pair_a * int(num_bins) + pair_b
+
+        eps = 1e-8
+        clip = float(getattr(self.cfg.model, "sampling_degree_pair_bias_clip", 4.0) or 4.0)
+        bias = torch.zeros((fam.numel(),), dtype=torch.float32, device=device)
+        log_parts = []
+        for fam_id, ref_pairs in pair_counts.items():
+            fam_id = int(fam_id)
+            mask = (fam == fam_id) & valid_endpoint
+            n = int(mask.sum().item())
+            total = int(family_totals.get(fam_id, 0) or 0)
+            if n <= 0 or total <= 0:
+                continue
+            local_pair_id = pair_id[mask]
+            cand_counts = torch.bincount(local_pair_id, minlength=num_bins * num_bins).float()
+            local_bias = torch.zeros((num_bins * num_bins,), dtype=torch.float32, device=device)
+            for pair_key, cnt in ref_pairs.items():
+                a, b = int(pair_key[0]), int(pair_key[1])
+                pid = a * int(num_bins) + b
+                if pid < 0 or pid >= int(local_bias.numel()):
+                    continue
+                target_share = float(cnt) / float(max(1, total))
+                cand_share = float(cand_counts[pid].item()) / float(max(1, n))
+                local_bias[pid] = math.log((target_share + eps) / (cand_share + eps))
+            if clip > 0:
+                local_bias = local_bias.clamp(min=-clip, max=clip)
+            bias[mask] = local_bias[local_pair_id] * strength
+            if getattr(self, "local_rank", 0) == 0 and not getattr(self, "_logged_sampling_exactk_degree_pair_bias", False):
+                log_parts.append(
+                    f"fam={fam_id}:n={n},pairs={len(ref_pairs)},"
+                    f"bias=[{float(local_bias.min().item()):.3f},{float(local_bias.max().item()):.3f}]"
+                )
+        if log_parts and getattr(self, "local_rank", 0) == 0 and not getattr(self, "_logged_sampling_exactk_degree_pair_bias", False):
+            print(
+                "[采样-EXACT-K-DEGPAIR] "
+                f"strength={strength:.4g} clip={clip:.4g} "
+                + "; ".join(log_parts[:10])
+            )
+            self._logged_sampling_exactk_degree_pair_bias = True
+        return bias
+
+    def _sampling_structure_guidance_factor(self, sampling_step):
+        remaining_frac = float(sampling_step) / float(max(int(self.T), 1))
+        lo = float(
+            getattr(
+                self.cfg.model,
+                "sampling_structure_guidance_min_step_frac",
+                0.0,
+            )
+            or 0.0
+        )
+        hi = float(
+            getattr(
+                self.cfg.model,
+                "sampling_structure_guidance_max_step_frac",
+                1.0,
+            )
+            or 1.0
+        )
+        if remaining_frac < lo or remaining_frac > hi:
+            return 0.0
+        power = float(
+            getattr(self.cfg.model, "sampling_structure_guidance_power", 1.0)
+            or 1.0
+        )
+        return max(0.0, min(1.0, remaining_frac)) ** max(power, 0.0)
+
+    def _sampling_structure_guidance_bias(
+        self,
+        data,
+        edge_index,
+        families,
+        edge_batch,
+        sampling_step,
+    ):
+        closure_w = float(
+            getattr(
+                self.cfg.model,
+                "sampling_structure_guidance_closure_weight",
+                0.0,
+            )
+            or 0.0
+        )
+        connect_w = float(
+            getattr(
+                self.cfg.model,
+                "sampling_structure_guidance_connect_weight",
+                0.0,
+            )
+            or 0.0
+        )
+        dp_w = float(
+            getattr(
+                self.cfg.model,
+                "sampling_structure_guidance_degree_pair_weight",
+                0.0,
+            )
+            or 0.0
+        )
+        assort_w = float(
+            getattr(
+                self.cfg.model,
+                "sampling_structure_guidance_assort_weight",
+                0.0,
+            )
+            or 0.0
+        )
+        factor = self._sampling_structure_guidance_factor(sampling_step)
+        if (
+            factor <= 0.0
+            or edge_index is None
+            or edge_index.numel() == 0
+            or max(abs(closure_w), abs(connect_w), abs(dp_w), abs(assort_w)) <= 0.0
+        ):
+            return None
+
+        device = edge_index.device
+        bias = torch.zeros((edge_index.shape[1],), dtype=torch.float32, device=device)
+        comp_feature = None
+        closure_feature = None
+        current_edge_index = getattr(data, "edge_index", None)
+        current_edge_attr = getattr(data, "edge_attr", None)
+        if current_edge_index is not None and current_edge_attr is not None:
+            cur_ei = current_edge_index.long().to(device)
+            cur_attr = current_edge_attr.to(device)
+            if cur_attr.dim() > 1:
+                cur_labels = cur_attr.argmax(dim=-1).long()
+            else:
+                cur_labels = cur_attr.long().reshape(-1)
+            visible = cur_labels > 0
+            cur_ei = cur_ei[:, visible] if cur_ei.numel() else cur_ei
+            node_batch = getattr(data, "batch", None)
+            if node_batch is None:
+                node_batch = torch.zeros(
+                    (int(data.node.shape[0]),), dtype=torch.long, device=device
+                )
+            else:
+                node_batch = node_batch.long().to(device)
+            graph_ids = edge_batch.unique(sorted=True)
+            closure_feature = torch.zeros_like(bias)
+            comp_feature = torch.zeros_like(bias)
+            for graph_idx_tensor in graph_ids:
+                graph_idx = int(graph_idx_tensor.item())
+                nodes = torch.where(node_batch == graph_idx)[0]
+                if nodes.numel() <= 1:
+                    continue
+                local_of = torch.full(
+                    (node_batch.shape[0],),
+                    -1,
+                    dtype=torch.long,
+                    device=device,
+                )
+                local_of[nodes] = torch.arange(nodes.numel(), device=device)
+                cand_mask = edge_batch == graph_idx
+                if not cand_mask.any():
+                    continue
+                vis_mask = (
+                    (cur_ei.numel() > 0)
+                    & (node_batch[cur_ei[0].long()] == graph_idx)
+                    & (node_batch[cur_ei[1].long()] == graph_idx)
+                )
+                n = int(nodes.numel())
+                adj = torch.zeros((n, n), dtype=torch.float32, device=device)
+                if bool(vis_mask.any()):
+                    src_vis = local_of[cur_ei[0, vis_mask].long()]
+                    dst_vis = local_of[cur_ei[1, vis_mask].long()]
+                    valid_vis = (src_vis >= 0) & (dst_vis >= 0)
+                    src_vis = src_vis[valid_vis]
+                    dst_vis = dst_vis[valid_vis]
+                    adj[src_vis, dst_vis] = 1.0
+                    adj[dst_vis, src_vis] = 1.0
+                adj.fill_diagonal_(0.0)
+                common = adj.matmul(adj)
+                idx = cand_mask.nonzero(as_tuple=True)[0]
+                src = local_of[edge_index[0, idx].long()]
+                dst = local_of[edge_index[1, idx].long()]
+                valid = (src >= 0) & (dst >= 0)
+                if valid.any():
+                    local_score = torch.zeros((idx.numel(),), dtype=torch.float32, device=device)
+                    cn = common[src[valid], dst[valid]]
+                    local_score[valid] = torch.log1p(cn) / math.log1p(max(n, 1))
+                    closure_feature[idx] = local_score
+                if (connect_w != 0.0) and bool(vis_mask.any()):
+                    parent = list(range(n))
+
+                    def find(x):
+                        while parent[x] != x:
+                            parent[x] = parent[parent[x]]
+                            x = parent[x]
+                        return x
+
+                    def union(a, b):
+                        ra, rb = find(a), find(b)
+                        if ra != rb:
+                            parent[rb] = ra
+
+                    src_cpu = src_vis.detach().cpu().tolist() if bool(vis_mask.any()) else []
+                    dst_cpu = dst_vis.detach().cpu().tolist() if bool(vis_mask.any()) else []
+                    for a, b in zip(src_cpu, dst_cpu):
+                        if a != b:
+                            union(int(a), int(b))
+                    comp_id = torch.tensor(
+                        [find(i) for i in range(n)],
+                        dtype=torch.long,
+                        device=device,
+                    )
+                    valid_comp = (src >= 0) & (dst >= 0)
+                    local_bridge = torch.zeros((idx.numel(),), dtype=torch.float32, device=device)
+                    if valid_comp.any():
+                        local_bridge[valid_comp] = (
+                            comp_id[src[valid_comp]] != comp_id[dst[valid_comp]]
+                        ).to(torch.float32)
+                    comp_feature[idx] = local_bridge
+
+        if closure_feature is not None and closure_w != 0.0:
+            bias = bias + float(closure_w * factor) * closure_feature
+        if comp_feature is not None and connect_w != 0.0:
+            bias = bias + float(connect_w * factor) * comp_feature
+
+        if dp_w != 0.0:
+            dp_bias = self._degree_pair_exact_k_score_bias(
+                edge_index,
+                families,
+                strength_override=float(dp_w * factor),
+            )
+            if dp_bias is not None:
+                bias = bias + dp_bias.to(device=device, dtype=bias.dtype)
+
+        if assort_w != 0.0:
+            ref = self._ensure_sampling_degree_pair_reference()
+            degree_bins = ref.get("degree_bins") if ref else None
+            if degree_bins is not None and degree_bins.numel() > 0:
+                dbins = degree_bins.to(device)
+                valid = (
+                    (edge_index[0] >= 0)
+                    & (edge_index[0] < dbins.numel())
+                    & (edge_index[1] >= 0)
+                    & (edge_index[1] < dbins.numel())
+                )
+                if valid.any():
+                    num_bins = max(
+                        2,
+                        int(
+                            getattr(
+                                self.cfg.model,
+                                "sampling_degree_pair_bins",
+                                5,
+                            )
+                            or 5
+                        ),
+                    )
+                    bu = torch.zeros_like(families.long())
+                    bv = torch.zeros_like(families.long())
+                    bu[valid] = dbins[edge_index[0, valid]]
+                    bv[valid] = dbins[edge_index[1, valid]]
+                    diff = (bu.float() - bv.float()).abs() / float(max(num_bins - 1, 1))
+                    target = getattr(
+                        self.cfg.model,
+                        "sampling_structure_guidance_assort_target",
+                        None,
+                    )
+                    try:
+                        target_val = None if target is None else float(target)
+                    except (TypeError, ValueError):
+                        target_val = None
+                    # PubMed target is negative; null defaults to disassortative
+                    # because current experiments aim to reduce positive assortativity.
+                    direction = -1.0 if target_val is None or target_val < 0 else 1.0
+                    assort_feature = diff if direction < 0 else (1.0 - diff)
+                    bias = bias + float(assort_w * factor) * assort_feature.to(bias.dtype)
+
+        if (
+            getattr(self, "local_rank", 0) == 0
+            and not getattr(self, "_logged_sampling_structure_guidance", False)
+        ):
+            print(
+                "[采样-STRUCT-GUIDE] "
+                f"step={sampling_step} factor={factor:.4g} "
+                f"closure={closure_w:.4g} connect={connect_w:.4g} "
+                f"degree_pair={dp_w:.4g} assort={assort_w:.4g} "
+                f"bias=[{float(bias.min().item()):.4g},{float(bias.max().item()):.4g}]"
+            )
+            self._logged_sampling_structure_guidance = True
+        return bias
+
+    def _degree_pair_ids_for_candidates(self, edge_index, families):
+        ref = self._ensure_sampling_degree_pair_reference()
+        degree_bins = ref.get("degree_bins") if ref else None
+        pair_counts = ref.get("pair_counts", {}) if ref else {}
+        family_totals = ref.get("family_totals", {}) if ref else {}
+        if degree_bins is None or degree_bins.numel() == 0 or not pair_counts:
+            return None
+        device = edge_index.device
+        dbins = degree_bins.to(device)
+        max_node = int(dbins.numel())
+        valid_endpoint = (
+            (edge_index[0] >= 0)
+            & (edge_index[0] < max_node)
+            & (edge_index[1] >= 0)
+            & (edge_index[1] < max_node)
+        )
+        if not bool(valid_endpoint.any()):
+            return None
+        fam = families.long().to(device).reshape(-1)
+        bin_u = torch.zeros_like(fam)
+        bin_v = torch.zeros_like(fam)
+        bin_u[valid_endpoint] = dbins[edge_index[0, valid_endpoint]]
+        bin_v[valid_endpoint] = dbins[edge_index[1, valid_endpoint]]
+        pair_a = torch.minimum(bin_u, bin_v)
+        pair_b = torch.maximum(bin_u, bin_v)
+        num_bins = max(2, int(getattr(self.cfg.model, "sampling_degree_pair_bins", 5) or 5))
+        pair_id = pair_a * int(num_bins) + pair_b
+        return {
+            "pair_id": pair_id,
+            "valid": valid_endpoint,
+            "pair_counts": pair_counts,
+            "family_totals": family_totals,
+            "num_bins": int(num_bins),
+        }
+
+    def _select_exact_k_with_degree_pair_quotas(
+        self,
+        selection_scores,
+        edge_index,
+        families,
+        edge_batch,
+        avg_counts,
+        id2edge_family,
+    ):
+        """Select exact family quotas, with optional within-family degree-pair quotas."""
+        pair_info = self._degree_pair_ids_for_candidates(edge_index, families)
+        if pair_info is None:
+            return None, [], {}
+
+        pair_id = pair_info["pair_id"]
+        valid_pair = pair_info["valid"]
+        pair_counts = pair_info["pair_counts"]
+        family_totals = pair_info["family_totals"]
+        num_bins = int(pair_info["num_bins"])
+        strength = float(getattr(self.cfg.model, "sampling_degree_pair_strength", 1.0) or 1.0)
+        strength = max(0.0, min(1.0, strength))
+        min_bin_edges = max(0, int(getattr(self.cfg.model, "sampling_degree_pair_min_bin_edges", 1) or 1))
+        graph_ids = edge_batch.unique(sorted=True)
+        selected_parts = []
+        log_parts = []
+        unfilled = {}
+
+        for graph_idx_tensor in graph_ids:
+            graph_idx = int(graph_idx_tensor.item())
+            for fam_id, fam_name in id2edge_family.items():
+                fam_id = int(fam_id)
+                mask = (edge_batch == graph_idx) & (families == fam_id)
+                local_idx = mask.nonzero(as_tuple=True)[0]
+                target = max(
+                    0,
+                    int(round(float(avg_counts.get(fam_name, 0.0) or 0.0))),
+                )
+                take = min(target, int(local_idx.numel()))
+                if take <= 0:
+                    if take != target:
+                        unfilled[(graph_idx, fam_name)] = (target, take)
+                    continue
+
+                local_selected = torch.zeros_like(mask)
+                pair_target = int(round(float(take) * strength))
+                pair_target = max(0, min(pair_target, take))
+                assigned = 0
+                pair_infos = []
+                fam_total = float(max(1, int(family_totals.get(fam_id, 0))))
+                if pair_target > 0 and fam_id in pair_counts:
+                    for pair_key, cnt in pair_counts.get(fam_id, {}).items():
+                        a, b = int(pair_key[0]), int(pair_key[1])
+                        pid = a * num_bins + b
+                        pmask = mask & valid_pair & (pair_id == pid)
+                        pn = int(pmask.sum().item())
+                        if pn <= 0:
+                            continue
+                        exact = float(pair_target) * float(cnt) / fam_total
+                        quota = int(math.floor(exact))
+                        if cnt >= min_bin_edges and exact > 0.0:
+                            quota = max(1, quota)
+                        quota = max(0, min(quota, pn))
+                        pair_infos.append(
+                            {
+                                "mask": pmask,
+                                "quota": quota,
+                                "frac": exact - math.floor(exact),
+                                "n": pn,
+                            }
+                        )
+                        assigned += quota
+                    if assigned > pair_target:
+                        excess = assigned - pair_target
+                        for info in sorted(pair_infos, key=lambda x: x["frac"]):
+                            if excess <= 0:
+                                break
+                            drop = min(int(info["quota"]), excess)
+                            info["quota"] -= drop
+                            excess -= drop
+
+                    for info in pair_infos:
+                        quota = int(info["quota"])
+                        if quota <= 0:
+                            continue
+                        pidx = info["mask"].nonzero(as_tuple=True)[0]
+                        top_local = torch.topk(
+                            selection_scores[pidx],
+                            k=min(quota, int(pidx.numel())),
+                            largest=True,
+                        ).indices
+                        local_selected[pidx[top_local]] = True
+
+                selected_count = int(local_selected.sum().item())
+                if selected_count < take:
+                    remaining = mask & (~local_selected)
+                    ridx = remaining.nonzero(as_tuple=True)[0]
+                    add = min(take - selected_count, int(ridx.numel()))
+                    if add > 0:
+                        top_local = torch.topk(
+                            selection_scores[ridx],
+                            k=add,
+                            largest=True,
+                        ).indices
+                        local_selected[ridx[top_local]] = True
+                selected_count = int(local_selected.sum().item())
+                if selected_count > 0:
+                    selected_parts.append(local_selected.nonzero(as_tuple=True)[0])
+                if selected_count != target:
+                    unfilled[(graph_idx, fam_name)] = (target, selected_count)
+                if getattr(self, "local_rank", 0) == 0 and target > 0:
+                    log_parts.append(
+                        f"g{graph_idx}/{fam_name}:target={target},"
+                        f"pair_target={pair_target},candidates={int(local_idx.numel())},"
+                        f"selected={selected_count}"
+                    )
+        return selected_parts, log_parts, unfilled
 
     def _sample_edge_labels_hierarchical(
         self,
@@ -3416,6 +4965,29 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         refine_max_iter = int(
             getattr(self.cfg.model, "hetero_metis_refine_max_iter", 200) or 0
         )
+        refine_preserve_high_high = bool(
+            getattr(
+                self.cfg.model,
+                "hetero_metis_refine_preserve_high_high",
+                False,
+            )
+        )
+        refine_preserve_high_quantile = float(
+            getattr(
+                self.cfg.model,
+                "hetero_metis_refine_preserve_high_quantile",
+                0.8,
+            )
+            or 0.8
+        )
+        refine_preserve_penalty_weight = float(
+            getattr(
+                self.cfg.model,
+                "hetero_metis_refine_preserve_penalty_weight",
+                0.0,
+            )
+            or 0.0
+        )
         all_blocks = []
         graph_count = int(batch.max().item()) + 1 if batch.numel() else 1
         for graph_idx in range(graph_count):
@@ -3446,6 +5018,9 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 node_type_local=anchor_node_subtype[nodes],
                 refine_degree_balance=refine_degree_balance,
                 refine_max_iter=refine_max_iter,
+                refine_preserve_high_high=refine_preserve_high_high,
+                refine_preserve_high_quantile=refine_preserve_high_quantile,
+                refine_preserve_penalty_weight=refine_preserve_penalty_weight,
             )
             if not blocks:
                 blocks = [list(range(int(nodes.numel())))]
@@ -3763,6 +5338,37 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 result[mask] = int(family_id)
         return result
 
+    def _node_type_ids_from_subtype(self, node_subtype):
+        type_offsets = getattr(self.dataset_info, "type_offsets", {}) or {}
+        sorted_types = sorted(type_offsets.items(), key=lambda item: item[1])
+        node_type = torch.full_like(node_subtype.long(), -1)
+        for type_id, (_type_name, offset) in enumerate(sorted_types):
+            next_offset = (
+                sorted_types[type_id + 1][1]
+                if type_id + 1 < len(sorted_types)
+                else self.out_dims.X
+            )
+            node_type[
+                (node_subtype >= int(offset))
+                & (node_subtype < int(next_offset))
+            ] = int(type_id)
+        return node_type
+
+    def _same_type_edge_mask(self, edge_index, node_subtype):
+        if edge_index is None or edge_index.numel() == 0:
+            return torch.zeros((0,), dtype=torch.bool, device=self.device)
+        edge_index = edge_index.long()
+        node_type = self._node_type_ids_from_subtype(node_subtype.long()).to(edge_index.device)
+        src_type = node_type[edge_index[0]]
+        dst_type = node_type[edge_index[1]]
+        return (src_type >= 0) & (src_type == dst_type)
+
+    def _filter_same_type_edges(self, edge_index, edge_attr, node_subtype):
+        if edge_index is None or edge_index.numel() == 0:
+            return edge_index, edge_attr
+        mask = self._same_type_edge_mask(edge_index.long(), node_subtype.long())
+        return edge_index[:, mask], edge_attr[mask]
+
     def _training_loss_from_encoded_queries(
         self,
         encoded,
@@ -3772,6 +5378,9 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         query_edge_batch,
         node_subtype,
         step_idx,
+        log_metrics=True,
+        balance_loss_by_query_family=False,
+        return_predictions=False,
     ):
         total_nodes = int(data.x.shape[0])
         current_labels = self._lookup_query_edge_labels(
@@ -3780,14 +5389,19 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             sparse_noisy_data["edge_attr_t"].argmax(dim=-1).long(),
             total_nodes,
         )
+        query_family = self._query_family_from_endpoints(
+            query_edge_index, node_subtype
+        )
+        decode_labels = self._query_decode_labels_for_mode(
+            current_labels,
+            getattr(self.cfg.model, "train_queryfree_query_state", "current"),
+        )
         logits = self._decode_query_logits(
             encoded,
             query_edge_index,
-            current_labels,
+            decode_labels,
             data.batch,
-        )
-        query_family = self._query_family_from_endpoints(
-            query_edge_index, node_subtype
+            query_family,
         )
         logits = self._mask_edge_logits_by_query_family(logits, query_family)
         true_labels = self._lookup_query_edge_labels(
@@ -3812,14 +5426,114 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             y=data.y,
             batch=data.batch,
         )
-        loss = self.train_loss.forward(
-            pred=pred,
-            true_data=true_data,
-            log=step_idx % self.log_every_steps == 0,
+        if bool(balance_loss_by_query_family):
+            loss = self._balanced_query_family_loss(
+                pred=pred,
+                true_data=true_data,
+                query_family=query_family,
+                log_metrics=bool(log_metrics),
+                step_idx=int(step_idx),
+            )
+        else:
+            loss = self.train_loss.forward(
+                pred=pred,
+                true_data=true_data,
+                log=bool(log_metrics) and step_idx % self.log_every_steps == 0,
+            )
+        if bool(log_metrics):
+            self._record_train_exist_diagnostics(
+                pred, true_data, sparse_noisy_data
+            )
+        if not return_predictions:
+            return loss
+        return loss, {
+            "logits": logits.detach(),
+            "true_labels": true_labels.detach(),
+            "current_labels": current_labels.detach(),
+            "query_family": query_family.detach(),
+        }
+
+    def _balanced_query_family_loss(
+        self,
+        pred,
+        true_data,
+        query_family,
+        log_metrics,
+        step_idx,
+    ):
+        """Mean of per-family query losses with per-family clamped pos_weight."""
+        if query_family is None or query_family.numel() == 0:
+            return self.train_loss.forward(pred=pred, true_data=true_data, log=False)
+        unique_families = torch.unique(query_family.long())
+        losses = []
+        old_pos_weight = getattr(self.train_loss, "exist_pos_weight", None)
+        max_pos_weight = float(
+            getattr(
+                self.cfg.model,
+                "same_type_internal_pos_weight_max",
+                getattr(self.cfg.model, "exist_pos_weight", 20),
+            )
+            or 20
         )
-        self._record_train_exist_diagnostics(
-            pred, true_data, sparse_noisy_data
+        min_pos_weight = float(
+            getattr(self.cfg.model, "same_type_internal_pos_weight_min", 1.0) or 1.0
         )
+        max_pos_weight = max(min_pos_weight, max_pos_weight)
+        family_stats = {}
+        try:
+            target = true_data.edge_attr
+            if target.dim() > 1:
+                target = target.argmax(dim=-1)
+            true_exist = target.reshape(-1).long() > 0
+            for fam_id_t in unique_families:
+                fam_id = int(fam_id_t.item())
+                fam_mask = query_family.long() == fam_id
+                if not fam_mask.any():
+                    continue
+                fam_exist = true_exist[fam_mask]
+                pos = int(fam_exist.sum().item())
+                neg = int((~fam_exist).sum().item())
+                if pos > 0:
+                    pos_weight = float(neg) / float(max(pos, 1))
+                    pos_weight = max(min_pos_weight, min(max_pos_weight, pos_weight))
+                else:
+                    pos_weight = min_pos_weight
+                self.train_loss.exist_pos_weight = pos_weight
+                losses.append(
+                    self.train_loss.forward(
+                        pred=pred,
+                        true_data=true_data,
+                        log=False,
+                        query_mask=fam_mask,
+                    )
+                )
+                family_stats[fam_id] = {
+                    "queries": int(fam_mask.sum().item()),
+                    "pos": pos,
+                    "neg": neg,
+                    "pos_weight": pos_weight,
+                }
+        finally:
+            self.train_loss.exist_pos_weight = old_pos_weight
+        if not losses:
+            return pred.edge_attr.sum() * 0.0
+        loss = torch.stack(losses).mean()
+        if (
+            log_metrics
+            and step_idx % self.log_every_steps == 0
+            and getattr(self, "local_rank", 0) == 0
+        ):
+            print(
+                "[TRAIN-FAMILY-BALANCED] "
+                + json.dumps(family_stats, ensure_ascii=False)
+            )
+            self.log(
+                "train/family_balanced_loss",
+                loss.detach(),
+                on_step=True,
+                prog_bar=False,
+                sync_dist=True,
+            )
         return loss
 
     def _predict_clean_logits_for_query_rounds(
@@ -3877,13 +5591,27 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 base_edge_attr_onehot.argmax(dim=-1).long(),
                 total_nodes,
             )
+            decode_labels = self._query_decode_labels_for_mode(
+                current_labels,
+                getattr(
+                    self.cfg.model,
+                    "sampling_queryfree_query_state",
+                    "current",
+                ),
+            )
             selected_edges = query_edge_index
             selected_families = query_edge_family
             selected_logits = self._decode_query_logits(
                 encoded,
                 query_edge_index,
-                current_labels,
+                decode_labels,
                 batch,
+                query_edge_family,
+                edge_input_residual_scale=getattr(
+                    self.cfg.model,
+                    "sampling_edge_input_residual_scale",
+                    None,
+                ),
             )
             if selected_logits.numel() == 0:
                 continue
@@ -4085,7 +5813,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 * float(getattr(self.cfg.model, "diffusion_steps", 100))
             )
         )
-        seed_base = int(getattr(self.cfg.train, "seed", 0) or 0)
+        seed_base = self._current_sampling_seed()
         metis_view = None
         random_view = None
         if mode in ("metis_only", "mean"):
@@ -4274,6 +6002,15 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         rel_balance_power = float(getattr(self.cfg.model, "hetero_metis_relation_balance_power", 0.5))
         refine_degree_balance = bool(getattr(self.cfg.model, "hetero_metis_refine_degree_balance", False))
         refine_max_iter = int(getattr(self.cfg.model, "hetero_metis_refine_max_iter", 200) or 0)
+        refine_preserve_high_high = bool(
+            getattr(self.cfg.model, "hetero_metis_refine_preserve_high_high", False)
+        )
+        refine_preserve_high_quantile = float(
+            getattr(self.cfg.model, "hetero_metis_refine_preserve_high_quantile", 0.8) or 0.8
+        )
+        refine_preserve_penalty_weight = float(
+            getattr(self.cfg.model, "hetero_metis_refine_preserve_penalty_weight", 0.0) or 0.0
+        )
         all_query_edge_index = []
         all_query_edge_batch = []
 
@@ -4319,6 +6056,9 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 round(float(rel_balance_power), 8),
                 bool(refine_degree_balance),
                 int(refine_max_iter),
+                bool(refine_preserve_high_high),
+                round(float(refine_preserve_high_quantile), 8),
+                round(float(refine_preserve_penalty_weight), 8),
             )
             blocks = self._true_block_cache.get(cache_key)
             if blocks is not None and getattr(self, "_hetero_block_edge_templates", None) is None:
@@ -4333,6 +6073,9 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                     node_type_local=node_t[batch_nodes],
                     refine_degree_balance=refine_degree_balance,
                     refine_max_iter=refine_max_iter,
+                    refine_preserve_high_high=refine_preserve_high_high,
+                    refine_preserve_high_quantile=refine_preserve_high_quantile,
+                    refine_preserve_penalty_weight=refine_preserve_penalty_weight,
                 )
                 if not blocks:
                     blocks = [list(range(int(batch_nodes.numel())))]
@@ -4357,15 +6100,52 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 block_id = int(torch.randint(len(blocks), (1,), device=self.device).item())
             else:
                 block_id = int(forced_block_id) % max(1, len(blocks))
-            block = blocks[block_id]
-            all_block_nodes = [
-                batch_nodes[torch.tensor(b, dtype=torch.long, device=self.device)]
-                for b in blocks
-            ]
+            metadata_key = ("hetero_metis_metadata",) + cache_key
+            block_metadata = self._true_block_cache.get(metadata_key)
+            if block_metadata is None:
+                all_block_nodes = [
+                    batch_nodes[
+                        torch.tensor(b, dtype=torch.long, device=self.device)
+                    ]
+                    for b in blocks
+                ]
+                node_block_id = torch.full(
+                    (int(data.x.shape[0]),),
+                    -1,
+                    dtype=torch.long,
+                    device=self.device,
+                )
+                for cached_block_id, cached_nodes in enumerate(all_block_nodes):
+                    node_block_id[cached_nodes] = int(cached_block_id)
+                type_node_pools = {}
+                block_type_node_pools = {}
+                batch_mask = data.batch == graph_idx
+                for type_name, type_offset in sorted_types:
+                    type_size = int(type_sizes.get(type_name, 0))
+                    type_mask = (
+                        (node_t >= int(type_offset))
+                        & (node_t < int(type_offset) + type_size)
+                        & batch_mask
+                    )
+                    type_nodes = torch.where(type_mask)[0]
+                    type_node_pools[str(type_name)] = type_nodes
+                    for cached_block_id in range(len(all_block_nodes)):
+                        block_type_node_pools[
+                            (int(cached_block_id), str(type_name))
+                        ] = type_nodes[
+                            node_block_id[type_nodes] == int(cached_block_id)
+                        ]
+                block_metadata = {
+                    "all_block_nodes": all_block_nodes,
+                    "node_block_id": node_block_id,
+                    "type_node_pools": type_node_pools,
+                    "block_type_node_pools": block_type_node_pools,
+                }
+                self._true_block_cache[metadata_key] = block_metadata
+            else:
+                all_block_nodes = block_metadata["all_block_nodes"]
             block_nodes = all_block_nodes[block_id]
             train_inter_state = {}
-            block_mask = torch.zeros(data.x.shape[0], dtype=torch.bool, device=self.device)
-            block_mask[block_nodes] = True
             full_block_query = bool(getattr(self.cfg.model, "block_query_full_block", False))
             do_inter_fill = bool(getattr(self.cfg.model, "block_query_inter_fill", False))
             max_block_edges = int(getattr(self.cfg.model, "block_query_max_edges_per_family", 0) or 0)
@@ -4387,15 +6167,14 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 if not fam_edge_mask.any():
                     continue
 
-                src_offset = int(type_offsets[src_type])
-                dst_offset = int(type_offsets[dst_type])
-                src_size = int(type_sizes.get(src_type, 0))
-                dst_size = int(type_sizes.get(dst_type, 0))
-                batch_mask = data.batch == graph_idx
-                src_mask = (node_t >= src_offset) & (node_t < src_offset + src_size) & batch_mask
-                dst_mask = (node_t >= dst_offset) & (node_t < dst_offset + dst_size) & batch_mask
-                batch_src_nodes = torch.where(src_mask)[0]
-                batch_dst_nodes = torch.where(dst_mask)[0]
+                batch_src_nodes = block_metadata["type_node_pools"].get(
+                    str(src_type),
+                    torch.empty(0, dtype=torch.long, device=self.device),
+                )
+                batch_dst_nodes = block_metadata["type_node_pools"].get(
+                    str(dst_type),
+                    torch.empty(0, dtype=torch.long, device=self.device),
+                )
                 if batch_src_nodes.numel() == 0 or batch_dst_nodes.numel() == 0:
                     continue
                 same_type = src_type == dst_type
@@ -4407,8 +6186,18 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                     continue
                 num_query = min(num_possible, max(1, int(math.ceil(float(self.edge_fraction) * num_possible))))
 
-                block_src_nodes = batch_src_nodes[block_mask[batch_src_nodes]]
-                block_dst_nodes = batch_dst_nodes[block_mask[batch_dst_nodes]]
+                block_src_nodes = block_metadata[
+                    "block_type_node_pools"
+                ].get(
+                    (int(block_id), str(src_type)),
+                    torch.empty(0, dtype=torch.long, device=self.device),
+                )
+                block_dst_nodes = block_metadata[
+                    "block_type_node_pools"
+                ].get(
+                    (int(block_id), str(dst_type)),
+                    torch.empty(0, dtype=torch.long, device=self.device),
+                )
                 if block_src_nodes.numel() == 0 or block_dst_nodes.numel() == 0:
                     continue
 
@@ -4740,6 +6529,724 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         true_exist_mean = (target.reshape(-1).long() > 0).to(dtype=pred_edge.dtype, device=pred_edge.device).mean()
         return torch.abs(pred_exist_mean - true_exist_mean)
 
+    def _auxiliary_time_factor(self, sparse_noisy_data, power: float) -> float:
+        """Return a stable scalar high-noise emphasis factor from t/T."""
+        try:
+            power = float(power or 0.0)
+        except Exception:
+            power = 0.0
+        if power <= 0.0:
+            return 1.0
+        t_float = None
+        if isinstance(sparse_noisy_data, dict):
+            t_float = sparse_noisy_data.get("t_float", None)
+        if t_float is None:
+            return 1.0
+        try:
+            t_val = float(torch.as_tensor(t_float).detach().float().mean().cpu())
+        except Exception:
+            return 1.0
+        t_val = max(0.0, min(1.0, t_val))
+        return float(t_val ** power)
+
+    def _warmup_weight(self, base_weight: float, warmup_epochs: int, t_factor: float = 1.0) -> float:
+        base_weight = float(base_weight or 0.0)
+        if base_weight <= 0.0:
+            return 0.0
+        warmup_epochs = int(warmup_epochs or 0)
+        if warmup_epochs > 0:
+            warm = min(float(self.current_epoch + 1) / float(warmup_epochs), 1.0)
+        else:
+            warm = 1.0
+        return base_weight * warm * float(t_factor)
+
+    def _query_family_and_target_exist(self, pred, true_data, clean_data):
+        pred_edge = pred.edge_attr
+        edge_index = pred.edge_index
+        target = true_data.edge_attr
+        if (
+            pred_edge.numel() == 0
+            or edge_index.numel() == 0
+            or target.numel() == 0
+            or not self.heterogeneous
+        ):
+            return None, None
+        _node_type_ids, query_family = self._infer_query_family_from_clean_node_types(
+            edge_index.long(),
+            clean_data.x,
+        )
+        if query_family is None or query_family.numel() != pred_edge.shape[0]:
+            return None, None
+        if target.dim() > 1:
+            target = target.argmax(dim=-1)
+        target_exist = (target.reshape(-1).long().to(pred_edge.device) > 0).to(
+            dtype=pred_edge.dtype
+        )
+        return query_family.to(pred_edge.device).long().reshape(-1), target_exist
+
+    def _global_aux_stats_from_block(self, pred, true_data, clean_data):
+        query_family, target_exist = self._query_family_and_target_exist(
+            pred, true_data, clean_data
+        )
+        if query_family is None:
+            return None
+        pred_edge = pred.edge_attr
+        logits = pred_edge.reshape(-1, pred_edge.shape[-1])
+        pred_exist = (1.0 - torch.softmax(logits, dim=-1)[:, 0]).clamp(
+            min=0.0, max=1.0
+        )
+        stats = {
+            "family": {},
+            "degree": {},
+            "num_pairs": 0,
+            "device": pred_edge.device,
+            "dtype": pred_edge.dtype,
+        }
+        for fam in torch.unique(query_family):
+            fam_id = int(fam.detach().cpu().item())
+            mask = query_family == fam_id
+            stats["family"][fam_id] = {
+                "n": float(mask.sum().item()),
+                "pred": float(pred_exist[mask].sum().detach().cpu()),
+                "target": float(target_exist[mask].sum().detach().cpu()),
+            }
+
+        pair_info = self._degree_pair_ids_for_candidates(pred.edge_index.long(), query_family)
+        if pair_info is None:
+            return stats
+        pair_id = pair_info["pair_id"].to(pred_edge.device).long()
+        valid_pair = pair_info["valid"].to(pred_edge.device)
+        num_bins = int(pair_info["num_bins"])
+        num_pairs = int(num_bins * num_bins)
+        stats["num_pairs"] = num_pairs
+        for fam in torch.unique(query_family):
+            fam_id = int(fam.detach().cpu().item())
+            mask = (query_family == fam_id) & valid_pair
+            if not mask.any():
+                continue
+            fam_pair_ids = pair_id[mask].clamp(min=0, max=num_pairs - 1)
+            pred_mass = pred_edge.new_zeros(num_pairs)
+            target_mass = pred_edge.new_zeros(num_pairs)
+            pred_mass.scatter_add_(0, fam_pair_ids, pred_exist[mask])
+            target_mass.scatter_add_(0, fam_pair_ids, target_exist[mask])
+            stats["degree"][fam_id] = {
+                "pred": pred_mass.detach().cpu(),
+                "target": target_mass.detach().cpu(),
+            }
+        return stats
+
+    def _merge_global_aux_stats(self, base, add):
+        if add is None:
+            return base
+        if base is None:
+            return add
+        for fam_id, vals in add.get("family", {}).items():
+            cur = base["family"].setdefault(fam_id, {"n": 0.0, "pred": 0.0, "target": 0.0})
+            cur["n"] += float(vals.get("n", 0.0))
+            cur["pred"] += float(vals.get("pred", 0.0))
+            cur["target"] += float(vals.get("target", 0.0))
+        base["num_pairs"] = max(int(base.get("num_pairs", 0)), int(add.get("num_pairs", 0)))
+        for fam_id, vals in add.get("degree", {}).items():
+            if fam_id not in base["degree"]:
+                base["degree"][fam_id] = {
+                    "pred": vals["pred"].clone(),
+                    "target": vals["target"].clone(),
+                }
+            else:
+                base["degree"][fam_id]["pred"] = base["degree"][fam_id]["pred"] + vals["pred"]
+                base["degree"][fam_id]["target"] = base["degree"][fam_id]["target"] + vals["target"]
+        return base
+
+    def _prepare_streaming_global_aux(self, stats, sparse_noisy_data):
+        if not stats:
+            return None
+        device = stats.get("device", self.device)
+        dtype = stats.get("dtype", torch.float32)
+        prepared = {"family_coef": {}, "degree_grad": {}, "stats": stats}
+
+        family_w = self._warmup_weight(
+            float(getattr(self.cfg.model, "family_count_loss_weight", 0.0) or 0.0),
+            int(getattr(self.cfg.model, "family_count_loss_warmup_epochs", 0) or 0),
+            self._auxiliary_time_factor(
+                sparse_noisy_data,
+                float(getattr(self.cfg.model, "family_count_loss_t_power", 0.0) or 0.0),
+            ),
+        )
+        loss_type = str(getattr(self.cfg.model, "family_count_loss_type", "l1") or "l1").lower()
+        min_edges = int(getattr(self.cfg.model, "family_count_loss_min_query_edges", 32) or 0)
+        active = [
+            (fam_id, vals)
+            for fam_id, vals in stats.get("family", {}).items()
+            if float(vals.get("n", 0.0)) >= min_edges
+        ]
+        if family_w > 0 and active:
+            denom_fams = float(len(active))
+            for fam_id, vals in active:
+                n = max(float(vals["n"]), 1.0)
+                diff = float(vals["pred"] / n - vals["target"] / n)
+                if loss_type == "mse":
+                    coef = 2.0 * diff / n
+                else:
+                    coef = (1.0 if diff >= 0.0 else -1.0) / n
+                prepared["family_coef"][fam_id] = family_w * coef / denom_fams
+
+        degree_w = self._warmup_weight(
+            float(getattr(self.cfg.model, "degree_pair_dist_loss_weight", 0.0) or 0.0),
+            int(getattr(self.cfg.model, "degree_pair_dist_loss_warmup_epochs", 0) or 0),
+            self._auxiliary_time_factor(
+                sparse_noisy_data,
+                float(getattr(self.cfg.model, "degree_pair_dist_loss_t_power", 0.0) or 0.0),
+            ),
+        )
+        if degree_w <= 0:
+            return prepared
+        eps = 1e-8
+        loss_type = str(getattr(self.cfg.model, "degree_pair_dist_loss_type", "js") or "js").lower()
+        min_edges = int(getattr(self.cfg.model, "degree_pair_dist_min_query_edges", 32) or 0)
+        active_degree = []
+        for fam_id, vals in stats.get("degree", {}).items():
+            target_mass = vals["target"].float()
+            pred_mass = vals["pred"].float()
+            if float((target_mass.sum() + pred_mass.sum()).item()) <= 0:
+                continue
+            if float(stats.get("family", {}).get(fam_id, {}).get("n", 0.0)) < min_edges:
+                continue
+            active_degree.append((fam_id, pred_mass, target_mass))
+        if not active_degree:
+            return prepared
+        denom_fams = float(len(active_degree))
+        for fam_id, pred_mass_cpu, target_mass_cpu in active_degree:
+            pred_mass = pred_mass_cpu.to(device=device, dtype=dtype).detach().clone().requires_grad_(True)
+            target_mass = target_mass_cpu.to(device=device, dtype=dtype)
+            if target_mass.sum() <= eps or pred_mass.sum() <= eps:
+                continue
+            pred_dist = pred_mass / pred_mass.sum().clamp(min=eps)
+            target_dist = target_mass / target_mass.sum().clamp(min=eps)
+            if loss_type == "l1":
+                small_loss = (pred_dist - target_dist).abs().sum()
+            elif loss_type == "mse":
+                small_loss = (pred_dist - target_dist).pow(2).sum()
+            elif loss_type == "kl":
+                small_loss = (
+                    target_dist * ((target_dist + eps).log() - (pred_dist + eps).log())
+                ).sum()
+            else:
+                mix = 0.5 * (pred_dist + target_dist)
+                small_loss = 0.5 * (
+                    (target_dist * ((target_dist + eps).log() - (mix + eps).log())).sum()
+                    + (pred_dist * ((pred_dist + eps).log() - (mix + eps).log())).sum()
+                )
+            grad = torch.autograd.grad(small_loss, pred_mass, retain_graph=False)[0]
+            prepared["degree_grad"][fam_id] = (degree_w / denom_fams) * grad.detach()
+        return prepared
+
+    def _streaming_global_aux_loss_for_block(self, pred, true_data, clean_data, prepared):
+        if not prepared:
+            return pred.edge_attr.sum() * 0.0
+        query_family, _target_exist = self._query_family_and_target_exist(pred, true_data, clean_data)
+        if query_family is None:
+            return pred.edge_attr.sum() * 0.0
+        pred_edge = pred.edge_attr
+        logits = pred_edge.reshape(-1, pred_edge.shape[-1])
+        pred_exist = (1.0 - torch.softmax(logits, dim=-1)[:, 0]).clamp(min=0.0, max=1.0)
+        loss = pred_edge.sum() * 0.0
+        for fam_id, coef in prepared.get("family_coef", {}).items():
+            mask = query_family == int(fam_id)
+            if mask.any():
+                loss = loss + float(coef) * pred_exist[mask].sum()
+        if prepared.get("degree_grad"):
+            pair_info = self._degree_pair_ids_for_candidates(pred.edge_index.long(), query_family)
+            if pair_info is not None:
+                pair_id = pair_info["pair_id"].to(pred_edge.device).long()
+                valid_pair = pair_info["valid"].to(pred_edge.device)
+                num_pairs = int(pair_info["num_bins"]) ** 2
+                for fam_id, grad in prepared.get("degree_grad", {}).items():
+                    mask = (query_family == int(fam_id)) & valid_pair
+                    if not mask.any():
+                        continue
+                    fam_pair_ids = pair_id[mask].clamp(min=0, max=num_pairs - 1)
+                    grad_dev = grad.to(device=pred_edge.device, dtype=pred_edge.dtype)
+                    loss = loss + (grad_dev[fam_pair_ids] * pred_exist[mask]).sum()
+        return loss
+
+    @staticmethod
+    def _js_divergence_from_masses(pred_mass, target_mass, eps=1e-8):
+        pred_sum = pred_mass.sum().clamp(min=eps)
+        target_sum = target_mass.sum().clamp(min=eps)
+        pred_dist = pred_mass / pred_sum
+        target_dist = target_mass / target_sum
+        mix = 0.5 * (pred_dist + target_dist)
+        return 0.5 * (
+            (pred_dist * ((pred_dist + eps).log() - (mix + eps).log())).sum()
+            + (target_dist * ((target_dist + eps).log() - (mix + eps).log())).sum()
+        )
+
+    def _compute_query_topk_structure_probe(self, pred, true_data, clean_data, num_nodes):
+        pred_edge = pred.edge_attr
+        edge_index = pred.edge_index
+        min_query = int(
+            getattr(self.cfg.model, "train_structure_probe_min_query_edges", 256) or 0
+        )
+        if (
+            pred_edge.numel() == 0
+            or edge_index.numel() == 0
+            or pred_edge.shape[0] < min_query
+            or not self.heterogeneous
+        ):
+            return None
+        query_family, target_exist = self._query_family_and_target_exist(
+            pred, true_data, clean_data
+        )
+        if query_family is None:
+            return None
+        k = int(target_exist.sum().detach().item())
+        n = int(target_exist.numel())
+        if k <= 0 or n <= 0:
+            return None
+        k = min(k, n)
+        logits = pred_edge.reshape(-1, pred_edge.shape[-1])
+        exist_scores = torch.logsumexp(logits[:, 1:], dim=-1) - logits[:, 0]
+        selected = torch.zeros(n, dtype=torch.bool, device=pred_edge.device)
+        top_idx = torch.topk(exist_scores, k=k, largest=True).indices
+        selected[top_idx] = True
+
+        target_bool = target_exist > 0.5
+        true_in_topk = target_exist[selected].sum()
+        precision = true_in_topk / float(max(k, 1))
+        recall = true_in_topk / target_exist.sum().clamp(min=1.0)
+
+        fam_ids = torch.unique(query_family)
+        family_sel = pred_edge.new_zeros(int(fam_ids.numel()))
+        family_target = pred_edge.new_zeros(int(fam_ids.numel()))
+        for pos, fam in enumerate(fam_ids):
+            mask = query_family == fam
+            family_sel[pos] = selected[mask].to(dtype=pred_edge.dtype).sum()
+            family_target[pos] = target_exist[mask].sum()
+        family_l1 = (
+            family_sel / family_sel.sum().clamp(min=1.0)
+            - family_target / family_target.sum().clamp(min=1.0)
+        ).abs().sum() * 0.5
+
+        degree_pair_js = None
+        pair_info = self._degree_pair_ids_for_candidates(edge_index.long(), query_family)
+        if pair_info is not None:
+            pair_id = pair_info["pair_id"].to(pred_edge.device).long()
+            valid_pair = pair_info["valid"].to(pred_edge.device)
+            num_pairs = int(pair_info["num_bins"]) ** 2
+            fam_count = int(query_family.max().detach().item()) + 1 if query_family.numel() else 0
+            total_bins = max(1, fam_count * num_pairs)
+            flat_ids = (query_family.clamp(min=0) * num_pairs + pair_id.clamp(min=0, max=num_pairs - 1)).long()
+            valid = valid_pair & (query_family >= 0)
+            if valid.any():
+                sel_mass = pred_edge.new_zeros(total_bins)
+                tgt_mass = pred_edge.new_zeros(total_bins)
+                sel_mass.scatter_add_(
+                    0,
+                    flat_ids[valid].clamp(min=0, max=total_bins - 1),
+                    selected[valid].to(dtype=pred_edge.dtype),
+                )
+                tgt_mass.scatter_add_(
+                    0,
+                    flat_ids[valid].clamp(min=0, max=total_bins - 1),
+                    target_exist[valid],
+                )
+                if sel_mass.sum() > 0 and tgt_mass.sum() > 0:
+                    degree_pair_js = self._js_divergence_from_masses(sel_mass, tgt_mass)
+
+        closure_mass_rel = None
+        closure_mean_gap = None
+        common = self._clean_common_neighbor_scores(
+            edge_index=edge_index.long(),
+            full_data=clean_data,
+            num_nodes=int(num_nodes),
+            device=pred_edge.device,
+            dtype=pred_edge.dtype,
+        )
+        if common is not None and common.numel() == n:
+            selected_mass = common[selected].sum()
+            target_mass = (common * target_exist).sum()
+            closure_mass_rel = (
+                (selected_mass - target_mass).abs()
+                / target_mass.abs().clamp(min=1.0)
+            )
+            selected_mean = common[selected].mean() if selected.any() else common.sum() * 0.0
+            target_mean = common[target_bool].mean() if target_bool.any() else common.sum() * 0.0
+            closure_mean_gap = selected_mean - target_mean
+
+        return {
+            "topk_precision": float(precision.detach().cpu()),
+            "topk_recall": float(recall.detach().cpu()),
+            "family_l1": float(family_l1.detach().cpu()),
+            "degree_pair_js": (
+                float(degree_pair_js.detach().cpu())
+                if degree_pair_js is not None
+                else None
+            ),
+            "closure_mass_rel": (
+                float(closure_mass_rel.detach().cpu())
+                if closure_mass_rel is not None
+                else None
+            ),
+            "closure_mean_gap": (
+                float(closure_mean_gap.detach().cpu())
+                if closure_mean_gap is not None
+                else None
+            ),
+            "k": float(k),
+        }
+
+    def _record_query_topk_structure_probe(self, pred, true_data, clean_data):
+        every = int(getattr(self.cfg.model, "train_structure_probe_every_epochs", 0) or 0)
+        if every <= 0 or int(self.current_epoch) % every != 0:
+            return
+        with torch.no_grad():
+            stats = self._compute_query_topk_structure_probe(
+                pred,
+                true_data,
+                clean_data,
+                num_nodes=clean_data.x.shape[0],
+            )
+        if not stats:
+            return
+        if not hasattr(self, "_epoch_struct_probe_count"):
+            self._epoch_struct_probe_count = 0
+            self._epoch_struct_probe_topk_precision_sum = 0.0
+            self._epoch_struct_probe_topk_recall_sum = 0.0
+            self._epoch_struct_probe_family_l1_sum = 0.0
+            self._epoch_struct_probe_degree_pair_js_sum = 0.0
+            self._epoch_struct_probe_degree_pair_js_count = 0
+            self._epoch_struct_probe_closure_mass_rel_sum = 0.0
+            self._epoch_struct_probe_closure_mass_rel_count = 0
+            self._epoch_struct_probe_closure_mean_gap_sum = 0.0
+            self._epoch_struct_probe_closure_mean_gap_count = 0
+            self._epoch_struct_probe_k_sum = 0.0
+        self._epoch_struct_probe_count += 1
+        self._epoch_struct_probe_topk_precision_sum += float(stats["topk_precision"])
+        self._epoch_struct_probe_topk_recall_sum += float(stats["topk_recall"])
+        self._epoch_struct_probe_family_l1_sum += float(stats["family_l1"])
+        self._epoch_struct_probe_k_sum += float(stats["k"])
+        if stats.get("degree_pair_js") is not None:
+            self._epoch_struct_probe_degree_pair_js_sum += float(stats["degree_pair_js"])
+            self._epoch_struct_probe_degree_pair_js_count += 1
+        if stats.get("closure_mass_rel") is not None:
+            self._epoch_struct_probe_closure_mass_rel_sum += float(stats["closure_mass_rel"])
+            self._epoch_struct_probe_closure_mass_rel_count += 1
+        if stats.get("closure_mean_gap") is not None:
+            self._epoch_struct_probe_closure_mean_gap_sum += float(stats["closure_mean_gap"])
+            self._epoch_struct_probe_closure_mean_gap_count += 1
+
+    def _compute_family_count_loss(self, pred, true_data, clean_data):
+        """Match family-wise expected edge density on the current query set."""
+        pred_edge = pred.edge_attr
+        edge_index = pred.edge_index
+        target = true_data.edge_attr
+        if (
+            pred_edge.numel() == 0
+            or edge_index.numel() == 0
+            or target.numel() == 0
+            or not self.heterogeneous
+        ):
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_families": 0.0}
+        _node_type_ids, query_family = self._infer_query_family_from_clean_node_types(
+            edge_index.long(),
+            clean_data.x,
+        )
+        if query_family is None or query_family.numel() != pred_edge.shape[0]:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_families": 0.0}
+        if target.dim() > 1:
+            target = target.argmax(dim=-1)
+        query_family = query_family.to(pred_edge.device).long().reshape(-1)
+        target_exist = (target.reshape(-1).long().to(pred_edge.device) > 0).to(
+            dtype=pred_edge.dtype
+        )
+        logits = pred_edge.reshape(-1, pred_edge.shape[-1])
+        prob = torch.softmax(logits, dim=-1)
+        pred_exist = (1.0 - prob[:, 0]).clamp(min=0.0, max=1.0)
+        min_edges = int(getattr(self.cfg.model, "family_count_loss_min_query_edges", 32) or 0)
+        loss_type = str(getattr(self.cfg.model, "family_count_loss_type", "l1") or "l1").lower()
+        losses = []
+        for fam in torch.unique(query_family):
+            mask = query_family == fam
+            n = int(mask.sum().item())
+            if n < min_edges:
+                continue
+            pred_density = pred_exist[mask].mean()
+            target_density = target_exist[mask].mean()
+            diff = pred_density - target_density.detach()
+            losses.append(diff.pow(2) if loss_type == "mse" else diff.abs())
+        if not losses:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_families": 0.0}
+        return torch.stack(losses).mean(), {"active_families": float(len(losses))}
+
+    def _compute_degree_pair_distribution_loss(self, pred, clean_data, true_data=None):
+        """Match family-wise endpoint degree-bin-pair distributions on query edges.
+
+        This is a training-only soft teacher for the diagnostic oracle used by
+        ``*_degree_pair_quota`` sampling. It compares the predicted soft edge
+        mass in each relation family against the clean graph's endpoint
+        degree-bin-pair histogram, but only over pair bins represented in the
+        current query set.
+        """
+        pred_edge = pred.edge_attr
+        edge_index = pred.edge_index
+        if pred_edge.numel() == 0 or edge_index.numel() == 0 or not self.heterogeneous:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_families": 0.0}
+
+        _node_type_ids, query_family = self._infer_query_family_from_clean_node_types(
+            edge_index.long(),
+            clean_data.x,
+        )
+        if query_family is None or query_family.numel() != pred_edge.shape[0]:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_families": 0.0}
+        query_family = query_family.to(pred_edge.device).long().reshape(-1)
+        pair_info = self._degree_pair_ids_for_candidates(edge_index.long(), query_family)
+        if pair_info is None:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_families": 0.0}
+
+        pair_id = pair_info["pair_id"].to(pred_edge.device).long()
+        valid_pair = pair_info["valid"].to(pred_edge.device)
+        pair_counts = pair_info["pair_counts"]
+        num_bins = int(pair_info["num_bins"])
+        num_pairs = int(num_bins * num_bins)
+        eps = 1e-8
+        min_edges = int(getattr(self.cfg.model, "degree_pair_dist_min_query_edges", 32) or 0)
+        loss_type = str(
+            getattr(self.cfg.model, "degree_pair_dist_loss_type", "js")
+            or "js"
+        ).lower()
+        target_smoothing = float(
+            getattr(self.cfg.model, "degree_pair_dist_target_smoothing", 0.0)
+            or 0.0
+        )
+        target_smoothing = max(0.0, min(1.0, target_smoothing))
+        target_mode = str(
+            getattr(self.cfg.model, "degree_pair_dist_target", "block") or "block"
+        ).lower()
+        if target_mode not in {"block", "reference"}:
+            target_mode = "block"
+        if target_mode == "block" and true_data is None:
+            target_mode = "reference"
+        block_target_exist = None
+        if target_mode == "block" and true_data is not None:
+            target = true_data.edge_attr
+            if target.dim() > 1:
+                target = target.argmax(dim=-1)
+            block_target_exist = (
+                target.reshape(-1).long().to(pred_edge.device) > 0
+            ).to(dtype=pred_edge.dtype)
+
+        logits = pred_edge.reshape(-1, pred_edge.shape[-1])
+        prob = torch.softmax(logits, dim=-1)
+        pred_exist = (1.0 - prob[:, 0]).clamp(min=0.0)
+        losses = []
+        for fam in torch.unique(query_family):
+            fam_id = int(fam.detach().cpu().item())
+            if fam_id < 0 or fam_id not in pair_counts:
+                continue
+            mask = (query_family == fam_id) & valid_pair
+            n = int(mask.sum().item())
+            if n < min_edges:
+                continue
+            fam_pair_ids = pair_id[mask].clamp(min=0, max=num_pairs - 1)
+            pred_mass = pred_edge.new_zeros(num_pairs)
+            pred_mass.scatter_add_(0, fam_pair_ids, pred_exist[mask])
+            if pred_mass.sum() <= eps:
+                continue
+
+            available = torch.zeros(num_pairs, dtype=torch.bool, device=pred_edge.device)
+            available[fam_pair_ids.unique()] = True
+            target_mass = pred_edge.new_zeros(num_pairs)
+            if target_mode == "block" and block_target_exist is not None:
+                target_mass.scatter_add_(0, fam_pair_ids, block_target_exist[mask])
+            else:
+                for pair_key, cnt in pair_counts.get(fam_id, {}).items():
+                    a, b = int(pair_key[0]), int(pair_key[1])
+                    pid = a * num_bins + b
+                    if 0 <= pid < num_pairs:
+                        target_mass[pid] = float(cnt)
+                target_mass = target_mass * available.to(dtype=target_mass.dtype)
+            if target_mass.sum() <= eps:
+                continue
+            if target_smoothing > 0:
+                smooth = available.to(dtype=target_mass.dtype)
+                smooth = smooth / smooth.sum().clamp(min=1.0)
+                target_dist = target_mass / target_mass.sum().clamp(min=eps)
+                target_dist = (1.0 - target_smoothing) * target_dist + target_smoothing * smooth
+            else:
+                target_dist = target_mass / target_mass.sum().clamp(min=eps)
+            pred_dist = pred_mass / pred_mass.sum().clamp(min=eps)
+
+            if loss_type == "l1":
+                losses.append((pred_dist - target_dist).abs().sum())
+            elif loss_type == "mse":
+                losses.append((pred_dist - target_dist).pow(2).sum())
+            elif loss_type == "kl":
+                losses.append(
+                    (target_dist * ((target_dist + eps).log() - (pred_dist + eps).log())).sum()
+                )
+            else:
+                mix = 0.5 * (pred_dist + target_dist)
+                losses.append(
+                    0.5
+                    * (
+                        (target_dist * ((target_dist + eps).log() - (mix + eps).log())).sum()
+                        + (pred_dist * ((pred_dist + eps).log() - (mix + eps).log())).sum()
+                    )
+                )
+
+        if not losses:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_families": 0.0}
+        return torch.stack(losses).mean(), {"active_families": float(len(losses))}
+
+    def _clean_common_neighbor_scores(self, edge_index, full_data, num_nodes, device, dtype):
+        full_edge_index = getattr(full_data, "edge_index", None)
+        full_edge_attr = getattr(full_data, "edge_attr", None)
+        if full_edge_index is None or full_edge_index.numel() == 0 or edge_index.numel() == 0:
+            return None
+        src_full = full_edge_index[0].long().to(device)
+        dst_full = full_edge_index[1].long().to(device)
+        if full_edge_attr is not None and full_edge_attr.numel() > 0:
+            if full_edge_attr.dim() > 1:
+                full_labels = full_edge_attr.argmax(dim=-1).to(device)
+            else:
+                full_labels = full_edge_attr.long().to(device)
+            full_pos = full_labels.reshape(-1) > 0
+            src_full = src_full[full_pos]
+            dst_full = dst_full[full_pos]
+        valid = (
+            (src_full >= 0)
+            & (src_full < num_nodes)
+            & (dst_full >= 0)
+            & (dst_full < num_nodes)
+            & (src_full != dst_full)
+        )
+        src_full = src_full[valid]
+        dst_full = dst_full[valid]
+        if src_full.numel() == 0:
+            return None
+        adj = torch.zeros((num_nodes, num_nodes), dtype=torch.bool, device=device)
+        adj[src_full, dst_full] = True
+        adj[dst_full, src_full] = True
+        q_src = edge_index[0].long().to(device)
+        q_dst = edge_index[1].long().to(device)
+        valid_q = (
+            (q_src >= 0)
+            & (q_src < num_nodes)
+            & (q_dst >= 0)
+            & (q_dst < num_nodes)
+            & (q_src != q_dst)
+        )
+        common = torch.zeros(edge_index.shape[1], dtype=dtype, device=device)
+        if valid_q.any():
+            valid_idx = valid_q.nonzero(as_tuple=False).reshape(-1)
+            chunk_size = int(
+                getattr(
+                    self.cfg.model,
+                    "closure_rank_common_neighbor_chunk_size",
+                    65536,
+                )
+                or 65536
+            )
+            chunk_size = max(1, chunk_size)
+            for start in range(0, int(valid_idx.numel()), chunk_size):
+                idx = valid_idx[start : start + chunk_size]
+                common[idx] = (
+                    adj[q_src[idx]] & adj[q_dst[idx]]
+                ).sum(dim=-1).to(dtype=dtype)
+        return common
+
+    def _compute_closure_ranking_loss(self, pred, clean_data, num_nodes):
+        """Pairwise ranking for structural closure opportunity, independent of edge ID."""
+        pred_edge = pred.edge_attr
+        edge_index = pred.edge_index
+        if pred_edge.numel() == 0 or edge_index.numel() == 0 or not self.heterogeneous:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_families": 0.0, "pairs": 0.0}
+        _node_type_ids, query_family = self._infer_query_family_from_clean_node_types(
+            edge_index.long(),
+            clean_data.x,
+        )
+        if query_family is None or query_family.numel() != pred_edge.shape[0]:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_families": 0.0, "pairs": 0.0}
+        common = self._clean_common_neighbor_scores(
+            edge_index=edge_index.long(),
+            full_data=clean_data,
+            num_nodes=int(num_nodes),
+            device=pred_edge.device,
+            dtype=pred_edge.dtype,
+        )
+        if common is None:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_families": 0.0, "pairs": 0.0}
+        if bool(getattr(self.cfg.model, "closure_rank_score_log1p", True)):
+            rank_score = torch.log1p(common)
+        else:
+            rank_score = common
+        min_common = float(
+            getattr(self.cfg.model, "closure_rank_min_common_neighbors", 1.0) or 0.0
+        )
+        top_q = max(
+            0.0,
+            min(1.0, float(getattr(self.cfg.model, "closure_rank_top_quantile", 0.8) or 0.8)),
+        )
+        bottom_q = max(
+            0.0,
+            min(1.0, float(getattr(self.cfg.model, "closure_rank_bottom_quantile", 0.5) or 0.5)),
+        )
+        min_edges = int(getattr(self.cfg.model, "closure_rank_min_query_edges", 64) or 0)
+        max_pairs = int(getattr(self.cfg.model, "closure_rank_pairs_per_family", 2048) or 2048)
+        margin = float(getattr(self.cfg.model, "closure_rank_margin", 0.0) or 0.0)
+        query_family = query_family.to(pred_edge.device).long().reshape(-1)
+        logits = pred_edge.reshape(-1, pred_edge.shape[-1])
+        exist_logits = torch.logsumexp(logits[:, 1:], dim=-1) - logits[:, 0]
+        losses = []
+        pair_total = 0
+        for fam in torch.unique(query_family):
+            fam_mask = query_family == fam
+            if int(fam_mask.sum().item()) < min_edges:
+                continue
+            fam_score = rank_score[fam_mask]
+            fam_logits = exist_logits[fam_mask]
+            positive_struct = fam_score >= float(math.log1p(min_common) if bool(getattr(self.cfg.model, "closure_rank_score_log1p", True)) else min_common)
+            if not positive_struct.any():
+                continue
+            high_threshold = torch.quantile(fam_score[positive_struct].detach().float(), top_q).to(
+                device=pred_edge.device, dtype=pred_edge.dtype
+            )
+            low_threshold = torch.quantile(fam_score.detach().float(), bottom_q).to(
+                device=pred_edge.device, dtype=pred_edge.dtype
+            )
+            good_idx = torch.where(fam_score >= high_threshold)[0]
+            bad_idx = torch.where(fam_score <= low_threshold)[0]
+            if good_idx.numel() == 0 or bad_idx.numel() == 0:
+                continue
+            pairs = min(max_pairs, int(good_idx.numel()), int(bad_idx.numel()))
+            if pairs <= 0:
+                continue
+            if good_idx.numel() > pairs:
+                good_idx = good_idx[torch.randperm(good_idx.numel(), device=pred_edge.device)[:pairs]]
+            if bad_idx.numel() > pairs:
+                bad_idx = bad_idx[torch.randperm(bad_idx.numel(), device=pred_edge.device)[:pairs]]
+            good_logits = fam_logits[good_idx]
+            bad_logits = fam_logits[bad_idx]
+            losses.append(F.softplus(margin - (good_logits - bad_logits)).mean())
+            pair_total += pairs
+        if not losses:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_families": 0.0, "pairs": 0.0}
+        return torch.stack(losses).mean(), {
+            "active_families": float(len(losses)),
+            "pairs": float(pair_total),
+        }
+
     def _compute_closure_positive_loss(self, pred, true_data, full_data, num_nodes):
         """Extra BCE on positive query edges weighted by true common-neighbor count."""
         pred_edge = pred.edge_attr
@@ -4914,6 +7421,226 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             return torch.stack(losses).sum()
         return pred_edge.sum() * 0.0
 
+    def _infer_query_family_from_clean_node_types(self, edge_index, clean_node):
+        """Vectorized family inference from clean endpoint node types."""
+        type_offsets = getattr(self.dataset_info, "type_offsets", {}) or {}
+        fam_endpoints = getattr(self.dataset_info, "fam_endpoints", {}) or {}
+        edge_family_offsets = (
+            getattr(self.dataset_info, "edge_family_offsets", {}) or {}
+        )
+        if not type_offsets or not fam_endpoints or not edge_family_offsets:
+            return None, None
+        if clean_node.dim() > 1:
+            node_subtype = clean_node.argmax(dim=-1).long()
+        else:
+            node_subtype = clean_node.long().reshape(-1)
+        sorted_types = sorted(type_offsets.items(), key=lambda kv: kv[1])
+        node_type_ids = node_subtype.new_full(node_subtype.shape, -1)
+        type_name_to_id = {}
+        for type_id, (type_name, offset) in enumerate(sorted_types):
+            type_name_to_id[str(type_name)] = type_id
+            if type_id + 1 < len(sorted_types):
+                next_offset = int(sorted_types[type_id + 1][1])
+                mask = (node_subtype >= int(offset)) & (
+                    node_subtype < next_offset
+                )
+            else:
+                mask = node_subtype >= int(offset)
+            node_type_ids[mask] = type_id
+        num_types = len(sorted_types)
+        if num_types <= 0:
+            return None, None
+        pair_to_family = node_subtype.new_full((num_types, num_types), -1)
+        for fam_id, (fam_name, _) in enumerate(
+            sorted(edge_family_offsets.items(), key=lambda kv: kv[1])
+        ):
+            endpoints = fam_endpoints.get(str(fam_name), {}) or {}
+            src_name = str(endpoints.get("src_type", ""))
+            dst_name = str(endpoints.get("dst_type", ""))
+            if src_name not in type_name_to_id or dst_name not in type_name_to_id:
+                continue
+            src_type = type_name_to_id[src_name]
+            dst_type = type_name_to_id[dst_name]
+            pair_to_family[src_type, dst_type] = fam_id
+            # Query edges are canonical in most training paths, but positive
+            # augmentation and undirected utilities can still present the
+            # reverse endpoint order. Treat both as the same family.
+            pair_to_family[dst_type, src_type] = fam_id
+        src_type = node_type_ids[edge_index[0].long()].clamp(min=0)
+        dst_type = node_type_ids[edge_index[1].long()].clamp(min=0)
+        query_family = pair_to_family[src_type, dst_type]
+        invalid = (
+            node_type_ids[edge_index[0].long()] < 0
+        ) | (node_type_ids[edge_index[1].long()] < 0)
+        if invalid.any():
+            query_family = query_family.clone()
+            query_family[invalid] = -1
+        return node_type_ids, query_family
+
+    def _compute_family_role_ranking_loss(
+        self,
+        pred,
+        true_data,
+        clean_data,
+        sparse_noisy_data,
+    ):
+        """Soft family-role ranking loss on the current query set.
+
+        For each relation family, compare the endpoint degree-role matrix
+        induced by predicted existence rankings against the clean positive
+        query edges. The predicted mass is obtained by a family-local softmax
+        over existence logits and scaled to the number of clean positives in
+        that family, so the objective supervises ranking/role allocation rather
+        than probability calibration.
+        """
+        if pred.edge_attr.numel() == 0 or pred.edge_index.numel() == 0:
+            zero = pred.edge_attr.sum() * 0.0
+            return zero, {"active_families": 0.0, "reliability": 0.0}
+        if not self.heterogeneous:
+            zero = pred.edge_attr.sum() * 0.0
+            return zero, {"active_families": 0.0, "reliability": 0.0}
+
+        reliability = sparse_noisy_data.get("endpoint_role_scale_factor")
+        if reliability is None:
+            t_float = sparse_noisy_data.get("t_float")
+            if t_float is not None:
+                reliability = self._endpoint_role_reliability_factor(t_float)
+        if reliability is None:
+            reliability_value = 1.0
+        else:
+            reliability_value = float(
+                reliability.detach().float().mean().clamp(0.0, 1.0).cpu()
+            )
+        min_reliability = float(
+            getattr(self.cfg.model, "family_role_loss_min_reliability", 0.0)
+            or 0.0
+        )
+        if reliability_value < min_reliability:
+            zero = pred.edge_attr.sum() * 0.0
+            return zero, {
+                "active_families": 0.0,
+                "reliability": reliability_value,
+            }
+
+        node = clean_data.x
+        if node.dim() > 1:
+            clean_node_labels = node.argmax(dim=-1).long()
+        else:
+            clean_node_labels = node.long()
+        node_type_ids, query_family = self._infer_query_family_from_clean_node_types(
+            pred.edge_index.long(),
+            clean_data.x,
+        )
+        if node_type_ids is None or query_family is None:
+            zero = pred.edge_attr.sum() * 0.0
+            return zero, {"active_families": 0.0, "reliability": reliability_value}
+        node_type_ids = node_type_ids.to(pred.edge_attr.device).long()
+        query_family = query_family.to(pred.edge_attr.device).long().reshape(-1)
+        if query_family.numel() != pred.edge_attr.shape[0]:
+            zero = pred.edge_attr.sum() * 0.0
+            return zero, {"active_families": 0.0, "reliability": reliability_value}
+
+        clean_edge_attr = clean_data.edge_attr
+        if clean_edge_attr.dim() > 1:
+            clean_labels = clean_edge_attr.argmax(dim=-1).long()
+        else:
+            clean_labels = clean_edge_attr.long().reshape(-1)
+        clean_pos = clean_labels > 0
+        clean_edges = clean_data.edge_index[:, clean_pos].long()
+        degree = pred.edge_attr.new_zeros(clean_node_labels.shape[0])
+        if clean_edges.numel() > 0:
+            ones = pred.edge_attr.new_ones(clean_edges.shape[1])
+            degree.scatter_add_(0, clean_edges[0].to(degree.device), ones)
+            degree.scatter_add_(0, clean_edges[1].to(degree.device), ones)
+        log_degree = torch.log1p(degree)
+
+        batch = getattr(clean_data, "batch", None)
+        if batch is None:
+            batch = torch.zeros_like(clean_node_labels, device=pred.edge_attr.device)
+        else:
+            batch = batch.to(pred.edge_attr.device).long()
+        node_type_ids = node_type_ids.to(pred.edge_attr.device)
+        roles = torch.ones_like(clean_node_labels, device=pred.edge_attr.device)
+        for graph_id in torch.unique(batch):
+            graph_mask = batch == graph_id
+            for type_id in torch.unique(node_type_ids[graph_mask]):
+                mask = graph_mask & (node_type_ids == type_id)
+                vals = log_degree[mask]
+                if vals.numel() == 0:
+                    continue
+                if vals.numel() == 1:
+                    roles[mask] = 1
+                    continue
+                q50 = torch.quantile(vals.float(), 0.5)
+                q80 = torch.quantile(vals.float(), 0.8)
+                r = torch.ones_like(vals, dtype=torch.long)
+                r[vals <= q50] = 0
+                r[vals > q80] = 2
+                roles[mask] = r
+
+        src = pred.edge_index[0].long()
+        dst = pred.edge_index[1].long()
+        src_role = roles[src]
+        dst_role = roles[dst]
+        same_type = node_type_ids[src] == node_type_ids[dst]
+        role_a = src_role.clone()
+        role_b = dst_role.clone()
+        if same_type.any():
+            lo = torch.minimum(src_role[same_type], dst_role[same_type])
+            hi = torch.maximum(src_role[same_type], dst_role[same_type])
+            role_a[same_type] = lo
+            role_b[same_type] = hi
+        role_pair = (role_a * 3 + role_b).long().clamp(0, 8)
+
+        target = true_data.edge_attr
+        if target.dim() > 1:
+            target = target.argmax(dim=-1).long()
+        else:
+            target = target.long().reshape(-1)
+        true_exist = (target > 0).to(dtype=pred.edge_attr.dtype)
+        logits = pred.edge_attr.reshape(-1, pred.edge_attr.shape[-1])
+        exist_logits = torch.logsumexp(logits[:, 1:], dim=-1) - logits[:, 0]
+        temperature = max(
+            float(getattr(self.cfg.model, "family_role_loss_temperature", 1.0) or 1.0),
+            1e-4,
+        )
+        eps = 1e-8
+        losses = []
+        for fam in torch.unique(query_family):
+            fam_int = int(fam.detach().cpu().item())
+            if fam_int < 0:
+                continue
+            fam_mask = query_family == fam
+            target_count = true_exist[fam_mask].sum()
+            if target_count <= 0:
+                continue
+            pred_weights = (
+                torch.softmax(exist_logits[fam_mask] / temperature, dim=0)
+                * target_count.detach()
+            )
+            target_weights = true_exist[fam_mask]
+            fam_role = role_pair[fam_mask]
+            pred_mass = pred.edge_attr.new_zeros(9)
+            target_mass = pred.edge_attr.new_zeros(9)
+            pred_mass.scatter_add_(0, fam_role, pred_weights)
+            target_mass.scatter_add_(0, fam_role, target_weights)
+            pred_dist = pred_mass / pred_mass.sum().clamp(min=eps)
+            target_dist = target_mass / target_mass.sum().clamp(min=eps)
+            mix = 0.5 * (pred_dist + target_dist)
+            jsd = 0.5 * (
+                (target_dist * ((target_dist + eps).log() - (mix + eps).log())).sum()
+                + (pred_dist * ((pred_dist + eps).log() - (mix + eps).log())).sum()
+            )
+            losses.append(jsd)
+
+        if not losses:
+            zero = pred.edge_attr.sum() * 0.0
+            return zero, {"active_families": 0.0, "reliability": reliability_value}
+        return torch.stack(losses).mean(), {
+            "active_families": float(len(losses)),
+            "reliability": reliability_value,
+        }
+
     def _training_t_override(self, data, batch_idx):
         schedule = str(getattr(self.cfg.model, "train_t_schedule", "random") or "random").lower()
         if schedule in {"random", "none"}:
@@ -4945,6 +7672,9 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         return t_vals.view(bs, 1).float()
 
     def training_step(self, data, i):
+        if bool(getattr(self.cfg.model, "train_family_staged_queryfree", False)):
+            return self._training_step_family_staged_queryfree(data, i)
+
         if bool(getattr(self.cfg.model, "train_partition_ensemble", False)):
             return self._training_step_partition_ensemble(data, i)
 
@@ -4958,41 +7688,370 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 return self._training_step_once(data, i)
 
             opt = self.optimizers()
+            profile_efficiency = self._profile_training_efficiency_enabled()
+            if profile_efficiency and self.device.type == "cuda":
+                torch.cuda.reset_peak_memory_stats(self.device)
+            profile_start = self._profile_time(profile_efficiency)
             data_one_hot = self.dataset_info.to_one_hot(data)
             t_override = self._training_t_override(data_one_hot, i)
             sparse_noisy_data = self.apply_sparse_noise(data_one_hot, t_override=t_override)
+            noise_done = self._profile_time(profile_efficiency)
+            lookup_start = noise_done
+            two_hop_lookup = self._build_training_two_hop_lookup(
+                sparse_noisy_data,
+                num_nodes=int(data_one_hot.x.shape[0]),
+            )
+            if two_hop_lookup is not None:
+                sparse_noisy_data["two_hop_structure_lookup"] = two_hop_lookup
+            lookup_done = self._profile_time(profile_efficiency)
 
             block_count = int(getattr(self.cfg.model, "train_all_blocks_count", 0) or 0)
             if block_count <= 0:
                 ef = max(float(getattr(self, "edge_fraction", 1.0) or 1.0), 1e-8)
                 block_count = max(1, int(math.ceil(1.0 / ef)))
+            step_mode = str(
+                getattr(self.cfg.model, "train_all_blocks_step_mode", "sequential")
+                or "sequential"
+            ).lower()
+            if step_mode not in {
+                "sequential",
+                "accumulate",
+                "accumulate_global",
+                "accumulate_streaming_global",
+            }:
+                raise ValueError(
+                    "model.train_all_blocks_step_mode must be 'sequential', "
+                    "'accumulate', 'accumulate_global', or "
+                    f"'accumulate_streaming_global', got {step_mode!r}"
+                )
 
             block_order = torch.arange(block_count, device=self.device)
             if bool(getattr(self.cfg.model, "train_all_blocks_shuffle", True)) and block_count > 1:
                 block_order = block_order[torch.randperm(block_count, device=self.device)]
 
             losses_detached = []
-            for block_id_t in block_order:
+            query_build_time = 0.0
+            comp_graph_time = 0.0
+            hgt_forward_time = 0.0
+            loss_build_time = 0.0
+            backward_time = 0.0
+            optimizer_time = 0.0
+            query_edges_total = 0
+            if step_mode in {"accumulate", "accumulate_global", "accumulate_streaming_global"}:
                 opt.zero_grad()
+            accumulate_divisor = max(1, int(block_order.numel()))
+            global_pred_edges = []
+            global_pred_edge_indices = []
+            global_true_edges = []
+            streaming_global_aux = None
+            if step_mode == "accumulate_streaming_global":
+                streaming_stats = None
+                with torch.no_grad():
+                    for block_id_t in block_order:
+                        stat_out = self._training_step_once(
+                            data_one_hot,
+                            i,
+                            data_is_one_hot=True,
+                            sparse_noisy_data_override=dict(sparse_noisy_data),
+                            forced_block_id=int(block_id_t.item()),
+                            skip_auxiliary_structure_losses=True,
+                            return_query_outputs=True,
+                            record_structure_probe=False,
+                        )
+                        if stat_out is None or "pred_edge_attr" not in stat_out:
+                            continue
+                        pred_stat = utils.SparsePlaceHolder(
+                            node=data_one_hot.x,
+                            charge=data_one_hot.charge,
+                            edge_attr=stat_out["pred_edge_attr"],
+                            edge_index=stat_out["pred_edge_index"],
+                            y=data_one_hot.y,
+                            batch=data_one_hot.batch,
+                        )
+                        true_stat = utils.SparsePlaceHolder(
+                            node=data_one_hot.x,
+                            charge=data_one_hot.charge,
+                            edge_attr=stat_out["true_edge_attr"],
+                            edge_index=stat_out["pred_edge_index"],
+                            y=data_one_hot.y,
+                            batch=data_one_hot.batch,
+                        )
+                        streaming_stats = self._merge_global_aux_stats(
+                            streaming_stats,
+                            self._global_aux_stats_from_block(
+                                pred_stat, true_stat, data_one_hot
+                            ),
+                        )
+                streaming_global_aux = self._prepare_streaming_global_aux(
+                    streaming_stats, sparse_noisy_data
+                )
+            for block_id_t in block_order:
+                if step_mode == "sequential":
+                    opt.zero_grad()
                 out = self._training_step_once(
                     data_one_hot,
                     i,
                     data_is_one_hot=True,
                     sparse_noisy_data_override=dict(sparse_noisy_data),
                     forced_block_id=int(block_id_t.item()),
+                    skip_auxiliary_structure_losses=(
+                        step_mode in {"accumulate_global", "accumulate_streaming_global"}
+                    ),
+                    return_query_outputs=(
+                        step_mode in {"accumulate_global", "accumulate_streaming_global"}
+                    ),
                 )
                 if out is None:
                     continue
                 loss_piece = out["loss"]
-                self.manual_backward(loss_piece)
-                clip_val = float(getattr(self.cfg.train, "clip_grad", 0.0) or 0.0)
-                if clip_val > 0:
-                    self.clip_gradients(opt, gradient_clip_val=clip_val, gradient_clip_algorithm="norm")
-                opt.step()
+                forward_done = self._profile_time(profile_efficiency)
+                if step_mode == "accumulate_global":
+                    if "pred_edge_attr" in out:
+                        global_pred_edges.append(out["pred_edge_attr"])
+                        global_pred_edge_indices.append(out["pred_edge_index"])
+                        global_true_edges.append(out["true_edge_attr"])
+                    backward_done = forward_done
+                elif step_mode == "accumulate_streaming_global":
+                    aux_block_loss = loss_piece.sum() * 0.0
+                    if "pred_edge_attr" in out:
+                        pred_block = utils.SparsePlaceHolder(
+                            node=data_one_hot.x,
+                            charge=data_one_hot.charge,
+                            edge_attr=out["pred_edge_attr"],
+                            edge_index=out["pred_edge_index"],
+                            y=data_one_hot.y,
+                            batch=data_one_hot.batch,
+                        )
+                        true_block = utils.SparsePlaceHolder(
+                            node=data_one_hot.x,
+                            charge=data_one_hot.charge,
+                            edge_attr=out["true_edge_attr"],
+                            edge_index=out["pred_edge_index"],
+                            y=data_one_hot.y,
+                            batch=data_one_hot.batch,
+                        )
+                        aux_block_loss = self._streaming_global_aux_loss_for_block(
+                            pred_block,
+                            true_block,
+                            data_one_hot,
+                            streaming_global_aux,
+                        )
+                        closure_rank_w = self._warmup_weight(
+                            float(getattr(self.cfg.model, "closure_rank_loss_weight", 0.0) or 0.0),
+                            int(getattr(self.cfg.model, "closure_rank_loss_warmup_epochs", 0) or 0),
+                            self._auxiliary_time_factor(
+                                sparse_noisy_data,
+                                float(getattr(self.cfg.model, "closure_rank_loss_t_power", 1.0) or 0.0),
+                            ),
+                        )
+                        if closure_rank_w > 0:
+                            loss_closure_rank, closure_rank_stats = self._compute_closure_ranking_loss(
+                                pred_block,
+                                data_one_hot,
+                                num_nodes=data_one_hot.x.shape[0],
+                            )
+                            aux_block_loss = aux_block_loss + (
+                                closure_rank_w * loss_closure_rank / float(accumulate_divisor)
+                            )
+                            if not hasattr(self, "_epoch_closure_rank_loss_sum"):
+                                self._epoch_closure_rank_loss_sum = 0.0
+                                self._epoch_closure_rank_loss_count = 0
+                                self._epoch_closure_rank_weighted_sum = 0.0
+                                self._epoch_closure_rank_active_sum = 0.0
+                                self._epoch_closure_rank_pairs_sum = 0.0
+                            self._epoch_closure_rank_loss_sum += float(
+                                loss_closure_rank.detach().cpu()
+                            )
+                            self._epoch_closure_rank_loss_count += 1
+                            self._epoch_closure_rank_weighted_sum += float(
+                                (closure_rank_w * loss_closure_rank).detach().cpu()
+                            )
+                            self._epoch_closure_rank_active_sum += float(
+                                closure_rank_stats.get("active_families", 0.0)
+                            )
+                            self._epoch_closure_rank_pairs_sum += float(
+                                closure_rank_stats.get("pairs", 0.0)
+                            )
+                    backward_loss = loss_piece / float(accumulate_divisor) + aux_block_loss
+                    self.manual_backward(backward_loss)
+                    backward_done = self._profile_time(profile_efficiency)
+                    loss_piece = loss_piece.detach() + aux_block_loss.detach()
+                else:
+                    backward_loss = (
+                        loss_piece / float(accumulate_divisor)
+                        if step_mode == "accumulate"
+                        else loss_piece
+                    )
+                    self.manual_backward(backward_loss)
+                    backward_done = self._profile_time(profile_efficiency)
+                if step_mode == "sequential":
+                    clip_val = float(getattr(self.cfg.train, "clip_grad", 0.0) or 0.0)
+                    if clip_val > 0:
+                        self.clip_gradients(opt, gradient_clip_val=clip_val, gradient_clip_algorithm="norm")
+                    opt.step()
+                    optimizer_done = self._profile_time(profile_efficiency)
+                else:
+                    optimizer_done = backward_done
+                perf = out.get("perf", {})
+                query_build_time += float(perf.get("query_build_s", 0.0))
+                comp_graph_time += float(perf.get("comp_graph_s", 0.0))
+                hgt_forward_time += float(perf.get("hgt_forward_s", 0.0))
+                loss_build_time += float(perf.get("loss_build_s", 0.0))
+                backward_time += backward_done - forward_done
+                optimizer_time += optimizer_done - backward_done
+                query_edges_total += int(out.get("query_edges", 0))
                 losses_detached.append(loss_piece.detach())
 
             if not losses_detached:
                 return None
+            if step_mode == "accumulate_global":
+                global_loss = torch.stack(losses_detached).mean()
+                if global_pred_edges and global_true_edges:
+                    pred_global = utils.SparsePlaceHolder(
+                        node=data_one_hot.x,
+                        charge=data_one_hot.charge,
+                        edge_attr=torch.cat(global_pred_edges, dim=0),
+                        edge_index=torch.cat(global_pred_edge_indices, dim=1),
+                        y=data_one_hot.y,
+                        batch=data_one_hot.batch,
+                    )
+                    true_global = utils.SparsePlaceHolder(
+                        node=data_one_hot.x,
+                        charge=data_one_hot.charge,
+                        edge_attr=torch.cat(global_true_edges, dim=0),
+                        edge_index=pred_global.edge_index,
+                        y=data_one_hot.y,
+                        batch=data_one_hot.batch,
+                    )
+
+                    family_count_w = self._warmup_weight(
+                        float(getattr(self.cfg.model, "family_count_loss_weight", 0.0) or 0.0),
+                        int(getattr(self.cfg.model, "family_count_loss_warmup_epochs", 0) or 0),
+                        self._auxiliary_time_factor(
+                            sparse_noisy_data,
+                            float(getattr(self.cfg.model, "family_count_loss_t_power", 0.0) or 0.0),
+                        ),
+                    )
+                    if family_count_w > 0:
+                        loss_family_count, family_count_stats = self._compute_family_count_loss(
+                            pred_global, true_global, data_one_hot
+                        )
+                        global_loss = global_loss + family_count_w * loss_family_count
+                        if not hasattr(self, "_epoch_family_count_loss_sum"):
+                            self._epoch_family_count_loss_sum = 0.0
+                            self._epoch_family_count_loss_count = 0
+                            self._epoch_family_count_weighted_sum = 0.0
+                            self._epoch_family_count_active_sum = 0.0
+                        self._epoch_family_count_loss_sum += float(loss_family_count.detach().cpu())
+                        self._epoch_family_count_loss_count += 1
+                        self._epoch_family_count_weighted_sum += float(
+                            (family_count_w * loss_family_count).detach().cpu()
+                        )
+                        self._epoch_family_count_active_sum += float(
+                            family_count_stats.get("active_families", 0.0)
+                        )
+
+                    degree_pair_w = self._warmup_weight(
+                        float(getattr(self.cfg.model, "degree_pair_dist_loss_weight", 0.0) or 0.0),
+                        int(getattr(self.cfg.model, "degree_pair_dist_loss_warmup_epochs", 0) or 0),
+                        self._auxiliary_time_factor(
+                            sparse_noisy_data,
+                            float(getattr(self.cfg.model, "degree_pair_dist_loss_t_power", 0.0) or 0.0),
+                        ),
+                    )
+                    if degree_pair_w > 0:
+                        loss_degree_pair, degree_pair_stats = self._compute_degree_pair_distribution_loss(
+                            pred_global, data_one_hot, true_global
+                        )
+                        global_loss = global_loss + degree_pair_w * loss_degree_pair
+                        if not hasattr(self, "_epoch_degree_pair_dist_loss_sum"):
+                            self._epoch_degree_pair_dist_loss_sum = 0.0
+                            self._epoch_degree_pair_dist_loss_count = 0
+                            self._epoch_degree_pair_dist_weighted_sum = 0.0
+                            self._epoch_degree_pair_dist_active_sum = 0.0
+                        self._epoch_degree_pair_dist_loss_sum += float(loss_degree_pair.detach().cpu())
+                        self._epoch_degree_pair_dist_loss_count += 1
+                        self._epoch_degree_pair_dist_weighted_sum += float(
+                            (degree_pair_w * loss_degree_pair).detach().cpu()
+                        )
+                        self._epoch_degree_pair_dist_active_sum += float(
+                            degree_pair_stats.get("active_families", 0.0)
+                        )
+
+                    closure_rank_w = self._warmup_weight(
+                        float(getattr(self.cfg.model, "closure_rank_loss_weight", 0.0) or 0.0),
+                        int(getattr(self.cfg.model, "closure_rank_loss_warmup_epochs", 0) or 0),
+                        self._auxiliary_time_factor(
+                            sparse_noisy_data,
+                            float(getattr(self.cfg.model, "closure_rank_loss_t_power", 1.0) or 0.0),
+                        ),
+                    )
+                    if closure_rank_w > 0:
+                        loss_closure_rank, closure_rank_stats = self._compute_closure_ranking_loss(
+                            pred_global, data_one_hot, num_nodes=data_one_hot.x.shape[0]
+                        )
+                        global_loss = global_loss + closure_rank_w * loss_closure_rank
+                        if not hasattr(self, "_epoch_closure_rank_loss_sum"):
+                            self._epoch_closure_rank_loss_sum = 0.0
+                            self._epoch_closure_rank_loss_count = 0
+                            self._epoch_closure_rank_weighted_sum = 0.0
+                            self._epoch_closure_rank_active_sum = 0.0
+                            self._epoch_closure_rank_pairs_sum = 0.0
+                        self._epoch_closure_rank_loss_sum += float(loss_closure_rank.detach().cpu())
+                        self._epoch_closure_rank_loss_count += 1
+                        self._epoch_closure_rank_weighted_sum += float(
+                            (closure_rank_w * loss_closure_rank).detach().cpu()
+                        )
+                        self._epoch_closure_rank_active_sum += float(
+                            closure_rank_stats.get("active_families", 0.0)
+                        )
+                        self._epoch_closure_rank_pairs_sum += float(
+                            closure_rank_stats.get("pairs", 0.0)
+                        )
+
+                backward_start = self._profile_time(profile_efficiency)
+                self.manual_backward(global_loss)
+                backward_done = self._profile_time(profile_efficiency)
+                backward_time += backward_done - backward_start
+
+            if step_mode in {"accumulate", "accumulate_global", "accumulate_streaming_global"}:
+                opt_start = self._profile_time(profile_efficiency)
+                clip_val = float(getattr(self.cfg.train, "clip_grad", 0.0) or 0.0)
+                if clip_val > 0:
+                    self.clip_gradients(opt, gradient_clip_val=clip_val, gradient_clip_algorithm="norm")
+                opt.step()
+                opt_done = self._profile_time(profile_efficiency)
+                optimizer_time += opt_done - opt_start
+            if profile_efficiency and getattr(self, "local_rank", 0) == 0:
+                peak_allocated = (
+                    int(torch.cuda.max_memory_allocated(self.device))
+                    if self.device.type == "cuda"
+                    else 0
+                )
+                peak_reserved = (
+                    int(torch.cuda.max_memory_reserved(self.device))
+                    if self.device.type == "cuda"
+                    else 0
+                )
+                lookup = sparse_noisy_data.get("two_hop_structure_lookup") or {}
+                print(
+                    "[TRAIN-PERF] "
+                    f"epoch={int(self.current_epoch)} mode={step_mode} "
+                    f"blocks={len(losses_detached)} "
+                    f"queries={query_edges_total} "
+                    f"noise_s={noise_done - profile_start:.4f} "
+                    f"twohop_build_s={lookup_done - lookup_start:.4f} "
+                    f"query_build_s={query_build_time:.4f} "
+                    f"comp_graph_s={comp_graph_time:.4f} "
+                    f"hgt_forward_s={hgt_forward_time:.4f} "
+                    f"loss_build_s={loss_build_time:.4f} "
+                    f"backward_s={backward_time:.4f} "
+                    f"optimizer_s={optimizer_time:.4f} "
+                    f"adj_nnz={int(lookup.get('adjacency_nnz', 0))} "
+                    f"twohop_nnz={int(lookup.get('two_hop_nnz', 0))} "
+                    f"peak_alloc_mb={peak_allocated / (1024 ** 2):.1f} "
+                    f"peak_reserved_mb={peak_reserved / (1024 ** 2):.1f}"
+                )
             return {"loss": torch.stack(losses_detached).mean()}
 
         repeats = max(1, int(getattr(self.cfg.model, "train_query_repeats", 1)))
@@ -5139,7 +8198,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         total_queries = max(1, int(query_edge_index.shape[1]))
         weighted_terms = []
         view_stats = []
-        seed_base = int(getattr(self.cfg.train, "seed", 0) or 0)
+        seed_base = self._current_sampling_seed()
         global_step = int(getattr(self, "global_step", 0))
         for view_idx, (view_name, rounds, blocks, view_weight) in enumerate((
             ("metis", metis_rounds, metis_blocks, metis_weight),
@@ -5219,6 +8278,253 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             self._logged_train_partition_ensemble = True
         return {"loss": total_loss.detach()}
 
+    def _iter_family_staged_query_chunks(
+        self,
+        node_subtype: torch.Tensor,
+        batch: torch.Tensor,
+        chunk_size: int,
+    ):
+        """Yield full legal candidate chunks grouped as intra- then cross-family tasks."""
+        type_offsets = getattr(self.dataset_info, "type_offsets", {}) or {}
+        fam_endpoints = getattr(self.dataset_info, "fam_endpoints", {}) or {}
+        edge_family_avg = (
+            getattr(self.dataset_info, "edge_family_avg_edge_counts", {}) or {}
+        )
+        if not (self.heterogeneous and type_offsets and fam_endpoints):
+            return
+
+        sorted_types = sorted(type_offsets.items(), key=lambda x: x[1])
+        type_ranges = {}
+        for idx, (name, offset) in enumerate(sorted_types):
+            nxt = (
+                sorted_types[idx + 1][1]
+                if idx + 1 < len(sorted_types)
+                else self.out_dims.X
+            )
+            type_ranges[str(name)] = (int(offset), int(nxt))
+
+        families = []
+        for fam_name, endpoints in fam_endpoints.items():
+            if float(edge_family_avg.get(fam_name, 0.0) or 0.0) <= 0.0:
+                continue
+            src_t = str(endpoints.get("src_type"))
+            dst_t = str(endpoints.get("dst_type"))
+            if src_t not in type_ranges or dst_t not in type_ranges:
+                continue
+            stage = 0 if src_t == dst_t else 1
+            families.append((stage, str(fam_name), src_t, dst_t))
+        families.sort(key=lambda item: (item[0], item[1]))
+
+        chunk_size = max(1024, int(chunk_size))
+        graph_count = int(batch.max().item()) + 1 if batch.numel() else 1
+        for stage, fam_name, src_t, dst_t in families:
+            s0, s1 = type_ranges[src_t]
+            d0, d1 = type_ranges[dst_t]
+            same_type = src_t == dst_t
+            for graph_idx in range(graph_count):
+                graph_mask = batch == int(graph_idx)
+                src_nodes = torch.where(
+                    graph_mask
+                    & (node_subtype >= int(s0))
+                    & (node_subtype < int(s1))
+                )[0]
+                dst_nodes = torch.where(
+                    graph_mask
+                    & (node_subtype >= int(d0))
+                    & (node_subtype < int(d1))
+                )[0]
+                if src_nodes.numel() == 0 or dst_nodes.numel() == 0:
+                    continue
+                if same_type:
+                    pair_index = torch.triu_indices(
+                        src_nodes.numel(),
+                        src_nodes.numel(),
+                        offset=1,
+                        device=self.device,
+                    )
+                    total = int(pair_index.shape[1])
+                    for start in range(0, total, chunk_size):
+                        sub = pair_index[:, start : start + chunk_size]
+                        if sub.numel() == 0:
+                            continue
+                        edge_index = torch.stack(
+                            [src_nodes[sub[0]], src_nodes[sub[1]]], dim=0
+                        )
+                        edge_batch = torch.full(
+                            (edge_index.shape[1],),
+                            int(graph_idx),
+                            dtype=torch.long,
+                            device=self.device,
+                        )
+                        yield stage, fam_name, edge_index, edge_batch
+                else:
+                    total = int(src_nodes.numel() * dst_nodes.numel())
+                    for start in range(0, total, chunk_size):
+                        end = min(total, start + chunk_size)
+                        flat = torch.arange(start, end, device=self.device)
+                        edge_index = torch.stack(
+                            [
+                                src_nodes[flat // dst_nodes.numel()],
+                                dst_nodes[flat % dst_nodes.numel()],
+                            ],
+                            dim=0,
+                        )
+                        edge_batch = torch.full(
+                            (edge_index.shape[1],),
+                            int(graph_idx),
+                            dtype=torch.long,
+                            device=self.device,
+                        )
+                        yield stage, fam_name, edge_index, edge_batch
+
+    def _training_step_family_staged_queryfree(
+        self,
+        data,
+        i,
+        do_backward: bool = True,
+        log_metrics: bool = False,
+    ):
+        """Encode full visible G_t once, then decode intra-family and cross-family tasks.
+
+        Query candidates are decoder-only; they never enter HGT message passing.
+        Stage 0 contains same-type families, stage 1 contains cross-type families.
+        """
+        if data.edge_index.numel() == 0:
+            return None
+        if not self.heterogeneous:
+            raise ValueError("train_family_staged_queryfree requires heterogeneous data")
+
+        opt = self.optimizers() if do_backward else None
+        if do_backward:
+            opt.zero_grad()
+        data_one_hot = self.dataset_info.to_one_hot(data)
+        t_override = self._training_t_override(data_one_hot, i)
+        sparse_noisy_data = self.apply_sparse_noise(
+            data_one_hot, t_override=t_override
+        )
+        node_subtype = (
+            data_one_hot.x.argmax(dim=-1).long()
+            if data_one_hot.x.dim() > 1
+            else data_one_hot.x.long()
+        )
+        batch = data_one_hot.batch.long()
+        ptr = data_one_hot.ptr.long()
+        encoded = self._encode_context_only(
+            data=data_one_hot,
+            node_onehot=sparse_noisy_data["node_t"],
+            context_edge_index=sparse_noisy_data["edge_index_t"].long(),
+            context_edge_attr=sparse_noisy_data["edge_attr_t"].float(),
+            batch=batch,
+            ptr=ptr,
+            t_float=sparse_noisy_data["t_float"],
+        )
+
+        chunk_size = int(
+            getattr(
+                self.cfg.model,
+                "train_family_staged_query_chunk_size",
+                65536,
+            )
+            or 65536
+        )
+        max_chunks = int(
+            getattr(self.cfg.model, "train_family_staged_max_chunks", 0) or 0
+        )
+        balance_by_family = bool(
+            getattr(self.cfg.model, "train_family_staged_balance_by_family", True)
+        )
+        chunk_meta = []
+        stage_counts = [0, 0]
+        fam_counts = {}
+        for stage, fam_name, query_edge_index, query_edge_batch in (
+            self._iter_family_staged_query_chunks(
+                node_subtype=node_subtype,
+                batch=batch,
+                chunk_size=chunk_size,
+            )
+        ):
+            if query_edge_index.numel() == 0:
+                continue
+            count = int(query_edge_index.shape[1])
+            chunk_meta.append((int(stage), str(fam_name), count))
+            stage_counts[int(stage)] += count
+            fam_counts[fam_name] = int(fam_counts.get(fam_name, 0)) + count
+            if max_chunks > 0 and len(chunk_meta) >= max_chunks:
+                break
+
+        total_queries = int(sum(stage_counts))
+        if total_queries <= 0 or not chunk_meta:
+            return None
+        active_families = max(len(fam_counts), 1)
+        total_chunks = len(chunk_meta)
+        chunk_count = 0
+        total_loss_metric = None
+        for stage, fam_name, query_edge_index, query_edge_batch in (
+            self._iter_family_staged_query_chunks(
+                node_subtype=node_subtype,
+                batch=batch,
+                chunk_size=chunk_size,
+            )
+        ):
+            if query_edge_index.numel() == 0:
+                continue
+            if max_chunks > 0 and chunk_count >= max_chunks:
+                break
+            loss_piece = self._training_loss_from_encoded_queries(
+                encoded=encoded,
+                data=data_one_hot,
+                sparse_noisy_data=sparse_noisy_data,
+                query_edge_index=query_edge_index,
+                query_edge_batch=query_edge_batch,
+                node_subtype=node_subtype,
+                step_idx=int(i),
+                log_metrics=bool(log_metrics),
+                balance_loss_by_query_family=bool(balance_by_family),
+            )
+            count = int(query_edge_index.shape[1])
+            if balance_by_family:
+                scale = (
+                    float(count)
+                    / float(max(int(fam_counts.get(fam_name, 0)), 1))
+                    / float(active_families)
+                )
+            else:
+                scale = float(count) / float(total_queries)
+            scaled_loss = loss_piece * scale
+            chunk_count += 1
+            if do_backward:
+                retain_graph = chunk_count < total_chunks
+                self.manual_backward(scaled_loss, retain_graph=retain_graph)
+            total_loss_metric = (
+                scaled_loss.detach()
+                if total_loss_metric is None
+                else total_loss_metric + scaled_loss.detach()
+            )
+        clip_val = float(getattr(self.cfg.train, "clip_grad", 0.0) or 0.0)
+        if do_backward and clip_val > 0:
+            self.clip_gradients(
+                opt,
+                gradient_clip_val=clip_val,
+                gradient_clip_algorithm="norm",
+            )
+        if do_backward:
+            opt.step()
+        if total_loss_metric is None:
+            return None
+        if (
+            getattr(self, "local_rank", 0) == 0
+            and not getattr(self, "_logged_train_family_staged_queryfree", False)
+        ):
+            print(
+                "[TRAIN-FAMILY-STAGED] "
+                f"queries={total_queries} chunks={chunk_count} "
+                f"intra={stage_counts[0]} cross={stage_counts[1]} "
+                f"balance_by_family={balance_by_family} "
+                f"families={fam_counts}"
+            )
+            self._logged_train_family_staged_queryfree = True
+        return {"loss": total_loss_metric.detach()}
+
     def _training_step_once(
         self,
         data,
@@ -5229,6 +8535,9 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         t_override=None,
         query_edge_override=None,
         query_batch_override=None,
+        skip_auxiliary_structure_losses=False,
+        return_query_outputs=False,
+        record_structure_probe=True,
     ):
         # The above code is using the Python debugger module `pdb` to set a breakpoint at a specific
         # line of code. When the code is executed, it will pause at that line and allow you to
@@ -5248,6 +8557,15 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             sparse_noisy_data = self.apply_sparse_noise(data, t_override=t_override)
         else:
             sparse_noisy_data = sparse_noisy_data_override
+        if "two_hop_structure_lookup" not in sparse_noisy_data:
+            training_lookup = self._build_training_two_hop_lookup(
+                sparse_noisy_data,
+                num_nodes=int(data.x.shape[0]),
+            )
+            if training_lookup is not None:
+                sparse_noisy_data["two_hop_structure_lookup"] = training_lookup
+        profile_efficiency = self._profile_training_efficiency_enabled()
+        query_build_start = self._profile_time(profile_efficiency)
         # ----- 随机选边用途 2/2：构造 query 边 -----
         # 遵循「全部可能边」概念：每次只对全部可能边中的一块做预测。query = 该块（比例 k=edge_fraction）。
         # 异质图：按族在族内可能边上采样 k*num_fam_possible_edges；同质图：全局 k*num_edges。
@@ -5276,7 +8594,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             edge_family2id = getattr(self.dataset_info, "edge_family2id", {})
             id2edge_family = {v: k for k, v in edge_family2id.items()}
             fam_endpoints = getattr(self.dataset_info, "fam_endpoints", {})
-            
+
             # 获取节点类型信息
             type_offsets = getattr(self.dataset_info, "type_offsets", {})
             node_type_names = getattr(self.dataset_info, "node_type_names", [])
@@ -5709,6 +9027,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         triu_query_edge_index, query_edge_batch = self._append_all_positive_query_edges(
             data, triu_query_edge_index, query_edge_batch
         )
+        query_build_done = self._profile_time(profile_efficiency)
 
         # 计算图使用加噪后的边（edge_index_t / edge_attr_t），故所有查询边位置（含并上的真实 (src,dst)）
         # 上模型看到的都是加噪后的子类别；真实标签由 mask_query_graph_from_comp_graph 从 data 取。
@@ -5720,13 +9039,13 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             for_message_passing=True,  # 训练时用于消息传递，需要双向信息流通
             total_num_nodes=data.x.shape[0],
         )
+        comp_graph_done = self._profile_time(profile_efficiency)
 
         # pass sparse comp_graph to dense comp_graph for ease calculation
         sparse_noisy_data["comp_edge_index_t"] = comp_edge_index
         sparse_noisy_data["comp_edge_attr_t"] = comp_edge_attr
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
         sparse_pred = self.forward(sparse_noisy_data)
+        forward_done = self._profile_time(profile_efficiency)
 
         # 异质图：限制节点预测只能在其所属类型的子类别范围内（训练时也要限制）
         if self.heterogeneous and hasattr(self.dataset_info, "type_offsets"):
@@ -5887,6 +9206,8 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             batch=data.batch,
         )
         true_data.collapse()  # Map one-hot to discrete class
+        if record_structure_probe:
+            self._record_query_topk_structure_probe(sparse_pred, true_data, data)
 
         structure_only_global = getattr(self.cfg.model, "structure_only_global", False)
         if structure_only_global:
@@ -5901,6 +9222,207 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             log=step_idx % self.log_every_steps == 0,
         )
         self._record_train_exist_diagnostics(sparse_pred, true_data, sparse_noisy_data)
+
+        family_role_w_base = float(
+            getattr(self.cfg.model, "family_role_loss_weight", 0.0) or 0.0
+        )
+        family_role_warmup = int(
+            getattr(self.cfg.model, "family_role_loss_warmup_epochs", 0) or 0
+        )
+        if family_role_warmup > 0:
+            family_role_factor = min(
+                float(self.current_epoch + 1) / float(family_role_warmup),
+                1.0,
+            )
+        else:
+            family_role_factor = 1.0
+        family_role_w = family_role_w_base * family_role_factor
+        if family_role_w > 0:
+            loss_family_role, family_role_stats = (
+                self._compute_family_role_ranking_loss(
+                    sparse_pred, true_data, data, sparse_noisy_data
+                )
+            )
+            loss = loss + family_role_w * loss_family_role
+            if not hasattr(self, "_epoch_family_role_loss_sum"):
+                self._epoch_family_role_loss_sum = 0.0
+                self._epoch_family_role_loss_count = 0
+                self._epoch_family_role_weighted_sum = 0.0
+                self._epoch_family_role_reliability_sum = 0.0
+                self._epoch_family_role_active_sum = 0.0
+            self._epoch_family_role_loss_sum += float(
+                loss_family_role.detach().cpu()
+            )
+            self._epoch_family_role_loss_count += 1
+            self._epoch_family_role_weighted_sum += float(
+                (family_role_w * loss_family_role).detach().cpu()
+            )
+            self._epoch_family_role_reliability_sum += float(
+                family_role_stats.get("reliability", 0.0)
+            )
+            self._epoch_family_role_active_sum += float(
+                family_role_stats.get("active_families", 0.0)
+            )
+            if step_idx % self.log_every_steps == 0:
+                self.log(
+                    "train/family_role_loss",
+                    loss_family_role.detach(),
+                    on_step=True,
+                    prog_bar=False,
+                    sync_dist=True,
+                )
+                self.log(
+                    "train/family_role_weight",
+                    torch.as_tensor(family_role_w, device=self.device),
+                    on_step=True,
+                    prog_bar=False,
+                    sync_dist=True,
+                )
+
+        family_count_w_base = float(
+            getattr(self.cfg.model, "family_count_loss_weight", 0.0) or 0.0
+        )
+        family_count_w = self._warmup_weight(
+            family_count_w_base,
+            int(getattr(self.cfg.model, "family_count_loss_warmup_epochs", 0) or 0),
+            self._auxiliary_time_factor(
+                sparse_noisy_data,
+                float(getattr(self.cfg.model, "family_count_loss_t_power", 0.0) or 0.0),
+            ),
+        )
+        if family_count_w > 0 and not skip_auxiliary_structure_losses:
+            loss_family_count, family_count_stats = self._compute_family_count_loss(
+                sparse_pred, true_data, data
+            )
+            loss = loss + family_count_w * loss_family_count
+            if not hasattr(self, "_epoch_family_count_loss_sum"):
+                self._epoch_family_count_loss_sum = 0.0
+                self._epoch_family_count_loss_count = 0
+                self._epoch_family_count_weighted_sum = 0.0
+                self._epoch_family_count_active_sum = 0.0
+            self._epoch_family_count_loss_sum += float(
+                loss_family_count.detach().cpu()
+            )
+            self._epoch_family_count_loss_count += 1
+            self._epoch_family_count_weighted_sum += float(
+                (family_count_w * loss_family_count).detach().cpu()
+            )
+            self._epoch_family_count_active_sum += float(
+                family_count_stats.get("active_families", 0.0)
+            )
+            if step_idx % self.log_every_steps == 0:
+                self.log(
+                    "train/family_count_loss",
+                    loss_family_count.detach(),
+                    on_step=True,
+                    prog_bar=False,
+                    sync_dist=True,
+                )
+                self.log(
+                    "train/family_count_weight",
+                    torch.as_tensor(family_count_w, device=self.device),
+                    on_step=True,
+                    prog_bar=False,
+                    sync_dist=True,
+                )
+
+        degree_pair_w_base = float(
+            getattr(self.cfg.model, "degree_pair_dist_loss_weight", 0.0) or 0.0
+        )
+        degree_pair_w = self._warmup_weight(
+            degree_pair_w_base,
+            int(getattr(self.cfg.model, "degree_pair_dist_loss_warmup_epochs", 0) or 0),
+            self._auxiliary_time_factor(
+                sparse_noisy_data,
+                float(getattr(self.cfg.model, "degree_pair_dist_loss_t_power", 0.0) or 0.0),
+            ),
+        )
+        if degree_pair_w > 0 and not skip_auxiliary_structure_losses:
+            loss_degree_pair, degree_pair_stats = (
+                self._compute_degree_pair_distribution_loss(sparse_pred, data, true_data)
+            )
+            loss = loss + degree_pair_w * loss_degree_pair
+            if not hasattr(self, "_epoch_degree_pair_dist_loss_sum"):
+                self._epoch_degree_pair_dist_loss_sum = 0.0
+                self._epoch_degree_pair_dist_loss_count = 0
+                self._epoch_degree_pair_dist_weighted_sum = 0.0
+                self._epoch_degree_pair_dist_active_sum = 0.0
+            self._epoch_degree_pair_dist_loss_sum += float(
+                loss_degree_pair.detach().cpu()
+            )
+            self._epoch_degree_pair_dist_loss_count += 1
+            self._epoch_degree_pair_dist_weighted_sum += float(
+                (degree_pair_w * loss_degree_pair).detach().cpu()
+            )
+            self._epoch_degree_pair_dist_active_sum += float(
+                degree_pair_stats.get("active_families", 0.0)
+            )
+            if step_idx % self.log_every_steps == 0:
+                self.log(
+                    "train/degree_pair_dist_loss",
+                    loss_degree_pair.detach(),
+                    on_step=True,
+                    prog_bar=False,
+                    sync_dist=True,
+                )
+                self.log(
+                    "train/degree_pair_dist_weight",
+                    torch.as_tensor(degree_pair_w, device=self.device),
+                    on_step=True,
+                    prog_bar=False,
+                    sync_dist=True,
+                )
+
+        closure_rank_w_base = float(
+            getattr(self.cfg.model, "closure_rank_loss_weight", 0.0) or 0.0
+        )
+        closure_rank_w = self._warmup_weight(
+            closure_rank_w_base,
+            int(getattr(self.cfg.model, "closure_rank_loss_warmup_epochs", 0) or 0),
+            self._auxiliary_time_factor(
+                sparse_noisy_data,
+                float(getattr(self.cfg.model, "closure_rank_loss_t_power", 1.0) or 0.0),
+            ),
+        )
+        if closure_rank_w > 0 and not skip_auxiliary_structure_losses:
+            loss_closure_rank, closure_rank_stats = self._compute_closure_ranking_loss(
+                sparse_pred, data, num_nodes=data.x.shape[0]
+            )
+            loss = loss + closure_rank_w * loss_closure_rank
+            if not hasattr(self, "_epoch_closure_rank_loss_sum"):
+                self._epoch_closure_rank_loss_sum = 0.0
+                self._epoch_closure_rank_loss_count = 0
+                self._epoch_closure_rank_weighted_sum = 0.0
+                self._epoch_closure_rank_active_sum = 0.0
+                self._epoch_closure_rank_pairs_sum = 0.0
+            self._epoch_closure_rank_loss_sum += float(
+                loss_closure_rank.detach().cpu()
+            )
+            self._epoch_closure_rank_loss_count += 1
+            self._epoch_closure_rank_weighted_sum += float(
+                (closure_rank_w * loss_closure_rank).detach().cpu()
+            )
+            self._epoch_closure_rank_active_sum += float(
+                closure_rank_stats.get("active_families", 0.0)
+            )
+            self._epoch_closure_rank_pairs_sum += float(
+                closure_rank_stats.get("pairs", 0.0)
+            )
+            if step_idx % self.log_every_steps == 0:
+                self.log(
+                    "train/closure_rank_loss",
+                    loss_closure_rank.detach(),
+                    on_step=True,
+                    prog_bar=False,
+                    sync_dist=True,
+                )
+                self.log(
+                    "train/closure_rank_weight",
+                    torch.as_tensor(closure_rank_w, device=self.device),
+                    on_step=True,
+                    prog_bar=False,
+                    sync_dist=True,
+                )
 
         closure_w_base = float(getattr(self.cfg.model, "closure_pos_loss_weight", 0.0) or 0.0)
         closure_warmup = int(getattr(self.cfg.model, "closure_pos_loss_warmup_epochs", 0) or 0)
@@ -6011,7 +9533,22 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                     self.log("train/node_dist_global_tv", node_stats["global_tv"].detach(), on_step=True, prog_bar=False, sync_dist=True)
                     self.log("train/node_dist_conditional_tv", node_stats["conditional_tv"].detach(), on_step=True, prog_bar=False, sync_dist=True)
 
-        return {"loss": loss}
+        loss_build_done = self._profile_time(profile_efficiency)
+        out = {
+            "loss": loss,
+            "query_edges": int(triu_query_edge_index.shape[1]),
+            "perf": {
+                "query_build_s": query_build_done - query_build_start,
+                "comp_graph_s": comp_graph_done - query_build_done,
+                "hgt_forward_s": forward_done - comp_graph_done,
+                "loss_build_s": loss_build_done - forward_done,
+            },
+        }
+        if return_query_outputs:
+            out["pred_edge_attr"] = sparse_pred.edge_attr
+            out["pred_edge_index"] = sparse_pred.edge_index
+            out["true_edge_attr"] = true_data.edge_attr
+        return out
 
     def on_after_backward(self) -> None:
         """Log gradient norm when structure_only_global to verify loss feedback reaches parameters."""
@@ -6104,6 +9641,24 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         self._epoch_closure_pos_loss_sum = 0.0
         self._epoch_closure_pos_loss_count = 0
         self._epoch_closure_pos_weighted_sum = 0.0
+        self._epoch_family_role_loss_sum = 0.0
+        self._epoch_family_role_loss_count = 0
+        self._epoch_family_role_weighted_sum = 0.0
+        self._epoch_family_role_reliability_sum = 0.0
+        self._epoch_family_role_active_sum = 0.0
+        self._epoch_family_count_loss_sum = 0.0
+        self._epoch_family_count_loss_count = 0
+        self._epoch_family_count_weighted_sum = 0.0
+        self._epoch_family_count_active_sum = 0.0
+        self._epoch_degree_pair_dist_loss_sum = 0.0
+        self._epoch_degree_pair_dist_loss_count = 0
+        self._epoch_degree_pair_dist_weighted_sum = 0.0
+        self._epoch_degree_pair_dist_active_sum = 0.0
+        self._epoch_closure_rank_loss_sum = 0.0
+        self._epoch_closure_rank_loss_count = 0
+        self._epoch_closure_rank_weighted_sum = 0.0
+        self._epoch_closure_rank_active_sum = 0.0
+        self._epoch_closure_rank_pairs_sum = 0.0
         self._epoch_diag_count = 0
         self._epoch_diag_t_sum = 0.0
         self._epoch_diag_query_pos_ratio_sum = 0.0
@@ -6112,6 +9667,17 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         self._epoch_diag_pos_p_exist_count = 0
         self._epoch_diag_neg_p_exist_sum = 0.0
         self._epoch_diag_neg_p_exist_count = 0
+        self._epoch_struct_probe_count = 0
+        self._epoch_struct_probe_topk_precision_sum = 0.0
+        self._epoch_struct_probe_topk_recall_sum = 0.0
+        self._epoch_struct_probe_family_l1_sum = 0.0
+        self._epoch_struct_probe_degree_pair_js_sum = 0.0
+        self._epoch_struct_probe_degree_pair_js_count = 0
+        self._epoch_struct_probe_closure_mass_rel_sum = 0.0
+        self._epoch_struct_probe_closure_mass_rel_count = 0
+        self._epoch_struct_probe_closure_mean_gap_sum = 0.0
+        self._epoch_struct_probe_closure_mean_gap_count = 0
+        self._epoch_struct_probe_k_sum = 0.0
 
     def on_train_epoch_end(self) -> None:
         # 只在 epoch 结束时统一从 TrainLossDiscrete 取出本 epoch 的所有训练指标，并一次性 log 到 wandb / Lightning
@@ -6141,8 +9707,103 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         else:
             closure_l1 = 0.0
             closure_wloss = 0.0
+        family_role_count = int(getattr(self, "_epoch_family_role_loss_count", 0) or 0)
+        if family_role_count > 0:
+            family_role_loss = float(getattr(self, "_epoch_family_role_loss_sum", 0.0)) / float(family_role_count)
+            family_role_wloss = float(getattr(self, "_epoch_family_role_weighted_sum", 0.0)) / float(family_role_count)
+            family_role_rel = float(getattr(self, "_epoch_family_role_reliability_sum", 0.0)) / float(family_role_count)
+            family_role_active = float(getattr(self, "_epoch_family_role_active_sum", 0.0)) / float(family_role_count)
+        else:
+            family_role_loss = 0.0
+            family_role_wloss = 0.0
+            family_role_rel = 0.0
+            family_role_active = 0.0
+        family_count_count = int(getattr(self, "_epoch_family_count_loss_count", 0) or 0)
+        if family_count_count > 0:
+            family_count_loss = float(getattr(self, "_epoch_family_count_loss_sum", 0.0)) / float(family_count_count)
+            family_count_wloss = float(getattr(self, "_epoch_family_count_weighted_sum", 0.0)) / float(family_count_count)
+            family_count_active = float(getattr(self, "_epoch_family_count_active_sum", 0.0)) / float(family_count_count)
+        else:
+            family_count_loss = 0.0
+            family_count_wloss = 0.0
+            family_count_active = 0.0
+        degree_pair_count = int(getattr(self, "_epoch_degree_pair_dist_loss_count", 0) or 0)
+        if degree_pair_count > 0:
+            degree_pair_loss = float(getattr(self, "_epoch_degree_pair_dist_loss_sum", 0.0)) / float(degree_pair_count)
+            degree_pair_wloss = float(getattr(self, "_epoch_degree_pair_dist_weighted_sum", 0.0)) / float(degree_pair_count)
+            degree_pair_active = float(getattr(self, "_epoch_degree_pair_dist_active_sum", 0.0)) / float(degree_pair_count)
+        else:
+            degree_pair_loss = 0.0
+            degree_pair_wloss = 0.0
+            degree_pair_active = 0.0
+        closure_rank_count = int(getattr(self, "_epoch_closure_rank_loss_count", 0) or 0)
+        if closure_rank_count > 0:
+            closure_rank_loss = float(getattr(self, "_epoch_closure_rank_loss_sum", 0.0)) / float(closure_rank_count)
+            closure_rank_wloss = float(getattr(self, "_epoch_closure_rank_weighted_sum", 0.0)) / float(closure_rank_count)
+            closure_rank_active = float(getattr(self, "_epoch_closure_rank_active_sum", 0.0)) / float(closure_rank_count)
+            closure_rank_pairs = float(getattr(self, "_epoch_closure_rank_pairs_sum", 0.0)) / float(closure_rank_count)
+        else:
+            closure_rank_loss = 0.0
+            closure_rank_wloss = 0.0
+            closure_rank_active = 0.0
+            closure_rank_pairs = 0.0
+        struct_probe_count = int(getattr(self, "_epoch_struct_probe_count", 0) or 0)
+        if struct_probe_count > 0:
+            struct_probe_precision = float(
+                getattr(self, "_epoch_struct_probe_topk_precision_sum", 0.0)
+            ) / float(struct_probe_count)
+            struct_probe_recall = float(
+                getattr(self, "_epoch_struct_probe_topk_recall_sum", 0.0)
+            ) / float(struct_probe_count)
+            struct_probe_family_l1 = float(
+                getattr(self, "_epoch_struct_probe_family_l1_sum", 0.0)
+            ) / float(struct_probe_count)
+            struct_probe_k = float(
+                getattr(self, "_epoch_struct_probe_k_sum", 0.0)
+            ) / float(struct_probe_count)
+        else:
+            struct_probe_precision = 0.0
+            struct_probe_recall = 0.0
+            struct_probe_family_l1 = 0.0
+            struct_probe_k = 0.0
+        struct_probe_dp_count = int(
+            getattr(self, "_epoch_struct_probe_degree_pair_js_count", 0) or 0
+        )
+        struct_probe_degree_pair_js = (
+            float(getattr(self, "_epoch_struct_probe_degree_pair_js_sum", 0.0))
+            / float(struct_probe_dp_count)
+            if struct_probe_dp_count > 0
+            else 0.0
+        )
+        struct_probe_closure_count = int(
+            getattr(self, "_epoch_struct_probe_closure_mass_rel_count", 0) or 0
+        )
+        struct_probe_closure_mass_rel = (
+            float(getattr(self, "_epoch_struct_probe_closure_mass_rel_sum", 0.0))
+            / float(struct_probe_closure_count)
+            if struct_probe_closure_count > 0
+            else 0.0
+        )
+        struct_probe_gap_count = int(
+            getattr(self, "_epoch_struct_probe_closure_mean_gap_count", 0) or 0
+        )
+        struct_probe_closure_mean_gap = (
+            float(getattr(self, "_epoch_struct_probe_closure_mean_gap_sum", 0.0))
+            / float(struct_probe_gap_count)
+            if struct_probe_gap_count > 0
+            else 0.0
+        )
         edge_nll = epoch_loss.get("train_epoch/NLL", -1)
-        total_train = edge_nll + degree_wloss + edge_count_wloss + closure_wloss if isinstance(edge_nll, (int, float)) and edge_nll >= 0 else -1
+        any_aux = (
+            degree_count > 0
+            or count_loss_count > 0
+            or closure_count > 0
+            or family_role_count > 0
+            or family_count_count > 0
+            or degree_pair_count > 0
+            or closure_rank_count > 0
+        )
+        total_train = edge_nll + degree_wloss + edge_count_wloss + closure_wloss + family_role_wloss + family_count_wloss + degree_pair_wloss + closure_rank_wloss if isinstance(edge_nll, (int, float)) and edge_nll >= 0 else -1
         diag_count = int(getattr(self, "_epoch_diag_count", 0) or 0)
         if diag_count > 0:
             diag_t = float(getattr(self, "_epoch_diag_t_sum", 0.0)) / float(diag_count)
@@ -6168,14 +9829,69 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         if closure_count > 0:
             epoch_loss["train_epoch/closure_pos_L1"] = closure_l1
             epoch_loss["train_epoch/closure_pos_weighted"] = closure_wloss
-        if (degree_count > 0 or count_loss_count > 0 or closure_count > 0) and total_train >= 0:
+        if family_role_count > 0:
+            epoch_loss["train_epoch/family_role_loss"] = family_role_loss
+            epoch_loss["train_epoch/family_role_weighted"] = family_role_wloss
+            epoch_loss["train_epoch/family_role_reliability"] = family_role_rel
+            epoch_loss["train_epoch/family_role_active_families"] = family_role_active
+        if family_count_count > 0:
+            epoch_loss["train_epoch/family_count_loss"] = family_count_loss
+            epoch_loss["train_epoch/family_count_weighted"] = family_count_wloss
+            epoch_loss["train_epoch/family_count_active_families"] = family_count_active
+        if degree_pair_count > 0:
+            epoch_loss["train_epoch/degree_pair_dist_loss"] = degree_pair_loss
+            epoch_loss["train_epoch/degree_pair_dist_weighted"] = degree_pair_wloss
+            epoch_loss["train_epoch/degree_pair_dist_active_families"] = degree_pair_active
+        if closure_rank_count > 0:
+            epoch_loss["train_epoch/closure_rank_loss"] = closure_rank_loss
+            epoch_loss["train_epoch/closure_rank_weighted"] = closure_rank_wloss
+            epoch_loss["train_epoch/closure_rank_active_families"] = closure_rank_active
+            epoch_loss["train_epoch/closure_rank_pairs"] = closure_rank_pairs
+        if struct_probe_count > 0:
+            epoch_loss["train_epoch/struct_probe_topk_precision"] = struct_probe_precision
+            epoch_loss["train_epoch/struct_probe_topk_recall"] = struct_probe_recall
+            epoch_loss["train_epoch/struct_probe_family_l1"] = struct_probe_family_l1
+            epoch_loss["train_epoch/struct_probe_degree_pair_js"] = struct_probe_degree_pair_js
+            epoch_loss["train_epoch/struct_probe_closure_mass_rel"] = struct_probe_closure_mass_rel
+            epoch_loss["train_epoch/struct_probe_closure_mean_gap"] = struct_probe_closure_mean_gap
+            epoch_loss["train_epoch/struct_probe_k"] = struct_probe_k
+        if any_aux and total_train >= 0:
             epoch_loss["train_epoch/total_with_aux"] = total_train
         # neg_acc=-1 表示 query 内无负样本（ideal 模式下常见），显示为 N/A
         neg_str = f"{neg_acc:.4f}" if isinstance(neg_acc, (int, float)) and neg_acc >= 0 else "N/A"
         degree_str = f" -- degree_L1: {degree_l1:.6f} -- degree_wloss: {degree_wloss:.6f}" if degree_count > 0 else ""
         edge_count_str = f" -- edge_count_L1: {edge_count_l1:.6f} -- edge_count_wloss: {edge_count_wloss:.6f}" if count_loss_count > 0 else ""
         closure_str = f" -- closure_L1: {closure_l1:.6f} -- closure_wloss: {closure_wloss:.6f}" if closure_count > 0 else ""
-        total_str = f" -- total_train: {total_train:.4f}" if (degree_count > 0 or count_loss_count > 0 or closure_count > 0) and total_train >= 0 else ""
+        family_role_str = (
+            f" -- family_role_loss: {family_role_loss:.6f}"
+            f" -- family_role_wloss: {family_role_wloss:.6f}"
+            f" -- family_role_rel: {family_role_rel:.3f}"
+            f" -- family_role_fams: {family_role_active:.1f}"
+        ) if family_role_count > 0 else ""
+        family_count_str = (
+            f" -- family_count: {family_count_loss:.6f}"
+            f" -- family_count_wloss: {family_count_wloss:.6f}"
+            f" -- family_count_fams: {family_count_active:.1f}"
+        ) if family_count_count > 0 else ""
+        degree_pair_str = (
+            f" -- degree_pair_dist: {degree_pair_loss:.6f}"
+            f" -- degree_pair_wloss: {degree_pair_wloss:.6f}"
+            f" -- degree_pair_fams: {degree_pair_active:.1f}"
+        ) if degree_pair_count > 0 else ""
+        closure_rank_str = (
+            f" -- closure_rank: {closure_rank_loss:.6f}"
+            f" -- closure_rank_wloss: {closure_rank_wloss:.6f}"
+            f" -- closure_rank_fams: {closure_rank_active:.1f}"
+            f" -- closure_rank_pairs: {closure_rank_pairs:.0f}"
+        ) if closure_rank_count > 0 else ""
+        struct_probe_str = (
+            f" -- struct_probe[topK_p={struct_probe_precision:.4f}"
+            f", famL1={struct_probe_family_l1:.4f}"
+            f", dpJS={struct_probe_degree_pair_js:.4f}"
+            f", closureRel={struct_probe_closure_mass_rel:.4f}"
+            f", closureGap={struct_probe_closure_mean_gap:.4f}]"
+        ) if struct_probe_count > 0 else ""
+        total_str = f" -- total_train: {total_train:.4f}" if any_aux and total_train >= 0 else ""
         diag_str = (
             f" -- t_norm: {diag_t:.3f} -- q_pos: {diag_qpos:.4f} -- pred_pos: {diag_pred_pos:.4f} "
             f"-- pos_p: {diag_pos_p:.4f} -- neg_p: {diag_neg_p:.4f}"
@@ -6194,21 +9910,86 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 for layer_idx, value in enumerate(gate_values):
                     epoch_loss[f"train_epoch/query_gate_layer_{layer_idx}"] = value
         if bool(getattr(self.cfg.model, "use_two_hop_structure", False)):
-            structure_residual = float(
-                getattr(self.model, "last_two_hop_residual_mean", 0.0)
+            base_residual = float(
+                getattr(self.model, "last_two_hop_base_residual_mean", 0.0)
+            )
+            structure_factor = float(
+                getattr(self.model, "last_two_hop_scale_factor_mean", 1.0)
+            )
+            effective_scale = float(
+                getattr(self.model, "last_two_hop_effective_scale_mean", 0.0)
+            )
+            effective_residual = float(
+                getattr(
+                    self.model,
+                    "last_two_hop_effective_residual_mean",
+                    getattr(self.model, "last_two_hop_residual_mean", 0.0),
+                )
             )
             gate_str += (
-                f" -- two_hop_residual: {structure_residual:.6f}"
+                f" -- two_hop_factor: {structure_factor:.6f}"
+                f" -- two_hop_base_residual: {base_residual:.6f}"
+                f" -- two_hop_effective_scale: {effective_scale:.6f}"
+                f" -- two_hop_effective_residual: {effective_residual:.6f}"
             )
             epoch_loss[
-                "train_epoch/two_hop_residual_mean"
-            ] = structure_residual
+                "train_epoch/two_hop_base_residual_mean"
+            ] = base_residual
+            epoch_loss[
+                "train_epoch/two_hop_scale_factor_mean"
+            ] = structure_factor
+            epoch_loss[
+                "train_epoch/two_hop_effective_scale_mean"
+            ] = effective_scale
+            epoch_loss[
+                "train_epoch/two_hop_effective_residual_mean"
+            ] = effective_residual
+        if bool(
+            getattr(self.cfg.model, "use_endpoint_role_residual", False)
+        ):
+            role_base_residual = float(
+                getattr(
+                    self.model,
+                    "last_endpoint_role_base_residual_mean",
+                    0.0,
+                )
+            )
+            role_effective_scale = float(
+                getattr(
+                    self.model,
+                    "last_endpoint_role_effective_scale_mean",
+                    0.0,
+                )
+            )
+            role_effective_residual = float(
+                getattr(
+                    self.model,
+                    "last_endpoint_role_effective_residual_mean",
+                    0.0,
+                )
+            )
+            gate_str += (
+                f" -- endpoint_role_base_residual: {role_base_residual:.6f}"
+                f" -- endpoint_role_effective_scale: {role_effective_scale:.6f}"
+                f" -- endpoint_role_effective_residual: {role_effective_residual:.6f}"
+            )
+            epoch_loss[
+                "train_epoch/endpoint_role_base_residual_mean"
+            ] = role_base_residual
+            epoch_loss[
+                "train_epoch/endpoint_role_effective_scale_mean"
+            ] = role_effective_scale
+            epoch_loss[
+                "train_epoch/endpoint_role_effective_residual_mean"
+            ] = role_effective_residual
 
         self.print(
             f"Epoch {self.current_epoch} finished: "
             f"exist_BCE: {exist_bce:.4f} -- subtype_CE: {subtype_ce:.4f} -- "
             f"pos_acc: {pos_acc:.4f} -- neg_acc: {neg_str}"
-            f"{degree_str}{edge_count_str}{closure_str}{total_str}{diag_str}{gate_str}"
+            f"{degree_str}{edge_count_str}{closure_str}{family_role_str}"
+            f"{family_count_str}{degree_pair_str}{closure_rank_str}"
+            f"{struct_probe_str}{total_str}{diag_str}{gate_str}"
         )
 
         if wandb.run:
@@ -6230,6 +10011,19 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             "train_epoch/edge_count_weighted",
             "train_epoch/closure_pos_L1",
             "train_epoch/closure_pos_weighted",
+            "train_epoch/family_count_loss",
+            "train_epoch/family_count_weighted",
+            "train_epoch/degree_pair_dist_loss",
+            "train_epoch/degree_pair_dist_weighted",
+            "train_epoch/closure_rank_loss",
+            "train_epoch/closure_rank_weighted",
+            "train_epoch/struct_probe_topk_precision",
+            "train_epoch/struct_probe_topk_recall",
+            "train_epoch/struct_probe_family_l1",
+            "train_epoch/struct_probe_degree_pair_js",
+            "train_epoch/struct_probe_closure_mass_rel",
+            "train_epoch/struct_probe_closure_mean_gap",
+            "train_epoch/struct_probe_k",
             "train_epoch/total_with_aux",
             "train_epoch/t_norm",
             "train_epoch/query_pos_ratio",
@@ -6269,6 +10063,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
 
     def on_validation_epoch_start(self) -> None:
         self._val_predicted_graphs_list = []
+        self._val_same_type_forward_metrics = []
         # 用于边分布图「generate」：在「真实边属于该族」的条件下，统计模型预测的子类型分布，与训练指标一致
         if getattr(self, "dataset_info", None) and getattr(self.dataset_info, "edge_family_marginals", None):
             self._val_edge_pred_counts_by_family = {
@@ -6296,10 +10091,21 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         The older validation path mixed full-graph NLL and sampling-style metrics, which is not
         comparable to focal/block edge-prediction training and produced misleading values.
         """
-        data = self.dataset_info.to_one_hot(data)
         with torch.no_grad():
-            out = self._training_step_once(data, i, data_is_one_hot=True)
-            loss = out["loss"].detach()
+            if bool(getattr(self.cfg.model, "train_family_staged_queryfree", False)):
+                out = self._training_step_family_staged_queryfree(
+                    data,
+                    i,
+                    do_backward=False,
+                    log_metrics=False,
+                )
+                if out is None:
+                    return None
+                loss = out["loss"].detach()
+            else:
+                data = self.dataset_info.to_one_hot(data)
+                out = self._training_step_once(data, i, data_is_one_hot=True)
+                loss = out["loss"].detach()
         loss_1d = loss.reshape(1)
         self.val_nll(loss_1d)
         self.val_exist_nll(loss_1d)
@@ -6322,6 +10128,38 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 return float(v.item()) if hasattr(v, "item") else float(v)
             except Exception:
                 return -1
+
+        def _mean_nested_metrics(items):
+            if not items:
+                return {}
+            out = {}
+            type_names = sorted(set().union(*(item.keys() for item in items)))
+            for type_name in type_names:
+                out[type_name] = {}
+                metric_names = sorted(
+                    set().union(
+                        *(
+                            (item.get(type_name, {}) or {}).keys()
+                            for item in items
+                        )
+                    )
+                )
+                for metric_name in metric_names:
+                    vals = []
+                    for item in items:
+                        value = (item.get(type_name, {}) or {}).get(metric_name)
+                        if value is None:
+                            continue
+                        try:
+                            value = float(value)
+                        except Exception:
+                            continue
+                        if math.isfinite(value):
+                            vals.append(value)
+                    out[type_name][metric_name] = (
+                        float(np.mean(vals)) if vals else None
+                    )
+            return out
 
         total_nll = _get(self.val_nll)
         exist_nll = _get(self.val_exist_nll)
@@ -6352,7 +10190,125 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         )
         self.log("val/epoch_NLL", val_nll_value, sync_dist=True)
         self.log("val/edge_loss", val_nll_value, sync_dist=True)
+        if getattr(self, "local_rank", 0) == 0:
+            forward_metrics = _mean_nested_metrics(
+                getattr(self, "_val_same_type_forward_metrics", [])
+            )
+            if forward_metrics:
+                table_str = self._format_same_type_internal_metrics_table(
+                    forward_metrics,
+                    prefix=(
+                        "Validation same-type forward top-K reconstruction "
+                        f"metrics at epoch {self.current_epoch}"
+                    ),
+                )
+                if table_str:
+                    print(table_str)
+                forward_path = os.path.join(
+                    os.getcwd(),
+                    f"val_same_type_forward_metrics_epoch{self.current_epoch}.json",
+                )
+                with open(forward_path, "w", encoding="utf-8") as file:
+                    json.dump(forward_metrics, file, ensure_ascii=False, indent=2)
+                print(f"Validation same-type forward metrics saved to {forward_path}")
+                if wandb.run:
+                    flat_metrics = {}
+                    for type_name, metrics in forward_metrics.items():
+                        for metric_name, value in (metrics or {}).items():
+                            if value is not None and math.isfinite(float(value)):
+                                flat_metrics[
+                                    f"val_same_type_forward/{type_name}/{metric_name}"
+                                ] = float(value)
+                    if flat_metrics:
+                        wandb.log(flat_metrics, step=int(self.current_epoch), commit=False)
         self._last_val_epoch_nll = val_nll_value
+        self._maybe_run_validation_sampling()
+
+    @torch.no_grad()
+    def _maybe_run_validation_sampling(self) -> None:
+        if not bool(getattr(self.cfg.general, "enable_val_sampling", False)):
+            return
+        sample_every = max(1, int(getattr(self.cfg.general, "sample_every_val", 1) or 1))
+        current_epoch = int(getattr(self, "current_epoch", 0))
+        if current_epoch % sample_every != 0:
+            return
+        if getattr(self, "local_rank", 0) != 0:
+            return
+
+        n_to_generate = max(1, int(getattr(self.cfg.general, "samples_to_generate", 1) or 1))
+        n_to_generate = min(n_to_generate, max(1, int(getattr(self.cfg.train, "batch_size", 1) or 1)))
+        self.print(
+            f"Validation sampling: generating {n_to_generate} sample(s) at epoch {current_epoch}"
+        )
+        use_fixed_nodes = bool(getattr(self.cfg.general, "cond_edge_gen_fixed_nodes", False))
+        use_sample_nodes = bool(getattr(self.cfg.general, "cond_edge_gen_sample_nodes", False))
+        if use_fixed_nodes and hasattr(self.dataset_info, "datamodule"):
+            use_test_graph = getattr(self.cfg.general, "cond_edge_gen_use_test_graph", True)
+            if use_test_graph and hasattr(self.dataset_info.datamodule, "test_dataset"):
+                fixed_single = self.dataset_info.datamodule.test_dataset[0].clone()
+            else:
+                fixed_single = self.dataset_info.datamodule.train_dataset[0].clone()
+            fixed_single = self._permute_fixed_graph_within_node_types(
+                fixed_single,
+                getattr(self.cfg.general, "fixed_node_type_permutation_seed", None),
+            )
+            fixed_single = self.dataset_info.to_one_hot(fixed_single)
+            from torch_geometric.data import Batch
+
+            fixed_batch = Batch.from_data_list(
+                [fixed_single.clone() for _ in range(n_to_generate)]
+            ).to(self.device)
+            samples = self.sample_batch_fixed_nodes(
+                fixed_batch,
+                keep_chain=0,
+                number_chain_steps=self.number_chain_steps,
+                save_final=n_to_generate,
+            )
+        else:
+            sample_num_nodes = getattr(self.cfg.general, "sample_num_nodes", None)
+            if sample_num_nodes is not None:
+                num_nodes = sample_num_nodes
+            elif use_sample_nodes and hasattr(self.dataset_info, "datamodule"):
+                train_data = self.dataset_info.datamodule.train_dataset[0]
+                num_nodes = getattr(
+                    train_data,
+                    "num_nodes",
+                    train_data.x.shape[0] if hasattr(train_data, "x") else 20,
+                )
+            else:
+                num_nodes = 20
+            samples = self.sample_batch(
+                batch_id=0,
+                batch_size=n_to_generate,
+                num_nodes=num_nodes,
+                save_final=n_to_generate,
+                keep_chain=0,
+                number_chain_steps=self.number_chain_steps,
+            )
+
+        to_log, _ = self.val_sampling_metrics.compute_all_metrics(
+            samples, current_epoch, local_rank=self.local_rank
+        )
+        with open(os.path.join(os.getcwd(), f"val_epoch{current_epoch}.json"), "w") as file:
+            json.dump(to_log, file)
+        internal_metrics = self._compute_same_type_internal_sampling_metrics(samples)
+        if internal_metrics:
+            internal_path = os.path.join(
+                os.getcwd(),
+                f"val_same_type_internal_metrics_epoch{current_epoch}.json",
+            )
+            with open(internal_path, "w", encoding="utf-8") as file:
+                json.dump(internal_metrics, file, ensure_ascii=False, indent=2)
+            table_str = self._format_same_type_internal_metrics_table(
+                internal_metrics,
+                prefix="Validation same-type internal metrics",
+            )
+            if table_str:
+                print(table_str)
+            self.print(f"Validation same-type internal metrics saved to {internal_path}")
+        self.val_sampling_metrics.reset()
+        if self.device.type == "cuda":
+            torch.cuda.empty_cache()
 
     def on_test_epoch_start(self) -> None:
         print("Starting test...")
@@ -6390,6 +10346,51 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
     def test_step(self, data, i):
         pass
 
+    def _current_sampling_seed(self) -> int:
+        active_seed = getattr(self, "_active_test_sampling_seed", None)
+        if active_seed is not None:
+            return int(active_seed)
+        return int(getattr(self.cfg.train, "seed", 0) or 0)
+
+    def _explicit_test_sampling_seeds(self):
+        configured = getattr(
+            self.cfg.general, "test_sampling_seeds", None
+        )
+        if configured is None:
+            return None
+        seeds = [int(seed) for seed in list(configured)]
+        if not seeds:
+            return None
+        test_variance = int(
+            getattr(self.cfg.general, "test_variance", 1)
+        )
+        if len(seeds) != test_variance:
+            raise ValueError(
+                "general.test_sampling_seeds must contain exactly "
+                f"general.test_variance={test_variance} seeds, got {seeds}."
+            )
+        final_samples = int(
+            getattr(
+                self.cfg.general,
+                "final_model_samples_to_generate",
+                1,
+            )
+        )
+        if final_samples != 1:
+            raise ValueError(
+                "Explicit paired test_sampling_seeds currently require "
+                "general.final_model_samples_to_generate=1."
+            )
+        num_devices = max(
+            int(getattr(self._trainer, "num_devices", 1)), 1
+        )
+        if num_devices != 1:
+            raise ValueError(
+                "Explicit paired test_sampling_seeds currently require "
+                "single-device testing."
+            )
+        return seeds
+
     def on_test_epoch_end(self) -> None:
         """Generate sparse samples and compute sampling metrics."""
         enable_test_sampling = getattr(self.cfg.general, "enable_test_sampling", True)
@@ -6406,9 +10407,13 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             with open(generated_path, "rb") as f:
                 samples = pickle.load(f)
         else:
-            n_to_generate = int(getattr(self.cfg.general, "final_model_samples_to_generate", 1))
-            n_to_generate *= int(getattr(self.cfg.general, "test_variance", 1))
-            n_to_generate = max(1, math.ceil(n_to_generate / max(getattr(self._trainer, "num_devices", 1), 1)))
+            explicit_sampling_seeds = self._explicit_test_sampling_seeds()
+            if explicit_sampling_seeds is not None:
+                n_to_generate = len(explicit_sampling_seeds)
+            else:
+                n_to_generate = int(getattr(self.cfg.general, "final_model_samples_to_generate", 1))
+                n_to_generate *= int(getattr(self.cfg.general, "test_variance", 1))
+                n_to_generate = max(1, math.ceil(n_to_generate / max(getattr(self._trainer, "num_devices", 1), 1)))
             self.print(
                 f"Samples to generate: {n_to_generate} for each of the "
                 f"{max(getattr(self._trainer, 'num_devices', 1), 1)} devices"
@@ -6421,52 +10426,69 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             use_fixed_nodes = bool(getattr(self.cfg.general, "cond_edge_gen_fixed_nodes", False))
             use_sample_nodes = bool(getattr(self.cfg.general, "cond_edge_gen_sample_nodes", False))
 
-            while remaining > 0:
-                to_generate = min(remaining, batch_size)
-                if use_fixed_nodes and hasattr(self.dataset_info, "datamodule"):
-                    use_test_graph = getattr(self.cfg.general, "cond_edge_gen_use_test_graph", True)
-                    if use_test_graph and hasattr(self.dataset_info.datamodule, "test_dataset"):
-                        fixed_single = self.dataset_info.datamodule.test_dataset[0].clone()
+            generated_count = 0
+            try:
+                while remaining > 0:
+                    if explicit_sampling_seeds is not None:
+                        to_generate = 1
+                        sample_seed = explicit_sampling_seeds[
+                            generated_count
+                        ]
+                        pl.seed_everything(sample_seed, workers=True)
+                        self._active_test_sampling_seed = sample_seed
+                        self.print(
+                            f"[TEST-SEED] sample_index={generated_count} "
+                            f"seed={sample_seed}"
+                        )
                     else:
-                        fixed_single = self.dataset_info.datamodule.train_dataset[0].clone()
-                    fixed_single = self._permute_fixed_graph_within_node_types(
-                        fixed_single,
-                        getattr(
-                            self.cfg.general,
-                            "fixed_node_type_permutation_seed",
-                            None,
-                        ),
-                    )
-                    fixed_single = self.dataset_info.to_one_hot(fixed_single)
-                    from torch_geometric.data import Batch
-                    fixed_batch = Batch.from_data_list([fixed_single.clone() for _ in range(to_generate)]).to(self.device)
-                    sampled_batch = self.sample_batch_fixed_nodes(
-                        fixed_batch,
-                        keep_chain=0,
-                        number_chain_steps=self.number_chain_steps,
-                        save_final=to_generate,
-                    )
-                else:
-                    sample_num_nodes = getattr(self.cfg.general, "sample_num_nodes", None)
-                    if sample_num_nodes is not None:
-                        num_nodes = sample_num_nodes
-                    elif use_sample_nodes and hasattr(self.dataset_info, "datamodule"):
-                        train_data = self.dataset_info.datamodule.train_dataset[0]
-                        num_nodes = getattr(train_data, "num_nodes", train_data.x.shape[0] if hasattr(train_data, "x") else 20)
+                        to_generate = min(remaining, batch_size)
+                    if use_fixed_nodes and hasattr(self.dataset_info, "datamodule"):
+                        use_test_graph = getattr(self.cfg.general, "cond_edge_gen_use_test_graph", True)
+                        if use_test_graph and hasattr(self.dataset_info.datamodule, "test_dataset"):
+                            fixed_single = self.dataset_info.datamodule.test_dataset[0].clone()
+                        else:
+                            fixed_single = self.dataset_info.datamodule.train_dataset[0].clone()
+                        fixed_single = self._permute_fixed_graph_within_node_types(
+                            fixed_single,
+                            getattr(
+                                self.cfg.general,
+                                "fixed_node_type_permutation_seed",
+                                None,
+                            ),
+                        )
+                        fixed_single = self.dataset_info.to_one_hot(fixed_single)
+                        from torch_geometric.data import Batch
+                        fixed_batch = Batch.from_data_list([fixed_single.clone() for _ in range(to_generate)]).to(self.device)
+                        sampled_batch = self.sample_batch_fixed_nodes(
+                            fixed_batch,
+                            keep_chain=0,
+                            number_chain_steps=self.number_chain_steps,
+                            save_final=to_generate,
+                        )
                     else:
-                        num_nodes = 20
-                    sampled_batch = self.sample_batch(
-                        batch_id=n_to_generate - remaining,
-                        batch_size=to_generate,
-                        num_nodes=num_nodes,
-                        save_final=to_generate,
-                        keep_chain=0,
-                        number_chain_steps=self.number_chain_steps,
-                    )
-                sample_chunks.append(sampled_batch)
-                remaining -= to_generate
-                if self.device.type == "cuda":
-                    torch.cuda.empty_cache()
+                        sample_num_nodes = getattr(self.cfg.general, "sample_num_nodes", None)
+                        if sample_num_nodes is not None:
+                            num_nodes = sample_num_nodes
+                        elif use_sample_nodes and hasattr(self.dataset_info, "datamodule"):
+                            train_data = self.dataset_info.datamodule.train_dataset[0]
+                            num_nodes = getattr(train_data, "num_nodes", train_data.x.shape[0] if hasattr(train_data, "x") else 20)
+                        else:
+                            num_nodes = 20
+                        sampled_batch = self.sample_batch(
+                            batch_id=generated_count,
+                            batch_size=to_generate,
+                            num_nodes=num_nodes,
+                            save_final=to_generate,
+                            keep_chain=0,
+                            number_chain_steps=self.number_chain_steps,
+                        )
+                    sample_chunks.append(sampled_batch)
+                    remaining -= to_generate
+                    generated_count += to_generate
+                    if self.device.type == "cuda":
+                        torch.cuda.empty_cache()
+            finally:
+                self._active_test_sampling_seed = None
 
             samples = utils.concat_sparse_graphs(sample_chunks)
             with open(f"generated_samples_rank{self.local_rank}.pkl", "wb") as f:
@@ -6514,12 +10536,318 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                     to_log = {k: to_log[k] + [cur_to_log[k]] for k in cur_to_log}
                 print(f"For the {idx} th sampling, we have: ")
                 print(cur_to_log)
+                if getattr(self, "local_rank", 0) == 0:
+                    cur_internal_metrics = self._compute_same_type_internal_sampling_metrics(
+                        split_samples[idx]
+                    )
+                    table_str = self._format_same_type_internal_metrics_table(
+                        cur_internal_metrics,
+                        prefix=f"Same-type internal metrics for sampling {idx}",
+                    )
+                    if table_str:
+                        print(table_str)
             to_log = {k: (np.mean(v), np.std(v)) for k, v in to_log.items()}
             print(f"For overall {test_variance} samplings, we have: ")
             print(to_log)
+        if getattr(self, "local_rank", 0) == 0:
+            internal_metrics = self._compute_same_type_internal_sampling_metrics(samples)
+            if internal_metrics:
+                internal_path = os.path.join(
+                    os.getcwd(),
+                    f"test_same_type_internal_metrics_epoch{self.current_epoch}.json",
+                )
+                with open(internal_path, "w", encoding="utf-8") as file:
+                    json.dump(internal_metrics, file, ensure_ascii=False, indent=2)
+                table_str = self._format_same_type_internal_metrics_table(
+                    internal_metrics,
+                    prefix=f"Overall same-type internal metrics for {test_variance} samplings",
+                )
+                if table_str:
+                    print(table_str)
+                print(f"Same-type internal metrics saved to {internal_path}")
+                if wandb.run:
+                    flat_metrics = {}
+                    for type_name, metrics in internal_metrics.items():
+                        if not isinstance(metrics, dict):
+                            continue
+                        for metric_name, value in metrics.items():
+                            if isinstance(value, (int, float)) and math.isfinite(float(value)):
+                                flat_metrics[
+                                    f"test_same_type_internal/{type_name}/{metric_name}"
+                                ] = float(value)
+                    if flat_metrics:
+                        wandb.log(flat_metrics, step=int(self.current_epoch), commit=False)
         if not generated_path:
             self._compute_and_save_test_intermediate_metrics()
         self.print("Test sampling metrics computed.")
+
+    def _reference_graph_for_same_type_metrics(self):
+        datamodule = getattr(self.dataset_info, "datamodule", None)
+        if datamodule is None:
+            return None
+        for dataset_name in ("test_dataset", "train_dataset", "val_dataset"):
+            dataset = getattr(datamodule, dataset_name, None)
+            if dataset is not None and len(dataset) > 0:
+                return dataset[0]
+        return None
+
+    def _node_type_ranges(self):
+        type_offsets = getattr(self.dataset_info, "type_offsets", {}) or {}
+        if not type_offsets:
+            return []
+        sorted_types = sorted(
+            ((str(name), int(offset)) for name, offset in type_offsets.items()),
+            key=lambda item: item[1],
+        )
+        ranges = []
+        for idx, (type_name, offset) in enumerate(sorted_types):
+            next_offset = (
+                int(sorted_types[idx + 1][1])
+                if idx + 1 < len(sorted_types)
+                else int(self.out_dims.X)
+            )
+            ranges.append((type_name, int(offset), int(next_offset)))
+        return ranges
+
+    @staticmethod
+    def _json_metric_value(value):
+        try:
+            value = float(value)
+        except Exception:
+            return None
+        return value if math.isfinite(value) else None
+
+    def _same_type_internal_graph_stats(self, data):
+        try:
+            import networkx as nx
+        except Exception as exc:
+            if getattr(self, "local_rank", 0) == 0:
+                print(f"[WARN] networkx unavailable for same-type metrics: {exc}")
+            return {}
+        if data is None:
+            return {}
+        node_state = getattr(data, "x", None)
+        if node_state is None:
+            node_state = getattr(data, "node", None)
+        if node_state is None:
+            return {}
+        if node_state.dim() > 1:
+            node_state = node_state.argmax(dim=-1)
+        node_state = node_state.long().detach().cpu()
+        edge_index = getattr(data, "edge_index", None)
+        if edge_index is None:
+            edge_index = torch.empty((2, 0), dtype=torch.long)
+        edge_index = edge_index.long().detach().cpu()
+        edge_attr = getattr(data, "edge_attr", None)
+        if edge_attr is None:
+            edge_labels = torch.ones(edge_index.shape[1], dtype=torch.long)
+        elif edge_attr.dim() > 1:
+            edge_labels = edge_attr.argmax(dim=-1).long().detach().cpu()
+        else:
+            edge_labels = edge_attr.long().detach().cpu()
+        batch = getattr(data, "batch", None)
+        if batch is None:
+            batch = torch.zeros(node_state.shape[0], dtype=torch.long)
+        else:
+            batch = batch.long().detach().cpu()
+        graph_count = int(batch.max().item()) + 1 if batch.numel() else 1
+        type_ranges = self._node_type_ranges()
+        stats = {}
+        for type_name, offset, next_offset in type_ranges:
+            per_graph = {
+                "nodes": [],
+                "edges": [],
+                "avg_degree": [],
+                "clustering": [],
+                "triangles": [],
+                "degree_assortativity": [],
+            }
+            for graph_idx in range(graph_count):
+                node_mask = (
+                    (batch == int(graph_idx))
+                    & (node_state >= int(offset))
+                    & (node_state < int(next_offset))
+                )
+                nodes = torch.where(node_mask)[0]
+                graph = nx.Graph()
+                graph.add_nodes_from(range(int(nodes.numel())))
+                if nodes.numel() > 0 and edge_index.numel() > 0:
+                    local_id = {
+                        int(node.item()): local_idx
+                        for local_idx, node in enumerate(nodes)
+                    }
+                    src = edge_index[0]
+                    dst = edge_index[1]
+                    edge_mask = (
+                        (edge_labels > 0)
+                        & node_mask[src]
+                        & node_mask[dst]
+                        & (batch[src] == int(graph_idx))
+                        & (batch[dst] == int(graph_idx))
+                    )
+                    for u, v in edge_index[:, edge_mask].t().tolist():
+                        if int(u) == int(v):
+                            continue
+                        graph.add_edge(local_id[int(u)], local_id[int(v)])
+                per_graph["nodes"].append(float(graph.number_of_nodes()))
+                per_graph["edges"].append(float(graph.number_of_edges()))
+                per_graph["avg_degree"].append(
+                    float(2.0 * graph.number_of_edges() / max(graph.number_of_nodes(), 1))
+                )
+                if graph.number_of_nodes() > 0:
+                    per_graph["clustering"].append(float(nx.average_clustering(graph)))
+                    per_graph["triangles"].append(
+                        float(sum(nx.triangles(graph).values()) / 3.0)
+                    )
+                else:
+                    per_graph["clustering"].append(float("nan"))
+                    per_graph["triangles"].append(float("nan"))
+                try:
+                    assortativity = nx.degree_assortativity_coefficient(graph)
+                except Exception:
+                    assortativity = float("nan")
+                per_graph["degree_assortativity"].append(
+                    float(assortativity) if assortativity is not None else float("nan")
+                )
+            stats[type_name] = {}
+            for metric_name, values in per_graph.items():
+                arr = np.asarray(values, dtype=float)
+                if arr.size == 0 or np.all(np.isnan(arr)):
+                    stats[type_name][metric_name] = None
+                else:
+                    stats[type_name][metric_name] = self._json_metric_value(
+                        np.nanmean(arr)
+                    )
+        return stats
+
+    def _compute_same_type_internal_sampling_metrics(self, samples):
+        reference = self._reference_graph_for_same_type_metrics()
+        return self._compute_same_type_internal_metrics_between(reference, samples)
+
+    def _compute_same_type_internal_metrics_between(self, reference, samples):
+        real_stats = self._same_type_internal_graph_stats(reference)
+        gen_stats = self._same_type_internal_graph_stats(samples)
+        if not real_stats or not gen_stats:
+            return {}
+        result = {}
+        for type_name in sorted(set(real_stats) | set(gen_stats)):
+            result[type_name] = {}
+            metric_names = sorted(
+                set(real_stats.get(type_name, {})) | set(gen_stats.get(type_name, {}))
+            )
+            for metric_name in metric_names:
+                real_value = real_stats.get(type_name, {}).get(metric_name)
+                gen_value = gen_stats.get(type_name, {}).get(metric_name)
+                result[type_name][f"{metric_name}_real"] = real_value
+                result[type_name][f"{metric_name}_gen"] = gen_value
+                if real_value is None or gen_value is None:
+                    result[type_name][f"{metric_name}_abs_gap"] = None
+                else:
+                    result[type_name][f"{metric_name}_abs_gap"] = abs(
+                        float(gen_value) - float(real_value)
+                    )
+        return result
+
+    def _same_type_internal_forward_reconstruction_metrics(
+        self,
+        data_one_hot,
+        query_edge_index,
+        pred_info,
+    ):
+        if pred_info is None:
+            return {}
+        logits = pred_info.get("logits")
+        true_labels = pred_info.get("true_labels")
+        query_family = pred_info.get("query_family")
+        if (
+            logits is None
+            or true_labels is None
+            or query_family is None
+            or logits.numel() == 0
+        ):
+            return {}
+        logits = logits.detach()
+        true_labels = true_labels.detach().long().reshape(-1)
+        query_family = query_family.detach().long().reshape(-1)
+        query_edge_index = query_edge_index.detach().long()
+        if logits.shape[0] != query_edge_index.shape[1]:
+            return {}
+        if logits.shape[-1] <= 1:
+            exist_scores = logits[:, 0]
+        else:
+            exist_scores = torch.logsumexp(logits[:, 1:], dim=-1) - logits[:, 0]
+        selected_edges = []
+        selected_labels = []
+        for fam_id_t in torch.unique(query_family):
+            fam_mask = query_family == fam_id_t
+            pos_count = int(((true_labels > 0) & fam_mask).sum().item())
+            if pos_count <= 0:
+                continue
+            fam_idx = torch.where(fam_mask)[0]
+            if fam_idx.numel() == 0:
+                continue
+            k = min(pos_count, int(fam_idx.numel()))
+            top_local = torch.topk(exist_scores[fam_idx], k=k, largest=True).indices
+            top_idx = fam_idx[top_local]
+            selected_edges.append(query_edge_index[:, top_idx])
+            if logits.shape[-1] > 1:
+                labels = logits[top_idx, 1:].argmax(dim=-1).long() + 1
+            else:
+                labels = torch.ones((top_idx.numel(),), dtype=torch.long, device=logits.device)
+            selected_labels.append(labels)
+        if selected_edges:
+            edge_index = torch.cat(selected_edges, dim=1)
+            edge_attr = torch.cat(selected_labels, dim=0)
+        else:
+            edge_index = torch.empty((2, 0), dtype=torch.long, device=self.device)
+            edge_attr = torch.empty((0,), dtype=torch.long, device=self.device)
+        pred_graph = utils.SparsePlaceHolder(
+            node=data_one_hot.x,
+            edge_index=edge_index,
+            edge_attr=edge_attr,
+            y=data_one_hot.y,
+            batch=data_one_hot.batch,
+            charge=getattr(data_one_hot, "charge", None),
+            ptr=getattr(data_one_hot, "ptr", None),
+        )
+        return self._compute_same_type_internal_metrics_between(data_one_hot, pred_graph)
+
+    @staticmethod
+    def _format_same_type_internal_metrics_table(metrics, prefix="Same-type internal metrics"):
+        if not metrics:
+            return ""
+        rows = []
+        header = (
+            f"{'type':<10} {'edges real/gen':>18} {'tri real/gen':>18} "
+            f"{'clust real/gen':>21} {'assort real/gen':>22}"
+        )
+        rows.append(prefix)
+        rows.append(header)
+        rows.append("-" * len(header))
+
+        def _fmt(value, digits=4):
+            if value is None:
+                return "nan"
+            try:
+                value = float(value)
+            except Exception:
+                return "nan"
+            if not math.isfinite(value):
+                return "nan"
+            if abs(value - round(value)) < 1e-9:
+                return str(int(round(value)))
+            return f"{value:.{digits}f}"
+
+        for type_name in sorted(metrics.keys()):
+            item = metrics.get(type_name, {}) or {}
+            rows.append(
+                f"{type_name:<10} "
+                f"{_fmt(item.get('edges_real'), 1):>8}/{_fmt(item.get('edges_gen'), 1):<8} "
+                f"{_fmt(item.get('triangles_real'), 1):>8}/{_fmt(item.get('triangles_gen'), 1):<8} "
+                f"{_fmt(item.get('clustering_real')):>9}/{_fmt(item.get('clustering_gen')):<9} "
+                f"{_fmt(item.get('degree_assortativity_real')):>10}/{_fmt(item.get('degree_assortativity_gen')):<10}"
+            )
+        return "\n".join(rows)
 
     def apply_sparse_noise(self, data, t_override=None):
         """Sparse forward noising for the simplified hetero edge-prediction path.
@@ -7065,9 +11393,35 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                     node_subtype_ids=metadata.get("node_subtype_ids"),
                     relation_type_ids=metadata.get("relation_type_ids"),
                     edge_family_ids=metadata.get("edge_family_ids"),
+                    two_hop_structure_lookup=sparse_noisy_data.get(
+                        "two_hop_structure_lookup"
+                    ),
+                    two_hop_scale_factor=sparse_noisy_data.get(
+                        "two_hop_scale_factor"
+                    ),
+                    endpoint_role_scale_factor=sparse_noisy_data.get(
+                        "endpoint_role_scale_factor"
+                    ),
+                    edge_input_residual_scale=sparse_noisy_data.get(
+                        "edge_input_residual_scale"
+                    ),
+                    family_y_table=sparse_noisy_data.get("family_y_t"),
+                    edge_struct_features=sparse_noisy_data.get(
+                        "edge_struct_features_t"
+                    ),
             )
         else:
-            return self.model(node, edge_attr, edge_index, y, batch)
+            return self.model(
+                node,
+                edge_attr,
+                edge_index,
+                y,
+                batch,
+                family_y_table=sparse_noisy_data.get("family_y_t"),
+                edge_struct_features=sparse_noisy_data.get(
+                    "edge_struct_features_t"
+                ),
+            )
 
     def _heterogeneous_metadata_for_edges(
         self, node, edge_attr, edge_index
@@ -7143,6 +11497,22 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             prepared["edge_attr_t"],
             prepared["edge_index_t"],
         )
+        structure_lookup = None
+        if (
+            bool(getattr(self.cfg.model, "use_two_hop_structure", False))
+            or bool(
+                getattr(
+                    self.cfg.model, "use_endpoint_role_residual", False
+                )
+            )
+        ):
+            structure_lookup = self.model.build_two_hop_structure_lookup(
+                context_edge_index=prepared["edge_index_t"],
+                num_nodes=int(prepared["node_t"].shape[0]),
+                node_type_ids=metadata.get("node_type_ids"),
+                edge_family_ids=metadata.get("edge_family_ids"),
+                batch=prepared["batch"],
+            )
         return self.model.encode_context(
             X=prepared["node_t"],
             edge_attr=prepared["edge_attr_t"],
@@ -7153,6 +11523,11 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             node_subtype_ids=metadata.get("node_subtype_ids"),
             relation_type_ids=metadata.get("relation_type_ids"),
             edge_family_ids=metadata.get("edge_family_ids"),
+            two_hop_structure_lookup=structure_lookup,
+            two_hop_scale_factor=prepared.get("two_hop_scale_factor"),
+            endpoint_role_scale_factor=prepared.get(
+                "endpoint_role_scale_factor"
+            ),
         )
 
     def _decode_query_logits(
@@ -7161,6 +11536,8 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         query_edge_index,
         query_current_labels,
         batch,
+        query_edge_family=None,
+        edge_input_residual_scale=None,
     ):
         query_attr = F.one_hot(
             query_current_labels.long().clamp(0, self.out_dims.E - 1),
@@ -7171,7 +11548,16 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             query_edge_attr=query_attr,
             query_edge_index=query_edge_index.long(),
             batch=batch.long(),
+            query_edge_family_ids=query_edge_family,
+            edge_input_residual_scale=edge_input_residual_scale,
         )
+
+    @staticmethod
+    def _query_decode_labels_for_mode(current_labels, mode):
+        mode = str(mode or "current").lower()
+        if mode in ("none", "no_edge", "zero"):
+            return torch.zeros_like(current_labels)
+        return current_labels
 
     def forward(self, noisy_data):
         """
@@ -7469,6 +11855,16 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         scores = torch.cat(
             [part["scores"].detach().float().cpu() for part in candidate_parts]
         )
+        family_parts = [
+            part.get("family")
+            for part in candidate_parts
+            if part.get("family") is not None
+        ]
+        families = None
+        if len(family_parts) == len(candidate_parts):
+            families = torch.cat(
+                [part.detach().cpu().long() for part in family_parts]
+            )
         keys = edge_index[0] * int(total_nodes) + edge_index[1]
 
         # Keep the maximum model score for duplicate block-query occurrences.
@@ -7476,6 +11872,8 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         edge_index = edge_index[:, order]
         keys = keys[order]
         scores = scores[order]
+        if families is not None:
+            families = families[order]
         _, inverse = torch.unique_consecutive(keys, return_inverse=True)
         num_unique = int(inverse[-1].item()) + 1 if inverse.numel() else 0
         max_scores = torch.full((num_unique,), -float("inf"), dtype=scores.dtype)
@@ -7498,6 +11896,8 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         edge_index = edge_index[:, chosen]
         keys = keys[chosen]
         scores = scores[chosen]
+        if families is not None:
+            families = families[chosen]
 
         ref = reference_edge_index.long().detach().cpu()
         ref_u = torch.minimum(ref[0], ref[1])
@@ -7519,7 +11919,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         )
         max_negatives = max(0, max_negatives)
         if negative_idx.numel() > max_negatives:
-            seed = int(getattr(self.cfg.train, "seed", 0) or 0)
+            seed = self._current_sampling_seed()
             t_int = int(round(float(t_float.mean().detach().cpu()) * self.T))
             generator = torch.Generator(device="cpu")
             generator.manual_seed(seed + 3000017 * t_int)
@@ -7596,6 +11996,83 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 ),
             }
 
+        per_family = {}
+        if families is not None and families.numel() == scores.numel():
+            edge_family2id = getattr(self.dataset_info, "edge_family2id", {}) or {}
+            id2edge_family = {int(v): str(k) for k, v in edge_family2id.items()}
+            for fam_id_tensor in torch.unique(families, sorted=True):
+                fam_id = int(fam_id_tensor.item())
+                fam_mask = families == fam_id
+                fam_idx = fam_mask.nonzero(as_tuple=True)[0]
+                if fam_idx.numel() == 0:
+                    continue
+                fam_real_mask = real_mask[fam_idx]
+                fam_real_count = int(fam_real_mask.sum().item())
+                fam_neg_count = int((~fam_real_mask).sum().item())
+                fam_scores = scores[fam_idx].numpy()
+                fam_labels = fam_real_mask.numpy().astype(np.int64)
+                fam_auc = float("nan")
+                if fam_real_count > 0 and fam_neg_count > 0:
+                    fam_ranks = self._rankdata_average(fam_scores)
+                    fam_pos_rank_sum = fam_ranks[fam_labels == 1].sum()
+                    fam_auc = float(
+                        (
+                            fam_pos_rank_sum
+                            - fam_real_count * (fam_real_count + 1) / 2.0
+                        )
+                        / (fam_real_count * fam_neg_count)
+                    )
+                fam_top_k = min(fam_real_count, int(fam_idx.numel()))
+                if fam_top_k > 0:
+                    fam_top_local = torch.topk(
+                        scores[fam_idx], k=fam_top_k, largest=True
+                    ).indices
+                    fam_top_idx = fam_idx[fam_top_local]
+                    fam_top_real = real_mask[fam_top_idx]
+                    fam_top_edges = edge_index[:, fam_top_idx]
+                    fam_top_common = np.asarray(
+                        [
+                            len(neighbors[int(u)].intersection(neighbors[int(v)]))
+                            for u, v in zip(
+                                fam_top_edges[0].tolist(),
+                                fam_top_edges[1].tolist(),
+                            )
+                        ],
+                        dtype=np.float64,
+                    )
+                    fam_top_recall = float(
+                        fam_top_real.sum().item() / max(fam_real_count, 1)
+                    )
+                    fam_top_common_mean = (
+                        float(fam_top_common.mean())
+                        if fam_top_common.size
+                        else float("nan")
+                    )
+                else:
+                    fam_top_recall = float("nan")
+                    fam_top_common_mean = float("nan")
+                fam_pos_scores = fam_scores[fam_labels == 1]
+                fam_neg_scores = fam_scores[fam_labels == 0]
+                per_family[id2edge_family.get(fam_id, str(fam_id))] = {
+                    "candidate_count": int(fam_idx.numel()),
+                    "real_candidate_count": fam_real_count,
+                    "negative_candidate_count": fam_neg_count,
+                    "real_vs_negative_auc": fam_auc,
+                    "mean_score_real": (
+                        float(fam_pos_scores.mean())
+                        if fam_pos_scores.size
+                        else float("nan")
+                    ),
+                    "mean_score_negative": (
+                        float(fam_neg_scores.mean())
+                        if fam_neg_scores.size
+                        else float("nan")
+                    ),
+                    "top_k": fam_top_k,
+                    "top_k_real_recall": fam_top_recall,
+                    "top_k_mean_common_neighbors": fam_top_common_mean,
+                }
+
         result = {
             "t": float(t_float.mean().detach().cpu()),
             "s": float(s_float.mean().detach().cpu()),
@@ -7622,6 +12099,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 float(top_common.mean()) if top_common.size else float("nan")
             ),
             "positive_score_by_triangle_contribution": positive_groups,
+            "per_family": per_family,
         }
         print("[采样-EDGE-SCORE-DIAG] " + json.dumps(result, ensure_ascii=False))
         output_path = os.path.join(
@@ -8391,7 +12869,8 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
 
         query_rounds = []
         use_template_blocks = (
-            str(getattr(self.cfg.model, "sampling_block_mode", "uniform")).lower() == "type_template"
+            not query_rounds
+            and str(getattr(self.cfg.model, "sampling_block_mode", "uniform")).lower() == "type_template"
             and pseudo_blocks is not None
             and len(pseudo_blocks) > 0
         )
@@ -8448,6 +12927,10 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             if ensemble_selection_mode not in (
                 "gumbel_exact_k",
                 "deterministic_exact_k",
+                "gumbel_exact_k_degree_pair",
+                "deterministic_exact_k_degree_pair",
+                "gumbel_exact_k_degree_pair_quota",
+                "deterministic_exact_k_degree_pair_quota",
             ):
                 raise ValueError(
                     "sampling_partition_ensemble requires gumbel_exact_k "
@@ -8475,6 +12958,32 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         base_edge_index = edge_index
         base_edge_attr_ids = edge_attr_ids
         base_edge_attr_onehot = edge_attr_onehot
+        sampling_structure_lookup = None
+        if isinstance(self.model, PyHGTDenoiser) and (
+            bool(getattr(self.cfg.model, "use_two_hop_structure", False))
+            or bool(
+                getattr(
+                    self.cfg.model, "use_endpoint_role_residual", False
+                )
+            )
+        ):
+            visible = base_edge_attr_ids > 0
+            visible_edge_index = base_edge_index[:, visible]
+            visible_edge_attr = base_edge_attr_onehot[visible]
+            visible_metadata = self._heterogeneous_metadata_for_edges(
+                node_onehot,
+                visible_edge_attr,
+                visible_edge_index,
+            )
+            sampling_structure_lookup = (
+                self.model.build_two_hop_structure_lookup(
+                    context_edge_index=visible_edge_index,
+                    num_nodes=int(node_onehot.shape[0]),
+                    node_type_ids=visible_metadata.get("node_type_ids"),
+                    edge_family_ids=visible_metadata.get("edge_family_ids"),
+                    batch=batch,
+                )
+            )
         cur_edge_index = edge_index
         cur_edge_attr_ids = edge_attr_ids
         cur_edge_attr_onehot = edge_attr_onehot
@@ -8490,10 +12999,22 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             and not use_autoregressive_context
         )
         use_global_exact_k = (
-            selection_mode in ("gumbel_exact_k", "deterministic_exact_k")
+            selection_mode in (
+                "gumbel_exact_k",
+                "deterministic_exact_k",
+                "gumbel_exact_k_degree_pair",
+                "deterministic_exact_k_degree_pair",
+                "gumbel_exact_k_degree_pair_quota",
+                "deterministic_exact_k_degree_pair_quota",
+            )
             and query_rounds
             and query_rounds[0][2] is not None
             and not use_autoregressive_context
+        )
+        use_queryfree_global_exact_k = (
+            use_global_exact_k
+            and isinstance(self.model, PyHGTDenoiser)
+            and bool(getattr(self.cfg.model, "sampling_queryfree_decode", False))
         )
         use_exact_k_connectivity_repair = (
             use_global_exact_k
@@ -8520,9 +13041,25 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         connectivity_stats = {}
         repair_candidate_parts = []
         global_exact_k_candidate_parts = []
+        clean_exact_k_candidate_parts = []
+        use_ranking_intervention_diag = (
+            use_global_exact_k
+            and bool(
+                getattr(
+                    self.cfg.model,
+                    "sampling_ranking_intervention_diag",
+                    False,
+                )
+            )
+        )
         use_forward_equivariance_diag = bool(
             getattr(self.cfg.general, "forward_equivariance_diag", False)
         ) and hasattr(data, "forward_equivariance_diag_node_type")
+        if use_queryfree_global_exact_k and use_forward_equivariance_diag:
+            raise ValueError(
+                "sampling_queryfree_decode does not currently support "
+                "forward_equivariance_diag."
+            )
         use_exactk_equivariance_diag = (
             use_forward_equivariance_diag
             and bool(getattr(self.cfg.general, "exactk_equivariance_diag", False))
@@ -8578,6 +13115,26 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             "query_removed": 0,
             "query_retained": 0,
         }
+        queryfree_encoded = None
+        if use_queryfree_global_exact_k:
+            queryfree_encoded = self._encode_context_only(
+                data=data,
+                node_onehot=node_onehot,
+                context_edge_index=base_edge_index.long(),
+                context_edge_attr=base_edge_attr_onehot.float(),
+                batch=batch,
+                ptr=ptr,
+                t_float=t_float,
+            )
+            if (
+                getattr(self, "local_rank", 0) == 0
+                and not getattr(self, "_logged_sampling_queryfree_decode", False)
+            ):
+                print(
+                    "[采样-QUERYFREE] global exact-K encodes current full G_t "
+                    "once and decodes query candidates without query message passing"
+                )
+                self._logged_sampling_queryfree_decode = True
 
         for query_edge_index, _query_edge_batch, query_edge_family in query_rounds:
             if query_edge_index is None or query_edge_index.numel() == 0:
@@ -8589,144 +13146,213 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 fw_edge_index = base_edge_index
                 fw_edge_attr_onehot = base_edge_attr_onehot
 
-            query_mask, comp_edge_index, comp_edge_attr = get_computational_graph(
-                triu_query_edge_index=query_edge_index,
-                clean_edge_index=fw_edge_index,
-                clean_edge_attr=fw_edge_attr_onehot,
-                heterogeneous=self.heterogeneous,
-                for_message_passing=True,
-                total_num_nodes=node_onehot.shape[0],
+            sampling_residual_scale = getattr(
+                self.cfg.model, "sampling_edge_input_residual_scale", None
             )
-
-            comp_query_edge_index = comp_edge_index[:, query_mask]
-
-            sparse_noisy_data = {
-                "node_t": node_onehot,
-                "X_t": node_onehot,
-                "edge_index_t": fw_edge_index,
-                "edge_attr_t": fw_edge_attr_onehot,
-                "comp_edge_index_t": comp_edge_index,
-                "comp_edge_attr_t": comp_edge_attr,
-                "y_t": data.y,
-                "batch": batch,
-                "ptr": ptr,
-                "charge_t": getattr(data, "charge", torch.zeros((node_onehot.shape[0], 0), device=self.device)),
-                "t_float": t_float,
-            }
-            pred = self.forward(sparse_noisy_data)
-            comp_query_logits = pred.edge_attr[query_mask]
+            selected_query_edge_index = None
+            selected_query_family = None
+            selected_query_batch = None
+            current_query_labels = None
+            query_logits = None
             paired_comp_query_logits = None
-            if use_forward_equivariance_diag:
-                diag_charge = getattr(data, "charge", None)
-                if diag_charge is None:
-                    diag_charge = torch.zeros(
-                        (node_onehot.shape[0], 0), device=self.device
-                    )
-                paired_sparse_noisy_data = {
-                    "node_t": node_onehot[diag_new_to_old],
-                    "X_t": node_onehot[diag_new_to_old],
-                    "edge_index_t": diag_old_to_new[fw_edge_index],
+            paired_query_logits = None
+            if use_queryfree_global_exact_k:
+                selected_query_edge_index = query_edge_index.long()
+                selected_query_family = query_edge_family.long()
+                selected_query_batch = batch[selected_query_edge_index[0].long()]
+                current_query_labels = self._lookup_query_edge_labels(
+                    selected_query_edge_index,
+                    fw_edge_index,
+                    fw_edge_attr_onehot.argmax(dim=-1).long(),
+                    total_nodes,
+                )
+                decode_query_labels = self._query_decode_labels_for_mode(
+                    current_query_labels,
+                    getattr(
+                        self.cfg.model,
+                        "sampling_queryfree_query_state",
+                        "current",
+                    ),
+                )
+                query_logits = self._decode_query_logits(
+                    queryfree_encoded,
+                    selected_query_edge_index,
+                    decode_query_labels,
+                    batch,
+                    selected_query_family,
+                    edge_input_residual_scale=sampling_residual_scale,
+                )
+            else:
+                query_mask, comp_edge_index, comp_edge_attr = get_computational_graph(
+                    triu_query_edge_index=query_edge_index,
+                    clean_edge_index=fw_edge_index,
+                    clean_edge_attr=fw_edge_attr_onehot,
+                    heterogeneous=self.heterogeneous,
+                    for_message_passing=True,
+                    total_num_nodes=node_onehot.shape[0],
+                )
+                sparse_noisy_data = {
+                    "node_t": node_onehot,
+                    "X_t": node_onehot,
+                    "edge_index_t": fw_edge_index,
                     "edge_attr_t": fw_edge_attr_onehot,
-                    "comp_edge_index_t": diag_old_to_new[comp_edge_index],
+                    "comp_edge_index_t": comp_edge_index,
                     "comp_edge_attr_t": comp_edge_attr,
                     "y_t": data.y,
-                    "batch": batch[diag_new_to_old],
+                    "batch": batch,
                     "ptr": ptr,
-                    "charge_t": diag_charge[diag_new_to_old],
+                    "charge_t": getattr(data, "charge", torch.zeros((node_onehot.shape[0], 0), device=self.device)),
                     "t_float": t_float,
                 }
-                paired_pred = self.forward(paired_sparse_noisy_data)
-                paired_comp_query_logits = paired_pred.edge_attr[query_mask]
-                if paired_comp_query_logits.shape != comp_query_logits.shape:
-                    raise RuntimeError(
-                        "paired forward changed query-logit shape: "
-                        f"{tuple(comp_query_logits.shape)} vs "
-                        f"{tuple(paired_comp_query_logits.shape)}"
+                if sampling_residual_scale is not None:
+                    sparse_noisy_data["edge_input_residual_scale"] = float(
+                        sampling_residual_scale
                     )
-                raw_diff = (
-                    comp_query_logits - paired_comp_query_logits
-                ).abs()
-                original_exist = (
-                    torch.logsumexp(comp_query_logits[:, 1:], dim=-1)
-                    - comp_query_logits[:, 0]
-                )
-                paired_exist = (
-                    torch.logsumexp(paired_comp_query_logits[:, 1:], dim=-1)
-                    - paired_comp_query_logits[:, 0]
-                )
-                exist_diff = (original_exist - paired_exist).abs()
-                prob_diff = (
-                    torch.sigmoid(original_exist)
-                    - torch.sigmoid(paired_exist)
-                ).abs()
-                forward_equivariance_stats["count"] += int(
-                    original_exist.numel()
-                )
-                forward_equivariance_stats["raw_element_count"] += int(
-                    raw_diff.numel()
-                )
-                forward_equivariance_stats["raw_abs_sum"] += float(
-                    raw_diff.sum().detach().cpu()
-                )
-                forward_equivariance_stats["raw_abs_max"] = max(
-                    forward_equivariance_stats["raw_abs_max"],
-                    float(raw_diff.max().detach().cpu()),
-                )
-                forward_equivariance_stats["exist_abs_sum"] += float(
-                    exist_diff.sum().detach().cpu()
-                )
-                forward_equivariance_stats["exist_abs_max"] = max(
-                    forward_equivariance_stats["exist_abs_max"],
-                    float(exist_diff.max().detach().cpu()),
-                )
-                forward_equivariance_stats["prob_abs_sum"] += float(
-                    prob_diff.sum().detach().cpu()
-                )
-                forward_equivariance_stats["prob_abs_max"] = max(
-                    forward_equivariance_stats["prob_abs_max"],
-                    float(prob_diff.max().detach().cpu()),
-                )
-                forward_equivariance_stats["exist_original"].append(
-                    original_exist.detach().float().cpu()
-                )
-                forward_equivariance_stats["exist_permuted"].append(
-                    paired_exist.detach().float().cpu()
-                )
-            if comp_query_logits.numel() == 0:
-                continue
-            selected_query_edge_index, selected_query_family, query_logits = self._select_original_query_outputs(
-                query_edge_index, query_edge_family, comp_query_edge_index, comp_query_logits
-            )
-            paired_query_logits = None
-            if use_forward_equivariance_diag:
-                (
-                    paired_selected_query_edge_index,
-                    paired_selected_query_family,
-                    paired_query_logits,
-                ) = self._select_original_query_outputs(
-                    diag_old_to_new[query_edge_index],
-                    query_edge_family,
-                    diag_old_to_new[comp_query_edge_index],
-                    paired_comp_query_logits,
-                )
-                if (
-                    paired_query_logits.shape != query_logits.shape
-                    or not torch.equal(
-                        paired_selected_query_family, selected_query_family
+                if sampling_structure_lookup is not None:
+                    sparse_noisy_data["two_hop_structure_lookup"] = (
+                        sampling_structure_lookup
                     )
-                ):
-                    raise RuntimeError(
-                        "paired query selection changed candidate alignment"
+                pred = self.forward(sparse_noisy_data)
+                comp_query_logits = pred.edge_attr[query_mask]
+                comp_query_edge_index = comp_edge_index[:, query_mask]
+                if use_forward_equivariance_diag:
+                    diag_charge = getattr(data, "charge", None)
+                    if diag_charge is None:
+                        diag_charge = torch.zeros(
+                            (node_onehot.shape[0], 0), device=self.device
+                        )
+                    paired_sparse_noisy_data = {
+                        "node_t": node_onehot[diag_new_to_old],
+                        "X_t": node_onehot[diag_new_to_old],
+                        "edge_index_t": diag_old_to_new[fw_edge_index],
+                        "edge_attr_t": fw_edge_attr_onehot,
+                        "comp_edge_index_t": diag_old_to_new[comp_edge_index],
+                        "comp_edge_attr_t": comp_edge_attr,
+                        "y_t": data.y,
+                        "batch": batch[diag_new_to_old],
+                        "ptr": ptr,
+                        "charge_t": diag_charge[diag_new_to_old],
+                        "t_float": t_float,
+                    }
+                    if sampling_residual_scale is not None:
+                        paired_sparse_noisy_data["edge_input_residual_scale"] = float(
+                            sampling_residual_scale
+                        )
+                    if sampling_structure_lookup is not None:
+                        paired_visible = fw_edge_attr_onehot.argmax(dim=-1).long() > 0
+                        paired_visible_edge_index = diag_old_to_new[
+                            fw_edge_index[:, paired_visible]
+                        ]
+                        paired_visible_edge_attr = fw_edge_attr_onehot[paired_visible]
+                        paired_metadata = self._heterogeneous_metadata_for_edges(
+                            paired_sparse_noisy_data["node_t"],
+                            paired_visible_edge_attr,
+                            paired_visible_edge_index,
+                        )
+                        paired_sparse_noisy_data["two_hop_structure_lookup"] = (
+                            self.model.build_two_hop_structure_lookup(
+                                context_edge_index=paired_visible_edge_index,
+                                num_nodes=int(node_onehot.shape[0]),
+                                node_type_ids=paired_metadata.get("node_type_ids"),
+                                edge_family_ids=paired_metadata.get(
+                                    "edge_family_ids"
+                                ),
+                                batch=paired_sparse_noisy_data["batch"],
+                            )
+                        )
+                    paired_pred = self.forward(paired_sparse_noisy_data)
+                    paired_comp_query_logits = paired_pred.edge_attr[query_mask]
+                    if paired_comp_query_logits.shape != comp_query_logits.shape:
+                        raise RuntimeError(
+                            "paired forward changed query-logit shape: "
+                            f"{tuple(comp_query_logits.shape)} vs "
+                            f"{tuple(paired_comp_query_logits.shape)}"
+                        )
+                    raw_diff = (
+                        comp_query_logits - paired_comp_query_logits
+                    ).abs()
+                    original_exist = (
+                        torch.logsumexp(comp_query_logits[:, 1:], dim=-1)
+                        - comp_query_logits[:, 0]
                     )
+                    paired_exist = (
+                        torch.logsumexp(paired_comp_query_logits[:, 1:], dim=-1)
+                        - paired_comp_query_logits[:, 0]
+                    )
+                    exist_diff = (original_exist - paired_exist).abs()
+                    prob_diff = (
+                        torch.sigmoid(original_exist)
+                        - torch.sigmoid(paired_exist)
+                    ).abs()
+                    forward_equivariance_stats["count"] += int(
+                        original_exist.numel()
+                    )
+                    forward_equivariance_stats["raw_element_count"] += int(
+                        raw_diff.numel()
+                    )
+                    forward_equivariance_stats["raw_abs_sum"] += float(
+                        raw_diff.sum().detach().cpu()
+                    )
+                    forward_equivariance_stats["raw_abs_max"] = max(
+                        forward_equivariance_stats["raw_abs_max"],
+                        float(raw_diff.max().detach().cpu()),
+                    )
+                    forward_equivariance_stats["exist_abs_sum"] += float(
+                        exist_diff.sum().detach().cpu()
+                    )
+                    forward_equivariance_stats["exist_abs_max"] = max(
+                        forward_equivariance_stats["exist_abs_max"],
+                        float(exist_diff.max().detach().cpu()),
+                    )
+                    forward_equivariance_stats["prob_abs_sum"] += float(
+                        prob_diff.sum().detach().cpu()
+                    )
+                    forward_equivariance_stats["prob_abs_max"] = max(
+                        forward_equivariance_stats["prob_abs_max"],
+                        float(prob_diff.max().detach().cpu()),
+                    )
+                    forward_equivariance_stats["exist_original"].append(
+                        original_exist.detach().float().cpu()
+                    )
+                    forward_equivariance_stats["exist_permuted"].append(
+                        paired_exist.detach().float().cpu()
+                    )
+                if comp_query_logits.numel() == 0:
+                    continue
+                selected_query_edge_index, selected_query_family, query_logits = self._select_original_query_outputs(
+                    query_edge_index, query_edge_family, comp_query_edge_index, comp_query_logits
+                )
+                if use_forward_equivariance_diag:
+                    (
+                        paired_selected_query_edge_index,
+                        paired_selected_query_family,
+                        paired_query_logits,
+                    ) = self._select_original_query_outputs(
+                        diag_old_to_new[query_edge_index],
+                        query_edge_family,
+                        diag_old_to_new[comp_query_edge_index],
+                        paired_comp_query_logits,
+                    )
+                    if (
+                        paired_query_logits.shape != query_logits.shape
+                        or not torch.equal(
+                            paired_selected_query_family, selected_query_family
+                        )
+                    ):
+                        raise RuntimeError(
+                            "paired query selection changed candidate alignment"
+                        )
             if query_logits.numel() == 0 or selected_query_edge_index.numel() == 0:
                 continue
-            selected_query_batch = batch[selected_query_edge_index[0].long()]
-            current_query_labels = self._lookup_query_edge_labels(
-                selected_query_edge_index,
-                fw_edge_index,
-                fw_edge_attr_onehot.argmax(dim=-1).long(),
-                total_nodes,
-            )
+            if selected_query_batch is None:
+                selected_query_batch = batch[selected_query_edge_index[0].long()]
+            if current_query_labels is None:
+                current_query_labels = self._lookup_query_edge_labels(
+                    selected_query_edge_index,
+                    fw_edge_index,
+                    fw_edge_attr_onehot.argmax(dim=-1).long(),
+                    total_nodes,
+                )
             if verbose_sampling:
                 raw_masked = self._mask_edge_logits_by_query_family(
                     query_logits, selected_query_family
@@ -8738,6 +13364,15 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 query_logits,
                 selected_query_family,
             )
+            if use_ranking_intervention_diag:
+                self._update_global_exact_k_candidates(
+                    clean_exact_k_candidate_parts,
+                    query_logits,
+                    selected_query_family,
+                    selected_query_edge_index,
+                    selected_query_batch,
+                    total_nodes,
+                )
             if use_forward_equivariance_diag:
                 paired_query_logits = (
                     self._calibrate_edge_logits_for_exist_pos_weight(
@@ -8765,6 +13400,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                     {
                         "edge_index": torch.stack([diag_u, diag_v], dim=0),
                         "scores": diag_scores,
+                        "family": selected_query_family.detach(),
                     }
                 )
             if verbose_sampling:
@@ -8959,6 +13595,26 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                     apply_connectivity_repair=use_exact_k_connectivity_repair,
                 )
             )
+            if use_ranking_intervention_diag:
+                clean_selected_edges, _ = (
+                    self._finalize_global_exact_k_candidates(
+                        data,
+                        clean_exact_k_candidate_parts,
+                        selection_mode,
+                        sampling_step,
+                        apply_connectivity_repair=False,
+                        log_selection=False,
+                    )
+                )
+                self._log_exact_k_ranking_intervention(
+                    clean_selected_edges=clean_selected_edges,
+                    mixed_selected_edges=selected_edges,
+                    current_edge_index=edge_index,
+                    candidate_parts=clean_exact_k_candidate_parts,
+                    total_nodes=total_nodes,
+                    s_float=s_float,
+                    t_float=t_float,
+                )
             if use_exactk_equivariance_diag:
                 paired_selected_edges, _ = (
                     self._finalize_global_exact_k_candidates(
@@ -9197,6 +13853,10 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         comp_edge_attr_t = sparse_noisy_data["comp_edge_attr_t"].to(device=self.device, dtype=torch.float32)
         y_t = sparse_noisy_data["y_t"].to(device=self.device, dtype=torch.float32)
         t_float = sparse_noisy_data["t_float"].to(device=self.device, dtype=torch.float32)
+        two_hop_scale_factor = self._two_hop_reliability_factor(t_float)
+        endpoint_role_scale_factor = (
+            self._endpoint_role_reliability_factor(t_float)
+        )
 
         if self._no_extra_features:
             # 不使用额外特征：不调用 extra_features/domain_features，不分配空张量，不拼接
@@ -9209,7 +13869,11 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             else:
                 node = node_t
             y = torch.hstack((y_t, t_float)).float()
-            return {
+            if self.sparse_hetero_y_dim > 0:
+                y = torch.hstack(
+                    [y, self._compute_sparse_hetero_y(sparse_noisy_data)]
+                ).float()
+            prepared = {
                 "node_t": node,
                 "edge_index_t": sparse_noisy_data["comp_edge_index_t"],
                 "edge_attr_t": comp_edge_attr_t,
@@ -9217,6 +13881,25 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 "batch": sparse_noisy_data["batch"],
                 "charge_t": sparse_noisy_data["charge_t"],
             }
+            if self.sparse_family_y_dim > 0:
+                prepared["family_y_t"] = self._compute_sparse_family_y(
+                    sparse_noisy_data
+                )
+            if bool(getattr(self.cfg.model, "use_edge_struct_features", False)):
+                prepared["edge_struct_features_t"] = self._compute_edge_struct_features(
+                    sparse_noisy_data
+                )
+            if "two_hop_structure_lookup" in sparse_noisy_data:
+                prepared["two_hop_structure_lookup"] = sparse_noisy_data[
+                    "two_hop_structure_lookup"
+                ]
+            if two_hop_scale_factor is not None:
+                prepared["two_hop_scale_factor"] = two_hop_scale_factor
+            if endpoint_role_scale_factor is not None:
+                prepared["endpoint_role_scale_factor"] = (
+                    endpoint_role_scale_factor
+                )
+            return prepared
 
         # get extra features
         extra_data = self.extra_features(sparse_noisy_data)
@@ -9317,6 +14000,10 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
 
         comp_edge_attr = torch.hstack([comp_edge_attr_t, extraE.to(device=self.device, dtype=torch.float32)])
         y = torch.hstack((y_t, t_float, extra_y.to(device=self.device, dtype=torch.float32))).float()
+        if self.sparse_hetero_y_dim > 0:
+            y = torch.hstack(
+                [y, self._compute_sparse_hetero_y(sparse_noisy_data)]
+            ).float()
 
         # get the input for the forward function
         # TODO: change to PlaceHolder
@@ -9328,6 +14015,30 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             "batch": sparse_noisy_data["batch"],
             "charge_t": sparse_noisy_data["charge_t"],
         }
+        if self.sparse_family_y_dim > 0:
+            extra_sparse_noisy_data["family_y_t"] = self._compute_sparse_family_y(
+                sparse_noisy_data
+            )
+        if bool(getattr(self.cfg.model, "use_edge_struct_features", False)):
+            extra_sparse_noisy_data["edge_struct_features_t"] = (
+                self._compute_edge_struct_features(sparse_noisy_data)
+            )
+        if "edge_input_residual_scale" in sparse_noisy_data:
+            extra_sparse_noisy_data["edge_input_residual_scale"] = (
+                sparse_noisy_data["edge_input_residual_scale"]
+            )
+        if "two_hop_structure_lookup" in sparse_noisy_data:
+            extra_sparse_noisy_data["two_hop_structure_lookup"] = (
+                sparse_noisy_data["two_hop_structure_lookup"]
+            )
+        if two_hop_scale_factor is not None:
+            extra_sparse_noisy_data["two_hop_scale_factor"] = (
+                two_hop_scale_factor
+            )
+        if endpoint_role_scale_factor is not None:
+            extra_sparse_noisy_data["endpoint_role_scale_factor"] = (
+                endpoint_role_scale_factor
+            )
 
         return extra_sparse_noisy_data
 
