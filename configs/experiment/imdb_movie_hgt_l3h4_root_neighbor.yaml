@@ -1,0 +1,38 @@
+# @package _global_
+defaults:
+  - imdb_movie_hgt_l3h4_node_closure
+
+general:
+  name: imdb_movie_l3h4_root_neighbor
+
+model:
+  # Keep the successful node-centered closure signal, then add a narrow typed
+  # root-neighbor objective for IMDB's dominant pattern:
+  # Actor/Director clean degree-2 roots with typed heterogeneous neighbors that
+  # should be closed by the third relation. This does not require exact edge ID
+  # recovery; it supervises root degree, neighbor-type mix, and closure coverage.
+  typed_root_neighbor_loss_weight: 0.03
+  typed_root_neighbor_loss_warmup_epochs: 5
+  typed_root_neighbor_loss_t_power: 1.0
+  typed_root_neighbor_exact_degree: 2
+  typed_root_neighbor_max_degree: 2
+  typed_root_neighbor_min_target_degree: 1.0
+  typed_root_neighbor_require_closed: true
+  typed_root_neighbor_closed_threshold: 0.5
+  typed_root_neighbor_saturation_scale: 1.0
+  typed_root_neighbor_degree_weight: 0.5
+  typed_root_neighbor_type_weight: 1.0
+  typed_root_neighbor_closure_weight: 1.0
+  typed_root_neighbor_chunk_size: 512
+
+  # This experiment tests distributional root-role supervision. Disable the
+  # inherited closure-rank term so improvements are not mixed with exact
+  # candidate ranking pressure, and so local 11 GB smoke tests remain stable.
+  closure_rank_loss_weight: 0.0
+
+  # A small endpoint degree-role anchor helps prevent family quotas from being
+  # satisfied by pushing too many Actor/Director roots to degree 0/1/3.
+  degree_role_dist_loss_weight: 0.01
+  degree_role_dist_loss_warmup_epochs: 5
+  degree_role_dist_loss_t_power: 1.0
+  degree_role_dist_degree_cap: 8

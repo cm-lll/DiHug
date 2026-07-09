@@ -644,6 +644,24 @@ typed_rooted_signature_min_group_nodes: 4
 typed_rooted_signature_closed_threshold: 0.5
 typed_rooted_signature_top_frac: 0.05
 typed_rooted_signature_top_slack: 1.05
+# Training-only typed root-neighbor supervision. Unlike exact edge recovery, this
+# matches the typed local role of low-degree root nodes: their expected degree,
+# neighbor-type composition, and closed-wedge coverage. This targets structures
+# such as IMDB where many Actor/Director degree-2 roots should connect to two
+# different node types and have those neighbors closed by a third relation.
+typed_root_neighbor_loss_weight: 0.0
+typed_root_neighbor_loss_warmup_epochs: 0
+typed_root_neighbor_loss_t_power: 0.0
+typed_root_neighbor_exact_degree: 2  # <=0 means use degree <= max_degree
+typed_root_neighbor_max_degree: 2
+typed_root_neighbor_min_target_degree: 1.0
+typed_root_neighbor_require_closed: true
+typed_root_neighbor_closed_threshold: 0.5
+typed_root_neighbor_saturation_scale: 1.0
+typed_root_neighbor_degree_weight: 0.5
+typed_root_neighbor_type_weight: 1.0
+typed_root_neighbor_closure_weight: 1.0
+typed_root_neighbor_chunk_size: 4096
 # Family-wise expected edge-count supervision. This is a low-order structural
 # moment: for each relation family, align sum P(edge) on the query candidates
 # with the clean family density represented in the same query set.
