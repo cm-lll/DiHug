@@ -3126,6 +3126,76 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 lookup[max(0, offset):max(0, next_offset)] = fam_id
         return lookup
 
+    def _edge_family_ids_from_data(self, data, edge_index=None, labels=None, device=None):
+        """Return per-edge relation family ids, preferring dataset-provided ids."""
+        if edge_index is None:
+            edge_index = getattr(data, "edge_index", None)
+        if edge_index is None:
+            return None
+        num_edges = int(edge_index.shape[1])
+        if device is None:
+            device = edge_index.device
+
+        edge_family = getattr(data, "edge_family", None)
+        if edge_family is not None:
+            edge_family = torch.as_tensor(edge_family, device=device).long().reshape(-1)
+            if int(edge_family.numel()) == num_edges:
+                return edge_family
+
+        if labels is None:
+            edge_attr = getattr(data, "edge_attr", None)
+            if edge_attr is not None and edge_attr.numel() > 0:
+                labels = edge_attr.argmax(dim=-1).long() if edge_attr.dim() > 1 else edge_attr.long().reshape(-1)
+        fam_ids = torch.full((num_edges,), -1, dtype=torch.long, device=device)
+        if labels is not None:
+            labels = torch.as_tensor(labels, device=device).long().reshape(-1)
+            label_to_fam = self._label_to_family_lookup().to(device)
+            valid_label = (
+                (labels >= 0)
+                & (labels < int(label_to_fam.numel()))
+            )
+            if bool(valid_label.any()):
+                fam_ids[valid_label] = label_to_fam[labels[valid_label]]
+
+        # Fallback for raw external edge labels: infer the family from endpoint node types.
+        missing = fam_ids < 0
+        if bool(missing.any()):
+            fam_endpoints = getattr(self.dataset_info, "fam_endpoints", {}) or {}
+            edge_family2id = getattr(self.dataset_info, "edge_family2id", {}) or {}
+            type_offsets = getattr(self.dataset_info, "type_offsets", {}) or {}
+            x = getattr(data, "x", None)
+            if fam_endpoints and edge_family2id and type_offsets and x is not None:
+                node_subtype = x.argmax(dim=-1).long() if x.dim() > 1 else x.long().reshape(-1)
+                node_type = self._node_type_ids_from_subtype(node_subtype).to(device)
+                sorted_types = sorted(type_offsets.items(), key=lambda item: item[1])
+                type_name_to_id = {str(name): idx for idx, (name, _off) in enumerate(sorted_types)}
+                endpoint_to_family = {}
+                for fam_name, endpoints in fam_endpoints.items():
+                    src_type = str((endpoints or {}).get("src_type", ""))
+                    dst_type = str((endpoints or {}).get("dst_type", ""))
+                    if src_type in type_name_to_id and dst_type in type_name_to_id:
+                        endpoint_to_family[
+                            (int(type_name_to_id[src_type]), int(type_name_to_id[dst_type]))
+                        ] = int(edge_family2id.get(fam_name, -1))
+                if endpoint_to_family:
+                    src = edge_index[0].long().to(device)
+                    dst = edge_index[1].long().to(device)
+                    valid = (
+                        missing
+                        & (src >= 0)
+                        & (src < int(node_type.numel()))
+                        & (dst >= 0)
+                        & (dst < int(node_type.numel()))
+                    )
+                    for pair, fam_id in endpoint_to_family.items():
+                        if fam_id < 0:
+                            continue
+                        pair_mask = valid & (node_type[src.clamp(min=0, max=max(0, int(node_type.numel()) - 1))] == pair[0]) & (
+                            node_type[dst.clamp(min=0, max=max(0, int(node_type.numel()) - 1))] == pair[1]
+                        )
+                        fam_ids[pair_mask] = int(fam_id)
+        return fam_ids
+
     def _get_reference_graph_for_sampling_stats(self):
         source = None
         if hasattr(self.dataset_info, "datamodule"):
@@ -10500,15 +10570,24 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         for type_name, type_id in type_name_to_id.items():
             type_counts[type_name] = int((node_type == int(type_id)).sum().item())
 
-        label_to_fam = self._label_to_family_lookup().cpu()
+        edge_families = self._edge_family_ids_from_data(
+            source,
+            edge_index=edge_index,
+            labels=labels,
+            device=torch.device("cpu"),
+        )
+        if edge_families is None:
+            edge_families = torch.full((int(edge_index.shape[1]),), -1, dtype=torch.long)
+        else:
+            edge_families = edge_families.detach().cpu().long().reshape(-1)
         positive_edges = []
         positive_fams = []
         seen = set()
         for col in range(int(edge_index.shape[1])):
             label = int(labels[col].item())
-            if label <= 0 or label >= int(label_to_fam.numel()):
+            if label <= 0:
                 continue
-            fam_id = int(label_to_fam[label].item())
+            fam_id = int(edge_families[col].item()) if col < int(edge_families.numel()) else -1
             if fam_id < 0:
                 continue
             u = int(edge_index[0, col].item())
@@ -10689,7 +10768,16 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         sorted_types = sorted(type_offsets.items(), key=lambda item: item[1])
         type_name_to_id = {str(name): idx for idx, (name, _off) in enumerate(sorted_types)}
         labels = data.edge_attr.argmax(dim=-1).long() if data.edge_attr.dim() > 1 else data.edge_attr.long().reshape(-1)
-        label_to_fam = self._label_to_family_lookup().to(device)
+        edge_families = self._edge_family_ids_from_data(
+            data,
+            edge_index=data.edge_index,
+            labels=labels,
+            device=device,
+        )
+        if edge_families is None:
+            edge_families = torch.full((int(data.edge_index.shape[1]),), -1, dtype=torch.long, device=device)
+        else:
+            edge_families = edge_families.to(device).long().reshape(-1)
         edge_batch_clean = data.batch[data.edge_index[0].long()].long()
 
         degree = torch.zeros(num_nodes, dtype=torch.float32, device=device)
@@ -10697,9 +10785,11 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         positive_edges_by_fam_graph = {}
         for col in range(int(data.edge_index.shape[1])):
             label = int(labels[col].detach().item())
-            if label <= 0 or label >= int(label_to_fam.numel()):
+            if label <= 0:
                 continue
-            fam_id = int(label_to_fam[label].detach().item())
+            fam_id = int(edge_families[col].detach().item()) if col < int(edge_families.numel()) else -1
+            if fam_id < 0:
+                continue
             u = int(data.edge_index[0, col].detach().item())
             v = int(data.edge_index[1, col].detach().item())
             if u == v or u < 0 or v < 0 or u >= num_nodes or v >= num_nodes:

@@ -34,7 +34,7 @@ train:
   batch_size: 1
   save_model: True
 model:
-  denoiser: hgt
+  denoiser: graph_transformer
   n_layers: 4
   diffusion_steps: 100
   edge_fraction: 0.5
@@ -60,16 +60,11 @@ model:
   train_all_blocks_step_mode: sequential
   train_all_blocks_shuffle: true
   train_all_blocks_count: 0
+  train_all_blocks_strict_count: true
   train_t_schedule: random
   train_t_cycle_repeats: 1
 
   # Denoiser / objective.
-  use_edge_phi_fusion: false
-  use_dual_softmax: true
-  use_time_film: true
-  use_edge_state_update: true
-  edge_state_update_mode: 'last'
-  structure_only_global: false
   training_mode: edge_prediction
   autoregressive: false
   exist_loss_type: bce
