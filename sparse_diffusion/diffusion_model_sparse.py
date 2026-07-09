@@ -5,6 +5,7 @@ import math
 import pickle
 import json
 import traceback
+import sys
 
 import torch
 import wandb
@@ -107,6 +108,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         self.train_partition_source = str(getattr(cfg.model, "train_partition_source", "noisy"))
         self._true_block_cache = {}
         self._inter_block_pool_cache = {}
+        self._rare_family_structural_stats = None
 
         self.test_variance = cfg.general.test_variance
         self.visualization_tools = Visualizer(dataset_infos)
@@ -232,26 +234,23 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             type_offsets=type_offsets,
             use_type_modulation=getattr(cfg.model, "use_type_modulation", True),
             use_family_film=getattr(cfg.model, "use_family_film", False),
-            use_family_edge_update=getattr(
-                cfg.model, "use_family_edge_update", False
-            ),
             use_relation_attention_matrix=getattr(
                 cfg.model, "use_relation_attention_matrix", False
             ),
             use_relation_message_matrix=getattr(
                 cfg.model, "use_relation_message_matrix", False
             ),
-            use_family_y_film=getattr(cfg.model, "use_family_y_film", False),
-            use_family_y_in_attention=getattr(
-                cfg.model, "use_family_y_in_attention", False
+            use_relation_pri=getattr(cfg.model, "use_relation_pri", False),
+            use_hgt_node_update=getattr(cfg.model, "use_hgt_node_update", False),
+            use_hgt_edge_update=getattr(cfg.model, "use_hgt_edge_update", False),
+            use_family_y_in_node_film=getattr(
+                cfg.model, "use_family_y_in_node_film", False
             ),
+            use_family_y_film=getattr(cfg.model, "use_family_y_film", False),
             use_family_y_in_edge_film=getattr(
                 cfg.model, "use_family_y_in_edge_film", False
             ),
             family_y_dim=getattr(self, "sparse_family_y_dim", 0),
-            family_edge_update_hidden_dim=getattr(
-                cfg.model, "family_edge_update_hidden_dim", 128
-            ),
             edge_only_model=getattr(cfg.model, "edge_only_model", False),
             use_edge_struct_features=getattr(
                 cfg.model, "use_edge_struct_features", False
@@ -259,14 +258,8 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             edge_struct_feature_dim=getattr(
                 cfg.model, "edge_struct_feature_dim", 8
             ),
-            edge_struct_hidden_dim=getattr(
-                cfg.model, "edge_struct_hidden_dim", 64
-            ),
-            edge_struct_residual_scale=getattr(
-                cfg.model, "edge_struct_residual_scale", 1.0
-            ),
-            edge_struct_use_family_y=getattr(
-                cfg.model, "edge_struct_use_family_y", False
+            fix_node_output_types=getattr(
+                cfg.model, "fix_node_output_types", False
             ),
         )
         if denoiser_cls is PyHGTDenoiser:
@@ -321,6 +314,8 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 ),
             )
         self.model = denoiser_cls(**model_kwargs)
+        self._init_learned_structure_controller()
+        self._init_learned_structure_targets()
 
         # whether to use sign net
         if self.sign_net and cfg.model.extra_features == "all":
@@ -398,6 +393,445 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         self.number_chain_steps = cfg.general.number_chain_steps
         # 每 N 步才跑一次 train_metrics（relation_matrix/metapath2/subtype_degree 等较耗时），设为 >1 可加速
         self.train_metrics_every_n_steps = int(getattr(cfg.train, "train_metrics_every_n_steps", 1))
+
+    def load_state_dict(self, state_dict, strict: bool = True):
+        state_dict = dict(state_dict)
+        if (
+            bool(getattr(self.cfg.model, "use_learned_structure_targets", False))
+            and not bool(getattr(self.cfg.model, "learned_structure_target_trainable", False))
+            and not bool(getattr(self.cfg.model, "learned_structure_target_load_from_ckpt", False))
+        ):
+            source = str(
+                getattr(self.cfg.model, "learned_structure_target_source", "train_stats")
+                or "train_stats"
+            ).lower()
+            if source in {"train", "train_stats", "training", "dataset"}:
+                state_dict.pop("learned_structure_target_raw", None)
+        if (
+            strict
+            and "learned_structure_target_raw" not in state_dict
+            and hasattr(self, "learned_structure_target_raw")
+        ):
+            source = str(
+                getattr(self.cfg.model, "learned_structure_target_source", "train_stats")
+                or "train_stats"
+            ).lower()
+            stats = None
+            if source in {"train", "train_stats", "training", "dataset"}:
+                stats = self._estimate_training_structure_target_stats()
+            if stats is not None:
+                state_dict["learned_structure_target_raw"] = self._structure_target_raw_from_stats(
+                    stats,
+                    self.learned_structure_target_raw.device,
+                ).to(dtype=self.learned_structure_target_raw.dtype)
+            else:
+                state_dict["learned_structure_target_raw"] = (
+                    self.learned_structure_target_raw.detach().clone()
+                )
+        return super().load_state_dict(state_dict, strict=strict)
+
+    def _init_learned_structure_controller(self):
+        """Small trainable bucket bias used to replace oracle sampling brakes."""
+        self.learned_structure_num_families = 0
+        self.learned_structure_num_degree_pairs = 0
+        if not bool(getattr(self.cfg.model, "use_learned_structure_controller", False)):
+            return
+        if not bool(getattr(self.dataset_info, "heterogeneous", False)):
+            return
+        num_families = len(getattr(self.dataset_info, "edge_family2id", {}) or {})
+        if num_families <= 0:
+            return
+        common_bins = max(
+            1,
+            int(getattr(self.cfg.model, "learned_structure_controller_common_bins", 4) or 4),
+        )
+        degree_bins = max(
+            2,
+            int(getattr(self.cfg.model, "sampling_degree_pair_bins", 5) or 5),
+        )
+        num_degree_pairs = degree_bins * degree_bins
+        init = float(getattr(self.cfg.model, "learned_structure_controller_init", 0.0) or 0.0)
+        self.learned_structure_num_families = int(num_families)
+        self.learned_structure_num_degree_pairs = int(num_degree_pairs)
+        self.learned_structure_family_bias = nn.Parameter(torch.full((num_families,), init))
+        self.learned_structure_common_bias = nn.Parameter(
+            torch.full((num_families, common_bins), init)
+        )
+        self.learned_structure_degree_pair_bias = nn.Parameter(
+            torch.full((num_families, num_degree_pairs), init)
+        )
+
+    def _learned_structure_controller_enabled(self):
+        return (
+            bool(getattr(self.cfg.model, "use_learned_structure_controller", False))
+            and hasattr(self, "learned_structure_family_bias")
+            and int(getattr(self, "learned_structure_num_families", 0)) > 0
+        )
+
+    def _init_learned_structure_targets(self):
+        """Store graph-level structure targets for non-oracle sampling limiters."""
+        if not bool(getattr(self.cfg.model, "use_learned_structure_targets", False)):
+            return
+
+        def _float_cfg(name, default):
+            value = getattr(self.cfg.model, name, default)
+            if value is None:
+                return float(default)
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return float(default)
+
+        stats = None
+        source = str(
+            getattr(self.cfg.model, "learned_structure_target_source", "train_stats")
+            or "train_stats"
+        ).lower()
+        if source in {"train", "train_stats", "training", "dataset"}:
+            stats = self._estimate_training_structure_target_stats()
+        if stats is None:
+            stats = {
+                "triangles": max(
+                    0.0,
+                    _float_cfg("learned_structure_target_init_triangles", 1.0),
+                ),
+                "clustering": _float_cfg("learned_structure_target_init_clustering", 0.1),
+                "lcc_size": max(
+                    0.0,
+                    _float_cfg("learned_structure_target_init_lcc", 1.0),
+                ),
+                "assortativity": _float_cfg(
+                    "learned_structure_target_init_assortativity", 0.0
+                ),
+            }
+        raw = self._structure_target_raw_from_stats(stats, torch.device("cpu")).float()
+        if bool(getattr(self.cfg.model, "learned_structure_target_trainable", False)):
+            self.learned_structure_target_raw = nn.Parameter(raw)
+        else:
+            self.register_buffer("learned_structure_target_raw", raw, persistent=True)
+        self.learned_structure_target_stats = {
+            "triangles": float(stats.get("triangles", 0.0)),
+            "clustering": float(stats.get("clustering", 0.0)),
+            "lcc_size": float(stats.get("lcc_size", 0.0)),
+            "assortativity": float(stats.get("assortativity", 0.0)),
+        }
+
+    def _estimate_training_structure_target_stats(self):
+        datamodule = getattr(self.dataset_info, "datamodule", None)
+        dataset = getattr(datamodule, "train_dataset", None) if datamodule is not None else None
+        if dataset is None:
+            return None
+        try:
+            dataset_len = len(dataset)
+        except Exception:
+            dataset_len = 0
+        if dataset_len <= 0:
+            return None
+        max_graphs = int(
+            getattr(self.cfg.model, "learned_structure_target_max_train_graphs", 0) or 0
+        )
+        if max_graphs <= 0:
+            max_graphs = dataset_len
+        max_graphs = min(max_graphs, dataset_len)
+        sums = {
+            "triangles": 0.0,
+            "clustering": 0.0,
+            "lcc_size": 0.0,
+            "assortativity": 0.0,
+        }
+        count = 0
+        for idx in range(max_graphs):
+            try:
+                data = dataset[idx]
+            except Exception:
+                continue
+            edge_attr = getattr(data, "edge_attr", None)
+            edge_index = getattr(data, "edge_index", None)
+            if edge_attr is None or edge_index is None:
+                continue
+            if edge_attr.dim() > 1:
+                edge_labels = edge_attr.argmax(dim=-1).long()
+            else:
+                edge_labels = edge_attr.long().reshape(-1)
+            node_obj = getattr(data, "x", None)
+            if node_obj is None:
+                node_obj = getattr(data, "node", None)
+            num_nodes = 0 if node_obj is None else int(node_obj.shape[0])
+            stats = self._sampling_current_structure_stats(
+                edge_index,
+                edge_labels,
+                num_nodes,
+            )
+            for key in sums:
+                sums[key] += float(stats.get(key, 0.0))
+            count += 1
+        if count <= 0:
+            return None
+        return {key: value / float(count) for key, value in sums.items()}
+
+    def _learned_structure_targets_enabled(self):
+        return (
+            bool(getattr(self.cfg.model, "use_learned_structure_targets", False))
+            and hasattr(self, "learned_structure_target_raw")
+        )
+
+    def _learned_structure_target_tensors(self):
+        if not self._learned_structure_targets_enabled():
+            return None
+        raw = self.learned_structure_target_raw
+        return {
+            "triangles": torch.expm1(raw[0].clamp(min=0.0, max=30.0)),
+            "clustering": torch.sigmoid(raw[1]),
+            "lcc_size": torch.expm1(raw[2].clamp(min=0.0, max=30.0)),
+            "assortativity": torch.tanh(raw[3]),
+        }
+
+    def _learned_structure_target_value(self, metric):
+        targets = self._learned_structure_target_tensors()
+        if not targets or metric not in targets:
+            return None
+        value = targets[metric].detach()
+        if not torch.isfinite(value):
+            return None
+        return float(value.cpu().item())
+
+    def _structure_target_raw_from_stats(self, stats, device):
+        tri = max(0.0, float(stats.get("triangles", 0.0)))
+        clustering = max(1.0e-6, min(1.0 - 1.0e-6, float(stats.get("clustering", 0.0))))
+        lcc = max(0.0, float(stats.get("lcc_size", 0.0)))
+        assort = max(-1.0 + 1.0e-6, min(1.0 - 1.0e-6, float(stats.get("assortativity", 0.0))))
+        return torch.tensor(
+            [
+                math.log1p(tri),
+                math.log(clustering / (1.0 - clustering)),
+                math.log1p(lcc),
+                math.atanh(assort),
+            ],
+            dtype=torch.float32,
+            device=device,
+        )
+
+    def _compute_learned_structure_target_loss(self, clean_data, step_idx):
+        if not self._learned_structure_targets_enabled():
+            ref = getattr(clean_data, "x", None)
+            if ref is None:
+                ref = getattr(clean_data, "node", None)
+            if ref is None:
+                return torch.tensor(0.0, device=self.device)
+            return ref.sum() * 0.0
+        weight = float(getattr(self.cfg.model, "learned_structure_target_loss_weight", 0.0) or 0.0)
+        if weight <= 0.0:
+            return self.learned_structure_target_raw.sum() * 0.0
+
+        edge_attr = getattr(clean_data, "edge_attr", None)
+        if edge_attr is None or edge_attr.numel() == 0:
+            return self.learned_structure_target_raw.sum() * 0.0
+        if edge_attr.dim() > 1:
+            edge_labels = edge_attr.argmax(dim=-1).long()
+        else:
+            edge_labels = edge_attr.long().reshape(-1)
+        node_obj = getattr(clean_data, "x", None)
+        if node_obj is None:
+            node_obj = getattr(clean_data, "node", None)
+        num_nodes = 0 if node_obj is None else int(node_obj.shape[0])
+        stats = self._sampling_current_structure_stats(
+            getattr(clean_data, "edge_index", None),
+            edge_labels,
+            num_nodes,
+        )
+        target_raw = self._structure_target_raw_from_stats(
+            stats,
+            self.learned_structure_target_raw.device,
+        )
+        weights = torch.tensor(
+            [
+                float(getattr(self.cfg.model, "learned_structure_target_triangle_weight", 1.0) or 0.0),
+                float(getattr(self.cfg.model, "learned_structure_target_clustering_weight", 1.0) or 0.0),
+                float(getattr(self.cfg.model, "learned_structure_target_lcc_weight", 1.0) or 0.0),
+                float(getattr(self.cfg.model, "learned_structure_target_assortativity_weight", 1.0) or 0.0),
+            ],
+            dtype=self.learned_structure_target_raw.dtype,
+            device=self.learned_structure_target_raw.device,
+        )
+        denom = torch.clamp(weights.sum(), min=1.0)
+        raw_loss = ((self.learned_structure_target_raw - target_raw).pow(2) * weights).sum() / denom
+        is_trainable_target = isinstance(self.learned_structure_target_raw, nn.Parameter)
+        loss = float(weight) * raw_loss if is_trainable_target else raw_loss.detach() * 0.0
+
+        if not hasattr(self, "_epoch_learned_structure_target_loss_sum"):
+            self._epoch_learned_structure_target_loss_sum = 0.0
+            self._epoch_learned_structure_target_weighted_sum = 0.0
+            self._epoch_learned_structure_target_loss_count = 0
+        self._epoch_learned_structure_target_loss_sum += float(raw_loss.detach().cpu())
+        self._epoch_learned_structure_target_weighted_sum += float(loss.detach().cpu())
+        self._epoch_learned_structure_target_loss_count += 1
+
+        if (
+            bool(getattr(self.cfg.model, "learned_structure_target_log", True))
+            and int(step_idx) % max(1, int(getattr(self, "log_every_steps", 1))) == 0
+        ):
+            learned = self._learned_structure_target_tensors()
+            if learned:
+                self.log("train/learned_target_loss", raw_loss.detach(), on_step=True, prog_bar=False, sync_dist=True)
+                self.log("train/learned_target_triangles", learned["triangles"].detach(), on_step=True, prog_bar=False, sync_dist=True)
+                self.log("train/learned_target_clustering", learned["clustering"].detach(), on_step=True, prog_bar=False, sync_dist=True)
+                self.log("train/learned_target_lcc", learned["lcc_size"].detach(), on_step=True, prog_bar=False, sync_dist=True)
+                self.log("train/learned_target_assortativity", learned["assortativity"].detach(), on_step=True, prog_bar=False, sync_dist=True)
+        return loss
+
+    def _sampling_structure_target_value(self, metric, config_names):
+        source = str(
+            getattr(self.cfg.model, "sampling_structure_target_source", "config")
+            or "config"
+        ).lower()
+        if source in {"learned", "learned_if_available", "auto"}:
+            learned = self._learned_structure_target_value(metric)
+            if learned is not None:
+                return learned
+            if source == "learned":
+                # Old checkpoints can still be sampled with explicit config
+                # targets, but they will not silently fabricate learned values.
+                pass
+        for name in config_names:
+            value = getattr(self.cfg.model, name, None)
+            if value is None:
+                continue
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                continue
+        return None
+
+    def _learned_structure_controller_l2(self, ref_tensor):
+        if not self._learned_structure_controller_enabled():
+            return ref_tensor.sum() * 0.0
+        weight = float(getattr(self.cfg.model, "learned_structure_controller_l2", 0.0) or 0.0)
+        if weight <= 0:
+            return ref_tensor.sum() * 0.0
+        terms = []
+        if bool(getattr(self.cfg.model, "learned_structure_controller_use_family", True)):
+            terms.append(self.learned_structure_family_bias.pow(2).mean())
+        if bool(getattr(self.cfg.model, "learned_structure_controller_use_common", True)):
+            terms.append(self.learned_structure_common_bias.pow(2).mean())
+        if bool(getattr(self.cfg.model, "learned_structure_controller_use_degree_pair", True)):
+            terms.append(self.learned_structure_degree_pair_bias.pow(2).mean())
+        if not terms:
+            return ref_tensor.sum() * 0.0
+        return float(weight) * torch.stack(terms).mean()
+
+    def _learned_structure_candidate_bias(
+        self,
+        edge_index,
+        families,
+        *,
+        common_graph_data=None,
+        common_num_nodes=None,
+    ):
+        if (
+            not self._learned_structure_controller_enabled()
+            or edge_index is None
+            or edge_index.numel() == 0
+            or families is None
+            or families.numel() == 0
+        ):
+            return None
+        device = edge_index.device
+        fam = families.long().to(device).reshape(-1)
+        if fam.numel() != edge_index.shape[1]:
+            return None
+        num_families = int(self.learned_structure_num_families)
+        valid_fam = (fam >= 0) & (fam < num_families)
+        if not bool(valid_fam.any()):
+            return None
+        scale = float(getattr(self.cfg.model, "learned_structure_controller_scale", 1.0) or 1.0)
+        if scale == 0.0:
+            return None
+        bias = torch.zeros((edge_index.shape[1],), dtype=torch.float32, device=device)
+        fam_safe = fam.clamp(min=0, max=max(num_families - 1, 0))
+
+        if bool(getattr(self.cfg.model, "learned_structure_controller_use_family", True)):
+            bias[valid_fam] = bias[valid_fam] + self.learned_structure_family_bias[fam_safe[valid_fam]].to(device=device, dtype=bias.dtype)
+
+        if bool(getattr(self.cfg.model, "learned_structure_controller_use_degree_pair", True)):
+            pair_info = self._degree_pair_ids_for_candidates(edge_index.long(), fam_safe)
+            if pair_info is not None:
+                pair_id = pair_info["pair_id"].to(device).long()
+                valid_pair = pair_info["valid"].to(device) & valid_fam
+                max_pair = int(self.learned_structure_num_degree_pairs) - 1
+                pair_id = pair_id.clamp(min=0, max=max(max_pair, 0))
+                if bool(valid_pair.any()):
+                    bias[valid_pair] = bias[valid_pair] + self.learned_structure_degree_pair_bias[
+                        fam_safe[valid_pair], pair_id[valid_pair]
+                    ].to(device=device, dtype=bias.dtype)
+
+        if (
+            bool(getattr(self.cfg.model, "learned_structure_controller_use_common", True))
+            and common_graph_data is not None
+        ):
+            if common_num_nodes is None:
+                node_obj = getattr(common_graph_data, "x", None)
+                if node_obj is None:
+                    node_obj = getattr(common_graph_data, "node", None)
+                common_num_nodes = 0 if node_obj is None else int(node_obj.shape[0])
+            if int(common_num_nodes or 0) > 0:
+                common = self._clean_common_neighbor_scores(
+                    edge_index=edge_index.long(),
+                    full_data=common_graph_data,
+                    num_nodes=int(common_num_nodes),
+                    device=device,
+                    dtype=bias.dtype,
+                )
+                if common is not None and common.numel() == bias.numel():
+                    common_bins = int(self.learned_structure_common_bias.shape[1])
+                    common_id = common.long().clamp(min=0, max=max(common_bins - 1, 0))
+                    bias[valid_fam] = bias[valid_fam] + self.learned_structure_common_bias[
+                        fam_safe[valid_fam], common_id[valid_fam]
+                    ].to(device=device, dtype=bias.dtype)
+
+        return bias * float(scale)
+
+    def _apply_learned_structure_controller_to_pred(self, pred, clean_data, query_family=None):
+        if not self._learned_structure_controller_enabled() or pred.edge_attr.numel() == 0:
+            return pred, pred.edge_attr.sum() * 0.0
+        if query_family is None:
+            _node_type_ids, query_family = self._infer_query_family_from_clean_node_types(
+                pred.edge_index.long(),
+                clean_data.x,
+            )
+        if query_family is None or query_family.numel() != pred.edge_attr.shape[0]:
+            return pred, pred.edge_attr.sum() * 0.0
+        bias = self._learned_structure_candidate_bias(
+            pred.edge_index.long(),
+            query_family,
+            common_graph_data=clean_data,
+            common_num_nodes=int(clean_data.x.shape[0]),
+        )
+        if bias is None:
+            return pred, pred.edge_attr.sum() * 0.0
+        edge_attr = pred.edge_attr.clone()
+        if edge_attr.shape[-1] > 1:
+            edge_attr[:, 1:] = edge_attr[:, 1:] + bias.to(edge_attr.dtype).unsqueeze(-1)
+        pred.edge_attr = edge_attr
+        l2 = self._learned_structure_controller_l2(edge_attr)
+        if (
+            bool(getattr(self.cfg.model, "learned_structure_controller_log", True))
+            and getattr(self, "global_step", 0) % max(1, int(getattr(self, "log_every_steps", 1))) == 0
+        ):
+            self.log(
+                "train/learned_structure_bias_abs_mean",
+                bias.detach().abs().mean(),
+                on_step=True,
+                prog_bar=False,
+                sync_dist=True,
+            )
+            self.log(
+                "train/learned_structure_l2",
+                l2.detach(),
+                on_step=True,
+                prog_bar=False,
+                sync_dist=True,
+            )
+        return pred, l2
 
     def _rho_for_partition(self) -> float:
         rho = self.block_partition_rho
@@ -1149,6 +1583,277 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             parts.append(torch.stack([src_b[flat // dst_a.numel()], dst_a[flat % dst_a.numel()]], dim=0))
         return torch.cat(parts, dim=1) if parts else torch.empty((2, 0), dtype=torch.long, device=self.device)
 
+    def _sort_candidate_edges(self, edges, total_nodes):
+        if edges is None or edges.numel() == 0 or edges.shape[1] <= 1:
+            return edges
+        key = edges[0].long() * int(max(1, total_nodes)) + edges[1].long()
+        order = torch.argsort(key)
+        return edges[:, order]
+
+    def _plan_full_coverage_block_query_edges(
+        self,
+        anchor_node_subtype,
+        batch,
+        all_blocks,
+        block_ids,
+        inter_state=None,
+    ):
+        """Assign every legal block candidate exactly once.
+
+        Blocks keep all within-block candidates.  Each inter-block candidate pool
+        is split between its two endpoint blocks using family-local target loads,
+        so the union over one block sweep covers the full legal family space.
+        """
+        edge_family2id = getattr(self.dataset_info, "edge_family2id", {})
+        id2edge_family = {int(v): str(k) for k, v in edge_family2id.items()}
+        fam_endpoints = getattr(self.dataset_info, "fam_endpoints", {})
+        type_offsets = getattr(self.dataset_info, "type_offsets", {})
+        edge_family_offsets = getattr(self.dataset_info, "edge_family_offsets", {})
+        edge_family_avg_edge_counts = (
+            getattr(self.dataset_info, "edge_family_avg_edge_counts", {}) or {}
+        )
+        if not (id2edge_family and fam_endpoints and type_offsets and edge_family_offsets and all_blocks):
+            return None, None, None
+        if inter_state is None:
+            inter_state = {}
+        sorted_types = sorted(type_offsets.items(), key=lambda x: x[1])
+        type_sizes = {}
+        for idx, (type_name, offset) in enumerate(sorted_types):
+            next_offset = (
+                sorted_types[idx + 1][1]
+                if idx + 1 < len(sorted_types)
+                else self.out_dims.X
+            )
+            type_sizes[str(type_name)] = int(next_offset - int(offset))
+
+        total_nodes = int(anchor_node_subtype.shape[0])
+        block_sigs = []
+        for nodes in all_blocks:
+            if nodes is None or nodes.numel() == 0:
+                block_sigs.append(())
+            else:
+                block_sigs.append(tuple(sorted(int(x) for x in nodes.detach().cpu().tolist())))
+        plan_key = ("full_coverage_block_query", tuple(block_sigs))
+        plan = inter_state.get(plan_key)
+        if plan is None:
+            plan = {}
+            coverage_stats = inter_state.setdefault("_coverage_stats", {})
+            pool_sizes = inter_state.setdefault("_pool_sizes", {})
+            graph_ids = sorted(
+                {
+                    int(batch[nodes[0].long()].item())
+                    for nodes in all_blocks
+                    if nodes is not None and nodes.numel() > 0
+                }
+            )
+            for graph_idx in graph_ids:
+                graph_block_ids = [
+                    i
+                    for i, nodes in enumerate(all_blocks)
+                    if nodes is not None
+                    and nodes.numel() > 0
+                    and int(batch[nodes[0].long()].item()) == int(graph_idx)
+                ]
+                if not graph_block_ids:
+                    continue
+                batch_mask = batch == int(graph_idx)
+                for fam_id, fam_name in id2edge_family.items():
+                    if (
+                        fam_name not in fam_endpoints
+                        or edge_family_avg_edge_counts.get(fam_name, 0) == 0
+                    ):
+                        continue
+                    src_type = str(fam_endpoints[fam_name]["src_type"])
+                    dst_type = str(fam_endpoints[fam_name]["dst_type"])
+                    if src_type not in type_offsets or dst_type not in type_offsets:
+                        continue
+                    src_offset = int(type_offsets[src_type])
+                    dst_offset = int(type_offsets[dst_type])
+                    src_size = int(type_sizes.get(src_type, 0))
+                    dst_size = int(type_sizes.get(dst_type, 0))
+                    src_all = torch.where(
+                        (anchor_node_subtype >= src_offset)
+                        & (anchor_node_subtype < src_offset + src_size)
+                        & batch_mask
+                    )[0]
+                    dst_all = torch.where(
+                        (anchor_node_subtype >= dst_offset)
+                        & (anchor_node_subtype < dst_offset + dst_size)
+                        & batch_mask
+                    )[0]
+                    if src_all.numel() == 0 or dst_all.numel() == 0:
+                        continue
+                    same_type = src_type == dst_type
+                    actual_possible = (
+                        int(src_all.numel() * (src_all.numel() - 1) // 2)
+                        if same_type
+                        else int(src_all.numel() * dst_all.numel())
+                    )
+                    if actual_possible <= 0:
+                        continue
+                    rec = coverage_stats.setdefault(
+                        (int(graph_idx), int(fam_id)),
+                        {
+                            "fam_name": str(fam_name),
+                            "formula_possible": int(actual_possible),
+                            "actual_possible": int(actual_possible),
+                            "target": 0,
+                            "intra": 0,
+                            "inter": 0,
+                            "selected": 0,
+                            "blocks": 0,
+                        },
+                    )
+                    rec["formula_possible"] = max(
+                        int(rec.get("formula_possible", 0)), int(actual_possible)
+                    )
+                    rec["actual_possible"] = max(
+                        int(rec.get("actual_possible", 0)), int(actual_possible)
+                    )
+                    rec["target"] = int(actual_possible)
+                    rec["blocks"] = max(int(rec.get("blocks", 0)), len(graph_block_ids))
+
+                    intra_by_block = {}
+                    loads = {}
+                    incident_capacity = {int(i): 0 for i in graph_block_ids}
+                    for block_id in graph_block_ids:
+                        intra = self._candidate_edges_for_block_family(
+                            all_blocks[int(block_id)].long().to(self.device),
+                            src_all,
+                            dst_all,
+                            same_type,
+                        )
+                        intra = self._sort_candidate_edges(intra, total_nodes)
+                        intra_by_block[int(block_id)] = intra
+                        loads[int(block_id)] = int(intra.shape[1])
+                        if intra.shape[1] > 0:
+                            plan.setdefault(int(block_id), []).append(
+                                (intra, int(graph_idx), int(fam_id))
+                            )
+                            rec["intra"] += int(intra.shape[1])
+                            rec["selected"] += int(intra.shape[1])
+
+                    pair_pools = []
+                    for pos_i, block_i in enumerate(graph_block_ids):
+                        for block_j in graph_block_ids[pos_i + 1:]:
+                            cand = self._candidate_edges_for_block_pair_family(
+                                all_blocks[int(block_i)].long().to(self.device),
+                                all_blocks[int(block_j)].long().to(self.device),
+                                src_all,
+                                dst_all,
+                                same_type,
+                            )
+                            cand = self._sort_candidate_edges(cand, total_nodes)
+                            cap = int(cand.shape[1])
+                            if cap <= 0:
+                                continue
+                            pair_pools.append((int(block_i), int(block_j), cand))
+                            incident_capacity[int(block_i)] += cap
+                            incident_capacity[int(block_j)] += cap
+                            pair_key = (
+                                int(graph_idx),
+                                min(int(block_i), int(block_j)),
+                                max(int(block_i), int(block_j)),
+                                int(fam_id),
+                            )
+                            pool_sizes[pair_key] = max(
+                                int(pool_sizes.get(pair_key, 0)), cap
+                            )
+                            inter_state[pair_key] = cap
+
+                    if not pair_pools:
+                        continue
+                    total_capacity_weight = sum(
+                        max(0, loads[i]) + max(0, incident_capacity[i])
+                        for i in graph_block_ids
+                    )
+                    targets = {}
+                    if total_capacity_weight <= 0:
+                        base = int(actual_possible) // max(1, len(graph_block_ids))
+                        rem = int(actual_possible) % max(1, len(graph_block_ids))
+                        for idx, block_id in enumerate(graph_block_ids):
+                            targets[int(block_id)] = base + (1 if idx < rem else 0)
+                    else:
+                        assigned_target = 0
+                        target_fracs = []
+                        for block_id in graph_block_ids:
+                            weight = float(loads[int(block_id)] + incident_capacity[int(block_id)])
+                            exact = float(actual_possible) * weight / float(total_capacity_weight)
+                            val = int(math.floor(exact))
+                            targets[int(block_id)] = val
+                            assigned_target += val
+                            target_fracs.append((exact - float(val), int(block_id)))
+                        leftover = int(actual_possible) - int(assigned_target)
+                        for _, block_id in sorted(target_fracs, reverse=True):
+                            if leftover <= 0:
+                                break
+                            targets[int(block_id)] += 1
+                            leftover -= 1
+
+                    for block_i, block_j, cand in sorted(
+                        pair_pools, key=lambda x: int(x[2].shape[1]), reverse=True
+                    ):
+                        cap = int(cand.shape[1])
+                        need_i = max(0, int(targets.get(block_i, 0)) - int(loads.get(block_i, 0)))
+                        need_j = max(0, int(targets.get(block_j, 0)) - int(loads.get(block_j, 0)))
+                        if need_i + need_j > 0:
+                            take_i = int(round(float(cap) * float(need_i) / float(need_i + need_j)))
+                        else:
+                            take_i = cap if int(loads.get(block_i, 0)) <= int(loads.get(block_j, 0)) else 0
+                        take_i = min(max(0, take_i), cap)
+                        parts = (
+                            (block_i, cand[:, :take_i]),
+                            (block_j, cand[:, take_i:]),
+                        )
+                        for owner, edges in parts:
+                            if edges.shape[1] == 0:
+                                continue
+                            plan.setdefault(int(owner), []).append(
+                                (edges, int(graph_idx), int(fam_id))
+                            )
+                            loads[int(owner)] = int(loads.get(int(owner), 0)) + int(edges.shape[1])
+                            rec["inter"] += int(edges.shape[1])
+                            rec["selected"] += int(edges.shape[1])
+            inter_state[plan_key] = plan
+            if (
+                getattr(self, "local_rank", 0) == 0
+                and not getattr(self, "_logged_full_coverage_block_query", False)
+            ):
+                stats = inter_state.get("_coverage_stats", {})
+                selected = sum(int(v.get("selected", 0)) for v in stats.values())
+                possible = sum(int(v.get("actual_possible", 0)) for v in stats.values())
+                print(
+                    "[BLOCK-FULL-COVER] "
+                    f"families={len(stats)} selected={selected} "
+                    f"possible={possible} coverage={selected / max(1, possible):.4f}"
+                )
+                self._logged_full_coverage_block_query = True
+
+        all_e, all_b, all_f = [], [], []
+        for block_id in block_ids:
+            for edges, graph_idx, fam_id in plan.get(int(block_id), []):
+                if edges is None or edges.numel() == 0:
+                    continue
+                all_e.append(edges)
+                all_b.append(
+                    torch.full(
+                        (int(edges.shape[1]),),
+                        int(graph_idx),
+                        dtype=torch.long,
+                        device=self.device,
+                    )
+                )
+                all_f.append(
+                    torch.full(
+                        (int(edges.shape[1]),),
+                        int(fam_id),
+                        dtype=torch.long,
+                        device=self.device,
+                    )
+                )
+        if not all_e:
+            return None, None, None
+        return torch.cat(all_e, dim=1), torch.cat(all_b, dim=0), torch.cat(all_f, dim=0)
 
     def _sample_family_labels_from_marginal(self, fam_name, num_edges, edge_family_offsets):
         num_edges = int(num_edges)
@@ -1948,6 +2653,146 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             labels = current_edge_labels.long().to(self.device)
             out[matched] = labels[order[locations[matched]]]
         return out
+
+    def _apply_block_unit_noising_for_training(
+        self,
+        data,
+        sparse_noisy_data,
+        query_edge_index,
+    ):
+        """Resample visible E_t only inside the current block-query unit.
+
+        Clean labels are taken from the query candidate set: existing clean
+        edges use their subtype, absent candidates use the no-edge state. Each
+        candidate is then diffused with the global family-specific Qt_bar. This
+        makes corruption block-scoped while keeping one global family marginal.
+        """
+        if not bool(getattr(self.cfg.model, "train_block_unit_noising", False)):
+            return sparse_noisy_data
+        if (
+            query_edge_index is None
+            or query_edge_index.numel() == 0
+            or not self.heterogeneous
+        ):
+            return sparse_noisy_data
+
+        edge_family2id = getattr(self.dataset_info, "edge_family2id", {}) or {}
+        id2edge_family = {int(v): str(k) for k, v in edge_family2id.items()}
+        edge_family_offsets = getattr(self.dataset_info, "edge_family_offsets", {}) or {}
+        if not id2edge_family or not edge_family_offsets:
+            return sparse_noisy_data
+
+        _, query_family = self._infer_query_family_from_clean_node_types(
+            query_edge_index.long(),
+            data.x,
+        )
+        if query_family is None:
+            return sparse_noisy_data
+
+        clean_edge_labels = (
+            data.edge_attr.argmax(dim=-1).long()
+            if data.edge_attr.dim() > 1
+            else data.edge_attr.long().reshape(-1)
+        )
+        clean_query_labels = self._lookup_query_edge_labels(
+            query_edge_index,
+            data.edge_index,
+            clean_edge_labels,
+            int(data.x.shape[0]),
+        )
+        alpha_t_bar = sparse_noisy_data.get("alpha_t_bar")
+        if alpha_t_bar is None:
+            return sparse_noisy_data
+        all_family_qt = self.transition_model.get_all_family_Qt_bar(
+            alpha_t_bar,
+            device=self.device,
+        )
+
+        qei = query_edge_index.long().to(self.device)
+        query_family = query_family.long().to(self.device).reshape(-1)
+        clean_query_labels = clean_query_labels.long().to(self.device).reshape(-1)
+        selected_edges = []
+        selected_labels = []
+        total_candidates = int(qei.shape[1])
+        for fam in torch.unique(query_family):
+            fam_id = int(fam.detach().cpu().item())
+            if fam_id < 0:
+                continue
+            fam_name = id2edge_family.get(fam_id)
+            if fam_name is None or fam_name not in all_family_qt:
+                continue
+            mask = query_family == fam_id
+            if not mask.any():
+                continue
+            fam_edges = qei[:, mask]
+            local_labels = clean_query_labels[mask].clone()
+            offset = int(edge_family_offsets.get(fam_name, 0))
+            nonzero = local_labels != 0
+            if nonzero.any():
+                local_labels[nonzero] = local_labels[nonzero] - offset + 1
+            fam_Q = all_family_qt[fam_name].E[data.batch[fam_edges[0]]]
+            num_states = int(fam_Q.shape[-1])
+            local_labels = local_labels.clamp(0, num_states - 1)
+            onehot = F.one_hot(local_labels, num_classes=num_states).float()
+            probs = torch.bmm(onehot.unsqueeze(1), fam_Q).squeeze(1)
+            sampled_local = probs.multinomial(1).flatten()
+            sampled_global = sampled_local.clone()
+            sampled_nonzero = sampled_global != 0
+            if sampled_nonzero.any():
+                sampled_global[sampled_nonzero] = (
+                    sampled_global[sampled_nonzero] - 1 + offset
+                )
+            keep = sampled_global != 0
+            if keep.any():
+                selected_edges.append(fam_edges[:, keep])
+                selected_labels.append(
+                    sampled_global[keep].long().clamp(0, self.out_dims.E - 1)
+                )
+
+        patched = dict(sparse_noisy_data)
+        if selected_edges:
+            edge_index_t = torch.cat(selected_edges, dim=1).long()
+            edge_labels_t = torch.cat(selected_labels, dim=0).long()
+            if edge_index_t.shape[1] > 1:
+                key = edge_index_t[0] * int(data.x.shape[0]) + edge_index_t[1]
+                order = torch.argsort(key)
+                edge_index_t = edge_index_t[:, order]
+                edge_labels_t = edge_labels_t[order]
+                key_sorted = key[order]
+                keep_unique = torch.ones(
+                    edge_labels_t.shape[0],
+                    dtype=torch.bool,
+                    device=self.device,
+                )
+                keep_unique[1:] = key_sorted[1:] != key_sorted[:-1]
+                edge_index_t = edge_index_t[:, keep_unique]
+                edge_labels_t = edge_labels_t[keep_unique]
+            patched["edge_index_t"] = edge_index_t
+            patched["edge_attr_t"] = F.one_hot(
+                edge_labels_t.clamp(0, self.out_dims.E - 1),
+                num_classes=self.out_dims.E,
+            ).float()
+        else:
+            patched["edge_index_t"] = torch.empty(
+                (2, 0), dtype=torch.long, device=self.device
+            )
+            patched["edge_attr_t"] = torch.empty(
+                (0, self.out_dims.E), dtype=torch.float32, device=self.device
+            )
+        patched["comp_edge_index_t"] = None
+        patched["comp_edge_attr_t"] = None
+        if (
+            getattr(self, "local_rank", 0) == 0
+            and not getattr(self, "_logged_train_block_unit_noising", False)
+        ):
+            print(
+                "[NOISE-BLOCK-UNIT] "
+                f"candidates={total_candidates} "
+                f"visible={int(patched['edge_index_t'].shape[1])} "
+                "marginal=global_family"
+            )
+            self._logged_train_block_unit_noising = True
+        return patched
 
     def _edge_reverse_posterior_logits(
         self,
@@ -2967,6 +3812,33 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
 
         mode = str(selection_mode).lower()
         base_seed = self._current_sampling_seed()
+        score_override = str(
+            getattr(self.cfg.model, "sampling_score_override", "none") or "none"
+        ).lower()
+        if score_override not in ("none", "model"):
+            if score_override == "zero":
+                raw_scores = torch.zeros_like(raw_scores)
+            elif score_override == "random":
+                score_generator = torch.Generator(device="cpu")
+                score_generator.manual_seed(
+                    base_seed + 917551 * int(sampling_step) + 12345
+                )
+                raw_scores = torch.rand(
+                    raw_scores.shape,
+                    generator=score_generator,
+                    dtype=torch.float32,
+                    device="cpu",
+                ).to(device=raw_scores.device, dtype=raw_scores.dtype)
+            else:
+                raise ValueError(
+                    "Unsupported model.sampling_score_override: "
+                    f"{score_override}"
+                )
+            if log_selection and getattr(self, "local_rank", 0) == 0:
+                print(
+                    "[采样-SCORE-OVERRIDE] "
+                    f"mode={score_override} candidates={candidate_count_after}"
+                )
         degree_pair_bias = None
         if mode in ("gumbel_exact_k_degree_pair", "deterministic_exact_k_degree_pair"):
             degree_pair_bias = self._degree_pair_exact_k_score_bias(edge_index, families)
@@ -2987,6 +3859,36 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 device=raw_scores.device,
                 dtype=raw_scores.dtype,
             )
+        flat_closure_bias = self._sampling_typed_flat_closure_bias(
+            data=data,
+            edge_index=edge_index,
+            families=families,
+            edge_batch=edge_batch,
+            sampling_step=sampling_step,
+        )
+        if flat_closure_bias is not None:
+            raw_scores = raw_scores + flat_closure_bias.to(
+                device=raw_scores.device,
+                dtype=raw_scores.dtype,
+            )
+        node_role_budget_bias = self._sampling_node_role_budget_bias(
+            data=data,
+            edge_index=edge_index,
+            edge_batch=edge_batch,
+            sampling_step=sampling_step,
+        )
+        if node_role_budget_bias is not None:
+            node_role_base_scores = raw_scores
+            raw_scores = raw_scores + node_role_budget_bias.to(
+                device=raw_scores.device,
+                dtype=raw_scores.dtype,
+            )
+            self._log_sampling_node_role_budget_bias_diag(
+                base_scores=node_role_base_scores,
+                bias=node_role_budget_bias,
+                sampling_step=sampling_step,
+                log_selection=log_selection,
+            )
 
         if mode in (
             "gumbel_exact_k",
@@ -2998,9 +3900,9 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                     getattr(
                         self.cfg.model,
                         "sampling_gumbel_temperature",
-                        1.0,
+                        0.01,
                     )
-                    or 1.0
+                    or 0.01
                 ),
                 1e-8,
             )
@@ -3148,7 +4050,14 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 + "; ".join(log_parts[:10])
             )
 
-        if apply_connectivity_repair and selected.numel() > 0:
+        hard_connectivity_repair = bool(
+            getattr(self.cfg.model, "sampling_connectivity_hard_repair", False)
+        )
+        if (
+            apply_connectivity_repair
+            and not hard_connectivity_repair
+            and selected.numel() > 0
+        ):
             selected = self._repair_global_exact_k_connectivity(
                 data=data,
                 edge_index=edge_index,
@@ -3156,6 +4065,58 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 families=families,
                 edge_batch=edge_batch,
                 selected=selected,
+            )
+
+        if selected.numel() > 0:
+            selected = self._apply_global_exact_k_min_churn(
+                data=data,
+                edge_index=edge_index,
+                edge_keys=edge_keys,
+                selection_scores=selection_scores,
+                families=families,
+                edge_batch=edge_batch,
+                selected=selected,
+                sampling_step=sampling_step,
+                log_selection=log_selection,
+            )
+
+        if hard_connectivity_repair and selected.numel() > 0:
+            selected = self._repair_global_exact_k_connectivity(
+                data=data,
+                edge_index=edge_index,
+                raw_scores=raw_scores,
+                families=families,
+                edge_batch=edge_batch,
+                selected=selected,
+                hard_lcc_floor=True,
+            )
+
+        if selected.numel() > 0:
+            selected = self._apply_global_exact_k_node_role_budget_repair(
+                data=data,
+                edge_index=edge_index,
+                edge_keys=edge_keys,
+                raw_scores=raw_scores,
+                selection_scores=selection_scores,
+                families=families,
+                edge_batch=edge_batch,
+                selected=selected,
+                sampling_step=sampling_step,
+                log_selection=log_selection,
+            )
+
+        if selected.numel() > 0:
+            selected = self._apply_global_exact_k_structure_swap_limiter(
+                data=data,
+                edge_index=edge_index,
+                edge_keys=edge_keys,
+                raw_scores=raw_scores,
+                selection_scores=selection_scores,
+                families=families,
+                edge_batch=edge_batch,
+                selected=selected,
+                sampling_step=sampling_step,
+                log_selection=log_selection,
             )
 
         if selected.numel() == 0:
@@ -3232,6 +4193,1539 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 )
         return edge_index[:, selected], labels
 
+    def _log_sampling_node_role_budget_bias_diag(
+        self,
+        base_scores,
+        bias,
+        sampling_step,
+        log_selection=True,
+    ):
+        if (
+            not log_selection
+            or not bool(getattr(self.cfg.model, "sampling_node_role_budget_diag", False))
+            or getattr(self, "local_rank", 0) != 0
+            or bias is None
+            or base_scores is None
+            or bias.numel() == 0
+        ):
+            return
+        every = max(
+            1,
+            int(getattr(self.cfg.model, "sampling_node_role_budget_diag_log_every", 10) or 10),
+        )
+        if int(sampling_step) % every != 0:
+            return
+        with torch.no_grad():
+            b = bias.detach().float().reshape(-1)
+            s = base_scores.detach().float().reshape(-1)
+            finite = torch.isfinite(b) & torch.isfinite(s)
+            if not bool(finite.any()):
+                return
+            b = b[finite]
+            s = s[finite]
+            abs_b = b.abs()
+            nz = abs_b > 1.0e-8
+            nz_frac = float(nz.float().mean().detach().cpu().item())
+            if bool(nz.any()):
+                nz_abs = abs_b[nz]
+                q50, q90, q99 = torch.quantile(
+                    nz_abs,
+                    torch.tensor([0.50, 0.90, 0.99], device=nz_abs.device),
+                ).detach().cpu().tolist()
+            else:
+                q50 = q90 = q99 = 0.0
+            score_std = float(s.std(unbiased=False).detach().cpu().item())
+            bias_std = float(b.std(unbiased=False).detach().cpu().item())
+            ratio = bias_std / max(score_std, 1.0e-8)
+            print(
+                "[采样-NODE-BUDGET-DIAG] "
+                f"step={int(sampling_step)} n={int(b.numel())} "
+                f"nonzero={nz_frac:.4f} "
+                f"bias_mean={float(b.mean().detach().cpu().item()):+.4g} "
+                f"bias_std={bias_std:.4g} "
+                f"bias_abs_q50/90/99={q50:.4g}/{q90:.4g}/{q99:.4g} "
+                f"score_std={score_std:.4g} ratio={ratio:.4g}"
+            )
+
+    def _apply_global_exact_k_node_role_budget_repair(
+        self,
+        data,
+        edge_index,
+        edge_keys,
+        raw_scores,
+        selection_scores,
+        families,
+        edge_batch,
+        selected,
+        sampling_step,
+        log_selection=True,
+    ):
+        """Quota-preserving swaps that greedily repair node-role closure deficits."""
+        if not bool(getattr(self.cfg.model, "sampling_node_role_budget_repair", False)):
+            return selected
+        max_swaps = int(
+            getattr(self.cfg.model, "sampling_node_role_budget_repair_max_swaps", 0) or 0
+        )
+        if max_swaps <= 0 or selected.numel() == 0:
+            return selected
+        total_steps = max(1, int(getattr(self.cfg.model, "diffusion_steps", 100) or 100))
+        step_frac = float(sampling_step) / float(total_steps)
+        min_step_frac = float(
+            getattr(self.cfg.model, "sampling_node_role_budget_repair_min_step_frac", 0.0)
+            or 0.0
+        )
+        max_step_frac = float(
+            getattr(self.cfg.model, "sampling_node_role_budget_repair_max_step_frac", 1.0)
+            or 1.0
+        )
+        if step_frac < min_step_frac or step_frac > max_step_frac:
+            return selected
+
+        device = edge_index.device
+        total_nodes = int(data.node.shape[0])
+        ref = self._ensure_sampling_node_role_budget_reference(total_nodes, device)
+        if not ref or ref.get("degree") is None or ref.get("tri_node") is None:
+            return selected
+
+        node_batch = getattr(data, "batch", None)
+        if node_batch is None:
+            node_batch_cpu = torch.zeros((total_nodes,), dtype=torch.long)
+        else:
+            node_batch_cpu = node_batch.long().detach().cpu()
+        edge_index_cpu = edge_index.long().detach().cpu()
+        edge_keys_cpu = edge_keys.long().detach().cpu()
+        families_cpu = families.long().detach().cpu()
+        edge_batch_cpu = edge_batch.long().detach().cpu()
+        raw_scores_cpu = raw_scores.float().detach().cpu()
+        selection_scores_cpu = selection_scores.float().detach().cpu()
+        selected_cpu = selected.long().detach().cpu()
+        ref_degree = ref["degree"].float().detach().cpu()
+        ref_tri = ref["tri_node"].float().detach().cpu()
+
+        selected_mask = torch.zeros(int(edge_index_cpu.shape[1]), dtype=torch.bool)
+        selected_mask[selected_cpu] = True
+        original_selected_count = int(selected_mask.sum().item())
+        before_counts = {}
+        for graph_idx, fam_id in zip(
+            edge_batch_cpu[selected_mask].tolist(),
+            families_cpu[selected_mask].tolist(),
+        ):
+            key = (int(graph_idx), int(fam_id))
+            before_counts[key] = before_counts.get(key, 0) + 1
+
+        degree_weight = float(
+            getattr(self.cfg.model, "sampling_node_role_budget_degree_weight", 0.0)
+            or 0.0
+        )
+        closure_weight = float(
+            getattr(self.cfg.model, "sampling_node_role_budget_closure_weight", 0.0)
+            or 0.0
+        )
+        if max(abs(degree_weight), abs(closure_weight)) <= 0.0:
+            return selected
+        role_gain_weight = float(
+            getattr(self.cfg.model, "sampling_node_role_budget_repair_role_gain_weight", 1.0)
+            or 0.0
+        )
+        model_score_weight = float(
+            getattr(
+                self.cfg.model,
+                "sampling_node_role_budget_repair_model_score_weight",
+                0.25,
+            )
+            or 0.0
+        )
+        score_margin = max(
+            0.0,
+            float(
+                getattr(self.cfg.model, "sampling_node_role_budget_repair_score_margin", 2.0)
+                or 0.0
+            ),
+        )
+        min_gain = float(
+            getattr(self.cfg.model, "sampling_node_role_budget_repair_min_gain", 1.0e-6)
+            or 0.0
+        )
+        pair_top_adds = max(
+            1,
+            int(getattr(self.cfg.model, "sampling_node_role_budget_repair_pair_top_adds", 64) or 64),
+        )
+        pair_top_drops = max(
+            1,
+            int(getattr(self.cfg.model, "sampling_node_role_budget_repair_pair_top_drops", 64) or 64),
+        )
+        pool_multiplier = max(
+            1,
+            int(getattr(self.cfg.model, "sampling_node_role_budget_repair_pool_multiplier", 4) or 4),
+        )
+        max_pool_per_family = max(
+            1,
+            int(
+                getattr(
+                    self.cfg.model,
+                    "sampling_node_role_budget_repair_max_pool_per_family",
+                    512,
+                )
+                or 512
+            ),
+        )
+        add_pool_limit = min(
+            max_pool_per_family,
+            max(pair_top_adds, pool_multiplier * pair_top_adds),
+        )
+        drop_pool_limit = min(
+            max_pool_per_family,
+            max(pair_top_drops, pool_multiplier * pair_top_drops),
+        )
+        protect_bridges = bool(
+            getattr(self.cfg.model, "sampling_node_role_budget_repair_protect_bridges", True)
+        )
+        low_degree_max = float(
+            getattr(self.cfg.model, "sampling_node_role_budget_low_degree_max", 3) or 3
+        )
+        role_gate = str(
+            getattr(self.cfg.model, "sampling_node_role_budget_role_gate", "low_degree")
+            or "low_degree"
+        ).lower()
+        closure_mode = str(
+            getattr(self.cfg.model, "sampling_node_role_budget_closure_mode", "count")
+            or "count"
+        ).lower()
+        closure_threshold = float(
+            getattr(self.cfg.model, "sampling_node_role_budget_closure_threshold", 0.5)
+            or 0.5
+        )
+        unit_target_max = float(
+            getattr(
+                self.cfg.model,
+                "sampling_node_role_budget_closure_unit_target_max",
+                1.0,
+            )
+            or 1.0
+        )
+        degree_scale = max(
+            1.0e-6,
+            float(getattr(self.cfg.model, "sampling_node_role_budget_degree_scale", 4.0) or 4.0),
+        )
+        closure_scale = max(
+            1.0e-6,
+            float(getattr(self.cfg.model, "sampling_node_role_budget_closure_scale", 1.0) or 1.0),
+        )
+
+        def _bridge_keys_for_graph(adj, nodes):
+            if not protect_bridges:
+                return set()
+            node_set = set(int(x) for x in nodes)
+            tin = {}
+            low = {}
+            bridges = set()
+            timer = 0
+            sys.setrecursionlimit(max(sys.getrecursionlimit(), len(node_set) + 100))
+
+            def dfs(u, parent):
+                nonlocal timer
+                tin[u] = timer
+                low[u] = timer
+                timer += 1
+                for v in adj.get(u, set()):
+                    if v not in node_set or v == parent:
+                        continue
+                    if v in tin:
+                        low[u] = min(low[u], tin[v])
+                    else:
+                        dfs(v, u)
+                        low[u] = min(low[u], low[v])
+                        if low[v] > tin[u]:
+                            a, b = (u, v) if u < v else (v, u)
+                            bridges.add((a, b))
+
+            for node in nodes:
+                node = int(node)
+                if node not in tin:
+                    dfs(node, -1)
+            return bridges
+
+        def _node_role_active(node, cur_degree):
+            ref_closed = float(ref_tri[node]) > closure_threshold
+            low_role = float(ref_degree[node]) <= low_degree_max or float(cur_degree) <= low_degree_max
+            if role_gate == "all":
+                return True
+            if role_gate == "target":
+                return ref_closed
+            if role_gate == "adaptive":
+                return bool(low_role or ref_closed)
+            return bool(low_role)
+
+        def _node_deficit(node, tri_value, degree_value):
+            if not _node_role_active(node, degree_value):
+                return 0.0
+            ref_t = float(ref_tri[node])
+            ref_d = float(ref_degree[node])
+            ref_closed = 1.0 if ref_t > closure_threshold else 0.0
+            cur_closed = 1.0 if float(tri_value) > closure_threshold else 0.0
+            if closure_mode == "coverage":
+                closure_def = max(0.0, ref_closed - cur_closed)
+            elif closure_mode == "adaptive":
+                if ref_t <= max(unit_target_max, closure_threshold):
+                    closure_def = max(0.0, ref_closed - cur_closed)
+                else:
+                    closure_def = max(0.0, ref_t - float(tri_value)) / closure_scale
+            else:
+                closure_def = max(0.0, ref_t - float(tri_value)) / closure_scale
+            degree_def = max(0.0, ref_d - float(degree_value)) / degree_scale
+            return closure_weight * closure_def + degree_weight * degree_def
+
+        def _triangle_nodes_for_edge(adj, u, v):
+            common = adj.get(u, set()).intersection(adj.get(v, set()))
+            return common
+
+        def _edge_role_delta(adj, degree, tri, pos, add_edge):
+            u = int(edge_index_cpu[0, pos].item())
+            v = int(edge_index_cpu[1, pos].item())
+            if u == v:
+                return -float("inf")
+            common = _triangle_nodes_for_edge(adj, u, v)
+            common_count = float(len(common))
+            affected = {u, v}
+            affected.update(int(x) for x in common)
+            before = 0.0
+            after = 0.0
+            for node in affected:
+                deg0 = float(degree.get(node, 0))
+                tri0 = float(tri.get(node, 0.0))
+                before += _node_deficit(node, tri0, deg0)
+                if node == u or node == v:
+                    tri1 = tri0 + common_count if add_edge else max(0.0, tri0 - common_count)
+                    deg1 = deg0 + 1.0 if add_edge else max(0.0, deg0 - 1.0)
+                else:
+                    tri1 = tri0 + 1.0 if add_edge else max(0.0, tri0 - 1.0)
+                    deg1 = deg0
+                after += _node_deficit(node, tri1, deg1)
+            return before - after
+
+        def _build_graph_state(graph_idx):
+            nodes = torch.where(node_batch_cpu == int(graph_idx))[0].tolist()
+            adj = {int(n): set() for n in nodes}
+            degree = {int(n): 0 for n in nodes}
+            graph_selected = (
+                selected_mask
+                & (edge_batch_cpu == int(graph_idx))
+            ).nonzero(as_tuple=True)[0]
+            for pos in graph_selected.tolist():
+                u = int(edge_index_cpu[0, pos].item())
+                v = int(edge_index_cpu[1, pos].item())
+                if u == v or u not in adj or v not in adj:
+                    continue
+                if v not in adj[u]:
+                    adj[u].add(v)
+                    adj[v].add(u)
+                    degree[u] += 1
+                    degree[v] += 1
+            tri = {int(n): 0.0 for n in nodes}
+            for node in nodes:
+                neigh = list(adj[int(node)])
+                count = 0
+                for i, left in enumerate(neigh):
+                    left_adj = adj.get(left, set())
+                    for right in neigh[i + 1 :]:
+                        if right in left_adj:
+                            count += 1
+                tri[int(node)] = float(count)
+            return nodes, adj, degree, tri
+
+        graph_families = torch.stack(
+            [edge_batch_cpu.long(), families_cpu.long()], dim=0
+        ).t()
+        unique_graph_families = torch.unique(graph_families, dim=0)
+        total_swaps = 0
+        total_considered = 0
+        log_records = []
+        if (
+            log_selection
+            and getattr(self, "local_rank", 0) == 0
+            and int(sampling_step)
+            % max(
+                1,
+                int(
+                    getattr(
+                        self.cfg.model,
+                        "sampling_node_role_budget_repair_log_every",
+                        1,
+                    )
+                    or 1
+                ),
+            )
+            == 0
+        ):
+            print(
+                "[采样-NODE-BUDGET-REPAIR] "
+                f"start step={int(sampling_step)} "
+                f"groups={int(unique_graph_families.shape[0])} "
+                f"max_swaps={max_swaps} "
+                f"add_pool_limit={add_pool_limit} "
+                f"drop_pool_limit={drop_pool_limit} "
+                f"max_pool_per_family={max_pool_per_family}",
+                flush=True,
+            )
+
+        for gf in unique_graph_families:
+            if total_swaps >= max_swaps:
+                break
+            graph_idx = int(gf[0].item())
+            fam_id = int(gf[1].item())
+            group_mask = (edge_batch_cpu == graph_idx) & (families_cpu == fam_id)
+            selected_group = selected_mask & group_mask
+            selected_count = int(selected_group.sum().item())
+            if selected_count <= 0:
+                continue
+
+            nodes, adj, degree, tri = _build_graph_state(graph_idx)
+            bridge_keys = _bridge_keys_for_graph(adj, nodes)
+            add_pool = ((~selected_mask) & group_mask).nonzero(as_tuple=True)[0]
+            drop_pool = selected_group.nonzero(as_tuple=True)[0]
+            if add_pool.numel() == 0 or drop_pool.numel() == 0:
+                continue
+            add_take = min(
+                int(add_pool.numel()),
+                add_pool_limit,
+            )
+            drop_take = min(
+                int(drop_pool.numel()),
+                drop_pool_limit,
+            )
+            add_pool = add_pool[
+                torch.topk(selection_scores_cpu[add_pool], k=add_take, largest=True).indices
+            ]
+            drop_pool = drop_pool[
+                torch.topk(selection_scores_cpu[drop_pool], k=drop_take, largest=False).indices
+            ]
+
+            group_swaps = 0
+            group_gain = 0.0
+            group_score_delta = 0.0
+            while total_swaps < max_swaps:
+                bridge_keys = _bridge_keys_for_graph(adj, nodes)
+                best = None
+                best_combined = 0.0
+                for add_pos in add_pool.tolist():
+                    if selected_mask[add_pos]:
+                        continue
+                    add_gain = _edge_role_delta(adj, degree, tri, add_pos, add_edge=True)
+                    if not math.isfinite(add_gain):
+                        continue
+                    for drop_pos in drop_pool.tolist():
+                        if not selected_mask[drop_pos]:
+                            continue
+                        du = int(edge_index_cpu[0, drop_pos].item())
+                        dv = int(edge_index_cpu[1, drop_pos].item())
+                        da, db = (du, dv) if du < dv else (dv, du)
+                        if (da, db) in bridge_keys:
+                            continue
+                        drop_gain = _edge_role_delta(
+                            adj, degree, tri, drop_pos, add_edge=False
+                        )
+                        role_gain = add_gain + drop_gain
+                        total_considered += 1
+                        if role_gain <= min_gain:
+                            continue
+                        score_delta = float(raw_scores_cpu[add_pos] - raw_scores_cpu[drop_pos])
+                        if score_delta < -score_margin:
+                            continue
+                        combined = role_gain_weight * role_gain + model_score_weight * score_delta
+                        if combined > best_combined:
+                            best_combined = combined
+                            best = (add_pos, drop_pos, role_gain, score_delta)
+                if best is None:
+                    break
+
+                add_pos, drop_pos, role_gain, score_delta = best
+                au = int(edge_index_cpu[0, add_pos].item())
+                av = int(edge_index_cpu[1, add_pos].item())
+                du = int(edge_index_cpu[0, drop_pos].item())
+                dv = int(edge_index_cpu[1, drop_pos].item())
+
+                if dv in adj.get(du, set()):
+                    adj[du].remove(dv)
+                    adj[dv].remove(du)
+                    degree[du] = max(0, degree.get(du, 0) - 1)
+                    degree[dv] = max(0, degree.get(dv, 0) - 1)
+                if au in adj and av in adj and av not in adj[au]:
+                    adj[au].add(av)
+                    adj[av].add(au)
+                    degree[au] = degree.get(au, 0) + 1
+                    degree[av] = degree.get(av, 0) + 1
+                # Recompute per-node triangle participation after the accepted
+                # swap. This keeps the greedy objective coverage-aware.
+                for node in nodes:
+                    neigh = list(adj[int(node)])
+                    count = 0
+                    for i, left in enumerate(neigh):
+                        left_adj = adj.get(left, set())
+                        for right in neigh[i + 1 :]:
+                            if right in left_adj:
+                                count += 1
+                    tri[int(node)] = float(count)
+
+                selected_mask[drop_pos] = False
+                selected_mask[add_pos] = True
+                group_swaps += 1
+                total_swaps += 1
+                group_gain += float(role_gain)
+                group_score_delta += float(score_delta)
+
+            if group_swaps > 0:
+                log_records.append(
+                    (graph_idx, fam_id, group_swaps, group_gain, group_score_delta)
+                )
+
+        if total_swaps <= 0:
+            if (
+                log_selection
+                and getattr(self, "local_rank", 0) == 0
+                and int(sampling_step)
+                % max(
+                    1,
+                    int(
+                        getattr(
+                            self.cfg.model,
+                            "sampling_node_role_budget_repair_log_every",
+                            1,
+                        )
+                        or 1
+                    ),
+                )
+                == 0
+            ):
+                print(
+                    "[采样-NODE-BUDGET-REPAIR] "
+                    f"step={int(sampling_step)} swaps=0 considered={total_considered}"
+                )
+            return selected
+
+        new_selected = selected_mask.nonzero(as_tuple=True)[0]
+        new_selected = new_selected[torch.argsort(edge_keys_cpu[new_selected])]
+        if int(new_selected.numel()) != original_selected_count:
+            raise RuntimeError("node-role budget repair changed selected edge count")
+        after_counts = {}
+        for graph_idx, fam_id in zip(
+            edge_batch_cpu[new_selected].tolist(),
+            families_cpu[new_selected].tolist(),
+        ):
+            key = (int(graph_idx), int(fam_id))
+            after_counts[key] = after_counts.get(key, 0) + 1
+        if before_counts != after_counts:
+            raise RuntimeError("node-role budget repair changed exact-K graph/family quotas")
+
+        if log_selection and getattr(self, "local_rank", 0) == 0:
+            msg = ""
+            if log_records:
+                rec = log_records[0]
+                msg = (
+                    f" g{rec[0]}/fam{rec[1]} swaps={rec[2]} "
+                    f"role_gain={rec[3]:+.4g} score_delta={rec[4]:+.4g}"
+                )
+            print(
+                "[采样-NODE-BUDGET-REPAIR] "
+                f"step={int(sampling_step)} swaps={total_swaps} "
+                f"considered={total_considered}{msg}"
+            )
+        return new_selected.to(device=device)
+
+    def _apply_global_exact_k_structure_swap_limiter(
+        self,
+        data,
+        edge_index,
+        edge_keys,
+        raw_scores,
+        selection_scores,
+        families,
+        edge_batch,
+        selected,
+        sampling_step,
+        log_selection=True,
+    ):
+        """Apply small structure-aware exact-K boundary swaps.
+
+        The global bias limiter changes every candidate score before exact-K.
+        This pass is narrower: exact-K first establishes the per-graph/family
+        quota, then we only exchange low-score selected edges with high-score
+        unselected candidates from the same graph/family when an approximate
+        structural delta improves the configured targets.
+        """
+        if not bool(getattr(self.cfg.model, "sampling_structure_swap_limiter", False)):
+            return selected
+
+        weight = float(
+            getattr(self.cfg.model, "sampling_structure_swap_limiter_weight", 1.0)
+            or 0.0
+        )
+        max_swaps = int(
+            getattr(self.cfg.model, "sampling_structure_swap_limiter_max_swaps", 256)
+            or 0
+        )
+        if weight <= 0.0 or max_swaps <= 0:
+            return selected
+
+        total_steps = max(1, int(getattr(self.cfg.model, "diffusion_steps", 100) or 100))
+        step_frac = float(sampling_step) / float(total_steps)
+        min_step_frac = float(
+            getattr(self.cfg.model, "sampling_structure_swap_limiter_min_step_frac", 0.0)
+            or 0.0
+        )
+        max_step_frac = float(
+            getattr(self.cfg.model, "sampling_structure_swap_limiter_max_step_frac", 1.0)
+            or 1.0
+        )
+        if step_frac < min_step_frac or step_frac > max_step_frac:
+            return selected
+
+        target_tri = self._sampling_structure_target_value(
+            "triangles",
+            (
+                "sampling_structure_limiter_target_triangles",
+                "sampling_structure_budget_target_triangles",
+                "sampling_structure_early_stop_target_triangles",
+            ),
+        )
+        target_clust = self._sampling_structure_target_value(
+            "clustering",
+            (
+                "sampling_structure_limiter_target_clustering",
+                "sampling_structure_budget_target_clustering",
+                "sampling_structure_early_stop_target_clustering",
+            ),
+        )
+        target_lcc = self._sampling_structure_target_value(
+            "lcc_size",
+            (
+                "sampling_structure_limiter_target_lcc",
+                "sampling_structure_early_stop_target_lcc",
+            ),
+        )
+        target_assort = self._sampling_structure_target_value(
+            "assortativity",
+            (
+                "sampling_structure_limiter_target_assortativity",
+                "sampling_structure_budget_target_assortativity",
+                "sampling_structure_early_stop_target_assortativity",
+            ),
+        )
+        if (
+            target_tri is None
+            and target_clust is None
+            and target_lcc is None
+            and target_assort is None
+        ):
+            return selected
+
+        tri_w = float(
+            getattr(self.cfg.model, "sampling_structure_limiter_triangle_weight", 1.0)
+            or 0.0
+        )
+        clust_w = float(
+            getattr(self.cfg.model, "sampling_structure_limiter_clustering_weight", 1.0)
+            or 0.0
+        )
+        lcc_w = float(
+            getattr(self.cfg.model, "sampling_structure_limiter_lcc_weight", 1.0)
+            or 0.0
+        )
+        assort_w = float(
+            getattr(self.cfg.model, "sampling_structure_limiter_assort_weight", 1.0)
+            or 0.0
+        )
+        degree_w = float(
+            getattr(self.cfg.model, "sampling_structure_limiter_degree_weight", 1.0)
+            or 0.0
+        )
+        tri_tol = max(
+            0.0,
+            float(
+                getattr(self.cfg.model, "sampling_structure_limiter_triangle_tolerance", 0.08)
+                or 0.0
+            ),
+        )
+        clust_tol = max(
+            0.0,
+            float(
+                getattr(self.cfg.model, "sampling_structure_limiter_clustering_tolerance", 0.10)
+                or 0.0
+            ),
+        )
+        lcc_tol = max(
+            0.0,
+            float(
+                getattr(self.cfg.model, "sampling_structure_limiter_lcc_tolerance", 0.05)
+                or 0.0
+            ),
+        )
+        assort_tol = max(
+            0.0,
+            float(
+                getattr(self.cfg.model, "sampling_structure_limiter_assort_tolerance", 0.15)
+                or 0.0
+            ),
+        )
+        degree_tol = max(
+            0.0,
+            float(
+                getattr(
+                    self.cfg.model,
+                    "sampling_structure_limiter_degree_hist_tolerance",
+                    0.15,
+                )
+                or 0.0
+            ),
+        )
+        score_weight = float(
+            getattr(
+                self.cfg.model,
+                "sampling_structure_swap_limiter_model_score_weight",
+                1.0,
+            )
+            or 0.0
+        )
+        gain_scale = float(
+            getattr(self.cfg.model, "sampling_structure_swap_limiter_gain_scale", 5.0)
+            or 1.0
+        )
+        score_margin = max(
+            0.0,
+            float(
+                getattr(self.cfg.model, "sampling_structure_swap_limiter_score_margin", 2.0)
+                or 0.0
+            ),
+        )
+        pool_multiplier = max(
+            1,
+            int(
+                getattr(
+                    self.cfg.model,
+                    "sampling_structure_swap_limiter_pool_multiplier",
+                    4,
+                )
+                or 1
+            ),
+        )
+        pair_top_adds = max(
+            1,
+            int(
+                getattr(
+                    self.cfg.model,
+                    "sampling_structure_swap_limiter_pair_top_adds",
+                    64,
+                )
+                or 64
+            ),
+        )
+        pair_top_drops = max(
+            1,
+            int(
+                getattr(
+                    self.cfg.model,
+                    "sampling_structure_swap_limiter_pair_top_drops",
+                    64,
+                )
+                or 64
+            ),
+        )
+        lcc_bridge_bonus = float(
+            getattr(
+                self.cfg.model,
+                "sampling_structure_swap_limiter_lcc_bridge_bonus",
+                0.0,
+            )
+            or 0.0
+        )
+        protect_lcc_bridges = bool(
+            getattr(
+                self.cfg.model,
+                "sampling_structure_swap_limiter_protect_lcc_bridges",
+                False,
+            )
+        )
+        connectivity_guard = bool(
+            getattr(
+                self.cfg.model,
+                "sampling_structure_swap_limiter_connectivity_guard",
+                False,
+            )
+        )
+        connectivity_guard_tol = max(
+            0.0,
+            float(
+                getattr(
+                    self.cfg.model,
+                    "sampling_structure_swap_limiter_connectivity_guard_tolerance",
+                    0.05,
+                )
+                or 0.0
+            ),
+        )
+        connectivity_gain_weight = float(
+            getattr(
+                self.cfg.model,
+                "sampling_structure_swap_limiter_connectivity_gain_weight",
+                2.0,
+            )
+            or 0.0
+        )
+        connectivity_candidate_bonus = float(
+            getattr(
+                self.cfg.model,
+                "sampling_structure_swap_limiter_connectivity_candidate_bonus",
+                4.0,
+            )
+            or 0.0
+        )
+        hard_lcc_lexicographic = bool(
+            getattr(
+                self.cfg.model,
+                "sampling_connectivity_hard_lexicographic",
+                False,
+            )
+        )
+        _, hard_lcc_floor = self._sampling_lcc_floor_target()
+
+        device = edge_index.device
+        edge_index_cpu = edge_index.long().detach().cpu()
+        edge_keys_cpu = edge_keys.long().detach().cpu()
+        families_cpu = families.long().detach().cpu()
+        edge_batch_cpu = edge_batch.long().detach().cpu()
+        raw_scores_cpu = raw_scores.float().detach().cpu()
+        selection_scores_cpu = selection_scores.float().detach().cpu()
+        selected_cpu = selected.long().detach().cpu()
+        candidate_count = int(edge_index_cpu.shape[1])
+        selected_mask = torch.zeros(candidate_count, dtype=torch.bool)
+        selected_mask[selected_cpu] = True
+
+        node_batch = getattr(data, "batch", None)
+        if node_batch is None:
+            node_batch_cpu = torch.zeros(
+                (int(data.node.shape[0]),), dtype=torch.long
+            )
+        else:
+            node_batch_cpu = node_batch.long().detach().cpu()
+        total_nodes = int(node_batch_cpu.numel())
+        graph_ids = edge_batch_cpu.unique(sorted=True).tolist()
+
+        ref = self._ensure_sampling_degree_pair_reference()
+        degree_boundaries = ref.get("boundaries") if ref else None
+        ref_degree_bins = ref.get("degree_bins") if ref else None
+
+        def _clustering_value(triangles, degree):
+            degree = float(degree)
+            if degree < 2.0:
+                return 0.0
+            return 2.0 * float(triangles) / (degree * (degree - 1.0))
+
+        def _relative_excess(value, target, tolerance):
+            if target is None or float(target) <= 0.0:
+                return 0.0
+            delta = float(value) / max(float(target), 1.0e-8) - 1.0
+            return max(0.0, abs(delta) - float(tolerance))
+
+        def _component_info(adj, nodes):
+            node_set = set(int(x) for x in nodes)
+            comp_id = {}
+            comp_size = {}
+            lcc = 0
+            comp = 0
+            for start in nodes:
+                start = int(start)
+                if start in comp_id:
+                    continue
+                stack = [start]
+                comp_id[start] = comp
+                size = 0
+                while stack:
+                    u = stack.pop()
+                    size += 1
+                    for v in adj[u]:
+                        if v in node_set and v not in comp_id:
+                            comp_id[v] = comp
+                            stack.append(v)
+                comp_size[comp] = size
+                lcc = max(lcc, size)
+                comp += 1
+            return comp_id, comp_size, lcc
+
+        def _bridge_lcc_losses(adj, nodes, comp_id, comp_size, current_lcc):
+            node_set = set(int(x) for x in nodes)
+            sys.setrecursionlimit(max(sys.getrecursionlimit(), len(node_set) + 100))
+            tin = {}
+            low = {}
+            subtree_size = {}
+            bridge_losses = {}
+            timer = 0
+
+            def dfs(u, parent):
+                nonlocal timer
+                tin[u] = timer
+                low[u] = timer
+                timer += 1
+                subtree_size[u] = 1
+                for v in adj[u]:
+                    if v not in node_set or v == parent:
+                        continue
+                    if v in tin:
+                        low[u] = min(low[u], tin[v])
+                    else:
+                        dfs(v, u)
+                        subtree_size[u] += subtree_size[v]
+                        low[u] = min(low[u], low[v])
+                        if low[v] > tin[u]:
+                            comp = comp_id.get(u, -1)
+                            comp_total = int(comp_size.get(comp, 0))
+                            child_part = int(subtree_size[v])
+                            rest_part = max(0, comp_total - child_part)
+                            other_lcc = max(
+                                (
+                                    int(size)
+                                    for cid, size in comp_size.items()
+                                    if int(cid) != int(comp)
+                                ),
+                                default=0,
+                            )
+                            new_lcc = max(other_lcc, child_part, rest_part)
+                            bridge_losses[(min(u, v), max(u, v))] = (
+                                float(new_lcc) - float(current_lcc)
+                            )
+
+            for node in nodes:
+                node = int(node)
+                if node not in tin:
+                    dfs(node, -1)
+            return bridge_losses
+
+        def _incident_triangles(adj, nodes):
+            tri = {int(node): 0 for node in nodes}
+            for u in nodes:
+                u = int(u)
+                neigh = sorted(adj[u])
+                count = 0
+                for i, a in enumerate(neigh):
+                    adj_a = adj[a]
+                    for b in neigh[i + 1 :]:
+                        if b in adj_a:
+                            count += 1
+                tri[u] = count
+            return tri
+
+        def _assortativity(edges, degree):
+            if len(edges) <= 1:
+                return 0.0
+            left = []
+            right = []
+            for u, v in edges:
+                left.append(float(degree[u]))
+                right.append(float(degree[v]))
+            left = torch.tensor(left, dtype=torch.float32)
+            right = torch.tensor(right, dtype=torch.float32)
+            lc = left - left.mean()
+            rc = right - right.mean()
+            denom = lc.std(unbiased=False) * rc.std(unbiased=False)
+            if float(denom.item()) <= 0.0:
+                return 0.0
+            return float(((lc * rc).mean() / denom).item())
+
+        total_swaps = 0
+        total_considered = 0
+        log_records = []
+
+        for graph_idx in graph_ids:
+            graph_idx = int(graph_idx)
+            nodes = torch.where(node_batch_cpu == graph_idx)[0].tolist()
+            if len(nodes) <= 1:
+                continue
+            adj = [set() for _ in range(total_nodes)]
+            graph_selected = (selected_mask & (edge_batch_cpu == graph_idx)).nonzero(
+                as_tuple=True
+            )[0]
+            selected_edges = []
+            for pos in graph_selected.tolist():
+                u = int(edge_index_cpu[0, pos].item())
+                v = int(edge_index_cpu[1, pos].item())
+                if u == v:
+                    continue
+                adj[u].add(v)
+                adj[v].add(u)
+                selected_edges.append((min(u, v), max(u, v)))
+            if not selected_edges:
+                continue
+
+            degree = [len(adj[int(node)]) for node in range(total_nodes)]
+            incident_tri = _incident_triangles(adj, nodes)
+            current_triangles = float(sum(incident_tri.values()) / 3.0)
+            current_clustering = float(
+                sum(_clustering_value(incident_tri[int(node)], degree[int(node)]) for node in nodes)
+                / max(len(nodes), 1)
+            )
+            current_assort = _assortativity(selected_edges, degree)
+            comp_id, comp_size, current_lcc = _component_info(adj, nodes)
+            bridge_lcc_losses = (
+                _bridge_lcc_losses(adj, nodes, comp_id, comp_size, current_lcc)
+                if lcc_w != 0.0 and target_lcc is not None
+                else {}
+            )
+            comp_id_tensor = None
+            comp_size_tensor = None
+            if connectivity_guard:
+                comp_id_tensor = torch.full((total_nodes,), -1, dtype=torch.long)
+                comp_size_tensor = torch.zeros((total_nodes,), dtype=torch.float32)
+                for node, cid in comp_id.items():
+                    cid = int(cid)
+                    comp_id_tensor[int(node)] = cid
+                    comp_size_tensor[cid] = float(comp_size.get(cid, 0))
+
+            current_degree_l1 = None
+            degree_over = None
+            degree_bins_current = None
+            if (
+                degree_w != 0.0
+                and degree_boundaries is not None
+                and ref_degree_bins is not None
+                and ref_degree_bins.numel() > 0
+            ):
+                deg_tensor = torch.tensor(
+                    [degree[i] for i in range(total_nodes)], dtype=torch.float32
+                )
+                boundaries_cpu = degree_boundaries.detach().cpu().to(dtype=deg_tensor.dtype)
+                num_bins = max(
+                    2,
+                    int(getattr(self.cfg.model, "sampling_degree_pair_bins", 5) or 5),
+                )
+                degree_bins_current = torch.bucketize(deg_tensor, boundaries_cpu).long()
+                graph_bins = degree_bins_current[nodes].clamp(0, num_bins - 1)
+                cur_hist = torch.bincount(graph_bins, minlength=num_bins).float()
+                cur_hist = cur_hist / torch.clamp(cur_hist.sum(), min=1.0)
+                ref_bins = ref_degree_bins.detach().cpu().long().clamp(0, num_bins - 1)
+                ref_hist = torch.bincount(ref_bins, minlength=num_bins).float()
+                ref_hist = ref_hist / torch.clamp(ref_hist.sum(), min=1.0)
+                degree_over = cur_hist - ref_hist
+                current_degree_l1 = float(degree_over.abs().sum().item())
+
+            base_tri_err = _relative_excess(current_triangles, target_tri, tri_tol)
+            base_clust_err = _relative_excess(current_clustering, target_clust, clust_tol)
+            base_lcc_err = _relative_excess(current_lcc, target_lcc, lcc_tol)
+            base_assort_err = 0.0
+            if target_assort is not None:
+                denom = max(abs(float(target_assort)), 1.0e-8)
+                base_assort_err = max(
+                    0.0,
+                    abs((float(current_assort) - float(target_assort)) / denom)
+                    - assort_tol,
+                )
+
+            if (
+                base_tri_err <= 0.0
+                and base_clust_err <= 0.0
+                and base_lcc_err <= 0.0
+                and base_assort_err <= 0.0
+                and (
+                    current_degree_l1 is None
+                    or current_degree_l1 <= degree_tol
+                    or degree_w == 0.0
+                )
+            ):
+                continue
+
+            def edge_delta(pos, adding):
+                u = int(edge_index_cpu[0, pos].item())
+                v = int(edge_index_cpu[1, pos].item())
+                if u == v:
+                    return None
+                common = adj[u].intersection(adj[v])
+                cn = len(common)
+                if adding and v in adj[u]:
+                    return None
+                if (not adding) and v not in adj[u]:
+                    return None
+
+                sign = 1.0 if adding else -1.0
+                tri_delta = sign * float(cn)
+                clust_delta_sum = 0.0
+                for node in (u, v):
+                    old_tri = float(incident_tri.get(node, 0))
+                    old_deg = float(degree[node])
+                    new_tri = old_tri + sign * float(cn)
+                    new_deg = old_deg + sign
+                    clust_delta_sum += _clustering_value(new_tri, new_deg) - _clustering_value(
+                        old_tri, old_deg
+                    )
+                for node in common:
+                    old_tri = float(incident_tri.get(node, 0))
+                    old_deg = float(degree[node])
+                    clust_delta_sum += _clustering_value(
+                        old_tri + sign, old_deg
+                    ) - _clustering_value(old_tri, old_deg)
+                clust_delta = clust_delta_sum / max(len(nodes), 1)
+
+                max_deg = max(max(degree[int(node)] for node in nodes), 1)
+                degree_diff = abs(float(degree[u]) - float(degree[v])) / float(max_deg)
+                lcc_delta = 0.0
+                if target_lcc is not None and lcc_w != 0.0:
+                    if adding:
+                        cu = comp_id.get(u, -1)
+                        cv = comp_id.get(v, -1)
+                        if cu >= 0 and cv >= 0 and cu != cv:
+                            merged = comp_size.get(cu, 0) + comp_size.get(cv, 0)
+                            lcc_delta = float(max(current_lcc, merged) - current_lcc)
+                    else:
+                        key = (min(u, v), max(u, v))
+                        if key in bridge_lcc_losses:
+                            if protect_lcc_bridges or connectivity_guard:
+                                return None
+                            lcc_delta = float(bridge_lcc_losses[key])
+
+                degree_guard = 0.0
+                if (
+                    degree_w != 0.0
+                    and current_degree_l1 is not None
+                    and degree_over is not None
+                    and degree_bins_current is not None
+                ):
+                    bu = int(degree_bins_current[u].clamp(0, degree_over.numel() - 1).item())
+                    bv = int(degree_bins_current[v].clamp(0, degree_over.numel() - 1).item())
+                    endpoint_over = max(0.0, float(0.5 * (degree_over[bu] + degree_over[bv]).item()))
+                    degree_guard = -endpoint_over if adding else endpoint_over
+                return {
+                    "tri": tri_delta,
+                    "clust": clust_delta,
+                    "degree_diff": degree_diff,
+                    "lcc": lcc_delta,
+                    "degree_guard": degree_guard,
+                }
+
+            swap_candidates = []
+            group_keys = torch.unique(
+                torch.stack(
+                    [
+                        edge_batch_cpu[edge_batch_cpu == graph_idx],
+                        families_cpu[edge_batch_cpu == graph_idx],
+                    ],
+                    dim=0,
+                ).t(),
+                dim=0,
+            )
+            per_group_pool = max(1, max_swaps * pool_multiplier)
+            for gf in group_keys:
+                fam_id = int(gf[1].item())
+                group_mask = (edge_batch_cpu == graph_idx) & (families_cpu == fam_id)
+                drop_pool = (selected_mask & group_mask).nonzero(as_tuple=True)[0]
+                add_pool = ((~selected_mask) & group_mask).nonzero(as_tuple=True)[0]
+                if drop_pool.numel() == 0 or add_pool.numel() == 0:
+                    continue
+                drop_pool = drop_pool[
+                    torch.argsort(selection_scores_cpu[drop_pool], descending=False)
+                ][:per_group_pool]
+                if (
+                    connectivity_guard
+                    and connectivity_candidate_bonus != 0.0
+                    and target_lcc is not None
+                    and float(target_lcc) > 0.0
+                    and float(current_lcc)
+                    < float(target_lcc) * (1.0 - connectivity_guard_tol)
+                    and comp_id_tensor is not None
+                    and comp_size_tensor is not None
+                    and add_pool.numel() > 0
+                ):
+                    add_rank_scores = selection_scores_cpu[add_pool].clone()
+                    add_u = edge_index_cpu[0, add_pool].long()
+                    add_v = edge_index_cpu[1, add_pool].long()
+                    add_cu = comp_id_tensor[add_u]
+                    add_cv = comp_id_tensor[add_v]
+                    valid_cross = (add_cu >= 0) & (add_cv >= 0) & (add_cu != add_cv)
+                    if bool(valid_cross.any().item()):
+                        merged = comp_size_tensor[add_cu.clamp(min=0)] + comp_size_tensor[
+                            add_cv.clamp(min=0)
+                        ]
+                        lcc_gain = (
+                            torch.maximum(
+                                merged,
+                                torch.full_like(merged, float(current_lcc)),
+                            )
+                            - float(current_lcc)
+                        ).clamp(min=0.0)
+                        add_rank_scores = add_rank_scores + torch.where(
+                            valid_cross,
+                            float(connectivity_candidate_bonus)
+                            * lcc_gain
+                            / max(float(target_lcc), 1.0),
+                            torch.zeros_like(add_rank_scores),
+                        )
+                    add_pool = add_pool[
+                        torch.argsort(add_rank_scores, descending=True)
+                    ][:per_group_pool]
+                else:
+                    add_pool = add_pool[
+                        torch.argsort(selection_scores_cpu[add_pool], descending=True)
+                    ][:per_group_pool]
+                add_infos = []
+                for add_tensor in add_pool[: min(pair_top_adds, int(add_pool.numel()))]:
+                    add_pos = int(add_tensor.item())
+                    add_delta = edge_delta(add_pos, True)
+                    if add_delta is not None:
+                        add_infos.append((add_pos, add_delta))
+                drop_infos = []
+                for drop_tensor in drop_pool[: min(pair_top_drops, int(drop_pool.numel()))]:
+                    drop_pos = int(drop_tensor.item())
+                    drop_delta = edge_delta(drop_pos, False)
+                    if drop_delta is not None:
+                        drop_infos.append((drop_pos, drop_delta))
+                if not add_infos or not drop_infos:
+                    continue
+                for add_pos, add_delta in add_infos:
+                    for drop_pos, drop_delta in drop_infos:
+                        tri_delta = add_delta["tri"] + drop_delta["tri"]
+                        clust_delta = add_delta["clust"] + drop_delta["clust"]
+                        lcc_delta = add_delta["lcc"] + drop_delta["lcc"]
+                        lcc_first_active = (
+                            hard_lcc_lexicographic
+                            and hard_lcc_floor is not None
+                            and float(current_lcc) < float(hard_lcc_floor)
+                        )
+
+                        struct_gain = 0.0
+                        hard_reject = False
+                        if lcc_first_active and float(lcc_delta) <= 0.0:
+                            hard_reject = True
+                        if (
+                            not lcc_first_active
+                            and tri_w != 0.0
+                            and target_tri is not None
+                            and target_tri > 0
+                        ):
+                            after = current_triangles + tri_delta
+                            after_err = _relative_excess(after, target_tri, tri_tol)
+                            if base_tri_err <= 0.0 and after_err > 0.0:
+                                hard_reject = True
+                            struct_gain += tri_w * (base_tri_err - after_err)
+                        if (
+                            not lcc_first_active
+                            and clust_w != 0.0
+                            and target_clust is not None
+                            and target_clust > 0
+                        ):
+                            after = current_clustering + clust_delta
+                            after_err = _relative_excess(after, target_clust, clust_tol)
+                            if base_clust_err <= 0.0 and after_err > 0.0:
+                                hard_reject = True
+                            struct_gain += clust_w * (base_clust_err - after_err)
+                        if lcc_w != 0.0 and target_lcc is not None and target_lcc > 0:
+                            after = current_lcc + lcc_delta
+                            after_err = _relative_excess(after, target_lcc, lcc_tol)
+                            if base_lcc_err <= 0.0 and after_err > 0.0:
+                                hard_reject = True
+                            struct_gain += lcc_w * (base_lcc_err - after_err)
+                            if connectivity_guard:
+                                lower_lcc = float(target_lcc) * max(
+                                    0.0, 1.0 - connectivity_guard_tol
+                                )
+                                if (
+                                    float(current_lcc) >= lower_lcc
+                                    and float(after) < lower_lcc
+                                ):
+                                    hard_reject = True
+                                elif (
+                                    float(current_lcc) < lower_lcc
+                                    and float(lcc_delta) < 0.0
+                                ):
+                                    hard_reject = True
+                                if (
+                                    connectivity_gain_weight != 0.0
+                                    and float(lcc_delta) > 0.0
+                                    and float(current_lcc) < float(target_lcc)
+                                ):
+                                    struct_gain += float(connectivity_gain_weight) * min(
+                                        1.0,
+                                        float(lcc_delta) / max(float(target_lcc), 1.0),
+                                    )
+                            if lcc_first_active and float(lcc_delta) > 0.0:
+                                struct_gain += max(1.0, float(connectivity_gain_weight)) * min(
+                                    1.0,
+                                    float(lcc_delta)
+                                    / max(float(hard_lcc_floor), 1.0),
+                                )
+                            if (
+                                lcc_bridge_bonus != 0.0
+                                and lcc_delta > 0.0
+                                and current_lcc < float(target_lcc)
+                            ):
+                                struct_gain += (
+                                    lcc_w
+                                    * float(lcc_bridge_bonus)
+                                    * min(
+                                        1.0,
+                                        float(lcc_delta) / max(float(target_lcc), 1.0),
+                                    )
+                                )
+                        if (
+                            not lcc_first_active
+                            and assort_w != 0.0
+                            and target_assort is not None
+                        ):
+                            desired = 1.0 if float(target_assort) > current_assort else -1.0
+                            assort_proxy = desired * (
+                                drop_delta["degree_diff"] - add_delta["degree_diff"]
+                            )
+                            struct_gain += assort_w * 0.25 * assort_proxy
+                        if (
+                            connectivity_guard
+                            and target_lcc is None
+                            and int(current_lcc) >= int(len(nodes))
+                            and float(lcc_delta) < 0.0
+                        ):
+                            hard_reject = True
+                        if hard_reject:
+                            continue
+                        if (
+                            degree_w != 0.0
+                            and current_degree_l1 is not None
+                            and current_degree_l1 <= degree_tol
+                        ):
+                            struct_gain += degree_w * (
+                                add_delta["degree_guard"] + drop_delta["degree_guard"]
+                            )
+
+                        score_delta = float(raw_scores_cpu[add_pos] - raw_scores_cpu[drop_pos])
+                        combined = score_weight * score_delta + gain_scale * weight * struct_gain
+                        total_considered += 1
+                        if struct_gain <= 0.0:
+                            continue
+                        if (not lcc_first_active) and score_delta < -score_margin:
+                            continue
+                        if combined <= 0.0:
+                            continue
+                        swap_candidates.append(
+                            (
+                                combined,
+                                struct_gain,
+                                score_delta,
+                                add_pos,
+                                drop_pos,
+                                tri_delta,
+                                clust_delta,
+                                lcc_delta,
+                            )
+                        )
+
+            if not swap_candidates:
+                continue
+            swap_candidates.sort(key=lambda item: item[0], reverse=True)
+            used_add = set()
+            used_drop = set()
+            graph_swaps = 0
+            graph_tri_delta = 0.0
+            graph_clust_delta = 0.0
+            graph_lcc_delta = 0.0
+            graph_score_delta = 0.0
+            for item in swap_candidates:
+                if total_swaps >= max_swaps:
+                    break
+                _, _, score_delta, add_pos, drop_pos, tri_delta, clust_delta, lcc_delta = item
+                if add_pos in used_add or drop_pos in used_drop:
+                    continue
+                if selected_mask[add_pos] or not selected_mask[drop_pos]:
+                    continue
+                selected_mask[drop_pos] = False
+                selected_mask[add_pos] = True
+                used_add.add(add_pos)
+                used_drop.add(drop_pos)
+                graph_swaps += 1
+                total_swaps += 1
+                graph_tri_delta += float(tri_delta)
+                graph_clust_delta += float(clust_delta)
+                graph_lcc_delta += float(lcc_delta)
+                graph_score_delta += float(score_delta)
+            if graph_swaps > 0:
+                log_records.append(
+                    (
+                        graph_idx,
+                        graph_swaps,
+                        current_triangles,
+                        current_triangles + graph_tri_delta,
+                        current_clustering,
+                        current_clustering + graph_clust_delta,
+                        current_assort,
+                        current_lcc,
+                        current_lcc + graph_lcc_delta,
+                        graph_score_delta,
+                    )
+                )
+            if total_swaps >= max_swaps:
+                break
+
+        if total_swaps <= 0:
+            if (
+                log_selection
+                and getattr(self, "local_rank", 0) == 0
+                and int(sampling_step)
+                % max(
+                    1,
+                    int(
+                        getattr(
+                            self.cfg.model,
+                            "sampling_structure_swap_limiter_log_every",
+                            1,
+                        )
+                        or 1
+                    ),
+                )
+                == 0
+            ):
+                print(
+                    "[采样-EXACT-K-SWAP-LIMITER] "
+                    f"step={int(sampling_step)} swaps=0 "
+                    f"considered={total_considered}"
+                )
+            return selected
+
+        new_selected = selected_mask.nonzero(as_tuple=True)[0]
+        new_selected = new_selected[torch.argsort(edge_keys_cpu[new_selected])]
+        if int(new_selected.numel()) != int(selected_cpu.numel()):
+            raise RuntimeError(
+                "structure swap limiter changed the total selected edge count"
+            )
+        before_counts = {}
+        after_counts = {}
+        for graph_idx, fam_id in zip(
+            edge_batch_cpu[selected_cpu].tolist(),
+            families_cpu[selected_cpu].tolist(),
+        ):
+            key = (int(graph_idx), int(fam_id))
+            before_counts[key] = before_counts.get(key, 0) + 1
+        for graph_idx, fam_id in zip(
+            edge_batch_cpu[new_selected].tolist(),
+            families_cpu[new_selected].tolist(),
+        ):
+            key = (int(graph_idx), int(fam_id))
+            after_counts[key] = after_counts.get(key, 0) + 1
+        if before_counts != after_counts:
+            raise RuntimeError(
+                "structure swap limiter changed exact-K graph/family quotas"
+            )
+
+        if log_selection and getattr(self, "local_rank", 0) == 0:
+            msg = ""
+            if log_records:
+                rec = log_records[0]
+                msg = (
+                    f" g{rec[0]} swaps={rec[1]}"
+                    f" tri={rec[2]:.0f}->{rec[3]:.0f}"
+                    f" clust={rec[4]:.4g}->{rec[5]:.4g}"
+                    f" assort={rec[6]:+.4g}"
+                    f" lcc={rec[7]:.0f}->{rec[8]:.0f}"
+                    f" score_delta={rec[9]:+.4g}"
+                )
+            print(
+                "[采样-EXACT-K-SWAP-LIMITER] "
+                f"step={int(sampling_step)} swaps={total_swaps} "
+                f"considered={total_considered}"
+                f"{msg}"
+            )
+        return new_selected.to(device=device)
+
+    def _apply_global_exact_k_min_churn(
+        self,
+        data,
+        edge_index,
+        edge_keys,
+        selection_scores,
+        families,
+        edge_batch,
+        selected,
+        sampling_step,
+        log_selection=True,
+    ):
+        """Force a minimum exact-K edit rate without changing family quotas."""
+        churn_frac = float(
+            getattr(self.cfg.model, "sampling_exact_k_min_edge_churn", 0.0) or 0.0
+        )
+        if churn_frac <= 0.0:
+            return selected
+        churn_frac = min(1.0, max(0.0, churn_frac))
+        min_step_frac = float(
+            getattr(self.cfg.model, "sampling_exact_k_churn_min_step_frac", 0.0)
+            or 0.0
+        )
+        total_steps = max(1, int(getattr(self.cfg.model, "diffusion_steps", 100) or 100))
+        if float(sampling_step) / float(total_steps) < min_step_frac:
+            return selected
+
+        device = edge_index.device
+        total_nodes = int(data.node.shape[0])
+        current_keys = None
+        current_edge_index = getattr(data, "edge_index", None)
+        if current_edge_index is not None and current_edge_index.numel() > 0:
+            cur = current_edge_index.long().to(device)
+            cur_u = torch.minimum(cur[0], cur[1])
+            cur_v = torch.maximum(cur[0], cur[1])
+            current_keys = torch.unique(cur_u * int(total_nodes) + cur_v)
+        if current_keys is None or current_keys.numel() == 0:
+            return selected
+
+        candidate_count = int(edge_keys.numel())
+        selected_mask = torch.zeros(candidate_count, dtype=torch.bool, device=device)
+        selected_mask[selected.long()] = True
+        is_current = torch.isin(edge_keys.long(), current_keys.long())
+        graph_families = torch.stack([edge_batch.long(), families.long()], dim=0).t()
+        unique_graph_families = torch.unique(graph_families, dim=0)
+        forced_swaps = 0
+        skipped = 0
+
+        for gf in unique_graph_families:
+            graph_idx = int(gf[0].item())
+            fam_id = int(gf[1].item())
+            group_mask = (edge_batch.long() == graph_idx) & (families.long() == fam_id)
+            selected_group = selected_mask & group_mask
+            selected_count = int(selected_group.sum().item())
+            if selected_count <= 0:
+                continue
+            desired_churn = int(math.ceil(float(selected_count) * churn_frac))
+            already_churned = int((selected_group & (~is_current)).sum().item())
+            need = max(0, desired_churn - already_churned)
+            if need <= 0:
+                continue
+
+            drop_pool = (selected_group & is_current).nonzero(as_tuple=True)[0]
+            add_pool = ((~selected_mask) & group_mask & (~is_current)).nonzero(as_tuple=True)[0]
+            take = min(need, int(drop_pool.numel()), int(add_pool.numel()))
+            if take <= 0:
+                skipped += need
+                continue
+
+            drop_order = torch.topk(
+                selection_scores[drop_pool],
+                k=take,
+                largest=False,
+            ).indices
+            add_order = torch.topk(
+                selection_scores[add_pool],
+                k=take,
+                largest=True,
+            ).indices
+            drop_idx = drop_pool[drop_order]
+            add_idx = add_pool[add_order]
+            selected_mask[drop_idx] = False
+            selected_mask[add_idx] = True
+            forced_swaps += take
+            skipped += max(0, need - take)
+
+        if forced_swaps > 0 or skipped > 0:
+            selected = selected_mask.nonzero(as_tuple=True)[0]
+            selected = selected[torch.argsort(edge_keys[selected])]
+            if log_selection and getattr(self, "local_rank", 0) == 0:
+                print(
+                    "[采样-EXACT-K-CHURN] "
+                    f"step={int(sampling_step)} "
+                    f"target_frac={churn_frac:.4f} "
+                    f"forced_swaps={forced_swaps} "
+                    f"skipped={skipped} "
+                    f"selected={int(selected.numel())}"
+                )
+        return selected
+
     def _repair_global_exact_k_connectivity(
         self,
         data,
@@ -3240,6 +5734,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         families,
         edge_batch,
         selected,
+        hard_lcc_floor=False,
     ):
         """Minimally connect an exact-K graph with quota-preserving exchanges."""
         device = edge_index.device
@@ -3317,6 +5812,13 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             graph_idx: int(info["components"])
             for graph_idx, info in before.items()
         }
+        current_lcc = {
+            graph_idx: int(info["lcc"])
+            for graph_idx, info in before.items()
+        }
+        _, target_lcc_floor = self._sampling_lcc_floor_target()
+        if not hard_lcc_floor:
+            target_lcc_floor = None
         before_triangles = self._count_total_triangles_sparse(
             edge_index_cpu[:, selected_mask],
             torch.ones(int(selected_mask.sum().item()), dtype=torch.long),
@@ -3347,18 +5849,46 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         score_delta = 0.0
         infeasible_families = set()
         unselected = (~selected_mask).nonzero(as_tuple=True)[0]
-        bridge_order = unselected[
-            torch.argsort(scores_cpu[unselected], descending=True)
-        ]
+        if hard_lcc_floor and target_lcc_floor is not None and unselected.numel() > 0:
+            bridge_gain = torch.zeros(int(unselected.numel()), dtype=torch.float32)
+            for rank_idx, pos_tensor in enumerate(unselected.tolist()):
+                graph_idx = int(edge_batch_cpu[pos_tensor].item())
+                if current_lcc.get(graph_idx, 0) >= float(target_lcc_floor):
+                    continue
+                u = int(edge_index_cpu[0, pos_tensor].item())
+                v = int(edge_index_cpu[1, pos_tensor].item())
+                ru, rv = find(u), find(v)
+                if ru == rv:
+                    continue
+                merged = int(component_size[ru]) + int(component_size[rv])
+                bridge_gain[rank_idx] = max(
+                    0.0,
+                    float(max(current_lcc.get(graph_idx, 0), merged))
+                    - float(current_lcc.get(graph_idx, 0)),
+                )
+            bridge_rank_score = bridge_gain * max(float(total_nodes), 1.0) + scores_cpu[
+                unselected
+            ]
+            bridge_order = unselected[torch.argsort(bridge_rank_score, descending=True)]
+        else:
+            bridge_order = unselected[
+                torch.argsort(scores_cpu[unselected], descending=True)
+            ]
         for pos in bridge_order.tolist():
             if max_swaps > 0 and len(repair_added) >= max_swaps:
                 break
             graph_idx = int(edge_batch_cpu[pos].item())
-            if current_components.get(graph_idx, 1) <= 1:
+            graph_satisfied = current_components.get(graph_idx, 1) <= 1
+            if target_lcc_floor is not None:
+                graph_satisfied = current_lcc.get(graph_idx, 0) >= float(
+                    target_lcc_floor
+                )
+            if graph_satisfied:
                 continue
             u = int(edge_index_cpu[0, pos].item())
             v = int(edge_index_cpu[1, pos].item())
-            if find(u) == find(v):
+            ru, rv = find(u), find(v)
+            if ru == rv:
                 continue
 
             key = (graph_idx, int(families_cpu[pos].item()))
@@ -3370,6 +5900,10 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 continue
 
             removed = pool.pop(0)
+            merged_lcc = max(
+                current_lcc.get(graph_idx, 0),
+                int(component_size[ru]) + int(component_size[rv]),
+            )
             selected_mask[removed] = False
             selected_mask[pos] = True
             forest_mask[pos] = True
@@ -3377,12 +5911,19 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             current_components[graph_idx] = max(
                 1, current_components.get(graph_idx, 1) - 1
             )
+            current_lcc[graph_idx] = int(merged_lcc)
             repair_added.append(pos)
             repair_removed.append(removed)
             score_delta += float(
                 scores_cpu[pos].item() - scores_cpu[removed].item()
             )
-            if all(count <= 1 for count in current_components.values()):
+            if target_lcc_floor is not None:
+                if all(
+                    current_lcc.get(graph_idx, 0) >= float(target_lcc_floor)
+                    for graph_idx in current_lcc
+                ):
+                    break
+            elif all(count <= 1 for count in current_components.values()):
                 break
 
         after = component_stats()
@@ -3425,6 +5966,8 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             after_lcc = {g: v["lcc"] for g, v in after.items()}
             print(
                 "[采样-EXACT-K-REPAIR] "
+                f"hard_lcc_floor={bool(hard_lcc_floor)} "
+                f"target_lcc_floor={None if target_lcc_floor is None else round(float(target_lcc_floor), 3)} "
                 f"components={before_components}->{after_components} "
                 f"lcc={before_lcc}->{after_lcc} "
                 f"swaps={len(repair_added)} "
@@ -4276,10 +6819,10 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         )
         if remaining_frac < lo or remaining_frac > hi:
             return 0.0
-        power = float(
-            getattr(self.cfg.model, "sampling_structure_guidance_power", 1.0)
-            or 1.0
+        power_raw = getattr(
+            self.cfg.model, "sampling_structure_guidance_power", 1.0
         )
+        power = 1.0 if power_raw is None else float(power_raw)
         return max(0.0, min(1.0, remaining_frac)) ** max(power, 0.0)
 
     def _sampling_structure_guidance_bias(
@@ -4322,19 +6865,84 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             )
             or 0.0
         )
+        budget_enabled = bool(
+            getattr(self.cfg.model, "sampling_structure_budget_controller", False)
+        )
+        budget_closure_w = float(
+            getattr(
+                self.cfg.model,
+                "sampling_structure_budget_closure_weight",
+                0.0,
+            )
+            or 0.0
+        )
+        budget_clustering_w = float(
+            getattr(
+                self.cfg.model,
+                "sampling_structure_budget_clustering_weight",
+                0.0,
+            )
+            or 0.0
+        )
+        budget_assort_w = float(
+            getattr(
+                self.cfg.model,
+                "sampling_structure_budget_assort_weight",
+                0.0,
+            )
+            or 0.0
+        )
+        limiter_enabled = bool(
+            getattr(self.cfg.model, "sampling_structure_limiter", False)
+        )
+        limiter_weight = float(
+            getattr(self.cfg.model, "sampling_structure_limiter_weight", 1.0)
+            or 0.0
+        )
+        learned_enabled = self._learned_structure_controller_enabled()
         factor = self._sampling_structure_guidance_factor(sampling_step)
         if (
-            factor <= 0.0
+            (factor <= 0.0 and not learned_enabled)
             or edge_index is None
             or edge_index.numel() == 0
-            or max(abs(closure_w), abs(connect_w), abs(dp_w), abs(assort_w)) <= 0.0
+            or max(
+                abs(closure_w),
+                abs(connect_w),
+                abs(dp_w),
+                abs(assort_w),
+                abs(budget_closure_w) if budget_enabled else 0.0,
+                abs(budget_clustering_w) if budget_enabled else 0.0,
+                abs(budget_assort_w) if budget_enabled else 0.0,
+                abs(limiter_weight) if limiter_enabled else 0.0,
+                1.0 if learned_enabled else 0.0,
+            )
+            <= 0.0
         ):
             return None
+
+        def _cfg_float(name, default=None):
+            value = getattr(self.cfg.model, name, default)
+            if value is None:
+                return default
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return default
+
+        def _cfg_first_float(names, default=None):
+            for name in names:
+                value = _cfg_float(name, None)
+                if value is not None:
+                    return value
+            return default
 
         device = edge_index.device
         bias = torch.zeros((edge_index.shape[1],), dtype=torch.float32, device=device)
         comp_feature = None
         closure_feature = None
+        budget_records = []
+        budget_assort_records = []
+        limiter_records = []
         current_edge_index = getattr(data, "edge_index", None)
         current_edge_attr = getattr(data, "edge_attr", None)
         if current_edge_index is not None and current_edge_attr is not None:
@@ -4388,6 +6996,155 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                     adj[dst_vis, src_vis] = 1.0
                 adj.fill_diagonal_(0.0)
                 common = adj.matmul(adj)
+                current_triangles = None
+                current_clustering = None
+                current_assortativity = None
+                current_lcc = None
+                current_degree_hist_l1 = None
+                degree_over_bins = None
+                degree_bins_current = None
+                limiter_tri_target = self._sampling_structure_target_value(
+                    "triangles",
+                    (
+                        "sampling_structure_limiter_target_triangles",
+                        "sampling_structure_budget_target_triangles",
+                        "sampling_structure_early_stop_target_triangles",
+                    ),
+                )
+                limiter_clust_target = self._sampling_structure_target_value(
+                    "clustering",
+                    (
+                        "sampling_structure_limiter_target_clustering",
+                        "sampling_structure_budget_target_clustering",
+                        "sampling_structure_early_stop_target_clustering",
+                    ),
+                )
+                limiter_lcc_target = self._sampling_structure_target_value(
+                    "lcc_size",
+                    (
+                        "sampling_structure_limiter_target_lcc",
+                        "sampling_structure_early_stop_target_lcc",
+                    ),
+                )
+                limiter_assort_target = self._sampling_structure_target_value(
+                    "assortativity",
+                    (
+                        "sampling_structure_limiter_target_assortativity",
+                        "sampling_structure_budget_target_assortativity",
+                        "sampling_structure_early_stop_target_assortativity",
+                    ),
+                )
+                need_tri_clust = (
+                    budget_enabled
+                    and (budget_closure_w != 0.0 or budget_clustering_w != 0.0)
+                ) or (
+                    limiter_enabled
+                    and (
+                        limiter_tri_target is not None
+                        or limiter_clust_target is not None
+                    )
+                )
+                need_assort = (
+                    budget_enabled and budget_assort_w != 0.0
+                ) or (
+                    limiter_enabled and limiter_assort_target is not None
+                )
+                need_lcc = limiter_enabled and limiter_lcc_target is not None
+                need_degree_hist = limiter_enabled and float(
+                    getattr(
+                        self.cfg.model,
+                        "sampling_structure_limiter_degree_weight",
+                        1.0,
+                    )
+                    or 0.0
+                ) != 0.0
+                deg = None
+                if need_tri_clust:
+                    # trace(A^3) / 6, using the common-neighbor matrix already
+                    # needed for candidate closure features.
+                    current_triangles = float(
+                        ((common * adj).sum() / 6.0).detach().cpu().item()
+                    )
+                    deg = adj.sum(dim=1)
+                    denom = deg * (deg - 1.0)
+                    tri_per_node_twice = (common * adj).sum(dim=1)
+                    local_clust = torch.zeros_like(deg)
+                    valid_deg = denom > 0
+                    local_clust[valid_deg] = tri_per_node_twice[valid_deg] / denom[valid_deg]
+                    current_clustering = float(local_clust.mean().detach().cpu().item())
+                if need_assort:
+                    if deg is None:
+                        deg = adj.sum(dim=1)
+                    upper = torch.triu(adj, diagonal=1) > 0
+                    eu, ev = upper.nonzero(as_tuple=True)
+                    if eu.numel() > 1:
+                        du = deg[eu]
+                        dv = deg[ev]
+                        du_c = du - du.mean()
+                        dv_c = dv - dv.mean()
+                        denom = du_c.std(unbiased=False) * dv_c.std(unbiased=False)
+                        if float(denom.detach().cpu().item()) > 0.0:
+                            current_assortativity = float(
+                                ((du_c * dv_c).mean() / denom).detach().cpu().item()
+                            )
+                        else:
+                            current_assortativity = 0.0
+                    else:
+                        current_assortativity = 0.0
+                if need_lcc:
+                    adj_bool = (adj > 0).detach().cpu().numpy()
+                    visited = np.zeros((int(n),), dtype=np.bool_)
+                    lcc = 0
+                    for start in range(int(n)):
+                        if visited[start]:
+                            continue
+                        stack = [start]
+                        visited[start] = True
+                        size = 0
+                        while stack:
+                            u_node = stack.pop()
+                            size += 1
+                            neigh = np.nonzero(adj_bool[u_node])[0]
+                            for v_node in neigh.tolist():
+                                if not visited[v_node]:
+                                    visited[v_node] = True
+                                    stack.append(int(v_node))
+                        lcc = max(lcc, int(size))
+                    current_lcc = float(lcc)
+                if need_degree_hist:
+                    ref = self._ensure_sampling_degree_pair_reference()
+                    boundaries = ref.get("boundaries") if ref else None
+                    ref_bins = ref.get("degree_bins") if ref else None
+                    if boundaries is not None and ref_bins is not None and ref_bins.numel() > 0:
+                        if deg is None:
+                            deg = adj.sum(dim=1)
+                        num_bins = max(
+                            2,
+                            int(
+                                getattr(
+                                    self.cfg.model,
+                                    "sampling_degree_pair_bins",
+                                    5,
+                                )
+                                or 5
+                            ),
+                        )
+                        boundaries_dev = boundaries.to(device=device, dtype=deg.dtype)
+                        degree_bins_current = torch.bucketize(deg, boundaries_dev).long()
+                        cur_hist = torch.bincount(
+                            degree_bins_current.clamp(0, num_bins - 1),
+                            minlength=num_bins,
+                        ).float()
+                        cur_hist = cur_hist / torch.clamp(cur_hist.sum(), min=1.0)
+                        ref_hist = torch.bincount(
+                            ref_bins.to(device=device).long().clamp(0, num_bins - 1),
+                            minlength=num_bins,
+                        ).float()
+                        ref_hist = ref_hist / torch.clamp(ref_hist.sum(), min=1.0)
+                        degree_over_bins = cur_hist - ref_hist
+                        current_degree_hist_l1 = float(
+                            degree_over_bins.abs().sum().detach().cpu().item()
+                        )
                 idx = cand_mask.nonzero(as_tuple=True)[0]
                 src = local_of[edge_index[0, idx].long()]
                 dst = local_of[edge_index[1, idx].long()]
@@ -4397,6 +7154,442 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                     cn = common[src[valid], dst[valid]]
                     local_score[valid] = torch.log1p(cn) / math.log1p(max(n, 1))
                     closure_feature[idx] = local_score
+                    if (
+                        budget_enabled
+                        and current_triangles is not None
+                        and (budget_closure_w != 0.0 or budget_clustering_w != 0.0)
+                    ):
+                        target_triangles = self._sampling_structure_target_value(
+                            "triangles",
+                            ("sampling_structure_budget_target_triangles",),
+                        )
+                        target_clustering = self._sampling_structure_target_value(
+                            "clustering",
+                            ("sampling_structure_budget_target_clustering",),
+                        )
+                        effective_delta = 0.0
+                        raw_delta = 0.0
+                        tri_delta = None
+                        clust_delta = None
+                        if (
+                            target_triangles is not None
+                            and target_triangles > 0
+                            and budget_closure_w != 0.0
+                        ):
+                            tolerance = max(
+                                0.0,
+                                float(
+                                    getattr(
+                                        self.cfg.model,
+                                        "sampling_structure_budget_triangle_tolerance",
+                                        0.0,
+                                    )
+                                    or 0.0
+                                ),
+                            )
+                            tri_delta = (
+                                current_triangles
+                                / max(float(target_triangles), 1.0)
+                            ) - 1.0
+                            if abs(tri_delta) <= tolerance:
+                                tri_effective = 0.0
+                            else:
+                                tri_effective = math.copysign(
+                                    abs(tri_delta) - tolerance,
+                                    tri_delta,
+                                )
+                            effective_delta += float(budget_closure_w) * float(tri_effective)
+                            raw_delta += float(budget_closure_w) * float(tri_delta)
+                        if (
+                            target_clustering is not None
+                            and target_clustering > 0
+                            and current_clustering is not None
+                            and budget_clustering_w != 0.0
+                        ):
+                            clust_delta = (
+                                current_clustering / max(float(target_clustering), 1.0e-8)
+                            ) - 1.0
+                            effective_delta += float(budget_clustering_w) * float(clust_delta)
+                            raw_delta += float(budget_clustering_w) * float(clust_delta)
+                        if effective_delta != 0.0:
+                            delta_clip = max(
+                                0.0,
+                                float(
+                                    getattr(
+                                        self.cfg.model,
+                                        "sampling_structure_budget_delta_clip",
+                                        2.0,
+                                    )
+                                    or 2.0
+                                ),
+                            )
+                            if delta_clip > 0:
+                                effective_delta = max(
+                                    -delta_clip,
+                                    min(delta_clip, float(effective_delta)),
+                                )
+                            # Under budget: positive closure bias. Over budget:
+                            # negative closure bias. This is the "structure
+                            # brake" missing from static closure guidance.
+                            budget_weight = (
+                                -float(factor)
+                                * float(effective_delta)
+                            )
+                            bias[idx] = bias[idx] + budget_weight * local_score
+                            budget_records.append(
+                                (
+                                    graph_idx,
+                                    current_triangles,
+                                    target_triangles if target_triangles is not None else float("nan"),
+                                    raw_delta,
+                                    effective_delta,
+                                    budget_weight,
+                                    current_clustering if current_clustering is not None else float("nan"),
+                                    target_clustering if target_clustering is not None else float("nan"),
+                                    tri_delta if tri_delta is not None else float("nan"),
+                                    clust_delta if clust_delta is not None else float("nan"),
+                                )
+                            )
+                    if (
+                        budget_enabled
+                        and budget_assort_w != 0.0
+                        and current_assortativity is not None
+                    ):
+                        target_assort = self._sampling_structure_target_value(
+                            "assortativity",
+                            ("sampling_structure_budget_target_assortativity",),
+                        )
+                        if target_assort is not None and abs(target_assort) > 1.0e-8:
+                            assort_delta = (
+                                current_assortativity - float(target_assort)
+                            ) / max(abs(float(target_assort)), 1.0e-8)
+                            deg = adj.sum(dim=1)
+                            max_deg = torch.clamp(deg.max(), min=1.0)
+                            degree_diff = torch.zeros((idx.numel(),), dtype=torch.float32, device=device)
+                            degree_diff[valid] = (
+                                deg[src[valid]].sub(deg[dst[valid]]).abs() / max_deg
+                            )
+                            # If current assortativity is too negative, delta < 0:
+                            # penalize high degree-difference candidates. If it is
+                            # too positive, reward them.
+                            assort_weight = (
+                                float(budget_assort_w)
+                                * float(factor)
+                                * float(assort_delta)
+                            )
+                            bias[idx] = bias[idx] + assort_weight * degree_diff
+                            budget_assort_records.append(
+                                (
+                                    graph_idx,
+                                    current_assortativity,
+                                    target_assort,
+                                    assort_delta,
+                                    assort_weight,
+                                )
+                            )
+                    if limiter_enabled and limiter_weight != 0.0:
+                        limiter_delta_clip = max(
+                            0.0,
+                            float(
+                                getattr(
+                                    self.cfg.model,
+                                    "sampling_structure_limiter_delta_clip",
+                                    1.0,
+                                )
+                                or 1.0
+                            ),
+                        )
+                        limiter_base = float(limiter_weight) * float(factor)
+                        limiter_adjust = torch.zeros(
+                            (idx.numel(),), dtype=torch.float32, device=device
+                        )
+                        limiter_parts = []
+
+                        tri_w = float(
+                            getattr(
+                                self.cfg.model,
+                                "sampling_structure_limiter_triangle_weight",
+                                1.0,
+                            )
+                            or 0.0
+                        )
+                        if (
+                            tri_w != 0.0
+                            and limiter_tri_target is not None
+                            and limiter_tri_target > 0
+                            and current_triangles is not None
+                        ):
+                            tri_tol = max(
+                                0.0,
+                                float(
+                                    getattr(
+                                        self.cfg.model,
+                                        "sampling_structure_limiter_triangle_tolerance",
+                                        0.08,
+                                    )
+                                    or 0.0
+                                ),
+                            )
+                            tri_delta = (
+                                float(current_triangles) / max(float(limiter_tri_target), 1.0)
+                            ) - 1.0
+                            tri_protected = abs(tri_delta) <= tri_tol or tri_delta > 0.0
+                            if tri_protected:
+                                strength = 1.0 if abs(tri_delta) <= tri_tol else min(
+                                    limiter_delta_clip,
+                                    abs(tri_delta),
+                                )
+                                limiter_adjust -= (
+                                    limiter_base
+                                    * tri_w
+                                    * float(strength)
+                                    * local_score
+                                )
+                                limiter_parts.append(
+                                    f"tri={current_triangles:.0f}/{limiter_tri_target:.0f}"
+                                    f",d={tri_delta:+.3g},w={-limiter_base * tri_w * float(strength):+.3g}"
+                                )
+
+                        clust_w = float(
+                            getattr(
+                                self.cfg.model,
+                                "sampling_structure_limiter_clustering_weight",
+                                1.0,
+                            )
+                            or 0.0
+                        )
+                        if (
+                            clust_w != 0.0
+                            and limiter_clust_target is not None
+                            and limiter_clust_target > 0
+                            and current_clustering is not None
+                        ):
+                            clust_tol = max(
+                                0.0,
+                                float(
+                                    getattr(
+                                        self.cfg.model,
+                                        "sampling_structure_limiter_clustering_tolerance",
+                                        0.10,
+                                    )
+                                    or 0.0
+                                ),
+                            )
+                            clust_delta = (
+                                float(current_clustering)
+                                / max(float(limiter_clust_target), 1.0e-8)
+                            ) - 1.0
+                            clust_protected = abs(clust_delta) <= clust_tol or clust_delta > 0.0
+                            if clust_protected:
+                                strength = 1.0 if abs(clust_delta) <= clust_tol else min(
+                                    limiter_delta_clip,
+                                    abs(clust_delta),
+                                )
+                                limiter_adjust -= (
+                                    limiter_base
+                                    * clust_w
+                                    * float(strength)
+                                    * local_score
+                                )
+                                limiter_parts.append(
+                                    f"clust={current_clustering:.4g}/{limiter_clust_target:.4g}"
+                                    f",d={clust_delta:+.3g},w={-limiter_base * clust_w * float(strength):+.3g}"
+                                )
+
+                        assort_w_limiter = float(
+                            getattr(
+                                self.cfg.model,
+                                "sampling_structure_limiter_assort_weight",
+                                1.0,
+                            )
+                            or 0.0
+                        )
+                        if (
+                            assort_w_limiter != 0.0
+                            and limiter_assort_target is not None
+                            and current_assortativity is not None
+                        ):
+                            assort_tol = max(
+                                0.0,
+                                float(
+                                    getattr(
+                                        self.cfg.model,
+                                        "sampling_structure_limiter_assort_tolerance",
+                                        0.15,
+                                    )
+                                    or 0.0
+                                ),
+                            )
+                            denom = max(abs(float(limiter_assort_target)), 1.0e-8)
+                            assort_delta = (
+                                float(current_assortativity) - float(limiter_assort_target)
+                            ) / denom
+                            if abs(assort_delta) <= assort_tol:
+                                if deg is None:
+                                    deg = adj.sum(dim=1)
+                                degree_diff = torch.zeros(
+                                    (idx.numel(),), dtype=torch.float32, device=device
+                                )
+                                max_deg = torch.clamp(deg.max(), min=1.0)
+                                degree_diff[valid] = (
+                                    deg[src[valid]].sub(deg[dst[valid]]).abs() / max_deg
+                                )
+                                if abs(assort_delta) < 1.0e-6:
+                                    away = (degree_diff - degree_diff[valid].mean()).abs()
+                                elif assort_delta > 0.0:
+                                    # Current assortativity is too positive; low
+                                    # degree-difference candidates move further away.
+                                    away = 1.0 - degree_diff
+                                else:
+                                    # Current assortativity is too negative; high
+                                    # degree-difference candidates move further away.
+                                    away = degree_diff
+                                limiter_adjust -= (
+                                    limiter_base
+                                    * assort_w_limiter
+                                    * away.to(limiter_adjust.dtype)
+                                )
+                                limiter_parts.append(
+                                    f"assort={current_assortativity:+.4g}/{limiter_assort_target:+.4g}"
+                                    f",d={assort_delta:+.3g},w={-limiter_base * assort_w_limiter:+.3g}"
+                                )
+
+                        degree_w = float(
+                            getattr(
+                                self.cfg.model,
+                                "sampling_structure_limiter_degree_weight",
+                                1.0,
+                            )
+                            or 0.0
+                        )
+                        if (
+                            degree_w != 0.0
+                            and current_degree_hist_l1 is not None
+                            and degree_over_bins is not None
+                            and degree_bins_current is not None
+                        ):
+                            degree_tol = max(
+                                0.0,
+                                float(
+                                    getattr(
+                                        self.cfg.model,
+                                        "sampling_structure_limiter_degree_hist_tolerance",
+                                        0.15,
+                                    )
+                                    or 0.0
+                                ),
+                            )
+                            if current_degree_hist_l1 <= degree_tol:
+                                endpoint_over = torch.zeros(
+                                    (idx.numel(),), dtype=torch.float32, device=device
+                                )
+                                over = degree_over_bins.to(device=device, dtype=torch.float32)
+                                endpoint_over[valid] = 0.5 * (
+                                    over[
+                                        degree_bins_current[src[valid]].clamp(
+                                            0, over.numel() - 1
+                                        )
+                                    ]
+                                    + over[
+                                        degree_bins_current[dst[valid]].clamp(
+                                            0, over.numel() - 1
+                                        )
+                                    ]
+                                )
+                                endpoint_over = torch.clamp(endpoint_over, min=0.0)
+                                limiter_adjust -= (
+                                    limiter_base
+                                    * degree_w
+                                    * endpoint_over.to(limiter_adjust.dtype)
+                                )
+                                limiter_parts.append(
+                                    f"degree_l1={current_degree_hist_l1:.4g}<={degree_tol:.4g}"
+                                    f",w={-limiter_base * degree_w:+.3g}"
+                                )
+
+                        lcc_w = float(
+                            getattr(
+                                self.cfg.model,
+                                "sampling_structure_limiter_lcc_weight",
+                                1.0,
+                            )
+                            or 0.0
+                        )
+                        if (
+                            lcc_w != 0.0
+                            and limiter_lcc_target is not None
+                            and limiter_lcc_target > 0
+                            and current_lcc is not None
+                            and bool(vis_mask.any())
+                        ):
+                            lcc_tol = max(
+                                0.0,
+                                float(
+                                    getattr(
+                                        self.cfg.model,
+                                        "sampling_structure_limiter_lcc_tolerance",
+                                        0.05,
+                                    )
+                                    or 0.0
+                                ),
+                            )
+                            lcc_delta = (
+                                float(current_lcc) / max(float(limiter_lcc_target), 1.0)
+                            ) - 1.0
+                            if lcc_delta < -lcc_tol:
+                                parent = list(range(n))
+
+                                def find_lcc(x):
+                                    while parent[x] != x:
+                                        parent[x] = parent[parent[x]]
+                                        x = parent[x]
+                                    return x
+
+                                def union_lcc(a, b):
+                                    ra, rb = find_lcc(a), find_lcc(b)
+                                    if ra != rb:
+                                        parent[rb] = ra
+
+                                src_cpu = (
+                                    src_vis.detach().cpu().tolist()
+                                    if bool(vis_mask.any())
+                                    else []
+                                )
+                                dst_cpu = (
+                                    dst_vis.detach().cpu().tolist()
+                                    if bool(vis_mask.any())
+                                    else []
+                                )
+                                for a, b in zip(src_cpu, dst_cpu):
+                                    if a != b:
+                                        union_lcc(int(a), int(b))
+                                comp_id = torch.tensor(
+                                    [find_lcc(i) for i in range(n)],
+                                    dtype=torch.long,
+                                    device=device,
+                                )
+                                bridge = torch.zeros(
+                                    (idx.numel(),), dtype=torch.float32, device=device
+                                )
+                                valid_comp = (src >= 0) & (dst >= 0)
+                                if valid_comp.any():
+                                    bridge[valid_comp] = (
+                                        comp_id[src[valid_comp]]
+                                        != comp_id[dst[valid_comp]]
+                                    ).to(torch.float32)
+                                limiter_adjust += (
+                                    limiter_base
+                                    * lcc_w
+                                    * bridge.to(limiter_adjust.dtype)
+                                )
+                                limiter_parts.append(
+                                    f"lcc={current_lcc:.0f}/{limiter_lcc_target:.0f}"
+                                    f",d={lcc_delta:+.3g},w={limiter_base * lcc_w:+.3g}"
+                                )
+
+                        if limiter_parts:
+                            bias[idx] = bias[idx] + limiter_adjust.to(bias.dtype)
+                            limiter_records.append((graph_idx, ";".join(limiter_parts)))
                 if (connect_w != 0.0) and bool(vis_mask.any()):
                     parent = list(range(n))
 
@@ -4486,18 +7679,701 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                     assort_feature = diff if direction < 0 else (1.0 - diff)
                     bias = bias + float(assort_w * factor) * assort_feature.to(bias.dtype)
 
+        learned_bias = None
+        if learned_enabled:
+            node_obj = getattr(data, "node", None)
+            if node_obj is None:
+                node_obj = getattr(data, "x", None)
+            learned_bias = self._learned_structure_candidate_bias(
+                edge_index=edge_index.long(),
+                families=families.long(),
+                common_graph_data=data,
+                common_num_nodes=None if node_obj is None else int(node_obj.shape[0]),
+            )
+            if learned_bias is not None:
+                bias = bias + learned_bias.to(device=device, dtype=bias.dtype)
+
         if (
             getattr(self, "local_rank", 0) == 0
-            and not getattr(self, "_logged_sampling_structure_guidance", False)
+            and (
+                not getattr(self, "_logged_sampling_structure_guidance", False)
+                or (
+                    (budget_records or budget_assort_records or limiter_records)
+                    and int(getattr(self.cfg.model, "sampling_structure_budget_log_every", 1) or 1) > 0
+                    and int(sampling_step)
+                    % int(getattr(self.cfg.model, "sampling_structure_budget_log_every", 1) or 1)
+                    == 0
+                )
+            )
         ):
+            budget_msg = ""
+            if budget_records:
+                rec = budget_records[0]
+                budget_msg = (
+                    f" budget_tri={rec[1]:.0f}/{rec[2]:.0f}"
+                    f" budget_clust={rec[6]:.4g}/{rec[7]:.4g}"
+                    f" delta={rec[3]:+.4g}->{rec[4]:+.4g}"
+                    f" tri_delta={rec[8]:+.4g}"
+                    f" clust_delta={rec[9]:+.4g}"
+                    f" dyn_w={rec[5]:+.4g}"
+                )
+            assort_msg = ""
+            if budget_assort_records:
+                arec = budget_assort_records[0]
+                assort_msg = (
+                    f" budget_assort={arec[1]:+.4g}/{arec[2]:+.4g}"
+                    f" delta={arec[3]:+.4g}"
+                    f" dyn_w={arec[4]:+.4g}"
+                )
+            limiter_msg = ""
+            if limiter_records:
+                limiter_msg = f" limiter={limiter_records[0][1]}"
             print(
                 "[采样-STRUCT-GUIDE] "
                 f"step={sampling_step} factor={factor:.4g} "
                 f"closure={closure_w:.4g} connect={connect_w:.4g} "
                 f"degree_pair={dp_w:.4g} assort={assort_w:.4g} "
+                f"budget_closure={budget_closure_w:.4g}"
+                f" budget_clustering={budget_clustering_w:.4g}"
+                f" budget_assort_w={budget_assort_w:.4g}"
+                f" limiter={1 if limiter_enabled else 0}"
+                f" learned={1 if learned_bias is not None else 0}"
+                f"{budget_msg}{assort_msg}{limiter_msg} "
                 f"bias=[{float(bias.min().item()):.4g},{float(bias.max().item()):.4g}]"
             )
             self._logged_sampling_structure_guidance = True
+        return bias
+
+    def _sampling_typed_flat_closure_bias(
+        self,
+        data,
+        edge_index,
+        families,
+        edge_batch,
+        sampling_step,
+    ):
+        """Bias exact-K ranking toward distributed low-degree wedge closures.
+
+        When endpoint/support/family filters are set to "*", this is a generic
+        low-degree common-neighbor closure prior.  Dataset-specific filters can
+        narrow it to typed motifs such as Actor/Director nodes sharing Movie
+        neighbors in IMDB.
+        """
+        if not bool(
+            getattr(self.cfg.model, "sampling_typed_flat_closure_controller", False)
+        ):
+            return None
+        weight = float(
+            getattr(self.cfg.model, "sampling_typed_flat_closure_weight", 0.0)
+            or 0.0
+        )
+        high_penalty = float(
+            getattr(
+                self.cfg.model,
+                "sampling_typed_flat_closure_high_degree_penalty",
+                0.0,
+            )
+            or 0.0
+        )
+        if (
+            edge_index is None
+            or edge_index.numel() == 0
+            or families is None
+            or edge_batch is None
+            or max(abs(weight), abs(high_penalty)) <= 0.0
+        ):
+            return None
+
+        remaining_frac = float(sampling_step) / float(max(int(self.T), 1))
+        lo = float(
+            getattr(
+                self.cfg.model,
+                "sampling_typed_flat_closure_min_step_frac",
+                0.0,
+            )
+            or 0.0
+        )
+        hi = float(
+            getattr(
+                self.cfg.model,
+                "sampling_typed_flat_closure_max_step_frac",
+                1.0,
+            )
+            or 1.0
+        )
+        if remaining_frac < lo or remaining_frac > hi:
+            return None
+        power_raw = getattr(
+            self.cfg.model, "sampling_typed_flat_closure_power", 0.0
+        )
+        power = 0.0 if power_raw is None else float(power_raw)
+        factor = max(0.0, min(1.0, remaining_frac)) ** max(power, 0.0)
+        if factor <= 0.0:
+            return None
+
+        def _csv_names(name, default):
+            value = getattr(self.cfg.model, name, default)
+            if value is None:
+                value = default
+            if isinstance(value, (list, tuple)):
+                return {str(v).strip() for v in value if str(v).strip()}
+            return {part.strip() for part in str(value).split(",") if part.strip()}
+
+        def _is_wildcard(names):
+            return (
+                not names
+                or any(str(item).lower() in {"*", "all", "__all__", "any"} for item in names)
+            )
+
+        type_offsets = getattr(self.dataset_info, "type_offsets", {}) or {}
+        if not type_offsets:
+            return None
+        sorted_types = sorted(
+            ((str(name), int(offset)) for name, offset in type_offsets.items()),
+            key=lambda item: item[1],
+        )
+        type_name_to_id = {name: idx for idx, (name, _off) in enumerate(sorted_types)}
+        closure_type_names = _csv_names(
+            "sampling_typed_flat_closure_endpoint_types", "*"
+        )
+        support_type_names = _csv_names(
+            "sampling_typed_flat_closure_support_types", "*"
+        )
+        if _is_wildcard(closure_type_names):
+            closure_type_ids = set(range(len(sorted_types)))
+        else:
+            closure_type_ids = {
+                int(type_name_to_id[name])
+                for name in closure_type_names
+                if name in type_name_to_id
+            }
+        if _is_wildcard(support_type_names):
+            support_type_ids = set(range(len(sorted_types)))
+        else:
+            support_type_ids = {
+                int(type_name_to_id[name])
+                for name in support_type_names
+                if name in type_name_to_id
+            }
+        if not closure_type_ids or not support_type_ids:
+            return None
+
+        node_obj = getattr(data, "anchor_node_subtype", None)
+        if node_obj is None:
+            node_obj = getattr(data, "node", None)
+        if node_obj is None:
+            node_obj = getattr(data, "x", None)
+        if node_obj is None:
+            return None
+        node_obj = node_obj.to(edge_index.device)
+        node_subtype = (
+            node_obj.argmax(dim=-1).long()
+            if node_obj.dim() > 1
+            else node_obj.long().reshape(-1)
+        )
+        node_type = self._node_type_ids_from_subtype(node_subtype).to(edge_index.device)
+
+        current_edge_index = getattr(data, "edge_index", None)
+        current_edge_attr = getattr(data, "edge_attr", None)
+        if current_edge_index is None or current_edge_attr is None:
+            return None
+        cur_ei = current_edge_index.long().to(edge_index.device)
+        cur_attr = current_edge_attr.to(edge_index.device)
+        cur_labels = (
+            cur_attr.argmax(dim=-1).long()
+            if cur_attr.dim() > 1
+            else cur_attr.long().reshape(-1)
+        )
+        visible = cur_labels > 0
+        if cur_ei.numel() == 0 or not bool(visible.any()):
+            return None
+        cur_ei = cur_ei[:, visible]
+
+        node_batch = getattr(data, "batch", None)
+        if node_batch is None:
+            node_batch = torch.zeros(
+                (int(node_subtype.numel()),),
+                dtype=torch.long,
+                device=edge_index.device,
+            )
+        else:
+            node_batch = node_batch.long().to(edge_index.device)
+
+        edge_family2id = getattr(self.dataset_info, "edge_family2id", {}) or {}
+        family_names = _csv_names(
+            "sampling_typed_flat_closure_families",
+            "*",
+        )
+        if _is_wildcard(family_names):
+            family_ids = set()
+            use_family_filter = False
+        else:
+            family_ids = {
+                int(edge_family2id[name])
+                for name in family_names
+                if name in edge_family2id
+            }
+            use_family_filter = bool(family_ids)
+
+        low_degree_max = float(
+            getattr(self.cfg.model, "sampling_typed_flat_closure_low_degree_max", 3)
+            or 3
+        )
+        high_degree_min = float(
+            getattr(self.cfg.model, "sampling_typed_flat_closure_high_degree_min", 6)
+            or 6
+        )
+        common_cap = float(
+            getattr(self.cfg.model, "sampling_typed_flat_closure_common_cap", 2.0)
+            or 2.0
+        )
+        common_cap = max(common_cap, 1.0)
+        bias = torch.zeros((edge_index.shape[1],), dtype=torch.float32, device=edge_index.device)
+        records = []
+
+        closure_type_tensor = torch.tensor(
+            sorted(closure_type_ids), dtype=torch.long, device=edge_index.device
+        )
+        support_type_tensor = torch.tensor(
+            sorted(support_type_ids), dtype=torch.long, device=edge_index.device
+        )
+        for graph_idx_tensor in edge_batch.unique(sorted=True):
+            graph_idx = int(graph_idx_tensor.item())
+            nodes = torch.where(node_batch == graph_idx)[0]
+            if nodes.numel() <= 1:
+                continue
+            local_of = torch.full(
+                (int(node_subtype.numel()),),
+                -1,
+                dtype=torch.long,
+                device=edge_index.device,
+            )
+            local_of[nodes] = torch.arange(nodes.numel(), device=edge_index.device)
+            vis_mask = (
+                (node_batch[cur_ei[0].long()] == graph_idx)
+                & (node_batch[cur_ei[1].long()] == graph_idx)
+            )
+            if not bool(vis_mask.any()):
+                continue
+            n = int(nodes.numel())
+            adj = torch.zeros((n, n), dtype=torch.float32, device=edge_index.device)
+            src_vis = local_of[cur_ei[0, vis_mask].long()]
+            dst_vis = local_of[cur_ei[1, vis_mask].long()]
+            valid_vis = (src_vis >= 0) & (dst_vis >= 0) & (src_vis != dst_vis)
+            if not bool(valid_vis.any()):
+                continue
+            src_vis = src_vis[valid_vis]
+            dst_vis = dst_vis[valid_vis]
+            adj[src_vis, dst_vis] = 1.0
+            adj[dst_vis, src_vis] = 1.0
+            adj.fill_diagonal_(0.0)
+            degree = adj.sum(dim=1)
+            local_type = node_type[nodes].long()
+            support_mask = (local_type[:, None] == support_type_tensor[None, :]).any(dim=1)
+            if not bool(support_mask.any()):
+                continue
+            support_adj = adj[:, support_mask]
+            shared_support = support_adj.matmul(support_adj.t())
+
+            cand_idx = (edge_batch == graph_idx).nonzero(as_tuple=True)[0]
+            if cand_idx.numel() == 0:
+                continue
+            src = local_of[edge_index[0, cand_idx].long()]
+            dst = local_of[edge_index[1, cand_idx].long()]
+            valid = (src >= 0) & (dst >= 0) & (src != dst)
+            if not bool(valid.any()):
+                continue
+
+            src_t = torch.full((cand_idx.numel(),), -1, dtype=torch.long, device=edge_index.device)
+            dst_t = torch.full_like(src_t, -1)
+            src_t[valid] = local_type[src[valid]]
+            dst_t[valid] = local_type[dst[valid]]
+            closure_endpoint = (
+                (src_t[:, None] == closure_type_tensor[None, :]).any(dim=1)
+                & (dst_t[:, None] == closure_type_tensor[None, :]).any(dim=1)
+            )
+            if use_family_filter:
+                fam_ok = torch.zeros_like(closure_endpoint)
+                for fam_id in family_ids:
+                    fam_ok |= families[cand_idx].long() == int(fam_id)
+                closure_endpoint &= fam_ok
+            if not bool((valid & closure_endpoint).any()):
+                continue
+
+            common = torch.zeros((cand_idx.numel(),), dtype=torch.float32, device=edge_index.device)
+            common[valid] = shared_support[src[valid], dst[valid]]
+            common_score = torch.clamp(common, min=0.0, max=common_cap) / common_cap
+            src_deg = torch.zeros_like(common)
+            dst_deg = torch.zeros_like(common)
+            src_deg[valid] = degree[src[valid]]
+            dst_deg[valid] = degree[dst[valid]]
+            low_pair = (src_deg <= low_degree_max) & (dst_deg <= low_degree_max)
+            high_pair = (src_deg >= high_degree_min) | (dst_deg >= high_degree_min)
+            active = valid & closure_endpoint & (common > 0)
+            local_bias = torch.zeros_like(common)
+            if weight != 0.0:
+                local_bias += float(weight * factor) * common_score * low_pair.to(common_score.dtype)
+            if high_penalty != 0.0:
+                local_bias -= (
+                    float(high_penalty * factor)
+                    * common_score
+                    * high_pair.to(common_score.dtype)
+                )
+            local_bias = torch.where(active, local_bias, torch.zeros_like(local_bias))
+            if bool((local_bias != 0).any()):
+                bias[cand_idx] = bias[cand_idx] + local_bias
+                records.append(
+                    (
+                        graph_idx,
+                        int(active.sum().detach().cpu().item()),
+                        int((active & low_pair).sum().detach().cpu().item()),
+                        int((active & high_pair).sum().detach().cpu().item()),
+                        float(local_bias.min().detach().cpu().item()),
+                        float(local_bias.max().detach().cpu().item()),
+                    )
+                )
+
+        if not bool((bias != 0).any()):
+            return None
+        if (
+            getattr(self, "local_rank", 0) == 0
+            and (
+                not getattr(self, "_logged_sampling_typed_flat_closure", False)
+                or int(sampling_step)
+                % max(
+                    1,
+                    int(
+                        getattr(
+                            self.cfg.model,
+                            "sampling_typed_flat_closure_log_every",
+                            10,
+                        )
+                        or 10
+                    ),
+                )
+                == 0
+            )
+        ):
+            rec_msg = ""
+            if records:
+                rec = records[0]
+                rec_msg = (
+                    f" graph={rec[0]} active={rec[1]} low={rec[2]} high={rec[3]}"
+                    f" local_bias=[{rec[4]:.4g},{rec[5]:.4g}]"
+                )
+            print(
+                "[采样-FLAT-CLOSURE] "
+                f"step={sampling_step} factor={factor:.4g} "
+                f"weight={weight:.4g} high_penalty={high_penalty:.4g}"
+                f"{rec_msg} bias=[{float(bias.min().item()):.4g},{float(bias.max().item()):.4g}]"
+            )
+            self._logged_sampling_typed_flat_closure = True
+        return bias
+
+    def _ensure_sampling_node_role_budget_reference(self, total_nodes, device):
+        cached = getattr(self, "_sampling_node_role_budget_reference", None)
+        if cached is not None and int(cached.get("num_nodes", -1)) == int(total_nodes):
+            return cached
+        source = self._get_reference_graph_for_sampling_stats()
+        if source is None or not hasattr(source, "edge_index") or not hasattr(source, "edge_attr"):
+            self._sampling_node_role_budget_reference = {}
+            return self._sampling_node_role_budget_reference
+
+        node_obj = getattr(source, "node_type", None)
+        if node_obj is None:
+            node_obj = getattr(source, "x", None)
+        if node_obj is None:
+            self._sampling_node_role_budget_reference = {}
+            return self._sampling_node_role_budget_reference
+        node_obj = node_obj.to(device)
+        node_subtype = node_obj.argmax(dim=-1).long() if node_obj.dim() > 1 else node_obj.long().reshape(-1)
+        if int(node_subtype.numel()) != int(total_nodes):
+            self._sampling_node_role_budget_reference = {}
+            return self._sampling_node_role_budget_reference
+
+        edge_index = source.edge_index.long().to(device)
+        edge_attr = source.edge_attr.to(device)
+        labels = edge_attr.argmax(dim=-1).long() if edge_attr.dim() > 1 else edge_attr.long().reshape(-1)
+        positive = labels > 0
+        edge_index = edge_index[:, positive]
+        if edge_index.numel() == 0:
+            self._sampling_node_role_budget_reference = {}
+            return self._sampling_node_role_budget_reference
+
+        adj = torch.zeros((int(total_nodes), int(total_nodes)), dtype=torch.float32, device=device)
+        src = edge_index[0].long()
+        dst = edge_index[1].long()
+        valid = (src >= 0) & (src < int(total_nodes)) & (dst >= 0) & (dst < int(total_nodes)) & (src != dst)
+        src = src[valid]
+        dst = dst[valid]
+        adj[src, dst] = 1.0
+        adj[dst, src] = 1.0
+        adj.fill_diagonal_(0.0)
+        degree = adj.sum(dim=1)
+        # Per-node triangle participation. For an undirected simple graph,
+        # diag(A^3) / 2 is the number of triangles incident to each node.
+        two_hop = adj.matmul(adj)
+        tri_node = (two_hop * adj).sum(dim=1) * 0.5
+        node_type = self._node_type_ids_from_subtype(node_subtype).to(device)
+        ref = {
+            "num_nodes": int(total_nodes),
+            "node_type": node_type,
+            "degree": degree,
+            "tri_node": tri_node,
+        }
+        self._sampling_node_role_budget_reference = ref
+        if getattr(self, "local_rank", 0) == 0 and not getattr(self, "_logged_sampling_node_role_budget_reference", False):
+            print(
+                "[采样-NODE-BUDGET] cached reference "
+                f"nodes={int(total_nodes)} edges={int(adj.sum().item() // 2)} "
+                f"tri_node_sum={float(tri_node.sum().detach().cpu().item()):.1f}"
+            )
+            self._logged_sampling_node_role_budget_reference = True
+        return ref
+
+    def _sampling_node_role_budget_bias(
+        self,
+        data,
+        edge_index,
+        edge_batch,
+        sampling_step,
+    ):
+        if not bool(getattr(self.cfg.model, "sampling_node_role_budget_controller", False)):
+            return None
+        degree_weight = float(
+            getattr(self.cfg.model, "sampling_node_role_budget_degree_weight", 0.0)
+            or 0.0
+        )
+        closure_weight = float(
+            getattr(self.cfg.model, "sampling_node_role_budget_closure_weight", 0.0)
+            or 0.0
+        )
+        over_penalty = float(
+            getattr(self.cfg.model, "sampling_node_role_budget_over_penalty", 0.0)
+            or 0.0
+        )
+        if (
+            edge_index is None
+            or edge_index.numel() == 0
+            or edge_batch is None
+            or max(abs(degree_weight), abs(closure_weight), abs(over_penalty)) <= 0.0
+        ):
+            return None
+
+        remaining_frac = float(sampling_step) / float(max(int(self.T), 1))
+        lo = float(
+            getattr(self.cfg.model, "sampling_node_role_budget_min_step_frac", 0.0)
+            or 0.0
+        )
+        hi = float(
+            getattr(self.cfg.model, "sampling_node_role_budget_max_step_frac", 1.0)
+            or 1.0
+        )
+        if remaining_frac < lo or remaining_frac > hi:
+            return None
+        power_raw = getattr(self.cfg.model, "sampling_node_role_budget_power", 0.0)
+        power = 0.0 if power_raw is None else float(power_raw)
+        factor = max(0.0, min(1.0, remaining_frac)) ** max(power, 0.0)
+        if factor <= 0.0:
+            return None
+
+        node_obj = getattr(data, "anchor_node_subtype", None)
+        if node_obj is None:
+            node_obj = getattr(data, "node", None)
+        if node_obj is None:
+            node_obj = getattr(data, "x", None)
+        if node_obj is None:
+            return None
+        node_obj = node_obj.to(edge_index.device)
+        node_subtype = node_obj.argmax(dim=-1).long() if node_obj.dim() > 1 else node_obj.long().reshape(-1)
+        total_nodes = int(node_subtype.numel())
+        ref = self._ensure_sampling_node_role_budget_reference(total_nodes, edge_index.device)
+        if not ref or ref.get("degree") is None or ref.get("tri_node") is None:
+            return None
+
+        current_edge_index = getattr(data, "edge_index", None)
+        current_edge_attr = getattr(data, "edge_attr", None)
+        if current_edge_index is None or current_edge_attr is None:
+            return None
+        cur_ei = current_edge_index.long().to(edge_index.device)
+        cur_attr = current_edge_attr.to(edge_index.device)
+        cur_labels = cur_attr.argmax(dim=-1).long() if cur_attr.dim() > 1 else cur_attr.long().reshape(-1)
+        visible = cur_labels > 0
+        cur_ei = cur_ei[:, visible]
+
+        node_batch = getattr(data, "batch", None)
+        if node_batch is None:
+            node_batch = torch.zeros((total_nodes,), dtype=torch.long, device=edge_index.device)
+        else:
+            node_batch = node_batch.long().to(edge_index.device)
+
+        ref_degree = ref["degree"].to(edge_index.device)
+        ref_tri = ref["tri_node"].to(edge_index.device)
+        low_degree_max = float(
+            getattr(self.cfg.model, "sampling_node_role_budget_low_degree_max", 3)
+            or 3
+        )
+        role_gate = str(
+            getattr(self.cfg.model, "sampling_node_role_budget_role_gate", "low_degree")
+            or "low_degree"
+        ).lower()
+        closure_mode = str(
+            getattr(self.cfg.model, "sampling_node_role_budget_closure_mode", "count")
+            or "count"
+        ).lower()
+        closure_threshold = float(
+            getattr(self.cfg.model, "sampling_node_role_budget_closure_threshold", 0.5)
+            or 0.5
+        )
+        unit_target_max = float(
+            getattr(
+                self.cfg.model,
+                "sampling_node_role_budget_closure_unit_target_max",
+                1.0,
+            )
+            or 1.0
+        )
+        degree_scale = max(
+            1e-6,
+            float(getattr(self.cfg.model, "sampling_node_role_budget_degree_scale", 4.0) or 4.0),
+        )
+        closure_scale = max(
+            1e-6,
+            float(getattr(self.cfg.model, "sampling_node_role_budget_closure_scale", 1.0) or 1.0),
+        )
+        common_cap = max(
+            1.0,
+            float(getattr(self.cfg.model, "sampling_node_role_budget_common_cap", 2.0) or 2.0),
+        )
+        bias = torch.zeros((edge_index.shape[1],), dtype=torch.float32, device=edge_index.device)
+        records = []
+
+        for graph_idx_tensor in edge_batch.unique(sorted=True):
+            graph_idx = int(graph_idx_tensor.item())
+            nodes = torch.where(node_batch == graph_idx)[0]
+            if nodes.numel() <= 1:
+                continue
+            local_of = torch.full((total_nodes,), -1, dtype=torch.long, device=edge_index.device)
+            local_of[nodes] = torch.arange(nodes.numel(), device=edge_index.device)
+            vis_mask = (
+                cur_ei.numel() > 0
+                and (node_batch[cur_ei[0].long()] == graph_idx)
+                & (node_batch[cur_ei[1].long()] == graph_idx)
+            )
+            n = int(nodes.numel())
+            adj = torch.zeros((n, n), dtype=torch.float32, device=edge_index.device)
+            if torch.is_tensor(vis_mask) and bool(vis_mask.any()):
+                src = local_of[cur_ei[0, vis_mask].long()]
+                dst = local_of[cur_ei[1, vis_mask].long()]
+                valid = (src >= 0) & (dst >= 0) & (src != dst)
+                if bool(valid.any()):
+                    src = src[valid]
+                    dst = dst[valid]
+                    adj[src, dst] = 1.0
+                    adj[dst, src] = 1.0
+                    adj.fill_diagonal_(0.0)
+            cur_degree = adj.sum(dim=1)
+            two_hop = adj.matmul(adj)
+            cur_tri = (two_hop * adj).sum(dim=1) * 0.5
+            shared_common = two_hop
+
+            ref_degree_local = ref_degree[nodes]
+            ref_tri_local = ref_tri[nodes]
+            degree_need = ((ref_degree_local - cur_degree) / degree_scale).clamp(min=-1.0, max=1.0)
+            ref_closed = (ref_tri_local > closure_threshold).to(dtype=ref_tri_local.dtype)
+            cur_closed = (cur_tri > closure_threshold).to(dtype=cur_tri.dtype)
+            if closure_mode == "coverage":
+                closure_need = (ref_closed - cur_closed).clamp(min=-1.0, max=1.0)
+            elif closure_mode == "adaptive":
+                unit_like = ref_tri_local <= max(unit_target_max, closure_threshold)
+                count_need = ((ref_tri_local - cur_tri) / closure_scale).clamp(min=-1.0, max=1.0)
+                cover_need = (ref_closed - cur_closed).clamp(min=-1.0, max=1.0)
+                closure_need = torch.where(unit_like, cover_need, count_need)
+            else:
+                closure_need = ((ref_tri_local - cur_tri) / closure_scale).clamp(min=-1.0, max=1.0)
+            low_role = (ref_degree_local <= low_degree_max) | (cur_degree <= low_degree_max)
+            target_role = ref_closed > 0
+            if role_gate == "all":
+                closure_role = torch.ones_like(low_role, dtype=torch.bool)
+            elif role_gate == "target":
+                closure_role = target_role
+            elif role_gate == "adaptive":
+                closure_role = low_role | target_role
+            else:
+                closure_role = low_role
+
+            cand_idx = (edge_batch == graph_idx).nonzero(as_tuple=True)[0]
+            if cand_idx.numel() == 0:
+                continue
+            src = local_of[edge_index[0, cand_idx].long()]
+            dst = local_of[edge_index[1, cand_idx].long()]
+            valid = (src >= 0) & (dst >= 0) & (src != dst)
+            if not bool(valid.any()):
+                continue
+            local_bias = torch.zeros((cand_idx.numel(),), dtype=torch.float32, device=edge_index.device)
+            src_v = src[valid]
+            dst_v = dst[valid]
+            deg_need_pair = degree_need[src_v] + degree_need[dst_v]
+            deg_over_pair = (-degree_need[src_v]).clamp(min=0.0) + (-degree_need[dst_v]).clamp(min=0.0)
+            common = shared_common[src_v, dst_v].clamp(min=0.0, max=common_cap) / common_cap
+            endpoint_role = closure_role[src_v] | closure_role[dst_v]
+            close_need_pair = (
+                closure_need[src_v].clamp(min=0.0)
+                + closure_need[dst_v].clamp(min=0.0)
+            ) * common * endpoint_role.to(common.dtype)
+            close_over_pair = (
+                (-closure_need[src_v]).clamp(min=0.0)
+                + (-closure_need[dst_v]).clamp(min=0.0)
+            ) * common
+            score = (
+                float(degree_weight * factor) * deg_need_pair
+                + float(closure_weight * factor) * close_need_pair
+                - float(over_penalty * factor) * (deg_over_pair + close_over_pair)
+            )
+            local_bias[valid] = score
+            if bool((local_bias != 0).any()):
+                bias[cand_idx] = bias[cand_idx] + local_bias
+                records.append(
+                    (
+                        graph_idx,
+                        int(valid.sum().detach().cpu().item()),
+                        float(degree_need.mean().detach().cpu().item()),
+                        float(closure_need.mean().detach().cpu().item()),
+                        float(local_bias.min().detach().cpu().item()),
+                        float(local_bias.max().detach().cpu().item()),
+                    )
+                )
+
+        if not bool((bias != 0).any()):
+            return None
+        if (
+            getattr(self, "local_rank", 0) == 0
+            and (
+                not getattr(self, "_logged_sampling_node_role_budget", False)
+                or int(sampling_step)
+                % max(
+                    1,
+                    int(getattr(self.cfg.model, "sampling_node_role_budget_log_every", 10) or 10),
+                )
+                == 0
+            )
+        ):
+            rec_msg = ""
+            if records:
+                rec = records[0]
+                rec_msg = (
+                    f" graph={rec[0]} active={rec[1]} "
+                    f"degree_need_mean={rec[2]:.4g} closure_need_mean={rec[3]:.4g} "
+                    f"local_bias=[{rec[4]:.4g},{rec[5]:.4g}]"
+                )
+            print(
+                "[采样-NODE-BUDGET] "
+                f"step={sampling_step} factor={factor:.4g} "
+                f"degree_w={degree_weight:.4g} closure_w={closure_weight:.4g} "
+                f"over_penalty={over_penalty:.4g}{rec_msg} "
+                f"bias=[{float(bias.min().detach().cpu().item()):.4g},{float(bias.max().detach().cpu().item()):.4g}]"
+            )
+            self._logged_sampling_node_role_budget = True
         return bias
 
     def _degree_pair_ids_for_candidates(self, edge_index, families):
@@ -4778,6 +8654,20 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         if inter_state is None:
             inter_state = {}
         inter_blocks = all_blocks if all_blocks is not None else pseudo_blocks
+        if (
+            bool(getattr(self.cfg.model, "block_query_full_block", False))
+            and bool(getattr(self.cfg.model, "block_query_inter_fill", False))
+            and inter_blocks
+        ):
+            planned = self._plan_full_coverage_block_query_edges(
+                anchor_node_subtype=anchor_node_subtype,
+                batch=batch,
+                all_blocks=inter_blocks,
+                block_ids=[int(x) for x in block_ids],
+                inter_state=inter_state,
+            )
+            if planned is not None and planned[0] is not None:
+                return planned
         for block_pos, block_nodes in enumerate(pseudo_blocks):
             block_id = int(block_ids[block_pos]) if block_pos < len(block_ids) else int(block_pos)
             if block_nodes.numel() == 0:
@@ -5426,6 +9316,11 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             y=data.y,
             batch=data.batch,
         )
+        pred, learned_structure_l2 = self._apply_learned_structure_controller_to_pred(
+            pred,
+            data,
+            query_family=query_family,
+        )
         if bool(balance_loss_by_query_family):
             loss = self._balanced_query_family_loss(
                 pred=pred,
@@ -5440,6 +9335,8 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 true_data=true_data,
                 log=bool(log_metrics) and step_idx % self.log_every_steps == 0,
             )
+        loss = loss + learned_structure_l2
+        loss = loss + self._compute_learned_structure_target_loss(data, step_idx)
         if bool(log_metrics):
             self._record_train_exist_diagnostics(
                 pred, true_data, sparse_noisy_data
@@ -5971,7 +9868,13 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 setattr(out, attr_name, getattr(data, attr_name))
         return out
 
-    def _heterogeneous_global_block_query_edges(self, data, sparse_noisy_data, forced_block_id=None):
+    def _heterogeneous_global_block_query_edges(
+        self,
+        data,
+        sparse_noisy_data,
+        forced_block_id=None,
+        inter_state=None,
+    ):
         """Sample queries from one shared hetero hard block across all families.
 
         This is the block-query mode used by ``block_partition_mode=hetero_metis``:
@@ -6099,6 +10002,24 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             if forced_block_id is None:
                 block_id = int(torch.randint(len(blocks), (1,), device=self.device).item())
             else:
+                expected_blocks = int(
+                    getattr(self.cfg.model, "train_all_blocks_count", 0) or 0
+                )
+                if expected_blocks <= 0:
+                    ef = max(float(getattr(self, "edge_fraction", 1.0) or 1.0), 1e-8)
+                    expected_blocks = max(1, int(math.ceil(1.0 / ef)))
+                if (
+                    bool(getattr(self.cfg.model, "train_all_blocks_strict_count", False))
+                    and int(len(blocks)) != int(expected_blocks)
+                ):
+                    raise RuntimeError(
+                        "hetero_metis produced an unexpected number of train blocks: "
+                        f"actual={int(len(blocks))}, expected={int(expected_blocks)}. "
+                        "Aborting instead of using forced_block_id modulo actual blocks, "
+                        "which would repeat some blocks or skip others. Adjust "
+                        "model.block_partition_rho/model.train_all_blocks_count or disable "
+                        "model.train_all_blocks_strict_count only for diagnostics."
+                    )
                 block_id = int(forced_block_id) % max(1, len(blocks))
             metadata_key = ("hetero_metis_metadata",) + cache_key
             block_metadata = self._true_block_cache.get(metadata_key)
@@ -6145,10 +10066,28 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             else:
                 all_block_nodes = block_metadata["all_block_nodes"]
             block_nodes = all_block_nodes[block_id]
-            train_inter_state = {}
+            train_inter_state = inter_state if inter_state is not None else {}
             full_block_query = bool(getattr(self.cfg.model, "block_query_full_block", False))
             do_inter_fill = bool(getattr(self.cfg.model, "block_query_inter_fill", False))
             max_block_edges = int(getattr(self.cfg.model, "block_query_max_edges_per_family", 0) or 0)
+
+            if full_block_query and do_inter_fill:
+                planned = self._plan_full_coverage_block_query_edges(
+                    anchor_node_subtype=node_t.long(),
+                    batch=data.batch.long(),
+                    all_blocks=all_block_nodes,
+                    block_ids=[int(block_id)],
+                    inter_state=train_inter_state,
+                )
+                if planned is not None and planned[0] is not None:
+                    planned_edges, planned_batch, _planned_family = planned
+                    if max_block_edges > 0 and planned_edges.shape[1] > max_block_edges:
+                        perm = torch.randperm(planned_edges.shape[1], device=self.device)[:max_block_edges]
+                        planned_edges = planned_edges[:, perm]
+                        planned_batch = planned_batch[perm]
+                    all_query_edge_index.append(planned_edges)
+                    all_query_edge_batch.append(planned_batch)
+                    continue
 
             for fam_id, fam_name in id2edge_family.items():
                 if fam_name not in fam_endpoints:
@@ -6253,9 +10192,20 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             return None, None
         return torch.cat(all_query_edge_index, dim=1), torch.cat(all_query_edge_batch, dim=0)
 
-    def _heterogeneous_block_query_edges(self, data, sparse_noisy_data, forced_block_id=None):
+    def _heterogeneous_block_query_edges(
+        self,
+        data,
+        sparse_noisy_data,
+        forced_block_id=None,
+        inter_state=None,
+    ):
         if self.block_partition_mode == "hetero_metis":
-            return self._heterogeneous_global_block_query_edges(data, sparse_noisy_data, forced_block_id=forced_block_id)
+            return self._heterogeneous_global_block_query_edges(
+                data,
+                sparse_noisy_data,
+                forced_block_id=forced_block_id,
+                inter_state=inter_state,
+            )
 
         """Sample one relation-aware local block per graph/family.
 
@@ -6515,6 +10465,504 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             self._logged_query_pos_injection = True
         return merged_edge_index, merged_edge_batch
 
+    def _ensure_rare_family_structural_stats(self):
+        if self._rare_family_structural_stats is not None:
+            return self._rare_family_structural_stats
+        stats = {"families": {}, "tiers": {}}
+        if not bool(getattr(self.cfg.model, "rare_family_structural_sampling", False)):
+            self._rare_family_structural_stats = stats
+            return stats
+        source = self._get_reference_graph_for_sampling_stats()
+        if source is None or not hasattr(source, "edge_index") or not hasattr(source, "edge_attr"):
+            self._rare_family_structural_stats = stats
+            return stats
+        edge_family2id = getattr(self.dataset_info, "edge_family2id", {}) or {}
+        fam_endpoints = getattr(self.dataset_info, "fam_endpoints", {}) or {}
+        type_offsets = getattr(self.dataset_info, "type_offsets", {}) or {}
+        if not edge_family2id or not fam_endpoints or not type_offsets:
+            self._rare_family_structural_stats = stats
+            return stats
+
+        edge_index = source.edge_index.detach().long()
+        edge_attr = source.edge_attr.detach()
+        labels = edge_attr.argmax(dim=-1).long() if edge_attr.dim() > 1 else edge_attr.long().reshape(-1)
+        x = source.x.detach()
+        node_subtype = x.argmax(dim=-1).long() if x.dim() > 1 else x.long().reshape(-1)
+        num_nodes = int(node_subtype.numel())
+        if num_nodes <= 0 or edge_index.numel() == 0 or labels.numel() == 0:
+            self._rare_family_structural_stats = stats
+            return stats
+
+        sorted_types = sorted(type_offsets.items(), key=lambda item: item[1])
+        type_name_to_id = {str(name): idx for idx, (name, _off) in enumerate(sorted_types)}
+        node_type = self._node_type_ids_from_subtype(node_subtype).detach().cpu()
+        type_counts = {}
+        for type_name, type_id in type_name_to_id.items():
+            type_counts[type_name] = int((node_type == int(type_id)).sum().item())
+
+        label_to_fam = self._label_to_family_lookup().cpu()
+        positive_edges = []
+        positive_fams = []
+        seen = set()
+        for col in range(int(edge_index.shape[1])):
+            label = int(labels[col].item())
+            if label <= 0 or label >= int(label_to_fam.numel()):
+                continue
+            fam_id = int(label_to_fam[label].item())
+            if fam_id < 0:
+                continue
+            u = int(edge_index[0, col].item())
+            v = int(edge_index[1, col].item())
+            if u == v or u < 0 or v < 0 or u >= num_nodes or v >= num_nodes:
+                continue
+            a, b = (u, v) if u <= v else (v, u)
+            key = (a, b, fam_id)
+            if key in seen:
+                continue
+            seen.add(key)
+            positive_edges.append((u, v))
+            positive_fams.append(fam_id)
+
+        if positive_edges:
+            pos_edge_tensor = torch.tensor(positive_edges, dtype=torch.long, device=self.device).t().contiguous()
+            common = self._clean_common_neighbor_scores(
+                edge_index=pos_edge_tensor,
+                full_data=source,
+                num_nodes=num_nodes,
+                device=self.device,
+                dtype=torch.float32,
+                chunk_size_attr="closure_rank_common_neighbor_chunk_size",
+            )
+            common_cpu = common.detach().cpu() if common is not None else torch.zeros(len(positive_edges))
+        else:
+            common_cpu = torch.zeros(0)
+
+        fam_common = {}
+        fam_counts = {}
+        for idx, fam_id in enumerate(positive_fams):
+            fam_counts[fam_id] = int(fam_counts.get(fam_id, 0)) + 1
+            fam_common.setdefault(fam_id, []).append(float(common_cpu[idx].item()))
+
+        id2edge_family = {int(v): str(k) for k, v in edge_family2id.items()}
+        ef = float(getattr(self, "edge_fraction", 1.0) or 1.0)
+        tier2_expected = float(getattr(self.cfg.model, "rare_family_tier2_expected_pos_threshold", 2.0) or 2.0)
+        tier2_importance = float(getattr(self.cfg.model, "rare_family_tier2_importance_threshold", 10.0) or 10.0)
+        tier2_density = float(getattr(self.cfg.model, "rare_family_tier2_density_threshold", 0.001) or 0.001)
+        tier1_expected = float(getattr(self.cfg.model, "rare_family_tier1_expected_pos_threshold", 5.0) or 5.0)
+        tier1_importance = float(getattr(self.cfg.model, "rare_family_tier1_importance_threshold", 5.0) or 5.0)
+        tier1_density = float(getattr(self.cfg.model, "rare_family_tier1_density_threshold", 0.01) or 0.01)
+        min_pos = int(getattr(self.cfg.model, "rare_family_min_positive_edges", 1) or 1)
+
+        for fam_name, fam_id_raw in edge_family2id.items():
+            fam_id = int(fam_id_raw)
+            endpoints = fam_endpoints.get(str(fam_name), {}) or {}
+            src_type = str(endpoints.get("src_type", ""))
+            dst_type = str(endpoints.get("dst_type", ""))
+            n_src = int(type_counts.get(src_type, 0))
+            n_dst = int(type_counts.get(dst_type, 0))
+            if src_type == dst_type:
+                possible = max(0, n_src * (n_src - 1) // 2)
+            else:
+                possible = max(0, n_src * n_dst)
+            pos_count = int(fam_counts.get(fam_id, 0))
+            density = float(pos_count) / float(max(possible, 1))
+            expected_pos = float(ef) * float(pos_count)
+            vals = torch.tensor(fam_common.get(fam_id, []), dtype=torch.float32)
+            if vals.numel() > 0:
+                mean_imp = float(vals.mean().item())
+                median_imp = float(vals.median().item())
+                p90_imp = float(torch.quantile(vals, 0.90).item())
+            else:
+                mean_imp = median_imp = p90_imp = 0.0
+            tier = 0
+            if (
+                pos_count >= min_pos
+                and expected_pos < tier2_expected
+                and mean_imp > tier2_importance
+                and p90_imp > tier2_importance
+                and density < tier2_density
+            ):
+                tier = 2
+            elif (
+                pos_count >= min_pos
+                and (
+                    expected_pos < tier1_expected
+                    or (
+                        mean_imp > tier1_importance
+                        and p90_imp > tier1_importance
+                        and density < tier1_density
+                    )
+                )
+            ):
+                tier = 1
+            fam_stat = {
+                "family": str(fam_name),
+                "family_id": fam_id,
+                "positive_edges": pos_count,
+                "possible_edges": possible,
+                "density": density,
+                "expected_pos_in_query": expected_pos,
+                "motif_importance_mean": mean_imp,
+                "motif_importance_median": median_imp,
+                "motif_importance_p90": p90_imp,
+                "tier": tier,
+            }
+            stats["families"][fam_id] = fam_stat
+            if tier > 0:
+                stats["tiers"][fam_id] = tier
+
+        self._rare_family_structural_stats = stats
+        if getattr(self, "local_rank", 0) == 0 and not getattr(self, "_logged_rare_family_structural_stats", False):
+            chosen = [
+                item
+                for item in stats["families"].values()
+                if int(item.get("tier", 0)) > 0
+            ]
+            chosen.sort(key=lambda item: (-int(item["tier"]), item["family"]))
+            msg = "; ".join(
+                (
+                    f"{item['family']}:tier{item['tier']}"
+                    f"/pos={item['positive_edges']}"
+                    f"/dens={item['density']:.3g}"
+                    f"/exp={item['expected_pos_in_query']:.2f}"
+                    f"/motif={item['motif_importance_mean']:.2f}"
+                    f"/p90={item['motif_importance_p90']:.2f}"
+                )
+                for item in chosen
+            )
+            print(
+                "[RARE-FAMILY] structural necessity tiers: "
+                + (msg if msg else "none")
+            )
+            self._logged_rare_family_structural_stats = True
+        return stats
+
+    def _dedupe_query_edges(self, query_edge_index, query_edge_batch):
+        if query_edge_index is None or query_edge_index.numel() == 0:
+            return query_edge_index, query_edge_batch
+        total_nodes = int(max(1, query_edge_index.max().item() + 1))
+        key = (
+            query_edge_batch.long() * int(total_nodes * total_nodes)
+            + query_edge_index[0].long() * int(total_nodes)
+            + query_edge_index[1].long()
+        )
+        order = torch.argsort(key)
+        key_sorted = key[order]
+        keep_sorted = torch.ones_like(key_sorted, dtype=torch.bool)
+        if key_sorted.numel() > 1:
+            keep_sorted[1:] = key_sorted[1:] != key_sorted[:-1]
+        keep = order[keep_sorted].sort().values
+        return query_edge_index[:, keep], query_edge_batch[keep]
+
+    def _append_rare_family_structural_queries(
+        self,
+        data,
+        query_edge_index,
+        query_edge_batch,
+        sparse_noisy_data=None,
+    ):
+        if not bool(getattr(self.cfg.model, "rare_family_structural_sampling", False)):
+            return query_edge_index, query_edge_batch
+        if (
+            query_edge_index is None
+            or query_edge_batch is None
+            or query_edge_index.numel() == 0
+            or data.edge_index.numel() == 0
+        ):
+            return query_edge_index, query_edge_batch
+        stats = self._ensure_rare_family_structural_stats()
+        tiers = stats.get("tiers", {}) if stats else {}
+        if not tiers:
+            return query_edge_index, query_edge_batch
+
+        edge_family2id = getattr(self.dataset_info, "edge_family2id", {}) or {}
+        id2edge_family = {int(v): str(k) for k, v in edge_family2id.items()}
+        fam_endpoints = getattr(self.dataset_info, "fam_endpoints", {}) or {}
+        type_offsets = getattr(self.dataset_info, "type_offsets", {}) or {}
+        if not id2edge_family or not fam_endpoints or not type_offsets:
+            return query_edge_index, query_edge_batch
+
+        device = query_edge_index.device
+        num_nodes = int(data.x.shape[0])
+        node_subtype = data.x.argmax(dim=-1).long() if data.x.dim() > 1 else data.x.long()
+        node_type = self._node_type_ids_from_subtype(node_subtype).to(device)
+        sorted_types = sorted(type_offsets.items(), key=lambda item: item[1])
+        type_name_to_id = {str(name): idx for idx, (name, _off) in enumerate(sorted_types)}
+        labels = data.edge_attr.argmax(dim=-1).long() if data.edge_attr.dim() > 1 else data.edge_attr.long().reshape(-1)
+        label_to_fam = self._label_to_family_lookup().to(device)
+        edge_batch_clean = data.batch[data.edge_index[0].long()].long()
+
+        degree = torch.zeros(num_nodes, dtype=torch.float32, device=device)
+        clean_positive_keys_by_fam = {}
+        positive_edges_by_fam_graph = {}
+        for col in range(int(data.edge_index.shape[1])):
+            label = int(labels[col].detach().item())
+            if label <= 0 or label >= int(label_to_fam.numel()):
+                continue
+            fam_id = int(label_to_fam[label].detach().item())
+            u = int(data.edge_index[0, col].detach().item())
+            v = int(data.edge_index[1, col].detach().item())
+            if u == v or u < 0 or v < 0 or u >= num_nodes or v >= num_nodes:
+                continue
+            degree[u] += 1.0
+            degree[v] += 1.0
+            if fam_id not in tiers:
+                continue
+            graph_idx = int(edge_batch_clean[col].detach().item())
+            fam_name = id2edge_family.get(fam_id, "")
+            endpoints = fam_endpoints.get(fam_name, {}) or {}
+            same_type = endpoints.get("src_type") == endpoints.get("dst_type")
+            ku, kv = (min(u, v), max(u, v)) if same_type else (u, v)
+            key = int(graph_idx) * num_nodes * num_nodes + int(ku) * num_nodes + int(kv)
+            clean_positive_keys_by_fam.setdefault(fam_id, set()).add(key)
+            positive_edges_by_fam_graph.setdefault((fam_id, graph_idx), []).append((ku, kv))
+
+        if not positive_edges_by_fam_graph:
+            return query_edge_index, query_edge_batch
+
+        existing_keys_by_graph = {}
+        for graph_idx in torch.unique(query_edge_batch.long()).detach().cpu().tolist():
+            mask = query_edge_batch.long() == int(graph_idx)
+            if not bool(mask.any()):
+                continue
+            edges = query_edge_index[:, mask].long()
+            keys = (
+                int(graph_idx) * num_nodes * num_nodes
+                + edges[0] * num_nodes
+                + edges[1]
+            )
+            existing_keys_by_graph[int(graph_idx)] = set(int(x) for x in keys.detach().cpu().tolist())
+
+        query_nodes_by_graph = {}
+        for graph_idx in torch.unique(query_edge_batch.long()).detach().cpu().tolist():
+            mask = query_edge_batch.long() == int(graph_idx)
+            if bool(mask.any()):
+                query_nodes_by_graph[int(graph_idx)] = torch.unique(
+                    query_edge_index[:, mask].reshape(-1).long()
+                )
+
+        t_factor = 1.0
+        if sparse_noisy_data is not None and "t_float" in sparse_noisy_data:
+            try:
+                t_mean = float(sparse_noisy_data["t_float"].detach().float().mean().cpu())
+                clean_factor = max(0.0, min(1.0, 1.0 - t_mean))
+                min_factor = float(
+                    getattr(self.cfg.model, "rare_family_hard_min_time_factor", 0.25)
+                    or 0.0
+                )
+                min_factor = max(0.0, min(1.0, min_factor))
+                t_factor = min_factor + (1.0 - min_factor) * clean_factor
+            except Exception:
+                t_factor = 1.0
+        warmup = int(getattr(self.cfg.model, "rare_family_hard_warmup_epochs", 10) or 0)
+        if warmup > 0:
+            epoch_factor = min(float(self.current_epoch + 1) / float(warmup), 1.0)
+        else:
+            epoch_factor = 1.0
+
+        add_edges = []
+        add_batch = []
+        added_pos = 0
+        added_hard = 0
+        added_easy = 0
+        added_random = 0
+        active_fams = set()
+        max_pos = int(getattr(self.cfg.model, "rare_family_max_positives_per_family", 0) or 0)
+        max_neg = int(getattr(self.cfg.model, "rare_family_max_negatives_per_family", 256) or 256)
+        low_degree_max = float(getattr(self.cfg.model, "rare_family_low_degree_max", 3) or 3)
+
+        def _sample_idx(idx, take):
+            take = int(max(0, min(int(take), int(idx.numel()))))
+            if take <= 0 or idx.numel() == 0:
+                return idx[:0]
+            if int(idx.numel()) <= take:
+                return idx
+            return idx[torch.randperm(int(idx.numel()), device=device)[:take]]
+
+        for (fam_id, graph_idx), pos_pairs in positive_edges_by_fam_graph.items():
+            tier = int(tiers.get(int(fam_id), 0))
+            if tier <= 0:
+                continue
+            scope_nodes = query_nodes_by_graph.get(int(graph_idx))
+            if scope_nodes is None or scope_nodes.numel() == 0:
+                continue
+            in_scope = torch.zeros(num_nodes, dtype=torch.bool, device=device)
+            in_scope[scope_nodes.long()] = True
+            scoped_pos = [
+                (u, v)
+                for u, v in pos_pairs
+                if bool(in_scope[int(u)].item()) and bool(in_scope[int(v)].item())
+            ]
+            if not scoped_pos:
+                continue
+            if max_pos > 0 and len(scoped_pos) > max_pos:
+                perm = torch.randperm(len(scoped_pos), device=device)[:max_pos].detach().cpu().tolist()
+                scoped_pos = [scoped_pos[i] for i in perm]
+            pos_tensor = torch.tensor(scoped_pos, dtype=torch.long, device=device).t().contiguous()
+            add_edges.append(pos_tensor)
+            add_batch.append(
+                torch.full((pos_tensor.shape[1],), int(graph_idx), dtype=torch.long, device=device)
+            )
+            added_pos += int(pos_tensor.shape[1])
+            active_fams.add(int(fam_id))
+
+            fam_name = id2edge_family.get(int(fam_id), "")
+            endpoints = fam_endpoints.get(fam_name, {}) or {}
+            src_type = str(endpoints.get("src_type", ""))
+            dst_type = str(endpoints.get("dst_type", ""))
+            if src_type not in type_name_to_id or dst_type not in type_name_to_id:
+                continue
+            batch_mask = data.batch.long().to(device) == int(graph_idx)
+            src_nodes = torch.where(
+                batch_mask & in_scope & (node_type == int(type_name_to_id[src_type]))
+            )[0]
+            dst_nodes = torch.where(
+                batch_mask & in_scope & (node_type == int(type_name_to_id[dst_type]))
+            )[0]
+            if src_nodes.numel() == 0 or dst_nodes.numel() == 0:
+                continue
+            same_type = src_type == dst_type
+            if same_type:
+                pairs = torch.triu_indices(src_nodes.numel(), src_nodes.numel(), offset=1, device=device)
+                if pairs.shape[1] == 0:
+                    continue
+                cand = torch.stack([src_nodes[pairs[0]], src_nodes[pairs[1]]], dim=0)
+            else:
+                flat = torch.arange(int(src_nodes.numel() * dst_nodes.numel()), device=device)
+                cand = torch.stack(
+                    [src_nodes[flat // dst_nodes.numel()], dst_nodes[flat % dst_nodes.numel()]],
+                    dim=0,
+                )
+            if cand.numel() == 0:
+                continue
+            cand_u = torch.minimum(cand[0], cand[1]) if same_type else cand[0]
+            cand_v = torch.maximum(cand[0], cand[1]) if same_type else cand[1]
+            cand_key = int(graph_idx) * num_nodes * num_nodes + cand_u.long() * num_nodes + cand_v.long()
+            clean_keys = clean_positive_keys_by_fam.get(int(fam_id), set())
+            existing_keys = existing_keys_by_graph.get(int(graph_idx), set())
+            keep_mask = torch.ones(cand.shape[1], dtype=torch.bool, device=device)
+            cand_key_cpu = cand_key.detach().cpu().tolist()
+            for idx_key, key in enumerate(cand_key_cpu):
+                if int(key) in clean_keys or int(key) in existing_keys:
+                    keep_mask[idx_key] = False
+            cand = torch.stack([cand_u, cand_v], dim=0)[:, keep_mask]
+            if cand.numel() == 0:
+                continue
+
+            common = self._clean_common_neighbor_scores(
+                edge_index=cand.long(),
+                full_data=data,
+                num_nodes=num_nodes,
+                device=device,
+                dtype=torch.float32,
+                chunk_size_attr="closure_rank_common_neighbor_chunk_size",
+            )
+            if common is None or common.numel() != cand.shape[1]:
+                common = torch.zeros(cand.shape[1], dtype=torch.float32, device=device)
+            low_endpoint = (degree[cand[0].long()] <= low_degree_max) | (
+                degree[cand[1].long()] <= low_degree_max
+            )
+            hard_pool = torch.where((common > 0) & low_endpoint)[0]
+            if hard_pool.numel() == 0:
+                hard_pool = torch.where(common > 0)[0]
+            easy_pool = torch.where(common <= 0)[0]
+            all_pool = torch.arange(cand.shape[1], device=device)
+
+            neg_per_pos = int(
+                getattr(
+                    self.cfg.model,
+                    "rare_family_tier2_neg_per_pos" if tier >= 2 else "rare_family_tier1_neg_per_pos",
+                    8 if tier >= 2 else 4,
+                )
+                or (8 if tier >= 2 else 4)
+            )
+            total_neg = min(max_neg, max(0, int(pos_tensor.shape[1]) * neg_per_pos))
+            if total_neg <= 0:
+                continue
+            hard_base = float(
+                getattr(
+                    self.cfg.model,
+                    "rare_family_tier2_hard_ratio" if tier >= 2 else "rare_family_tier1_hard_ratio",
+                    0.4 if tier >= 2 else 0.2,
+                )
+                or 0.0
+            )
+            hard_ratio = max(0.0, min(1.0, hard_base * epoch_factor * t_factor))
+            easy_base = max(0.0, float(getattr(self.cfg.model, "rare_family_easy_ratio", 0.30) or 0.0))
+            random_base = max(0.0, float(getattr(self.cfg.model, "rare_family_random_ratio", 0.30) or 0.0))
+            non_hard_total = easy_base + random_base
+            if non_hard_total > 0.0:
+                easy_ratio = (1.0 - hard_ratio) * easy_base / non_hard_total
+                random_ratio = (1.0 - hard_ratio) * random_base / non_hard_total
+            else:
+                easy_ratio = 0.0
+                random_ratio = 1.0 - hard_ratio
+            hard_take = int(round(float(total_neg) * hard_ratio))
+            easy_take = int(round(float(total_neg) * easy_ratio))
+            random_take = int(round(float(total_neg) * random_ratio))
+            overflow = hard_take + easy_take + random_take - total_neg
+            if overflow > 0:
+                random_take = max(0, random_take - overflow)
+                overflow = hard_take + easy_take + random_take - total_neg
+            if overflow > 0:
+                easy_take = max(0, easy_take - overflow)
+            hard_idx = _sample_idx(hard_pool, hard_take)
+            used = torch.zeros(cand.shape[1], dtype=torch.bool, device=device)
+            if hard_idx.numel() > 0:
+                used[hard_idx] = True
+            easy_idx = _sample_idx(easy_pool[~used[easy_pool]], easy_take)
+            if easy_idx.numel() > 0:
+                used[easy_idx] = True
+            random_take = max(
+                random_take,
+                total_neg - int(hard_idx.numel()) - int(easy_idx.numel()),
+            )
+            random_idx = _sample_idx(all_pool[~used], random_take)
+            for idx_part, bucket in (
+                (hard_idx, "hard"),
+                (easy_idx, "easy"),
+                (random_idx, "random"),
+            ):
+                if idx_part.numel() == 0:
+                    continue
+                add_edges.append(cand[:, idx_part])
+                add_batch.append(
+                    torch.full((idx_part.numel(),), int(graph_idx), dtype=torch.long, device=device)
+                )
+                if bucket == "hard":
+                    added_hard += int(idx_part.numel())
+                elif bucket == "easy":
+                    added_easy += int(idx_part.numel())
+                else:
+                    added_random += int(idx_part.numel())
+
+        if not add_edges:
+            return query_edge_index, query_edge_batch
+        merged_edge_index = torch.cat([query_edge_index.long()] + add_edges, dim=1)
+        merged_edge_batch = torch.cat([query_edge_batch.long()] + add_batch, dim=0)
+        merged_edge_index, merged_edge_batch = self._dedupe_query_edges(
+            merged_edge_index, merged_edge_batch
+        )
+        if not hasattr(self, "_epoch_rare_family_query_pos"):
+            self._epoch_rare_family_query_pos = 0
+            self._epoch_rare_family_query_hard = 0
+            self._epoch_rare_family_query_easy = 0
+            self._epoch_rare_family_query_random = 0
+        self._epoch_rare_family_query_pos += int(added_pos)
+        self._epoch_rare_family_query_hard += int(added_hard)
+        self._epoch_rare_family_query_easy += int(added_easy)
+        self._epoch_rare_family_query_random += int(added_random)
+        if getattr(self, "local_rank", 0) == 0 and not getattr(self, "_logged_rare_family_query_aug", False):
+            fam_names = ",".join(id2edge_family.get(f, str(f)) for f in sorted(active_fams))
+            print(
+                "[RARE-FAMILY] query augmentation "
+                f"families={fam_names} pos={added_pos} hard={added_hard} "
+                f"easy={added_easy} random={added_random} "
+                f"hard_epoch_factor={epoch_factor:.3f} hard_time_factor={t_factor:.3f}"
+            )
+            self._logged_rare_family_query_aug = True
+        return merged_edge_index, merged_edge_batch
+
     def _compute_query_edge_count_loss(self, pred, true_data):
         """Calibrate query-level expected edge count: mean P(edge) vs true edge ratio."""
         pred_edge = pred.edge_attr
@@ -6548,6 +10996,26 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             return 1.0
         t_val = max(0.0, min(1.0, t_val))
         return float(t_val ** power)
+
+    def _auxiliary_low_noise_factor(self, sparse_noisy_data, power: float) -> float:
+        """Return a stable scalar low-noise emphasis factor from 1 - t/T."""
+        try:
+            power = float(power or 0.0)
+        except Exception:
+            power = 0.0
+        if power <= 0.0:
+            return 1.0
+        t_float = None
+        if isinstance(sparse_noisy_data, dict):
+            t_float = sparse_noisy_data.get("t_float", None)
+        if t_float is None:
+            return 1.0
+        try:
+            t_val = float(torch.as_tensor(t_float).detach().float().mean().cpu())
+        except Exception:
+            return 1.0
+        t_val = max(0.0, min(1.0, t_val))
+        return float((1.0 - t_val) ** power)
 
     def _warmup_weight(self, base_weight: float, warmup_epochs: int, t_factor: float = 1.0) -> float:
         base_weight = float(base_weight or 0.0)
@@ -6583,6 +11051,266 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             dtype=pred_edge.dtype
         )
         return query_family.to(pred_edge.device).long().reshape(-1), target_exist
+
+    def _current_query_exist_from_noisy_graph(
+        self,
+        query_edge_index,
+        sparse_noisy_data,
+        total_nodes,
+        dtype,
+        device,
+    ):
+        if not isinstance(sparse_noisy_data, dict) or query_edge_index.numel() == 0:
+            return torch.zeros(query_edge_index.shape[1], dtype=dtype, device=device)
+        current_edge_index = sparse_noisy_data.get("edge_index_t", None)
+        if current_edge_index is None:
+            current_edge_index = sparse_noisy_data.get("edge_index", None)
+        current_edge_attr = sparse_noisy_data.get("edge_attr_t", None)
+        if current_edge_attr is None:
+            current_edge_attr = sparse_noisy_data.get("edge_attr", None)
+        if current_edge_index is None or current_edge_attr is None or current_edge_index.numel() == 0:
+            return torch.zeros(query_edge_index.shape[1], dtype=dtype, device=device)
+        if current_edge_attr.dim() > 1:
+            current_labels = current_edge_attr.argmax(dim=-1).long()
+        else:
+            current_labels = current_edge_attr.reshape(-1).long()
+        labels = self._lookup_query_edge_labels(
+            query_edge_index.long(),
+            current_edge_index.long(),
+            current_labels,
+            int(total_nodes),
+        ).to(device=device)
+        return (labels.reshape(-1) > 0).to(dtype=dtype, device=device)
+
+    def _compute_structure_delta_loss(self, pred, true_data, clean_data, sparse_noisy_data):
+        """Local structural moment matching with a one-step denoising hinge.
+
+        The direct term aligns soft predicted existence probabilities with the
+        clean target on the current query unit. The hinge term asks the
+        prediction to be structurally closer to clean than the current noisy
+        graph at this same t, avoiding a pure static closure prior.
+        """
+        pred_edge = pred.edge_attr
+        edge_index = pred.edge_index
+        if pred_edge.numel() == 0 or edge_index.numel() == 0 or not self.heterogeneous:
+            zero = pred_edge.sum() * 0.0
+            return zero, {
+                "active_groups": 0.0,
+                "degree": 0.0,
+                "interface": 0.0,
+                "gram": 0.0,
+                "improvement": 0.0,
+                "gram_groups": 0.0,
+            }
+        query_family, target_exist = self._query_family_and_target_exist(
+            pred, true_data, clean_data
+        )
+        if query_family is None:
+            zero = pred_edge.sum() * 0.0
+            return zero, {
+                "active_groups": 0.0,
+                "degree": 0.0,
+                "interface": 0.0,
+                "gram": 0.0,
+                "improvement": 0.0,
+                "gram_groups": 0.0,
+            }
+
+        node_type_ids, _ = self._infer_query_family_from_clean_node_types(
+            edge_index.long(),
+            clean_data.x,
+        )
+        if node_type_ids is None:
+            zero = pred_edge.sum() * 0.0
+            return zero, {
+                "active_groups": 0.0,
+                "degree": 0.0,
+                "interface": 0.0,
+                "gram": 0.0,
+                "improvement": 0.0,
+                "gram_groups": 0.0,
+            }
+
+        logits = pred_edge.reshape(-1, pred_edge.shape[-1])
+        pred_exist = (1.0 - torch.softmax(logits, dim=-1)[:, 0]).clamp(min=0.0, max=1.0)
+        target_exist = target_exist.to(device=pred_edge.device, dtype=pred_edge.dtype)
+        current_exist = self._current_query_exist_from_noisy_graph(
+            edge_index.long(),
+            sparse_noisy_data,
+            int(clean_data.x.shape[0]),
+            pred_edge.dtype,
+            pred_edge.device,
+        )
+        query_family = query_family.to(pred_edge.device).long().reshape(-1)
+        valid_query = query_family >= 0
+        if not valid_query.any():
+            zero = pred_edge.sum() * 0.0
+            return zero, {
+                "active_groups": 0.0,
+                "degree": 0.0,
+                "interface": 0.0,
+                "gram": 0.0,
+                "improvement": 0.0,
+                "gram_groups": 0.0,
+            }
+        if not bool(valid_query.all()):
+            edge_index = edge_index[:, valid_query]
+            pred_exist = pred_exist[valid_query]
+            target_exist = target_exist[valid_query]
+            current_exist = current_exist[valid_query]
+            query_family = query_family[valid_query]
+        batch = getattr(clean_data, "batch", None)
+        if batch is None or batch.numel() != clean_data.x.shape[0]:
+            graph_id = torch.zeros(edge_index.shape[1], dtype=torch.long, device=pred_edge.device)
+        else:
+            graph_id = batch.to(pred_edge.device).long()[edge_index[0].long()]
+        node_type_ids = node_type_ids.to(pred_edge.device).long()
+
+        min_edges = int(getattr(self.cfg.model, "structure_delta_min_query_edges", 32) or 0)
+        max_nodes = int(getattr(self.cfg.model, "structure_delta_max_nodes_per_group", 256) or 0)
+        max_edges = int(getattr(self.cfg.model, "structure_delta_max_edges_per_group", 80000) or 0)
+        degree_weight = float(getattr(self.cfg.model, "structure_delta_degree_weight", 1.0) or 0.0)
+        interface_weight = float(getattr(self.cfg.model, "structure_delta_interface_weight", 1.0) or 0.0)
+        gram_weight = float(getattr(self.cfg.model, "structure_delta_gram_weight", 0.25) or 0.0)
+        improvement_weight = float(getattr(self.cfg.model, "structure_delta_improvement_weight", 0.5) or 0.0)
+        margin = float(getattr(self.cfg.model, "structure_delta_hinge_margin", 0.0) or 0.0)
+        loss_type = str(getattr(self.cfg.model, "structure_delta_loss_type", "mse") or "mse").lower()
+
+        def metric_loss(a, b):
+            diff = a - b
+            if loss_type == "l1":
+                return diff.abs().mean()
+            return diff.pow(2).mean()
+
+        fam_span = int(query_family.max().detach().item()) + 1 if query_family.numel() else 1
+        group_key = graph_id * max(fam_span, 1) + query_family.clamp(min=0)
+        losses = []
+        degree_vals = []
+        interface_vals = []
+        gram_vals = []
+        improve_vals = []
+        gram_groups = 0
+
+        for key in torch.unique(group_key):
+            mask = group_key == key
+            edge_count = int(mask.sum().detach().item())
+            if edge_count < min_edges:
+                continue
+            local_edges = edge_index[:, mask].long()
+            nodes, inverse = torch.unique(local_edges.reshape(-1), sorted=True, return_inverse=True)
+            if nodes.numel() == 0:
+                continue
+            local_edge_count = int(local_edges.shape[1])
+            u = inverse[:local_edge_count]
+            v = inverse[local_edge_count:]
+            local_n = int(nodes.numel())
+            pe = pred_exist[mask]
+            te = target_exist[mask].detach()
+            ce = current_exist[mask].detach()
+
+            pred_deg = pred_edge.new_zeros(local_n)
+            target_deg = pred_edge.new_zeros(local_n)
+            current_deg = pred_edge.new_zeros(local_n)
+            pred_deg.scatter_add_(0, u, pe)
+            pred_deg.scatter_add_(0, v, pe)
+            target_deg.scatter_add_(0, u, te)
+            target_deg.scatter_add_(0, v, te)
+            current_deg.scatter_add_(0, u, ce)
+            current_deg.scatter_add_(0, v, ce)
+            scale = target_deg.mean().detach().clamp(min=1.0)
+            degree_err = metric_loss(pred_deg / scale, target_deg / scale)
+            current_degree_err = metric_loss(current_deg / scale, target_deg / scale).detach()
+
+            local_types = node_type_ids[nodes]
+            interface_terms = []
+            current_interface_terms = []
+            for type_id in torch.unique(local_types):
+                type_mask = local_types == type_id
+                if not type_mask.any():
+                    continue
+                type_scale = target_deg[type_mask].mean().detach().clamp(min=1.0)
+                interface_terms.append(
+                    metric_loss(pred_deg[type_mask] / type_scale, target_deg[type_mask] / type_scale)
+                )
+                current_interface_terms.append(
+                    metric_loss(
+                        current_deg[type_mask] / type_scale,
+                        target_deg[type_mask] / type_scale,
+                    ).detach()
+                )
+            if interface_terms:
+                interface_err = torch.stack(interface_terms).mean()
+                current_interface_err = torch.stack(current_interface_terms).mean()
+            else:
+                interface_err = pred_edge.sum() * 0.0
+                current_interface_err = interface_err.detach()
+
+            gram_err = pred_edge.sum() * 0.0
+            current_gram_err = gram_err.detach()
+            use_gram = (
+                gram_weight > 0.0
+                and max_nodes > 0
+                and max_edges > 0
+                and local_n <= max_nodes
+                and local_edge_count <= max_edges
+            )
+            if use_gram:
+                pred_adj = pred_edge.new_zeros((local_n, local_n))
+                target_adj = pred_edge.new_zeros((local_n, local_n))
+                current_adj = pred_edge.new_zeros((local_n, local_n))
+                pred_adj.index_put_((u, v), pe, accumulate=True)
+                pred_adj.index_put_((v, u), pe, accumulate=True)
+                target_adj.index_put_((u, v), te, accumulate=True)
+                target_adj.index_put_((v, u), te, accumulate=True)
+                current_adj.index_put_((u, v), ce, accumulate=True)
+                current_adj.index_put_((v, u), ce, accumulate=True)
+                target_gram = target_adj @ target_adj.t()
+                pred_gram = pred_adj @ pred_adj.t()
+                current_gram = current_adj @ current_adj.t()
+                gram_scale = target_gram.detach().abs().mean().clamp(min=1.0)
+                gram_err = metric_loss(pred_gram / gram_scale, target_gram.detach() / gram_scale)
+                current_gram_err = metric_loss(
+                    current_gram.detach() / gram_scale,
+                    target_gram.detach() / gram_scale,
+                ).detach()
+                gram_groups += 1
+
+            direct_err = (
+                degree_weight * degree_err
+                + interface_weight * interface_err
+                + gram_weight * gram_err
+            )
+            current_err = (
+                degree_weight * current_degree_err
+                + interface_weight * current_interface_err
+                + gram_weight * current_gram_err
+            ).detach()
+            improve = torch.relu(direct_err - current_err + margin)
+            losses.append(direct_err + improvement_weight * improve)
+            degree_vals.append(degree_err.detach())
+            interface_vals.append(interface_err.detach())
+            gram_vals.append(gram_err.detach())
+            improve_vals.append(improve.detach())
+
+        if not losses:
+            zero = pred_edge.sum() * 0.0
+            return zero, {
+                "active_groups": 0.0,
+                "degree": 0.0,
+                "interface": 0.0,
+                "gram": 0.0,
+                "improvement": 0.0,
+                "gram_groups": 0.0,
+            }
+        loss = torch.stack(losses).mean()
+        return loss, {
+            "active_groups": float(len(losses)),
+            "degree": float(torch.stack(degree_vals).mean().detach().cpu()),
+            "interface": float(torch.stack(interface_vals).mean().detach().cpu()),
+            "gram": float(torch.stack(gram_vals).mean().detach().cpu()),
+            "improvement": float(torch.stack(improve_vals).mean().detach().cpu()),
+            "gram_groups": float(gram_groups),
+        }
 
     def _global_aux_stats_from_block(self, pred, true_data, clean_data):
         query_family, target_exist = self._query_family_and_target_exist(
@@ -6780,6 +11508,383 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             (pred_dist * ((pred_dist + eps).log() - (mix + eps).log())).sum()
             + (target_dist * ((target_dist + eps).log() - (mix + eps).log())).sum()
         )
+
+    def _signature_mass_loss(self, pred_mass, target_mass, loss_type="js", eps=1e-8):
+        if pred_mass.numel() == 0 or target_mass.numel() == 0:
+            return pred_mass.sum() * 0.0
+        if target_mass.sum().detach() <= eps or pred_mass.sum() <= eps:
+            return pred_mass.sum() * 0.0
+        loss_type = str(loss_type or "js").lower()
+        target_detached = target_mass.detach()
+        if loss_type == "l1":
+            pred_dist = pred_mass / pred_mass.sum().clamp(min=eps)
+            target_dist = target_detached / target_detached.sum().clamp(min=eps)
+            return (pred_dist - target_dist).abs().sum()
+        if loss_type == "mse":
+            pred_dist = pred_mass / pred_mass.sum().clamp(min=eps)
+            target_dist = target_detached / target_detached.sum().clamp(min=eps)
+            return (pred_dist - target_dist).pow(2).sum()
+        if loss_type == "kl":
+            pred_dist = pred_mass / pred_mass.sum().clamp(min=eps)
+            target_dist = target_detached / target_detached.sum().clamp(min=eps)
+            return (
+                target_dist
+                * ((target_dist + eps).log() - (pred_dist + eps).log())
+            ).sum()
+        return self._js_divergence_from_masses(pred_mass, target_detached, eps=eps)
+
+    def _compute_typed_rooted_signature_loss(self, pred, clean_data, true_data):
+        """Match a typed local structural signature induced by query probabilities.
+
+        The ideal structure-complete objective would match all typed subgraph
+        counts.  This finite differentiable signature is the practical
+        truncation used during denoising: endpoint roles, typed support buckets,
+        typed closed-center motif mass, low-degree closed-node coverage, and
+        closure anti-concentration are all computed from the same soft query
+        edge probabilities.  Gradients therefore reach individual query logits
+        through global/rooted structural discrepancies rather than only through
+        exact edge identity.
+        """
+        pred_edge = pred.edge_attr
+        edge_index = pred.edge_index
+        target = true_data.edge_attr
+        if (
+            pred_edge.numel() == 0
+            or edge_index.numel() == 0
+            or target.numel() == 0
+            or not self.heterogeneous
+        ):
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_terms": 0.0}
+
+        num_nodes = int(clean_data.x.shape[0])
+        max_nodes = int(
+            getattr(self.cfg.model, "typed_rooted_signature_max_nodes", 3000) or 0
+        )
+        if max_nodes > 0 and num_nodes > max_nodes:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_terms": 0.0}
+
+        device = pred_edge.device
+        dtype = pred_edge.dtype
+        node_type_ids = self._clean_node_type_ids(clean_data.x, device)
+        if node_type_ids is None or int(node_type_ids.numel()) != num_nodes:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_terms": 0.0}
+
+        full_edge_index = getattr(clean_data, "edge_index", None)
+        full_edge_attr = getattr(clean_data, "edge_attr", None)
+        if full_edge_index is None or full_edge_index.numel() == 0:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_terms": 0.0}
+        src_full = full_edge_index[0].long().to(device)
+        dst_full = full_edge_index[1].long().to(device)
+        if full_edge_attr is not None and full_edge_attr.numel() > 0:
+            if full_edge_attr.dim() > 1:
+                full_labels = full_edge_attr.argmax(dim=-1).to(device)
+            else:
+                full_labels = full_edge_attr.long().to(device)
+            full_pos = full_labels.reshape(-1) > 0
+            src_full = src_full[full_pos]
+            dst_full = dst_full[full_pos]
+        valid_full = (
+            (src_full >= 0)
+            & (src_full < num_nodes)
+            & (dst_full >= 0)
+            & (dst_full < num_nodes)
+            & (src_full != dst_full)
+        )
+        src_full = src_full[valid_full]
+        dst_full = dst_full[valid_full]
+        if src_full.numel() == 0:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_terms": 0.0}
+
+        adj = torch.zeros((num_nodes, num_nodes), dtype=torch.bool, device=device)
+        adj[src_full, dst_full] = True
+        adj[dst_full, src_full] = True
+        degree = adj.sum(dim=-1).long()
+        degree_cap = max(
+            1,
+            int(getattr(self.cfg.model, "typed_rooted_signature_degree_cap", 8) or 8),
+        )
+        support_cap = max(
+            1,
+            int(getattr(self.cfg.model, "typed_rooted_signature_support_cap", 8) or 8),
+        )
+        degree_bucket = degree.clamp(min=0, max=degree_cap)
+        valid_node = node_type_ids >= 0
+        if not bool(valid_node.any()):
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_terms": 0.0}
+        num_types = int(node_type_ids[valid_node].max().item()) + 1
+        node_role_count = int(num_types * (degree_cap + 1))
+        node_role = (node_type_ids * int(degree_cap + 1) + degree_bucket).long()
+        node_role = node_role.clamp(min=0, max=node_role_count - 1)
+
+        query_family, target_exist = self._query_family_and_target_exist(
+            pred, true_data, clean_data
+        )
+        if query_family is None:
+            _node_type_ids, query_family = self._infer_query_family_from_clean_node_types(
+                edge_index.long(), clean_data.x
+            )
+        if query_family is None or query_family.numel() != pred_edge.shape[0]:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_terms": 0.0}
+        query_family = query_family.to(device).long().reshape(-1)
+        if target_exist is None:
+            if target.dim() > 1:
+                target = target.argmax(dim=-1)
+            target_exist = (target.reshape(-1).long().to(device) > 0).to(dtype=dtype)
+        else:
+            target_exist = target_exist.to(device=device, dtype=dtype).reshape(-1)
+
+        logits = pred_edge.reshape(-1, pred_edge.shape[-1])
+        pred_exist = (1.0 - torch.softmax(logits, dim=-1)[:, 0]).clamp(
+            min=0.0,
+            max=1.0,
+        )
+        q_src = edge_index[0].long().to(device)
+        q_dst = edge_index[1].long().to(device)
+        valid_q = (
+            (q_src >= 0)
+            & (q_src < num_nodes)
+            & (q_dst >= 0)
+            & (q_dst < num_nodes)
+            & (q_src != q_dst)
+            & (query_family >= 0)
+        )
+        valid_idx = valid_q.nonzero(as_tuple=False).reshape(-1)
+        if valid_idx.numel() == 0:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_terms": 0.0}
+        max_query_edges = int(
+            getattr(self.cfg.model, "typed_rooted_signature_max_query_edges", 0) or 0
+        )
+        if max_query_edges > 0 and int(valid_idx.numel()) > max_query_edges:
+            sample_idx = torch.randperm(int(valid_idx.numel()), device=device)[
+                :max_query_edges
+            ]
+            valid_idx = valid_idx[sample_idx]
+
+        q_src_v = q_src[valid_idx]
+        q_dst_v = q_dst[valid_idx]
+        pred_v = pred_exist[valid_idx]
+        target_v = target_exist[valid_idx]
+        fam_v = query_family[valid_idx]
+        num_families = int(fam_v.max().item()) + 1
+        loss_type = str(
+            getattr(self.cfg.model, "typed_rooted_signature_loss_type", "js") or "js"
+        ).lower()
+        eps = 1e-8
+        losses = []
+        active_terms = 0
+
+        endpoint_w = float(
+            getattr(self.cfg.model, "typed_rooted_signature_endpoint_weight", 1.0)
+            or 0.0
+        )
+        if endpoint_w > 0:
+            pred_endpoint = pred_edge.new_zeros(node_role_count)
+            target_endpoint = pred_edge.new_zeros(node_role_count)
+            src_role = node_role[q_src_v]
+            dst_role = node_role[q_dst_v]
+            pred_endpoint.scatter_add_(0, src_role, pred_v)
+            pred_endpoint.scatter_add_(0, dst_role, pred_v)
+            target_endpoint.scatter_add_(0, src_role, target_v)
+            target_endpoint.scatter_add_(0, dst_role, target_v)
+            if target_endpoint.sum().detach() > eps and pred_endpoint.sum() > eps:
+                losses.append(
+                    endpoint_w
+                    * self._signature_mass_loss(
+                        pred_endpoint, target_endpoint, loss_type=loss_type, eps=eps
+                    )
+                )
+                active_terms += 1
+
+        pair_count = int((degree_cap + 1) * (degree_cap + 1))
+        support_group_count = int(num_families * pair_count * (support_cap + 1))
+        pred_support = pred_edge.new_zeros(support_group_count)
+        target_support = pred_edge.new_zeros(support_group_count)
+        motif_group_count = int(num_families * node_role_count)
+        pred_motif = pred_edge.new_zeros(motif_group_count)
+        target_motif = pred_edge.new_zeros(motif_group_count)
+        pred_node_closure = pred_edge.new_zeros(num_nodes)
+        target_node_closure = pred_edge.new_zeros(num_nodes)
+
+        chunk_size = int(
+            getattr(self.cfg.model, "typed_rooted_signature_chunk_size", 512) or 512
+        )
+        chunk_size = max(1, chunk_size)
+        common_cap = float(
+            getattr(self.cfg.model, "typed_rooted_signature_common_cap", 0.0) or 0.0
+        )
+        for start in range(0, int(valid_idx.numel()), chunk_size):
+            sl = slice(start, start + chunk_size)
+            src_c = q_src_v[sl]
+            dst_c = q_dst_v[sl]
+            pred_c = pred_v[sl]
+            target_c = target_v[sl]
+            fam_c = fam_v[sl]
+            common = adj[src_c] & adj[dst_c]
+            common_weight = common.to(dtype=dtype)
+            if common_cap > 0:
+                common_sum = common_weight.sum(dim=-1, keepdim=True).clamp(min=1.0)
+                common_weight = common_weight * (common_cap / common_sum).clamp(max=1.0)
+            common_count = common.sum(dim=-1).long().clamp(min=0, max=support_cap)
+            src_deg = degree_bucket[src_c].clamp(min=0, max=degree_cap)
+            dst_deg = degree_bucket[dst_c].clamp(min=0, max=degree_cap)
+            pair_id = src_deg * int(degree_cap + 1) + dst_deg
+            support_id = (
+                (fam_c.clamp(min=0, max=num_families - 1) * pair_count + pair_id)
+                * int(support_cap + 1)
+                + common_count
+            ).clamp(min=0, max=support_group_count - 1)
+            pred_support.scatter_add_(0, support_id, pred_c)
+            target_support.scatter_add_(0, support_id, target_c)
+
+            pred_node_closure = pred_node_closure + (
+                common_weight * pred_c.unsqueeze(-1)
+            ).sum(dim=0)
+            target_node_closure = target_node_closure + (
+                common_weight.detach() * target_c.unsqueeze(-1)
+            ).sum(dim=0)
+
+            for fam in torch.unique(fam_c):
+                fam_id = int(fam.detach().cpu().item())
+                if fam_id < 0 or fam_id >= num_families:
+                    continue
+                rows = fam_c == fam_id
+                if not bool(rows.any()):
+                    continue
+                pred_center = (
+                    common_weight[rows] * pred_c[rows].unsqueeze(-1)
+                ).sum(dim=0)
+                target_center = (
+                    common_weight[rows].detach() * target_c[rows].unsqueeze(-1)
+                ).sum(dim=0)
+                motif_ids = (
+                    fam_id * node_role_count + node_role
+                ).clamp(min=0, max=motif_group_count - 1)
+                pred_motif.scatter_add_(0, motif_ids, pred_center)
+                target_motif.scatter_add_(0, motif_ids, target_center)
+
+        support_w = float(
+            getattr(self.cfg.model, "typed_rooted_signature_support_weight", 1.0)
+            or 0.0
+        )
+        if support_w > 0 and target_support.sum().detach() > eps and pred_support.sum() > eps:
+            losses.append(
+                support_w
+                * self._signature_mass_loss(
+                    pred_support, target_support, loss_type=loss_type, eps=eps
+                )
+            )
+            active_terms += 1
+
+        motif_w = float(
+            getattr(self.cfg.model, "typed_rooted_signature_motif_weight", 1.0)
+            or 0.0
+        )
+        if motif_w > 0 and target_motif.sum().detach() > eps and pred_motif.sum() > eps:
+            losses.append(
+                motif_w
+                * self._signature_mass_loss(
+                    pred_motif, target_motif, loss_type=loss_type, eps=eps
+                )
+            )
+            active_terms += 1
+
+        lowdeg_w = float(
+            getattr(self.cfg.model, "typed_rooted_signature_lowdeg_weight", 1.0)
+            or 0.0
+        )
+        if lowdeg_w > 0:
+            max_low_degree = int(
+                getattr(self.cfg.model, "typed_rooted_signature_low_degree_max", 3)
+                or 3
+            )
+            min_group_nodes = int(
+                getattr(self.cfg.model, "typed_rooted_signature_min_group_nodes", 4)
+                or 0
+            )
+            threshold = float(
+                getattr(self.cfg.model, "typed_rooted_signature_closed_threshold", 0.5)
+                or 0.5
+            )
+            pred_closed = (1.0 - torch.exp(-pred_node_closure.clamp(min=0.0))).clamp(
+                min=eps,
+                max=1.0 - eps,
+            )
+            target_closed = (target_node_closure.detach() > threshold).to(dtype=dtype)
+            low_valid = valid_node & (degree <= max_low_degree)
+            low_losses = []
+            for gid in torch.unique(node_role[low_valid]):
+                mask = low_valid & (node_role == gid)
+                n = int(mask.sum().item())
+                if n < min_group_nodes:
+                    continue
+                target_vec = target_closed[mask]
+                if target_vec.sum().detach() <= 0:
+                    continue
+                pred_vec = pred_closed[mask]
+                bce = -(
+                    target_vec * pred_vec.log()
+                    + (1.0 - target_vec) * (1.0 - pred_vec).log()
+                ).mean()
+                frac = (pred_vec.mean() - target_vec.mean().detach()).abs()
+                low_losses.append(bce + frac)
+            if low_losses:
+                losses.append(lowdeg_w * torch.stack(low_losses).mean())
+                active_terms += 1
+
+        concentration_w = float(
+            getattr(
+                self.cfg.model,
+                "typed_rooted_signature_concentration_weight",
+                1.0,
+            )
+            or 0.0
+        )
+        if concentration_w > 0:
+            top_frac = float(
+                getattr(self.cfg.model, "typed_rooted_signature_top_frac", 0.05)
+                or 0.05
+            )
+            top_frac = max(0.0, min(1.0, top_frac))
+            slack = float(
+                getattr(self.cfg.model, "typed_rooted_signature_top_slack", 1.05)
+                or 1.0
+            )
+            min_group_nodes = int(
+                getattr(self.cfg.model, "typed_rooted_signature_min_group_nodes", 4)
+                or 0
+            )
+            conc_losses = []
+            for gid in torch.unique(node_role[valid_node]):
+                mask = valid_node & (node_role == gid)
+                n = int(mask.sum().item())
+                if n < min_group_nodes:
+                    continue
+                pred_vec = pred_node_closure[mask]
+                target_vec = target_node_closure[mask].detach()
+                if pred_vec.sum() <= eps or target_vec.sum().detach() <= eps:
+                    continue
+                k = max(1, min(n, int(math.ceil(float(n) * top_frac))))
+                pred_top = torch.topk(pred_vec, k=k, largest=True).values.sum()
+                target_top = torch.topk(target_vec, k=k, largest=True).values.sum()
+                pred_frac = pred_top / pred_vec.sum().clamp(min=eps)
+                target_frac = target_top / target_vec.sum().clamp(min=eps)
+                conc_losses.append(F.relu(pred_frac - slack * target_frac.detach()))
+            if conc_losses:
+                losses.append(concentration_w * torch.stack(conc_losses).mean())
+                active_terms += 1
+
+        if not losses:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_terms": 0.0}
+        return torch.stack(losses).mean(), {"active_terms": float(active_terms)}
 
     def _compute_query_topk_structure_probe(self, pred, true_data, clean_data, num_nodes):
         pred_edge = pred.edge_attr
@@ -7105,7 +12210,1094 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             return zero, {"active_families": 0.0}
         return torch.stack(losses).mean(), {"active_families": float(len(losses))}
 
-    def _clean_common_neighbor_scores(self, edge_index, full_data, num_nodes, device, dtype):
+    def _compute_closure_bucket_distribution_loss(self, pred, clean_data, true_data):
+        """Match where clean closure mass lives across family/degree buckets.
+
+        For each query edge (u, v), clean common-neighbor count estimates how
+        many triangles that edge would close in the target graph. The target
+        mass is 1[edge exists] * common(u, v), while the predicted mass is
+        P(edge) * common(u, v). Matching the resulting family-wise degree-pair
+        distributions discourages a hub-centric shortcut where the model gets
+        the global triangle count right but assigns the closure to the wrong
+        endpoint roles.
+        """
+        pred_edge = pred.edge_attr
+        edge_index = pred.edge_index
+        target = true_data.edge_attr
+        if (
+            pred_edge.numel() == 0
+            or edge_index.numel() == 0
+            or target.numel() == 0
+            or not self.heterogeneous
+        ):
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_families": 0.0}
+
+        _node_type_ids, query_family = self._infer_query_family_from_clean_node_types(
+            edge_index.long(),
+            clean_data.x,
+        )
+        if query_family is None or query_family.numel() != pred_edge.shape[0]:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_families": 0.0}
+        query_family = query_family.to(pred_edge.device).long().reshape(-1)
+
+        pair_info = self._degree_pair_ids_for_candidates(edge_index.long(), query_family)
+        if pair_info is None:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_families": 0.0}
+
+        common = self._clean_common_neighbor_scores(
+            edge_index=edge_index.long(),
+            full_data=clean_data,
+            num_nodes=int(clean_data.x.shape[0]),
+            device=pred_edge.device,
+            dtype=pred_edge.dtype,
+        )
+        if common is None:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_families": 0.0}
+
+        common_cap = float(
+            getattr(self.cfg.model, "closure_bucket_dist_common_cap", 0.0) or 0.0
+        )
+        if common_cap > 0:
+            common = common.clamp(max=common_cap)
+        if bool(getattr(self.cfg.model, "closure_bucket_dist_score_log1p", False)):
+            common_score = torch.log1p(common)
+        else:
+            common_score = common
+        common_score = common_score.clamp(min=0.0)
+        if not bool((common_score > 0).any()):
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_families": 0.0}
+
+        if target.dim() > 1:
+            target = target.argmax(dim=-1)
+        target_exist = (target.reshape(-1).long().to(pred_edge.device) > 0).to(
+            dtype=pred_edge.dtype
+        )
+
+        logits = pred_edge.reshape(-1, pred_edge.shape[-1])
+        pred_exist = (1.0 - torch.softmax(logits, dim=-1)[:, 0]).clamp(
+            min=0.0,
+            max=1.0,
+        )
+        pred_weight = pred_exist * common_score
+        target_weight = target_exist * common_score.detach()
+
+        pair_id = pair_info["pair_id"].to(pred_edge.device).long()
+        valid_pair = pair_info["valid"].to(pred_edge.device)
+        num_bins = int(pair_info["num_bins"])
+        num_pairs = int(num_bins * num_bins)
+        min_edges = int(
+            getattr(self.cfg.model, "closure_bucket_dist_min_query_edges", 32) or 0
+        )
+        loss_type = str(
+            getattr(self.cfg.model, "closure_bucket_dist_loss_type", "js") or "js"
+        ).lower()
+        target_smoothing = float(
+            getattr(self.cfg.model, "closure_bucket_dist_target_smoothing", 0.0)
+            or 0.0
+        )
+        target_smoothing = max(0.0, min(1.0, target_smoothing))
+        eps = 1e-8
+        losses = []
+
+        for fam in torch.unique(query_family):
+            fam_id = int(fam.detach().cpu().item())
+            mask = (query_family == fam_id) & valid_pair & (common_score > 0)
+            n = int(mask.sum().item())
+            if n < min_edges:
+                continue
+            fam_pair_ids = pair_id[mask].clamp(min=0, max=num_pairs - 1)
+            pred_mass = pred_edge.new_zeros(num_pairs)
+            target_mass = pred_edge.new_zeros(num_pairs)
+            pred_mass.scatter_add_(0, fam_pair_ids, pred_weight[mask])
+            target_mass.scatter_add_(0, fam_pair_ids, target_weight[mask])
+            if target_mass.sum() <= eps or pred_mass.sum() <= eps:
+                continue
+
+            available = pred_edge.new_zeros(num_pairs, dtype=torch.bool)
+            available[fam_pair_ids.unique()] = True
+            target_dist = target_mass / target_mass.sum().clamp(min=eps)
+            if target_smoothing > 0:
+                smooth = available.to(dtype=target_mass.dtype)
+                smooth = smooth / smooth.sum().clamp(min=1.0)
+                target_dist = (1.0 - target_smoothing) * target_dist + target_smoothing * smooth
+            pred_dist = pred_mass / pred_mass.sum().clamp(min=eps)
+
+            if loss_type == "l1":
+                losses.append((pred_dist - target_dist.detach()).abs().sum())
+            elif loss_type == "mse":
+                losses.append((pred_dist - target_dist.detach()).pow(2).sum())
+            elif loss_type == "kl":
+                losses.append(
+                    (
+                        target_dist.detach()
+                        * ((target_dist.detach() + eps).log() - (pred_dist + eps).log())
+                    ).sum()
+                )
+            else:
+                target_detached = target_dist.detach()
+                mix = 0.5 * (pred_dist + target_detached)
+                losses.append(
+                    0.5
+                    * (
+                        (
+                            target_detached
+                            * ((target_detached + eps).log() - (mix + eps).log())
+                        ).sum()
+                        + (
+                            pred_dist
+                            * ((pred_dist + eps).log() - (mix + eps).log())
+                        ).sum()
+                    )
+                )
+
+        if not losses:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_families": 0.0}
+        return torch.stack(losses).mean(), {"active_families": float(len(losses))}
+
+    def _clean_node_type_ids(self, clean_x, device):
+        if clean_x is None or clean_x.numel() == 0:
+            return None
+        node_subtype = clean_x
+        if node_subtype.dim() > 1:
+            node_subtype = node_subtype.argmax(dim=-1)
+        node_subtype = node_subtype.long().to(device)
+        type_offsets = getattr(self.dataset_info, "type_offsets", {}) or {}
+        if not type_offsets:
+            return None
+        sorted_types = sorted(type_offsets.items(), key=lambda item: item[1])
+        node_type_ids = torch.full_like(node_subtype, -1)
+        for idx, (_type_name, offset) in enumerate(sorted_types):
+            if idx + 1 < len(sorted_types):
+                next_offset = int(sorted_types[idx + 1][1])
+                mask = (node_subtype >= int(offset)) & (node_subtype < next_offset)
+            else:
+                mask = node_subtype >= int(offset)
+            node_type_ids[mask] = int(idx)
+        return node_type_ids
+
+    def _compute_node_closure_distribution_loss(self, pred, clean_data, true_data):
+        """Match node-centered clean triangle participation from query edges.
+
+        A query edge (u, v) closes one triangle for every clean common-neighbor
+        center node w in N(u) cap N(v). We accumulate P(edge_uv) to those center
+        nodes and compare the resulting per-node closure contribution vector
+        with the clean target vector inside node-type x degree buckets. This is
+        designed for structures such as IMDB where many low-degree nodes each
+        contribute one local closure; aggregate triangle or edge-bucket losses
+        can miss this anti-concentration pattern.
+        """
+        pred_edge = pred.edge_attr
+        edge_index = pred.edge_index
+        target = true_data.edge_attr
+        if (
+            pred_edge.numel() == 0
+            or edge_index.numel() == 0
+            or target.numel() == 0
+            or not self.heterogeneous
+        ):
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_groups": 0.0}
+
+        num_nodes = int(clean_data.x.shape[0])
+        device = pred_edge.device
+        dtype = pred_edge.dtype
+        node_type_ids = self._clean_node_type_ids(clean_data.x, device)
+        if node_type_ids is None or int(node_type_ids.numel()) != num_nodes:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_groups": 0.0}
+
+        full_edge_index = getattr(clean_data, "edge_index", None)
+        full_edge_attr = getattr(clean_data, "edge_attr", None)
+        if full_edge_index is None or full_edge_index.numel() == 0:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_groups": 0.0}
+        src_full = full_edge_index[0].long().to(device)
+        dst_full = full_edge_index[1].long().to(device)
+        if full_edge_attr is not None and full_edge_attr.numel() > 0:
+            if full_edge_attr.dim() > 1:
+                full_labels = full_edge_attr.argmax(dim=-1).to(device)
+            else:
+                full_labels = full_edge_attr.long().to(device)
+            full_pos = full_labels.reshape(-1) > 0
+            src_full = src_full[full_pos]
+            dst_full = dst_full[full_pos]
+        valid_full = (
+            (src_full >= 0)
+            & (src_full < num_nodes)
+            & (dst_full >= 0)
+            & (dst_full < num_nodes)
+            & (src_full != dst_full)
+        )
+        src_full = src_full[valid_full]
+        dst_full = dst_full[valid_full]
+        if src_full.numel() == 0:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_groups": 0.0}
+
+        adj = torch.zeros((num_nodes, num_nodes), dtype=torch.bool, device=device)
+        adj[src_full, dst_full] = True
+        adj[dst_full, src_full] = True
+        degree = adj.sum(dim=-1).long()
+        degree_cap = max(
+            1,
+            int(getattr(self.cfg.model, "node_closure_dist_degree_cap", 8) or 8),
+        )
+        degree_bucket = degree.clamp(min=0, max=degree_cap)
+        group_id = node_type_ids * int(degree_cap + 1) + degree_bucket
+        valid_group_node = node_type_ids >= 0
+
+        if target.dim() > 1:
+            target = target.argmax(dim=-1)
+        target_exist = (target.reshape(-1).long().to(device) > 0).to(dtype=dtype)
+        logits = pred_edge.reshape(-1, pred_edge.shape[-1])
+        pred_exist = (1.0 - torch.softmax(logits, dim=-1)[:, 0]).clamp(
+            min=0.0,
+            max=1.0,
+        )
+
+        q_src = edge_index[0].long().to(device)
+        q_dst = edge_index[1].long().to(device)
+        valid_q = (
+            (q_src >= 0)
+            & (q_src < num_nodes)
+            & (q_dst >= 0)
+            & (q_dst < num_nodes)
+            & (q_src != q_dst)
+        )
+        valid_idx = valid_q.nonzero(as_tuple=False).reshape(-1)
+        if valid_idx.numel() == 0:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_groups": 0.0}
+
+        pred_node = pred_edge.new_zeros(num_nodes)
+        target_node = pred_edge.new_zeros(num_nodes)
+        chunk_size = int(
+            getattr(self.cfg.model, "node_closure_dist_chunk_size", 4096) or 4096
+        )
+        chunk_size = max(1, chunk_size)
+        common_cap = float(
+            getattr(self.cfg.model, "node_closure_dist_common_cap", 0.0) or 0.0
+        )
+        include_endpoints = bool(
+            getattr(self.cfg.model, "node_closure_dist_include_endpoints", False)
+        )
+        for start in range(0, int(valid_idx.numel()), chunk_size):
+            idx = valid_idx[start : start + chunk_size]
+            common = adj[q_src[idx]] & adj[q_dst[idx]]
+            if common_cap > 0:
+                common_weight = common.to(dtype=dtype)
+                common_sum = common_weight.sum(dim=-1, keepdim=True).clamp(min=1.0)
+                scale = (common_cap / common_sum).clamp(max=1.0)
+                common_weight = common_weight * scale
+            else:
+                common_weight = common.to(dtype=dtype)
+            pred_node = pred_node + (common_weight * pred_exist[idx].unsqueeze(-1)).sum(dim=0)
+            target_node = target_node + (
+                common_weight.detach() * target_exist[idx].unsqueeze(-1)
+            ).sum(dim=0)
+            if include_endpoints:
+                endpoint_common = common_weight.sum(dim=-1)
+                pred_endpoint = pred_exist[idx] * endpoint_common
+                target_endpoint = target_exist[idx] * endpoint_common.detach()
+                pred_node.scatter_add_(0, q_src[idx], pred_endpoint)
+                pred_node.scatter_add_(0, q_dst[idx], pred_endpoint)
+                target_node.scatter_add_(0, q_src[idx], target_endpoint)
+                target_node.scatter_add_(0, q_dst[idx], target_endpoint)
+
+        eps = 1e-8
+        min_group_nodes = int(
+            getattr(self.cfg.model, "node_closure_dist_min_group_nodes", 4) or 0
+        )
+        min_target_mass = float(
+            getattr(self.cfg.model, "node_closure_dist_min_target_mass", 1.0) or 0.0
+        )
+        loss_type = str(
+            getattr(self.cfg.model, "node_closure_dist_loss_type", "js") or "js"
+        ).lower()
+        mass_weight = float(
+            getattr(self.cfg.model, "node_closure_dist_mass_weight", 0.25) or 0.0
+        )
+        second_weight = float(
+            getattr(self.cfg.model, "node_closure_dist_second_moment_weight", 0.25)
+            or 0.0
+        )
+        top_frac = float(
+            getattr(self.cfg.model, "node_closure_dist_top_frac", 0.10) or 0.0
+        )
+        top_weight = float(
+            getattr(self.cfg.model, "node_closure_dist_top_weight", 0.25) or 0.0
+        )
+
+        losses = []
+        active_groups = 0
+        for gid in torch.unique(group_id[valid_group_node]):
+            mask = valid_group_node & (group_id == gid)
+            n = int(mask.sum().item())
+            if n < min_group_nodes:
+                continue
+            pred_vec = pred_node[mask]
+            target_vec = target_node[mask].detach()
+            target_sum = target_vec.sum()
+            pred_sum = pred_vec.sum()
+            if target_sum <= max(min_target_mass, eps) or pred_sum <= eps:
+                continue
+            pred_dist = pred_vec / pred_sum.clamp(min=eps)
+            target_dist = target_vec / target_sum.clamp(min=eps)
+
+            if loss_type == "l1":
+                group_loss = (pred_dist - target_dist).abs().sum()
+            elif loss_type == "mse":
+                group_loss = (pred_dist - target_dist).pow(2).sum()
+            elif loss_type == "kl":
+                group_loss = (
+                    target_dist
+                    * ((target_dist + eps).log() - (pred_dist + eps).log())
+                ).sum()
+            else:
+                mix = 0.5 * (pred_dist + target_dist)
+                group_loss = 0.5 * (
+                    (target_dist * ((target_dist + eps).log() - (mix + eps).log())).sum()
+                    + (pred_dist * ((pred_dist + eps).log() - (mix + eps).log())).sum()
+                )
+
+            if mass_weight > 0:
+                pred_mean = pred_vec.mean()
+                target_mean = target_vec.mean()
+                group_loss = group_loss + mass_weight * (
+                    (pred_mean - target_mean).abs() / target_mean.detach().clamp(min=1.0)
+                )
+            if second_weight > 0:
+                pred_second = pred_vec.pow(2).mean()
+                target_second = target_vec.pow(2).mean()
+                group_loss = group_loss + second_weight * (
+                    (pred_second - target_second).abs()
+                    / target_second.detach().clamp(min=1.0)
+                )
+            if top_weight > 0 and top_frac > 0 and n > 1:
+                k = max(1, min(n, int(math.ceil(float(n) * min(max(top_frac, 0.0), 1.0)))))
+                top_idx = torch.topk(target_vec, k=k, largest=True).indices
+                target_top_frac = target_vec[top_idx].sum() / target_sum.clamp(min=eps)
+                pred_top_frac = pred_vec[top_idx].sum() / pred_sum.clamp(min=eps)
+                group_loss = group_loss + top_weight * (
+                    pred_top_frac - target_top_frac.detach()
+                ).abs()
+
+            losses.append(group_loss)
+            active_groups += 1
+
+        if not losses:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_groups": 0.0}
+        return torch.stack(losses).mean(), {"active_groups": float(active_groups)}
+
+    def _compute_edge_support_distribution_loss(self, pred, clean_data, true_data):
+        """Match clean edge triangle-support distribution.
+
+        The existing closure-bucket loss places closure mass into endpoint
+        degree buckets. This loss is sharper: for predicted clean edge
+        probabilities, it matches the distribution over
+        relation-family x endpoint-degree-pair x clean common-neighbor support.
+        It therefore penalizes the IMDB failure mode where the model gets a
+        plausible triangle count by assigning very high support to a few edges
+        while too many true low-support triangle edges remain absent.
+        """
+        pred_edge = pred.edge_attr
+        edge_index = pred.edge_index
+        target = true_data.edge_attr
+        if (
+            pred_edge.numel() == 0
+            or edge_index.numel() == 0
+            or target.numel() == 0
+            or not self.heterogeneous
+        ):
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_families": 0.0}
+
+        _node_type_ids, query_family = self._infer_query_family_from_clean_node_types(
+            edge_index.long(),
+            clean_data.x,
+        )
+        if query_family is None or query_family.numel() != pred_edge.shape[0]:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_families": 0.0}
+        query_family = query_family.to(pred_edge.device).long().reshape(-1)
+
+        pair_info = self._degree_pair_ids_for_candidates(edge_index.long(), query_family)
+        if pair_info is None:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_families": 0.0}
+
+        common = self._clean_common_neighbor_scores(
+            edge_index=edge_index.long(),
+            full_data=clean_data,
+            num_nodes=int(clean_data.x.shape[0]),
+            device=pred_edge.device,
+            dtype=pred_edge.dtype,
+        )
+        if common is None:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_families": 0.0}
+
+        support_cap = max(
+            1,
+            int(getattr(self.cfg.model, "edge_support_dist_support_cap", 8) or 8),
+        )
+        support_bin = common.round().long().clamp(min=0, max=support_cap)
+        support_bins = int(support_cap + 1)
+
+        if target.dim() > 1:
+            target = target.argmax(dim=-1)
+        target_exist = (target.reshape(-1).long().to(pred_edge.device) > 0).to(
+            dtype=pred_edge.dtype
+        )
+        logits = pred_edge.reshape(-1, pred_edge.shape[-1])
+        pred_exist = (1.0 - torch.softmax(logits, dim=-1)[:, 0]).clamp(
+            min=0.0,
+            max=1.0,
+        )
+
+        pair_id = pair_info["pair_id"].to(pred_edge.device).long()
+        valid_pair = pair_info["valid"].to(pred_edge.device)
+        num_pairs = int(pair_info["num_bins"]) * int(pair_info["num_bins"])
+        group_id = pair_id.clamp(min=0, max=num_pairs - 1) * support_bins + support_bin
+        num_groups = int(num_pairs * support_bins)
+        min_edges = int(
+            getattr(self.cfg.model, "edge_support_dist_min_query_edges", 32) or 0
+        )
+        loss_type = str(
+            getattr(self.cfg.model, "edge_support_dist_loss_type", "js") or "js"
+        ).lower()
+        target_smoothing = float(
+            getattr(self.cfg.model, "edge_support_dist_target_smoothing", 0.0)
+            or 0.0
+        )
+        target_smoothing = max(0.0, min(1.0, target_smoothing))
+        eps = 1e-8
+        losses = []
+
+        for fam in torch.unique(query_family):
+            fam_id = int(fam.detach().cpu().item())
+            mask = (query_family == fam_id) & valid_pair
+            n = int(mask.sum().item())
+            if n < min_edges:
+                continue
+            fam_group = group_id[mask].clamp(min=0, max=num_groups - 1)
+            pred_mass = pred_edge.new_zeros(num_groups)
+            target_mass = pred_edge.new_zeros(num_groups)
+            pred_mass.scatter_add_(0, fam_group, pred_exist[mask])
+            target_mass.scatter_add_(0, fam_group, target_exist[mask])
+            if target_mass.sum() <= eps or pred_mass.sum() <= eps:
+                continue
+
+            available = pred_edge.new_zeros(num_groups, dtype=torch.bool)
+            available[fam_group.unique()] = True
+            target_dist = target_mass / target_mass.sum().clamp(min=eps)
+            if target_smoothing > 0:
+                smooth = available.to(dtype=target_mass.dtype)
+                smooth = smooth / smooth.sum().clamp(min=1.0)
+                target_dist = (
+                    (1.0 - target_smoothing) * target_dist
+                    + target_smoothing * smooth
+                )
+            pred_dist = pred_mass / pred_mass.sum().clamp(min=eps)
+            target_detached = target_dist.detach()
+
+            if loss_type == "l1":
+                losses.append((pred_dist - target_detached).abs().sum())
+            elif loss_type == "mse":
+                losses.append((pred_dist - target_detached).pow(2).sum())
+            elif loss_type == "kl":
+                losses.append(
+                    (
+                        target_detached
+                        * ((target_detached + eps).log() - (pred_dist + eps).log())
+                    ).sum()
+                )
+            else:
+                mix = 0.5 * (pred_dist + target_detached)
+                losses.append(
+                    0.5
+                    * (
+                        (
+                            target_detached
+                            * ((target_detached + eps).log() - (mix + eps).log())
+                        ).sum()
+                        + (
+                            pred_dist
+                            * ((pred_dist + eps).log() - (mix + eps).log())
+                        ).sum()
+                    )
+                )
+
+        if not losses:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_families": 0.0}
+        return torch.stack(losses).mean(), {"active_families": float(len(losses))}
+
+    def _compute_low_degree_closure_coverage_loss(self, pred, clean_data, true_data):
+        """Match low-degree closed-node coverage by node type and clean degree.
+
+        For each node, query-edge probabilities are accumulated through clean
+        common-neighbor incidence into expected closure mass. We convert that
+        mass into a soft probability that the node has at least one closed
+        wedge, and match both node-wise coverage and group-level closed-node
+        fraction for low-degree node-type x degree groups.
+        """
+        pred_edge = pred.edge_attr
+        edge_index = pred.edge_index
+        target = true_data.edge_attr
+        if (
+            pred_edge.numel() == 0
+            or edge_index.numel() == 0
+            or target.numel() == 0
+            or not self.heterogeneous
+        ):
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_groups": 0.0}
+
+        num_nodes = int(clean_data.x.shape[0])
+        device = pred_edge.device
+        dtype = pred_edge.dtype
+        node_type_ids = self._clean_node_type_ids(clean_data.x, device)
+        if node_type_ids is None or int(node_type_ids.numel()) != num_nodes:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_groups": 0.0}
+
+        full_edge_index = getattr(clean_data, "edge_index", None)
+        full_edge_attr = getattr(clean_data, "edge_attr", None)
+        if full_edge_index is None or full_edge_index.numel() == 0:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_groups": 0.0}
+        src_full = full_edge_index[0].long().to(device)
+        dst_full = full_edge_index[1].long().to(device)
+        if full_edge_attr is not None and full_edge_attr.numel() > 0:
+            if full_edge_attr.dim() > 1:
+                full_labels = full_edge_attr.argmax(dim=-1).to(device)
+            else:
+                full_labels = full_edge_attr.long().to(device)
+            full_pos = full_labels.reshape(-1) > 0
+            src_full = src_full[full_pos]
+            dst_full = dst_full[full_pos]
+        valid_full = (
+            (src_full >= 0)
+            & (src_full < num_nodes)
+            & (dst_full >= 0)
+            & (dst_full < num_nodes)
+            & (src_full != dst_full)
+        )
+        src_full = src_full[valid_full]
+        dst_full = dst_full[valid_full]
+        if src_full.numel() == 0:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_groups": 0.0}
+
+        adj = torch.zeros((num_nodes, num_nodes), dtype=torch.bool, device=device)
+        adj[src_full, dst_full] = True
+        adj[dst_full, src_full] = True
+        degree = adj.sum(dim=-1).long()
+
+        if target.dim() > 1:
+            target = target.argmax(dim=-1)
+        target_exist = (target.reshape(-1).long().to(device) > 0).to(dtype=dtype)
+        logits = pred_edge.reshape(-1, pred_edge.shape[-1])
+        pred_exist = (1.0 - torch.softmax(logits, dim=-1)[:, 0]).clamp(
+            min=0.0,
+            max=1.0,
+        )
+
+        q_src = edge_index[0].long().to(device)
+        q_dst = edge_index[1].long().to(device)
+        valid_q = (
+            (q_src >= 0)
+            & (q_src < num_nodes)
+            & (q_dst >= 0)
+            & (q_dst < num_nodes)
+            & (q_src != q_dst)
+        )
+        valid_idx = valid_q.nonzero(as_tuple=False).reshape(-1)
+        if valid_idx.numel() == 0:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_groups": 0.0}
+
+        pred_node = pred_edge.new_zeros(num_nodes)
+        target_node = pred_edge.new_zeros(num_nodes)
+        chunk_size = int(
+            getattr(self.cfg.model, "low_degree_closure_chunk_size", 4096) or 4096
+        )
+        chunk_size = max(1, chunk_size)
+        common_cap = float(
+            getattr(self.cfg.model, "low_degree_closure_common_cap", 0.0) or 0.0
+        )
+        include_endpoints = bool(
+            getattr(self.cfg.model, "low_degree_closure_include_endpoints", False)
+        )
+        for start in range(0, int(valid_idx.numel()), chunk_size):
+            idx = valid_idx[start : start + chunk_size]
+            common = adj[q_src[idx]] & adj[q_dst[idx]]
+            if common_cap > 0:
+                common_weight = common.to(dtype=dtype)
+                common_sum = common_weight.sum(dim=-1, keepdim=True).clamp(min=1.0)
+                scale = (common_cap / common_sum).clamp(max=1.0)
+                common_weight = common_weight * scale
+            else:
+                common_weight = common.to(dtype=dtype)
+            if include_endpoints:
+                endpoint_common = common_weight.sum(dim=-1)
+                target_endpoint = target_exist[idx] * endpoint_common.detach()
+                target_node.scatter_add_(0, q_src[idx], target_endpoint)
+                target_node.scatter_add_(0, q_dst[idx], target_endpoint)
+            target_weight = common_weight.detach().clone()
+            target_weight.mul_(target_exist[idx].unsqueeze(-1))
+            target_node = target_node + target_weight.sum(dim=0)
+            common_weight.mul_(pred_exist[idx].unsqueeze(-1))
+            pred_node = pred_node + common_weight.sum(dim=0)
+            if include_endpoints:
+                pred_endpoint = pred_exist[idx] * endpoint_common
+                pred_node.scatter_add_(0, q_src[idx], pred_endpoint)
+                pred_node.scatter_add_(0, q_dst[idx], pred_endpoint)
+
+        max_degree = int(
+            getattr(self.cfg.model, "low_degree_closure_max_degree", 3) or 3
+        )
+        degree_cap = int(
+            getattr(self.cfg.model, "low_degree_closure_degree_cap", 0) or 0
+        )
+        if degree_cap <= 0:
+            degree_cap = max(1, max_degree)
+        role_mode = str(
+            getattr(self.cfg.model, "low_degree_closure_role_mode", "low_degree")
+            or "low_degree"
+        ).lower()
+        min_group_nodes = int(
+            getattr(self.cfg.model, "low_degree_closure_min_group_nodes", 4) or 0
+        )
+        min_target_closed = float(
+            getattr(self.cfg.model, "low_degree_closure_min_target_closed", 1.0)
+            or 0.0
+        )
+        threshold = float(
+            getattr(self.cfg.model, "low_degree_closure_target_threshold", 0.5)
+            or 0.5
+        )
+        saturation_scale = max(
+            1e-6,
+            float(getattr(self.cfg.model, "low_degree_closure_saturation_scale", 1.0) or 1.0),
+        )
+        fraction_weight = float(
+            getattr(self.cfg.model, "low_degree_closure_fraction_weight", 1.0) or 0.0
+        )
+        bce_weight = float(
+            getattr(self.cfg.model, "low_degree_closure_bce_weight", 1.0) or 0.0
+        )
+        eps = max(1e-6, float(torch.finfo(dtype).eps) * 16.0)
+        pred_closed = (1.0 - torch.exp(-pred_node.clamp(min=0.0) / saturation_scale)).clamp(
+            min=eps,
+            max=1.0 - eps,
+        )
+        target_closed = (target_node.detach() > threshold).to(dtype=dtype)
+        group_id = node_type_ids * int(degree_cap + 1) + degree.clamp(
+            min=0,
+            max=degree_cap,
+        )
+        valid_node = node_type_ids >= 0
+        low_node = degree <= max_degree
+        target_node_role = target_closed > 0
+        if role_mode == "all":
+            pass
+        elif role_mode == "target":
+            valid_node = valid_node & target_node_role
+        elif role_mode == "adaptive":
+            valid_node = valid_node & (low_node | target_node_role)
+        else:
+            valid_node = valid_node & low_node
+
+        losses = []
+        active_groups = 0
+        for gid in torch.unique(group_id[valid_node]):
+            mask = valid_node & (group_id == gid)
+            n = int(mask.sum().item())
+            if n < min_group_nodes:
+                continue
+            target_vec = target_closed[mask]
+            if float(target_vec.sum().detach().cpu()) < min_target_closed:
+                continue
+            pred_vec = pred_closed[mask]
+            group_loss = pred_vec.sum() * 0.0
+            if bce_weight > 0:
+                pred_vec = pred_vec.clamp(min=eps, max=1.0 - eps)
+                bce = -(
+                    target_vec * pred_vec.log()
+                    + (1.0 - target_vec) * (1.0 - pred_vec).log()
+                ).mean()
+                group_loss = group_loss + bce_weight * bce
+            if fraction_weight > 0:
+                group_loss = group_loss + fraction_weight * (
+                    pred_vec.mean() - target_vec.mean().detach()
+                ).abs()
+            losses.append(group_loss)
+            active_groups += 1
+
+        if not losses:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_groups": 0.0}
+        return torch.stack(losses).mean(), {"active_groups": float(active_groups)}
+
+    def _compute_degree_role_distribution_loss(self, pred, clean_data, true_data):
+        """Match endpoint mass over node-type x clean-degree roles.
+
+        This is intentionally lighter than node-closure losses: it only asks
+        whether the predicted clean edges place their endpoint degree mass into
+        the same typed clean-degree buckets as the target query edges. It helps
+        avoid the shortcut where the right edge count is achieved by assigning
+        too many edges to a small set of high-degree nodes.
+        """
+        pred_edge = pred.edge_attr
+        edge_index = pred.edge_index
+        target = true_data.edge_attr
+        if (
+            pred_edge.numel() == 0
+            or edge_index.numel() == 0
+            or target.numel() == 0
+            or not self.heterogeneous
+        ):
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_groups": 0.0}
+
+        num_nodes = int(clean_data.x.shape[0])
+        device = pred_edge.device
+        dtype = pred_edge.dtype
+        node_type_ids = self._clean_node_type_ids(clean_data.x, device)
+        if node_type_ids is None or int(node_type_ids.numel()) != num_nodes:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_groups": 0.0}
+
+        full_edge_index = getattr(clean_data, "edge_index", None)
+        full_edge_attr = getattr(clean_data, "edge_attr", None)
+        if full_edge_index is None or full_edge_index.numel() == 0:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_groups": 0.0}
+        src_full = full_edge_index[0].long().to(device)
+        dst_full = full_edge_index[1].long().to(device)
+        if full_edge_attr is not None and full_edge_attr.numel() > 0:
+            if full_edge_attr.dim() > 1:
+                full_labels = full_edge_attr.argmax(dim=-1).to(device)
+            else:
+                full_labels = full_edge_attr.long().to(device)
+            full_pos = full_labels.reshape(-1) > 0
+            src_full = src_full[full_pos]
+            dst_full = dst_full[full_pos]
+        valid_full = (
+            (src_full >= 0)
+            & (src_full < num_nodes)
+            & (dst_full >= 0)
+            & (dst_full < num_nodes)
+            & (src_full != dst_full)
+        )
+        src_full = src_full[valid_full]
+        dst_full = dst_full[valid_full]
+        if src_full.numel() == 0:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_groups": 0.0}
+
+        degree = pred_edge.new_zeros(num_nodes)
+        degree.scatter_add_(0, src_full, torch.ones_like(src_full, dtype=dtype))
+        degree.scatter_add_(0, dst_full, torch.ones_like(dst_full, dtype=dtype))
+        degree_cap = max(
+            1,
+            int(getattr(self.cfg.model, "degree_role_dist_degree_cap", 8) or 8),
+        )
+        degree_bucket = degree.long().clamp(min=0, max=degree_cap)
+        valid_node = node_type_ids >= 0
+        num_types = int(node_type_ids[valid_node].max().item()) + 1 if valid_node.any() else 0
+        if num_types <= 0:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_groups": 0.0}
+        num_groups = int(num_types * (degree_cap + 1))
+        node_group = (node_type_ids * int(degree_cap + 1) + degree_bucket).long()
+
+        if target.dim() > 1:
+            target = target.argmax(dim=-1)
+        target_exist = (target.reshape(-1).long().to(device) > 0).to(dtype=dtype)
+        logits = pred_edge.reshape(-1, pred_edge.shape[-1])
+        pred_exist = (1.0 - torch.softmax(logits, dim=-1)[:, 0]).clamp(
+            min=0.0,
+            max=1.0,
+        )
+        q_src = edge_index[0].long().to(device)
+        q_dst = edge_index[1].long().to(device)
+        valid_q = (
+            (q_src >= 0)
+            & (q_src < num_nodes)
+            & (q_dst >= 0)
+            & (q_dst < num_nodes)
+            & (q_src != q_dst)
+        )
+        if not valid_q.any():
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_groups": 0.0}
+        q_src = q_src[valid_q]
+        q_dst = q_dst[valid_q]
+        pred_exist = pred_exist[valid_q]
+        target_exist = target_exist[valid_q]
+
+        pred_mass = pred_edge.new_zeros(num_groups)
+        target_mass = pred_edge.new_zeros(num_groups)
+        src_group = node_group[q_src].clamp(min=0, max=num_groups - 1)
+        dst_group = node_group[q_dst].clamp(min=0, max=num_groups - 1)
+        pred_mass.scatter_add_(0, src_group, pred_exist)
+        pred_mass.scatter_add_(0, dst_group, pred_exist)
+        target_mass.scatter_add_(0, src_group, target_exist)
+        target_mass.scatter_add_(0, dst_group, target_exist)
+
+        eps = 1e-8
+        min_target = float(
+            getattr(self.cfg.model, "degree_role_dist_min_target_mass", 1.0) or 0.0
+        )
+        if target_mass.sum() <= max(min_target, eps) or pred_mass.sum() <= eps:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_groups": 0.0}
+        available = target_mass > 0
+        if not available.any():
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_groups": 0.0}
+        pred_dist = pred_mass / pred_mass.sum().clamp(min=eps)
+        target_dist = target_mass / target_mass.sum().clamp(min=eps)
+        smoothing = float(
+            getattr(self.cfg.model, "degree_role_dist_target_smoothing", 0.0) or 0.0
+        )
+        smoothing = max(0.0, min(1.0, smoothing))
+        if smoothing > 0:
+            smooth = available.to(dtype=dtype)
+            smooth = smooth / smooth.sum().clamp(min=1.0)
+            target_dist = (1.0 - smoothing) * target_dist + smoothing * smooth
+        target_detached = target_dist.detach()
+        loss_type = str(
+            getattr(self.cfg.model, "degree_role_dist_loss_type", "js") or "js"
+        ).lower()
+        if loss_type == "l1":
+            loss = (pred_dist - target_detached).abs().sum()
+        elif loss_type == "mse":
+            loss = (pred_dist - target_detached).pow(2).sum()
+        elif loss_type == "kl":
+            loss = (
+                target_detached
+                * ((target_detached + eps).log() - (pred_dist + eps).log())
+            ).sum()
+        else:
+            mix = 0.5 * (pred_dist + target_detached)
+            loss = 0.5 * (
+                (target_detached * ((target_detached + eps).log() - (mix + eps).log())).sum()
+                + (pred_dist * ((pred_dist + eps).log() - (mix + eps).log())).sum()
+            )
+        return loss, {"active_groups": float(available.sum().item())}
+
+    def _compute_closure_anti_concentration_loss(self, pred, clean_data, true_data):
+        """Penalize top-heavy node-centered closure mass.
+
+        The target graph may distribute triangle participation across many
+        low-degree nodes. This loss compares top-k closure-mass fractions within
+        node-type x clean-degree groups and only penalizes predicted
+        concentration above the clean target fraction, with a small slack.
+        """
+        pred_edge = pred.edge_attr
+        edge_index = pred.edge_index
+        target = true_data.edge_attr
+        if (
+            pred_edge.numel() == 0
+            or edge_index.numel() == 0
+            or target.numel() == 0
+            or not self.heterogeneous
+        ):
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_groups": 0.0}
+
+        num_nodes = int(clean_data.x.shape[0])
+        device = pred_edge.device
+        dtype = pred_edge.dtype
+        node_type_ids = self._clean_node_type_ids(clean_data.x, device)
+        if node_type_ids is None or int(node_type_ids.numel()) != num_nodes:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_groups": 0.0}
+
+        full_edge_index = getattr(clean_data, "edge_index", None)
+        full_edge_attr = getattr(clean_data, "edge_attr", None)
+        if full_edge_index is None or full_edge_index.numel() == 0:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_groups": 0.0}
+        src_full = full_edge_index[0].long().to(device)
+        dst_full = full_edge_index[1].long().to(device)
+        if full_edge_attr is not None and full_edge_attr.numel() > 0:
+            if full_edge_attr.dim() > 1:
+                full_labels = full_edge_attr.argmax(dim=-1).to(device)
+            else:
+                full_labels = full_edge_attr.long().to(device)
+            full_pos = full_labels.reshape(-1) > 0
+            src_full = src_full[full_pos]
+            dst_full = dst_full[full_pos]
+        valid_full = (
+            (src_full >= 0)
+            & (src_full < num_nodes)
+            & (dst_full >= 0)
+            & (dst_full < num_nodes)
+            & (src_full != dst_full)
+        )
+        src_full = src_full[valid_full]
+        dst_full = dst_full[valid_full]
+        if src_full.numel() == 0:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_groups": 0.0}
+
+        adj = torch.zeros((num_nodes, num_nodes), dtype=torch.bool, device=device)
+        adj[src_full, dst_full] = True
+        adj[dst_full, src_full] = True
+        degree = adj.sum(dim=-1).long()
+
+        if target.dim() > 1:
+            target = target.argmax(dim=-1)
+        target_exist = (target.reshape(-1).long().to(device) > 0).to(dtype=dtype)
+        logits = pred_edge.reshape(-1, pred_edge.shape[-1])
+        pred_exist = (1.0 - torch.softmax(logits, dim=-1)[:, 0]).clamp(
+            min=0.0,
+            max=1.0,
+        )
+
+        q_src = edge_index[0].long().to(device)
+        q_dst = edge_index[1].long().to(device)
+        valid_q = (
+            (q_src >= 0)
+            & (q_src < num_nodes)
+            & (q_dst >= 0)
+            & (q_dst < num_nodes)
+            & (q_src != q_dst)
+        )
+        valid_idx = valid_q.nonzero(as_tuple=False).reshape(-1)
+        if valid_idx.numel() == 0:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_groups": 0.0}
+
+        pred_node = pred_edge.new_zeros(num_nodes)
+        target_node = pred_edge.new_zeros(num_nodes)
+        chunk_size = int(
+            getattr(self.cfg.model, "closure_anti_concentration_chunk_size", 4096)
+            or 4096
+        )
+        chunk_size = max(1, chunk_size)
+        common_cap = float(
+            getattr(self.cfg.model, "closure_anti_concentration_common_cap", 0.0)
+            or 0.0
+        )
+        include_endpoints = bool(
+            getattr(
+                self.cfg.model,
+                "closure_anti_concentration_include_endpoints",
+                False,
+            )
+        )
+        for start in range(0, int(valid_idx.numel()), chunk_size):
+            idx = valid_idx[start : start + chunk_size]
+            common = adj[q_src[idx]] & adj[q_dst[idx]]
+            if common_cap > 0:
+                common_weight = common.to(dtype=dtype)
+                common_sum = common_weight.sum(dim=-1, keepdim=True).clamp(min=1.0)
+                scale = (common_cap / common_sum).clamp(max=1.0)
+                common_weight = common_weight * scale
+            else:
+                common_weight = common.to(dtype=dtype)
+            pred_node = pred_node + (
+                common_weight * pred_exist[idx].unsqueeze(-1)
+            ).sum(dim=0)
+            target_node = target_node + (
+                common_weight.detach() * target_exist[idx].unsqueeze(-1)
+            ).sum(dim=0)
+            if include_endpoints:
+                endpoint_common = common_weight.sum(dim=-1)
+                pred_endpoint = pred_exist[idx] * endpoint_common
+                target_endpoint = target_exist[idx] * endpoint_common.detach()
+                pred_node.scatter_add_(0, q_src[idx], pred_endpoint)
+                pred_node.scatter_add_(0, q_dst[idx], pred_endpoint)
+                target_node.scatter_add_(0, q_src[idx], target_endpoint)
+                target_node.scatter_add_(0, q_dst[idx], target_endpoint)
+
+        degree_cap = max(
+            1,
+            int(
+                getattr(
+                    self.cfg.model,
+                    "closure_anti_concentration_degree_cap",
+                    8,
+                )
+                or 8
+            ),
+        )
+        max_degree = int(
+            getattr(self.cfg.model, "closure_anti_concentration_max_degree", 0)
+            or 0
+        )
+        degree_bucket = degree.clamp(min=0, max=degree_cap)
+        group_id = node_type_ids * int(degree_cap + 1) + degree_bucket
+        valid_node = node_type_ids >= 0
+        if max_degree > 0:
+            valid_node = valid_node & (degree <= max_degree)
+
+        top_frac = float(
+            getattr(self.cfg.model, "closure_anti_concentration_top_frac", 0.05)
+            or 0.05
+        )
+        top_frac = max(0.0, min(1.0, top_frac))
+        slack = float(
+            getattr(self.cfg.model, "closure_anti_concentration_slack", 1.05)
+            or 1.0
+        )
+        min_nodes = int(
+            getattr(self.cfg.model, "closure_anti_concentration_min_group_nodes", 8)
+            or 0
+        )
+        min_target = float(
+            getattr(self.cfg.model, "closure_anti_concentration_min_target_mass", 1.0)
+            or 0.0
+        )
+        eps = 1e-8
+        losses = []
+        active_groups = 0
+        for gid in torch.unique(group_id[valid_node]):
+            mask = valid_node & (group_id == gid)
+            n = int(mask.sum().item())
+            if n < min_nodes:
+                continue
+            pred_vec = pred_node[mask]
+            target_vec = target_node[mask].detach()
+            pred_sum = pred_vec.sum()
+            target_sum = target_vec.sum()
+            if pred_sum <= eps or target_sum <= max(min_target, eps):
+                continue
+            k = max(1, min(n, int(math.ceil(float(n) * top_frac))))
+            pred_top = torch.topk(pred_vec, k=k, largest=True).values.sum()
+            target_top = torch.topk(target_vec, k=k, largest=True).values.sum()
+            pred_frac = pred_top / pred_sum.clamp(min=eps)
+            target_frac = target_top / target_sum.clamp(min=eps)
+            losses.append(F.relu(pred_frac - slack * target_frac.detach()))
+            active_groups += 1
+
+        if not losses:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_groups": 0.0}
+        return torch.stack(losses).mean(), {"active_groups": float(active_groups)}
+
+    def _clean_common_neighbor_scores(
+        self,
+        edge_index,
+        full_data,
+        num_nodes,
+        device,
+        dtype,
+        chunk_size_attr="closure_rank_common_neighbor_chunk_size",
+    ):
         full_edge_index = getattr(full_data, "edge_index", None)
         full_edge_attr = getattr(full_data, "edge_attr", None)
         if full_edge_index is None or full_edge_index.numel() == 0 or edge_index.numel() == 0:
@@ -7149,7 +13341,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             chunk_size = int(
                 getattr(
                     self.cfg.model,
-                    "closure_rank_common_neighbor_chunk_size",
+                    str(chunk_size_attr or "closure_rank_common_neighbor_chunk_size"),
                     65536,
                 )
                 or 65536
@@ -7245,6 +13437,503 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         return torch.stack(losses).mean(), {
             "active_families": float(len(losses)),
             "pairs": float(pair_total),
+        }
+
+    def _compute_structure_utility_ranking_loss(self, pred, clean_data, true_data, num_nodes):
+        """Rank candidates by their clean-context structural utility under family exact-K quotas.
+
+        The utility is intentionally structural rather than edge-identity based:
+        clean common-neighbor support is the main signal, low-degree closure can
+        be boosted, and high-degree concentration can optionally be penalized.
+        For each relation family, K is the number of clean positives in the
+        current query set, matching the quota used by sampling-time exact-K.
+        """
+        pred_edge = pred.edge_attr
+        edge_index = pred.edge_index
+        if pred_edge.numel() == 0 or edge_index.numel() == 0 or not self.heterogeneous:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_families": 0.0, "pairs": 0.0}
+
+        query_family, target_exist = self._query_family_and_target_exist(
+            pred, true_data, clean_data
+        )
+        if query_family is None or query_family.numel() != pred_edge.shape[0]:
+            _node_type_ids, query_family = self._infer_query_family_from_clean_node_types(
+                edge_index.long(),
+                clean_data.x,
+            )
+        if query_family is None or query_family.numel() != pred_edge.shape[0]:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_families": 0.0, "pairs": 0.0}
+        if target_exist is None:
+            target = true_data.edge_attr
+            if target is None or target.numel() == 0:
+                zero = pred_edge.sum() * 0.0
+                return zero, {"active_families": 0.0, "pairs": 0.0}
+            if target.dim() > 1:
+                target = target.argmax(dim=-1)
+            target_exist = (target.reshape(-1).long().to(pred_edge.device) > 0).to(
+                dtype=pred_edge.dtype
+            )
+        else:
+            target_exist = target_exist.to(device=pred_edge.device, dtype=pred_edge.dtype).reshape(-1)
+
+        common = self._clean_common_neighbor_scores(
+            edge_index=edge_index.long(),
+            full_data=clean_data,
+            num_nodes=int(num_nodes),
+            device=pred_edge.device,
+            dtype=pred_edge.dtype,
+            chunk_size_attr="structure_utility_rank_common_neighbor_chunk_size",
+        )
+        if common is None:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_families": 0.0, "pairs": 0.0}
+        if bool(getattr(self.cfg.model, "structure_utility_rank_score_log1p", True)):
+            common_score = torch.log1p(common)
+        else:
+            common_score = common
+
+        full_edge_index = getattr(clean_data, "edge_index", None)
+        full_edge_attr = getattr(clean_data, "edge_attr", None)
+        if full_edge_index is None or full_edge_index.numel() == 0:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_families": 0.0, "pairs": 0.0}
+        src_full = full_edge_index[0].long().to(pred_edge.device)
+        dst_full = full_edge_index[1].long().to(pred_edge.device)
+        if full_edge_attr is not None and full_edge_attr.numel() > 0:
+            if full_edge_attr.dim() > 1:
+                full_labels = full_edge_attr.argmax(dim=-1).to(pred_edge.device)
+            else:
+                full_labels = full_edge_attr.long().to(pred_edge.device)
+            full_pos = full_labels.reshape(-1) > 0
+            src_full = src_full[full_pos]
+            dst_full = dst_full[full_pos]
+        valid_full = (
+            (src_full >= 0)
+            & (src_full < int(num_nodes))
+            & (dst_full >= 0)
+            & (dst_full < int(num_nodes))
+            & (src_full != dst_full)
+        )
+        src_full = src_full[valid_full]
+        dst_full = dst_full[valid_full]
+        degree = torch.zeros(int(num_nodes), dtype=pred_edge.dtype, device=pred_edge.device)
+        if src_full.numel() > 0:
+            one = torch.ones_like(src_full, dtype=pred_edge.dtype)
+            degree.scatter_add_(0, src_full, one)
+            degree.scatter_add_(0, dst_full, one)
+
+        q_src = edge_index[0].long().to(pred_edge.device)
+        q_dst = edge_index[1].long().to(pred_edge.device)
+        valid_q = (
+            (q_src >= 0)
+            & (q_src < int(num_nodes))
+            & (q_dst >= 0)
+            & (q_dst < int(num_nodes))
+            & (q_src != q_dst)
+        )
+        query_family = query_family.to(pred_edge.device).long().reshape(-1)
+        logits = pred_edge.reshape(-1, pred_edge.shape[-1])
+        exist_logits = torch.logsumexp(logits[:, 1:], dim=-1) - logits[:, 0]
+
+        common_w = float(
+            getattr(self.cfg.model, "structure_utility_rank_common_weight", 1.0) or 0.0
+        )
+        lowdeg_w = float(
+            getattr(self.cfg.model, "structure_utility_rank_low_degree_weight", 1.0) or 0.0
+        )
+        degree_penalty = float(
+            getattr(self.cfg.model, "structure_utility_rank_degree_penalty", 0.0) or 0.0
+        )
+        true_edge_w = float(
+            getattr(self.cfg.model, "structure_utility_rank_true_edge_weight", 0.0) or 0.0
+        )
+        low_degree_max = int(
+            getattr(self.cfg.model, "structure_utility_rank_low_degree_max", 3) or 3
+        )
+        utility = common_w * common_score
+        if lowdeg_w != 0.0:
+            low_endpoint = (
+                (degree[q_src.clamp(min=0, max=int(num_nodes) - 1)] <= float(low_degree_max))
+                | (degree[q_dst.clamp(min=0, max=int(num_nodes) - 1)] <= float(low_degree_max))
+            ).to(dtype=pred_edge.dtype)
+            utility = utility + lowdeg_w * low_endpoint * common_score
+        if degree_penalty != 0.0:
+            src_deg = degree[q_src.clamp(min=0, max=int(num_nodes) - 1)]
+            dst_deg = degree[q_dst.clamp(min=0, max=int(num_nodes) - 1)]
+            penalty = torch.log1p(src_deg) * torch.log1p(dst_deg)
+            utility = utility - degree_penalty * penalty
+        if true_edge_w != 0.0:
+            utility = utility + true_edge_w * target_exist
+
+        min_edges = int(
+            getattr(self.cfg.model, "structure_utility_rank_min_query_edges", 64) or 0
+        )
+        max_pairs = int(
+            getattr(self.cfg.model, "structure_utility_rank_pairs_per_family", 2048)
+            or 2048
+        )
+        bottom_q = max(
+            0.0,
+            min(
+                1.0,
+                float(
+                    getattr(self.cfg.model, "structure_utility_rank_bottom_quantile", 0.5)
+                    or 0.5
+                ),
+            ),
+        )
+        margin = float(
+            getattr(self.cfg.model, "structure_utility_rank_margin", 0.0) or 0.0
+        )
+        losses = []
+        pair_total = 0
+        for fam in torch.unique(query_family):
+            fam_mask = (query_family == fam) & valid_q
+            fam_n = int(fam_mask.sum().item())
+            if fam_n < min_edges:
+                continue
+            fam_target = target_exist[fam_mask]
+            k = int(fam_target.sum().detach().item())
+            if k <= 0 or k >= fam_n:
+                continue
+            fam_utility = utility[fam_mask]
+            fam_logits = exist_logits[fam_mask]
+            if not torch.isfinite(fam_utility).all():
+                continue
+            if float((fam_utility.max() - fam_utility.min()).detach().cpu()) <= 1e-8:
+                continue
+            good_idx = torch.topk(fam_utility.detach(), k=k, largest=True).indices
+            low_threshold = torch.quantile(fam_utility.detach().float(), bottom_q).to(
+                device=pred_edge.device,
+                dtype=pred_edge.dtype,
+            )
+            bad_idx = torch.where(fam_utility <= low_threshold)[0]
+            if good_idx.numel() == 0 or bad_idx.numel() == 0:
+                continue
+            pairs = min(max_pairs, int(good_idx.numel()), int(bad_idx.numel()))
+            if pairs <= 0:
+                continue
+            if good_idx.numel() > pairs:
+                good_idx = good_idx[
+                    torch.randperm(good_idx.numel(), device=pred_edge.device)[:pairs]
+                ]
+            if bad_idx.numel() > pairs:
+                bad_idx = bad_idx[
+                    torch.randperm(bad_idx.numel(), device=pred_edge.device)[:pairs]
+                ]
+            good_logits = fam_logits[good_idx]
+            bad_logits = fam_logits[bad_idx]
+            losses.append(F.softplus(margin - (good_logits - bad_logits)).mean())
+            pair_total += pairs
+        if not losses:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_families": 0.0, "pairs": 0.0}
+        return torch.stack(losses).mean(), {
+            "active_families": float(len(losses)),
+            "pairs": float(pair_total),
+        }
+
+    def _compute_node_role_coverage_ranking_loss(
+        self,
+        pred,
+        clean_data,
+        true_data,
+        num_nodes,
+    ):
+        """Rank candidates by node-role budget coverage gain.
+
+        This is the training-side counterpart of the sampling node-role budget
+        controller.  A candidate receives utility when adding it would cover
+        clean-graph node roles that still need degree or closure participation.
+        Unit-like closure roles are saturated as coverage, while high-count
+        closure roles use count gain.  The utility is detached and only guides
+        candidate existence logits through a pairwise ranking objective.
+        """
+        pred_edge = pred.edge_attr
+        edge_index = pred.edge_index
+        if pred_edge.numel() == 0 or edge_index.numel() == 0 or not self.heterogeneous:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_families": 0.0, "pairs": 0.0}
+
+        query_family, target_exist = self._query_family_and_target_exist(
+            pred, true_data, clean_data
+        )
+        if query_family is None or query_family.numel() != pred_edge.shape[0]:
+            _node_type_ids, query_family = self._infer_query_family_from_clean_node_types(
+                edge_index.long(),
+                clean_data.x,
+            )
+        if query_family is None or query_family.numel() != pred_edge.shape[0]:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_families": 0.0, "pairs": 0.0}
+        if target_exist is None:
+            target = true_data.edge_attr
+            if target is None or target.numel() == 0:
+                zero = pred_edge.sum() * 0.0
+                return zero, {"active_families": 0.0, "pairs": 0.0}
+            if target.dim() > 1:
+                target = target.argmax(dim=-1)
+            target_exist = (target.reshape(-1).long().to(pred_edge.device) > 0).to(
+                dtype=pred_edge.dtype
+            )
+        else:
+            target_exist = target_exist.to(
+                device=pred_edge.device,
+                dtype=pred_edge.dtype,
+            ).reshape(-1)
+
+        full_edge_index = getattr(clean_data, "edge_index", None)
+        full_edge_attr = getattr(clean_data, "edge_attr", None)
+        if full_edge_index is None or full_edge_index.numel() == 0:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_families": 0.0, "pairs": 0.0}
+        src_full = full_edge_index[0].long().to(pred_edge.device)
+        dst_full = full_edge_index[1].long().to(pred_edge.device)
+        if full_edge_attr is not None and full_edge_attr.numel() > 0:
+            if full_edge_attr.dim() > 1:
+                full_labels = full_edge_attr.argmax(dim=-1).to(pred_edge.device)
+            else:
+                full_labels = full_edge_attr.long().to(pred_edge.device)
+            full_pos = full_labels.reshape(-1) > 0
+            src_full = src_full[full_pos]
+            dst_full = dst_full[full_pos]
+        valid_full = (
+            (src_full >= 0)
+            & (src_full < int(num_nodes))
+            & (dst_full >= 0)
+            & (dst_full < int(num_nodes))
+            & (src_full != dst_full)
+        )
+        src_full = src_full[valid_full]
+        dst_full = dst_full[valid_full]
+        undirected_u = torch.minimum(src_full, dst_full)
+        undirected_v = torch.maximum(src_full, dst_full)
+        unique_key = undirected_u * int(num_nodes) + undirected_v
+        unique_key = torch.unique(unique_key, sorted=False)
+        src_full = torch.div(unique_key, int(num_nodes), rounding_mode="floor").long()
+        dst_full = (unique_key % int(num_nodes)).long()
+        if src_full.numel() == 0:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_families": 0.0, "pairs": 0.0}
+
+        device = pred_edge.device
+        dtype = pred_edge.dtype
+        adj = torch.zeros((int(num_nodes), int(num_nodes)), dtype=torch.bool, device=device)
+        adj[src_full, dst_full] = True
+        adj[dst_full, src_full] = True
+        degree = adj.sum(dim=-1).to(dtype=dtype)
+
+        tri_part = pred_edge.new_zeros(int(num_nodes))
+        full_valid_idx = torch.arange(src_full.numel(), device=device)
+        chunk_size = int(
+            getattr(
+                self.cfg.model,
+                "node_role_coverage_rank_common_neighbor_chunk_size",
+                getattr(self.cfg.model, "structure_utility_rank_common_neighbor_chunk_size", 65536),
+            )
+            or 65536
+        )
+        chunk_size = max(1, chunk_size)
+        for start in range(0, int(full_valid_idx.numel()), chunk_size):
+            idx = full_valid_idx[start : start + chunk_size]
+            common = adj[src_full[idx]] & adj[dst_full[idx]]
+            common_count = common.sum(dim=-1).to(dtype=dtype)
+            if common_count.sum() <= 0:
+                continue
+            tri_part.scatter_add_(0, src_full[idx], common_count)
+            tri_part.scatter_add_(0, dst_full[idx], common_count)
+            tri_part = tri_part + common.to(dtype=dtype).sum(dim=0)
+        tri_part = tri_part / 3.0
+
+        low_degree_max = int(
+            getattr(self.cfg.model, "node_role_coverage_rank_low_degree_max", 3) or 3
+        )
+        threshold = float(
+            getattr(self.cfg.model, "node_role_coverage_rank_closure_threshold", 0.5)
+            or 0.0
+        )
+        role_gate = str(
+            getattr(self.cfg.model, "node_role_coverage_rank_role_gate", "adaptive")
+            or "adaptive"
+        ).lower()
+        low_role = degree <= float(low_degree_max)
+        target_role = tri_part > float(threshold)
+        if role_gate == "all":
+            role_mask = torch.ones_like(low_role, dtype=torch.bool)
+        elif role_gate == "target":
+            role_mask = target_role
+        elif role_gate == "adaptive":
+            role_mask = low_role | target_role
+        else:
+            role_mask = low_role
+
+        closure_mode = str(
+            getattr(self.cfg.model, "node_role_coverage_rank_closure_mode", "adaptive")
+            or "adaptive"
+        ).lower()
+        unit_target_max = float(
+            getattr(
+                self.cfg.model,
+                "node_role_coverage_rank_closure_unit_target_max",
+                1.0,
+            )
+            or 1.0
+        )
+        unit_target = tri_part <= max(unit_target_max, threshold)
+        if closure_mode == "coverage":
+            coverage_node = role_mask & target_role
+            count_node = torch.zeros_like(role_mask, dtype=torch.bool)
+        elif closure_mode == "count":
+            coverage_node = torch.zeros_like(role_mask, dtype=torch.bool)
+            count_node = role_mask & target_role
+        else:
+            coverage_node = role_mask & target_role & unit_target
+            count_node = role_mask & target_role & (~unit_target)
+
+        degree_weight = float(
+            getattr(self.cfg.model, "node_role_coverage_rank_degree_weight", 0.25)
+            or 0.0
+        )
+        closure_weight = float(
+            getattr(self.cfg.model, "node_role_coverage_rank_closure_weight", 1.0)
+            or 0.0
+        )
+        degree_scale = max(
+            1e-6,
+            float(getattr(self.cfg.model, "node_role_coverage_rank_degree_scale", 4.0) or 4.0),
+        )
+        closure_scale = max(
+            1e-6,
+            float(getattr(self.cfg.model, "node_role_coverage_rank_closure_scale", 1.0) or 1.0),
+        )
+        coverage_gain = coverage_node.to(dtype=dtype) * closure_weight
+        count_gain = count_node.to(dtype=dtype) * (closure_weight / closure_scale)
+        degree_gain = (
+            role_mask.to(dtype=dtype)
+            * (degree / degree_scale).clamp(min=0.0, max=1.0)
+            * degree_weight
+        )
+
+        q_src = edge_index[0].long().to(device)
+        q_dst = edge_index[1].long().to(device)
+        valid_q = (
+            (q_src >= 0)
+            & (q_src < int(num_nodes))
+            & (q_dst >= 0)
+            & (q_dst < int(num_nodes))
+            & (q_src != q_dst)
+        )
+        valid_idx = valid_q.nonzero(as_tuple=False).reshape(-1)
+        if valid_idx.numel() == 0:
+            zero = pred_edge.sum() * 0.0
+            return zero, {"active_families": 0.0, "pairs": 0.0}
+
+        utility = pred_edge.new_zeros(pred_edge.shape[0])
+        common_cap = float(
+            getattr(self.cfg.model, "node_role_coverage_rank_common_cap", 2.0) or 0.0
+        )
+        include_endpoints = bool(
+            getattr(self.cfg.model, "node_role_coverage_rank_include_endpoints", True)
+        )
+        for start in range(0, int(valid_idx.numel()), chunk_size):
+            idx = valid_idx[start : start + chunk_size]
+            common = adj[q_src[idx]] & adj[q_dst[idx]]
+            if common_cap > 0:
+                common_weight = common.to(dtype=dtype)
+                common_sum = common_weight.sum(dim=-1, keepdim=True).clamp(min=1.0)
+                scale = (common_cap / common_sum).clamp(max=1.0)
+                common_weight = common_weight * scale
+            else:
+                common_weight = common.to(dtype=dtype)
+            center_score = common_weight.matmul((coverage_gain + count_gain).reshape(-1))
+            score = center_score
+            if include_endpoints:
+                endpoint_common = common_weight.sum(dim=-1)
+                active_endpoint = (endpoint_common > 0).to(dtype=dtype)
+                src = q_src[idx].clamp(min=0, max=int(num_nodes) - 1)
+                dst = q_dst[idx].clamp(min=0, max=int(num_nodes) - 1)
+                src_count = torch.minimum(endpoint_common, tri_part[src].clamp(min=0.0))
+                dst_count = torch.minimum(endpoint_common, tri_part[dst].clamp(min=0.0))
+                score = score + active_endpoint * (coverage_gain[src] + coverage_gain[dst])
+                score = score + src_count * count_gain[src] + dst_count * count_gain[dst]
+                score = score + degree_gain[src] + degree_gain[dst]
+            utility[idx] = score
+
+        query_family = query_family.to(device).long().reshape(-1)
+        logits = pred_edge.reshape(-1, pred_edge.shape[-1])
+        exist_logits = torch.logsumexp(logits[:, 1:], dim=-1) - logits[:, 0]
+        min_edges = int(
+            getattr(self.cfg.model, "node_role_coverage_rank_min_query_edges", 32) or 0
+        )
+        max_pairs = int(
+            getattr(self.cfg.model, "node_role_coverage_rank_pairs_per_family", 1024)
+            or 1024
+        )
+        bottom_q = max(
+            0.0,
+            min(
+                1.0,
+                float(
+                    getattr(self.cfg.model, "node_role_coverage_rank_bottom_quantile", 0.5)
+                    or 0.5
+                ),
+            ),
+        )
+        margin = float(
+            getattr(self.cfg.model, "node_role_coverage_rank_margin", 0.0) or 0.0
+        )
+        losses = []
+        pair_total = 0
+        active_utility_sum = 0.0
+        for fam in torch.unique(query_family):
+            fam_mask = (query_family == fam) & valid_q
+            fam_n = int(fam_mask.sum().item())
+            if fam_n < min_edges:
+                continue
+            fam_target = target_exist[fam_mask]
+            k = int(fam_target.sum().detach().item())
+            if k <= 0 or k >= fam_n:
+                continue
+            fam_utility = utility[fam_mask]
+            fam_logits = exist_logits[fam_mask]
+            if not torch.isfinite(fam_utility).all():
+                continue
+            if float((fam_utility.max() - fam_utility.min()).detach().cpu()) <= 1e-8:
+                continue
+            good_idx = torch.topk(fam_utility.detach(), k=k, largest=True).indices
+            low_threshold = torch.quantile(fam_utility.detach().float(), bottom_q).to(
+                device=device,
+                dtype=dtype,
+            )
+            bad_idx = torch.where(fam_utility <= low_threshold)[0]
+            if good_idx.numel() == 0 or bad_idx.numel() == 0:
+                continue
+            pairs = min(max_pairs, int(good_idx.numel()), int(bad_idx.numel()))
+            if pairs <= 0:
+                continue
+            if good_idx.numel() > pairs:
+                good_idx = good_idx[torch.randperm(good_idx.numel(), device=device)[:pairs]]
+            if bad_idx.numel() > pairs:
+                bad_idx = bad_idx[torch.randperm(bad_idx.numel(), device=device)[:pairs]]
+            good_logits = fam_logits[good_idx]
+            bad_logits = fam_logits[bad_idx]
+            losses.append(F.softplus(margin - (good_logits - bad_logits)).mean())
+            pair_total += pairs
+            active_utility_sum += float(fam_utility[good_idx].detach().mean().cpu())
+
+        if not losses:
+            zero = pred_edge.sum() * 0.0
+            return zero, {
+                "active_families": 0.0,
+                "pairs": 0.0,
+                "utility": 0.0,
+            }
+        return torch.stack(losses).mean(), {
+            "active_families": float(len(losses)),
+            "pairs": float(pair_total),
+            "utility": active_utility_sum / float(len(losses)),
         }
 
     def _compute_closure_positive_loss(self, pred, true_data, full_data, num_nodes):
@@ -7744,8 +14433,10 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             global_pred_edge_indices = []
             global_true_edges = []
             streaming_global_aux = None
+            block_inter_state = {}
             if step_mode == "accumulate_streaming_global":
                 streaming_stats = None
+                streaming_block_inter_state = {}
                 with torch.no_grad():
                     for block_id_t in block_order:
                         stat_out = self._training_step_once(
@@ -7754,6 +14445,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                             data_is_one_hot=True,
                             sparse_noisy_data_override=dict(sparse_noisy_data),
                             forced_block_id=int(block_id_t.item()),
+                            block_inter_state=streaming_block_inter_state,
                             skip_auxiliary_structure_losses=True,
                             return_query_outputs=True,
                             record_structure_probe=False,
@@ -7794,6 +14486,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                     data_is_one_hot=True,
                     sparse_noisy_data_override=dict(sparse_noisy_data),
                     forced_block_id=int(block_id_t.item()),
+                    block_inter_state=block_inter_state,
                     skip_auxiliary_structure_losses=(
                         step_mode in {"accumulate_global", "accumulate_streaming_global"}
                     ),
@@ -7978,6 +14671,195 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                             degree_pair_stats.get("active_families", 0.0)
                         )
 
+                    closure_bucket_w = self._warmup_weight(
+                        float(getattr(self.cfg.model, "closure_bucket_dist_loss_weight", 0.0) or 0.0),
+                        int(getattr(self.cfg.model, "closure_bucket_dist_loss_warmup_epochs", 0) or 0),
+                        self._auxiliary_time_factor(
+                            sparse_noisy_data,
+                            float(getattr(self.cfg.model, "closure_bucket_dist_loss_t_power", 0.0) or 0.0),
+                        ),
+                    )
+                    if closure_bucket_w > 0:
+                        loss_closure_bucket, closure_bucket_stats = self._compute_closure_bucket_distribution_loss(
+                            pred_global, data_one_hot, true_global
+                        )
+                        global_loss = global_loss + closure_bucket_w * loss_closure_bucket
+                        if not hasattr(self, "_epoch_closure_bucket_dist_loss_sum"):
+                            self._epoch_closure_bucket_dist_loss_sum = 0.0
+                            self._epoch_closure_bucket_dist_loss_count = 0
+                            self._epoch_closure_bucket_dist_weighted_sum = 0.0
+                            self._epoch_closure_bucket_dist_active_sum = 0.0
+                        self._epoch_closure_bucket_dist_loss_sum += float(loss_closure_bucket.detach().cpu())
+                        self._epoch_closure_bucket_dist_loss_count += 1
+                        self._epoch_closure_bucket_dist_weighted_sum += float(
+                            (closure_bucket_w * loss_closure_bucket).detach().cpu()
+                        )
+                        self._epoch_closure_bucket_dist_active_sum += float(
+                            closure_bucket_stats.get("active_families", 0.0)
+                        )
+
+                    node_closure_w = self._warmup_weight(
+                        float(getattr(self.cfg.model, "node_closure_dist_loss_weight", 0.0) or 0.0),
+                        int(getattr(self.cfg.model, "node_closure_dist_loss_warmup_epochs", 0) or 0),
+                        self._auxiliary_time_factor(
+                            sparse_noisy_data,
+                            float(getattr(self.cfg.model, "node_closure_dist_loss_t_power", 0.0) or 0.0),
+                        ),
+                    )
+                    if node_closure_w > 0:
+                        loss_node_closure, node_closure_stats = self._compute_node_closure_distribution_loss(
+                            pred_global, data_one_hot, true_global
+                        )
+                        global_loss = global_loss + node_closure_w * loss_node_closure
+                        if not hasattr(self, "_epoch_node_closure_dist_loss_sum"):
+                            self._epoch_node_closure_dist_loss_sum = 0.0
+                            self._epoch_node_closure_dist_loss_count = 0
+                            self._epoch_node_closure_dist_weighted_sum = 0.0
+                            self._epoch_node_closure_dist_active_sum = 0.0
+                        self._epoch_node_closure_dist_loss_sum += float(loss_node_closure.detach().cpu())
+                        self._epoch_node_closure_dist_loss_count += 1
+                        self._epoch_node_closure_dist_weighted_sum += float(
+                            (node_closure_w * loss_node_closure).detach().cpu()
+                        )
+                        self._epoch_node_closure_dist_active_sum += float(
+                            node_closure_stats.get("active_groups", 0.0)
+                        )
+
+                    edge_support_w = self._warmup_weight(
+                        float(getattr(self.cfg.model, "edge_support_dist_loss_weight", 0.0) or 0.0),
+                        int(getattr(self.cfg.model, "edge_support_dist_loss_warmup_epochs", 0) or 0),
+                        self._auxiliary_time_factor(
+                            sparse_noisy_data,
+                            float(getattr(self.cfg.model, "edge_support_dist_loss_t_power", 0.0) or 0.0),
+                        ),
+                    )
+                    if edge_support_w > 0:
+                        loss_edge_support, edge_support_stats = self._compute_edge_support_distribution_loss(
+                            pred_global, data_one_hot, true_global
+                        )
+                        global_loss = global_loss + edge_support_w * loss_edge_support
+                        if not hasattr(self, "_epoch_edge_support_dist_loss_sum"):
+                            self._epoch_edge_support_dist_loss_sum = 0.0
+                            self._epoch_edge_support_dist_loss_count = 0
+                            self._epoch_edge_support_dist_weighted_sum = 0.0
+                            self._epoch_edge_support_dist_active_sum = 0.0
+                        self._epoch_edge_support_dist_loss_sum += float(loss_edge_support.detach().cpu())
+                        self._epoch_edge_support_dist_loss_count += 1
+                        self._epoch_edge_support_dist_weighted_sum += float(
+                            (edge_support_w * loss_edge_support).detach().cpu()
+                        )
+                        self._epoch_edge_support_dist_active_sum += float(
+                            edge_support_stats.get("active_families", 0.0)
+                        )
+
+                    low_degree_closure_w = self._warmup_weight(
+                        float(getattr(self.cfg.model, "low_degree_closure_loss_weight", 0.0) or 0.0),
+                        int(getattr(self.cfg.model, "low_degree_closure_loss_warmup_epochs", 0) or 0),
+                        self._auxiliary_time_factor(
+                            sparse_noisy_data,
+                            float(getattr(self.cfg.model, "low_degree_closure_loss_t_power", 0.0) or 0.0),
+                        ),
+                    )
+                    if low_degree_closure_w > 0:
+                        loss_low_degree_closure, low_degree_closure_stats = self._compute_low_degree_closure_coverage_loss(
+                            pred_global, data_one_hot, true_global
+                        )
+                        global_loss = global_loss + low_degree_closure_w * loss_low_degree_closure
+                        if not hasattr(self, "_epoch_low_degree_closure_loss_sum"):
+                            self._epoch_low_degree_closure_loss_sum = 0.0
+                            self._epoch_low_degree_closure_loss_count = 0
+                            self._epoch_low_degree_closure_weighted_sum = 0.0
+                            self._epoch_low_degree_closure_active_sum = 0.0
+                        self._epoch_low_degree_closure_loss_sum += float(loss_low_degree_closure.detach().cpu())
+                        self._epoch_low_degree_closure_loss_count += 1
+                        self._epoch_low_degree_closure_weighted_sum += float(
+                            (low_degree_closure_w * loss_low_degree_closure).detach().cpu()
+                        )
+                        self._epoch_low_degree_closure_active_sum += float(
+                            low_degree_closure_stats.get("active_groups", 0.0)
+                        )
+
+                    degree_role_w = self._warmup_weight(
+                        float(getattr(self.cfg.model, "degree_role_dist_loss_weight", 0.0) or 0.0),
+                        int(getattr(self.cfg.model, "degree_role_dist_loss_warmup_epochs", 0) or 0),
+                        self._auxiliary_time_factor(
+                            sparse_noisy_data,
+                            float(getattr(self.cfg.model, "degree_role_dist_loss_t_power", 0.0) or 0.0),
+                        ),
+                    )
+                    if degree_role_w > 0:
+                        loss_degree_role, degree_role_stats = self._compute_degree_role_distribution_loss(
+                            pred_global, data_one_hot, true_global
+                        )
+                        global_loss = global_loss + degree_role_w * loss_degree_role
+                        if not hasattr(self, "_epoch_degree_role_dist_loss_sum"):
+                            self._epoch_degree_role_dist_loss_sum = 0.0
+                            self._epoch_degree_role_dist_loss_count = 0
+                            self._epoch_degree_role_dist_weighted_sum = 0.0
+                            self._epoch_degree_role_dist_active_sum = 0.0
+                        self._epoch_degree_role_dist_loss_sum += float(loss_degree_role.detach().cpu())
+                        self._epoch_degree_role_dist_loss_count += 1
+                        self._epoch_degree_role_dist_weighted_sum += float(
+                            (degree_role_w * loss_degree_role).detach().cpu()
+                        )
+                        self._epoch_degree_role_dist_active_sum += float(
+                            degree_role_stats.get("active_groups", 0.0)
+                        )
+
+                    closure_anti_w = self._warmup_weight(
+                        float(getattr(self.cfg.model, "closure_anti_concentration_loss_weight", 0.0) or 0.0),
+                        int(getattr(self.cfg.model, "closure_anti_concentration_loss_warmup_epochs", 0) or 0),
+                        self._auxiliary_time_factor(
+                            sparse_noisy_data,
+                            float(getattr(self.cfg.model, "closure_anti_concentration_loss_t_power", 0.0) or 0.0),
+                        ),
+                    )
+                    if closure_anti_w > 0:
+                        loss_closure_anti, closure_anti_stats = self._compute_closure_anti_concentration_loss(
+                            pred_global, data_one_hot, true_global
+                        )
+                        global_loss = global_loss + closure_anti_w * loss_closure_anti
+                        if not hasattr(self, "_epoch_closure_anti_concentration_loss_sum"):
+                            self._epoch_closure_anti_concentration_loss_sum = 0.0
+                            self._epoch_closure_anti_concentration_loss_count = 0
+                            self._epoch_closure_anti_concentration_weighted_sum = 0.0
+                            self._epoch_closure_anti_concentration_active_sum = 0.0
+                        self._epoch_closure_anti_concentration_loss_sum += float(loss_closure_anti.detach().cpu())
+                        self._epoch_closure_anti_concentration_loss_count += 1
+                        self._epoch_closure_anti_concentration_weighted_sum += float(
+                            (closure_anti_w * loss_closure_anti).detach().cpu()
+                        )
+                        self._epoch_closure_anti_concentration_active_sum += float(
+                            closure_anti_stats.get("active_groups", 0.0)
+                        )
+
+                    typed_signature_w = self._warmup_weight(
+                        float(getattr(self.cfg.model, "typed_rooted_signature_loss_weight", 0.0) or 0.0),
+                        int(getattr(self.cfg.model, "typed_rooted_signature_loss_warmup_epochs", 0) or 0),
+                        self._auxiliary_time_factor(
+                            sparse_noisy_data,
+                            float(getattr(self.cfg.model, "typed_rooted_signature_loss_t_power", 0.0) or 0.0),
+                        ),
+                    )
+                    if typed_signature_w > 0:
+                        loss_typed_signature, typed_signature_stats = self._compute_typed_rooted_signature_loss(
+                            pred_global, data_one_hot, true_global
+                        )
+                        global_loss = global_loss + typed_signature_w * loss_typed_signature
+                        if not hasattr(self, "_epoch_typed_rooted_signature_loss_sum"):
+                            self._epoch_typed_rooted_signature_loss_sum = 0.0
+                            self._epoch_typed_rooted_signature_loss_count = 0
+                            self._epoch_typed_rooted_signature_weighted_sum = 0.0
+                            self._epoch_typed_rooted_signature_active_sum = 0.0
+                        self._epoch_typed_rooted_signature_loss_sum += float(loss_typed_signature.detach().cpu())
+                        self._epoch_typed_rooted_signature_loss_count += 1
+                        self._epoch_typed_rooted_signature_weighted_sum += float(
+                            (typed_signature_w * loss_typed_signature).detach().cpu()
+                        )
+                        self._epoch_typed_rooted_signature_active_sum += float(
+                            typed_signature_stats.get("active_terms", 0.0)
+                        )
+
                     closure_rank_w = self._warmup_weight(
                         float(getattr(self.cfg.model, "closure_rank_loss_weight", 0.0) or 0.0),
                         int(getattr(self.cfg.model, "closure_rank_loss_warmup_epochs", 0) or 0),
@@ -8007,6 +14889,72 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                         )
                         self._epoch_closure_rank_pairs_sum += float(
                             closure_rank_stats.get("pairs", 0.0)
+                        )
+
+                    structure_utility_w = self._warmup_weight(
+                        float(getattr(self.cfg.model, "structure_utility_rank_loss_weight", 0.0) or 0.0),
+                        int(getattr(self.cfg.model, "structure_utility_rank_loss_warmup_epochs", 0) or 0),
+                        self._auxiliary_time_factor(
+                            sparse_noisy_data,
+                            float(getattr(self.cfg.model, "structure_utility_rank_loss_t_power", 0.0) or 0.0),
+                        ),
+                    )
+                    if structure_utility_w > 0:
+                        loss_structure_utility, structure_utility_stats = self._compute_structure_utility_ranking_loss(
+                            pred_global, data_one_hot, true_global, num_nodes=data_one_hot.x.shape[0]
+                        )
+                        global_loss = global_loss + structure_utility_w * loss_structure_utility
+                        if not hasattr(self, "_epoch_structure_utility_rank_loss_sum"):
+                            self._epoch_structure_utility_rank_loss_sum = 0.0
+                            self._epoch_structure_utility_rank_loss_count = 0
+                            self._epoch_structure_utility_rank_weighted_sum = 0.0
+                            self._epoch_structure_utility_rank_active_sum = 0.0
+                            self._epoch_structure_utility_rank_pairs_sum = 0.0
+                        self._epoch_structure_utility_rank_loss_sum += float(loss_structure_utility.detach().cpu())
+                        self._epoch_structure_utility_rank_loss_count += 1
+                        self._epoch_structure_utility_rank_weighted_sum += float(
+                            (structure_utility_w * loss_structure_utility).detach().cpu()
+                        )
+                        self._epoch_structure_utility_rank_active_sum += float(
+                            structure_utility_stats.get("active_families", 0.0)
+                        )
+                        self._epoch_structure_utility_rank_pairs_sum += float(
+                            structure_utility_stats.get("pairs", 0.0)
+                        )
+
+                    node_role_coverage_w = self._warmup_weight(
+                        float(getattr(self.cfg.model, "node_role_coverage_rank_loss_weight", 0.0) or 0.0),
+                        int(getattr(self.cfg.model, "node_role_coverage_rank_loss_warmup_epochs", 0) or 0),
+                        self._auxiliary_time_factor(
+                            sparse_noisy_data,
+                            float(getattr(self.cfg.model, "node_role_coverage_rank_loss_t_power", 0.0) or 0.0),
+                        ),
+                    )
+                    if node_role_coverage_w > 0:
+                        loss_node_role_coverage, node_role_coverage_stats = self._compute_node_role_coverage_ranking_loss(
+                            pred_global, data_one_hot, true_global, num_nodes=data_one_hot.x.shape[0]
+                        )
+                        global_loss = global_loss + node_role_coverage_w * loss_node_role_coverage
+                        if not hasattr(self, "_epoch_node_role_coverage_rank_loss_sum"):
+                            self._epoch_node_role_coverage_rank_loss_sum = 0.0
+                            self._epoch_node_role_coverage_rank_loss_count = 0
+                            self._epoch_node_role_coverage_rank_weighted_sum = 0.0
+                            self._epoch_node_role_coverage_rank_active_sum = 0.0
+                            self._epoch_node_role_coverage_rank_pairs_sum = 0.0
+                            self._epoch_node_role_coverage_rank_utility_sum = 0.0
+                        self._epoch_node_role_coverage_rank_loss_sum += float(loss_node_role_coverage.detach().cpu())
+                        self._epoch_node_role_coverage_rank_loss_count += 1
+                        self._epoch_node_role_coverage_rank_weighted_sum += float(
+                            (node_role_coverage_w * loss_node_role_coverage).detach().cpu()
+                        )
+                        self._epoch_node_role_coverage_rank_active_sum += float(
+                            node_role_coverage_stats.get("active_families", 0.0)
+                        )
+                        self._epoch_node_role_coverage_rank_pairs_sum += float(
+                            node_role_coverage_stats.get("pairs", 0.0)
+                        )
+                        self._epoch_node_role_coverage_rank_utility_sum += float(
+                            node_role_coverage_stats.get("utility", 0.0)
                         )
 
                 backward_start = self._profile_time(profile_efficiency)
@@ -8532,6 +15480,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         data_is_one_hot=False,
         sparse_noisy_data_override=None,
         forced_block_id=None,
+        block_inter_state=None,
         t_override=None,
         query_edge_override=None,
         query_batch_override=None,
@@ -8576,7 +15525,12 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 query_batch_override,
             )
             if self.use_block_query and triu_query_edge_index is None:
-                triu_query_edge_index, query_edge_batch = self._heterogeneous_block_query_edges(data, sparse_noisy_data, forced_block_id=forced_block_id)
+                triu_query_edge_index, query_edge_batch = self._heterogeneous_block_query_edges(
+                    data,
+                    sparse_noisy_data,
+                    forced_block_id=forced_block_id,
+                    inter_state=block_inter_state,
+                )
             if triu_query_edge_index is not None and query_edge_batch is not None:
                 pass
             else:
@@ -8588,6 +15542,12 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 and query_edge_batch is not None
                 and not bool(getattr(self.cfg.model, "block_query_include_uniform", True))
             )
+            if block_query_only:
+                sparse_noisy_data = self._apply_block_unit_noising_for_training(
+                    data,
+                    sparse_noisy_data,
+                    triu_query_edge_index,
+                )
             # 异质图模式：按关系族分别进行均匀采样（只处理有边的关系族）
             # 参考原项目实现，但需要区分关系族
             # 获取关系族信息
@@ -9024,6 +15984,13 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             triu_query_edge_index = triu_query_edge_index[:, chosen]
             query_edge_batch = query_edge_batch[chosen]
 
+        triu_query_edge_index, query_edge_batch = self._append_rare_family_structural_queries(
+            data,
+            triu_query_edge_index,
+            query_edge_batch,
+            sparse_noisy_data=sparse_noisy_data,
+        )
+
         triu_query_edge_index, query_edge_batch = self._append_all_positive_query_edges(
             data, triu_query_edge_index, query_edge_batch
         )
@@ -9175,6 +16142,19 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 # 这样softmax后这些类别的概率为0，不会影响损失计算
                 edge_family_mask_inv = 1.0 - edge_family_mask  # (E_query, de)
                 sparse_pred.edge_attr = sparse_pred.edge_attr - edge_family_mask_inv * 1e10  # 将不允许的类别设为-inf
+                sparse_pred.edge_attr = torch.nan_to_num(
+                    sparse_pred.edge_attr,
+                    nan=0.0,
+                    posinf=1.0e4,
+                    neginf=-1.0e10,
+                )
+        if sparse_pred.edge_attr.numel() > 0 and not torch.isfinite(sparse_pred.edge_attr).all():
+            sparse_pred.edge_attr = torch.nan_to_num(
+                sparse_pred.edge_attr,
+                nan=0.0,
+                posinf=1.0e4,
+                neginf=-1.0e10,
+            )
         # mask true label for query edges
         # We have the true edge index at time 0, and the query edge index at time t. This function
         # merge the query edges and edge index at time 0, delete repeated one, and retune the mask
@@ -9206,6 +16186,17 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             batch=data.batch,
         )
         true_data.collapse()  # Map one-hot to discrete class
+        sparse_pred, learned_structure_l2 = self._apply_learned_structure_controller_to_pred(
+            sparse_pred,
+            data,
+        )
+        if sparse_pred.edge_attr.numel() > 0 and not torch.isfinite(sparse_pred.edge_attr).all():
+            sparse_pred.edge_attr = torch.nan_to_num(
+                sparse_pred.edge_attr,
+                nan=0.0,
+                posinf=1.0e4,
+                neginf=-1.0e10,
+            )
         if record_structure_probe:
             self._record_query_topk_structure_probe(sparse_pred, true_data, data)
 
@@ -9221,6 +16212,8 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             true_data=true_data,
             log=step_idx % self.log_every_steps == 0,
         )
+        loss = loss + learned_structure_l2
+        loss = loss + self._compute_learned_structure_target_loss(data, step_idx)
         self._record_train_exist_diagnostics(sparse_pred, true_data, sparse_noisy_data)
 
         family_role_w_base = float(
@@ -9326,6 +16319,83 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                     sync_dist=True,
                 )
 
+        structure_delta_w_base = float(
+            getattr(self.cfg.model, "structure_delta_loss_weight", 0.0) or 0.0
+        )
+        structure_delta_w = self._warmup_weight(
+            structure_delta_w_base,
+            int(getattr(self.cfg.model, "structure_delta_loss_warmup_epochs", 0) or 0),
+            self._auxiliary_low_noise_factor(
+                sparse_noisy_data,
+                float(getattr(self.cfg.model, "structure_delta_low_noise_t_power", 0.0) or 0.0),
+            ),
+        )
+        if structure_delta_w > 0 and not skip_auxiliary_structure_losses:
+            loss_structure_delta, structure_delta_stats = self._compute_structure_delta_loss(
+                sparse_pred, true_data, data, sparse_noisy_data
+            )
+            loss = loss + structure_delta_w * loss_structure_delta
+            if not hasattr(self, "_epoch_structure_delta_loss_sum"):
+                self._epoch_structure_delta_loss_sum = 0.0
+                self._epoch_structure_delta_loss_count = 0
+                self._epoch_structure_delta_weighted_sum = 0.0
+                self._epoch_structure_delta_active_sum = 0.0
+                self._epoch_structure_delta_degree_sum = 0.0
+                self._epoch_structure_delta_interface_sum = 0.0
+                self._epoch_structure_delta_gram_sum = 0.0
+                self._epoch_structure_delta_improve_sum = 0.0
+                self._epoch_structure_delta_gram_groups_sum = 0.0
+            self._epoch_structure_delta_loss_sum += float(
+                loss_structure_delta.detach().cpu()
+            )
+            self._epoch_structure_delta_loss_count += 1
+            self._epoch_structure_delta_weighted_sum += float(
+                (structure_delta_w * loss_structure_delta).detach().cpu()
+            )
+            self._epoch_structure_delta_active_sum += float(
+                structure_delta_stats.get("active_groups", 0.0)
+            )
+            self._epoch_structure_delta_degree_sum += float(
+                structure_delta_stats.get("degree", 0.0)
+            )
+            self._epoch_structure_delta_interface_sum += float(
+                structure_delta_stats.get("interface", 0.0)
+            )
+            self._epoch_structure_delta_gram_sum += float(
+                structure_delta_stats.get("gram", 0.0)
+            )
+            self._epoch_structure_delta_improve_sum += float(
+                structure_delta_stats.get("improvement", 0.0)
+            )
+            self._epoch_structure_delta_gram_groups_sum += float(
+                structure_delta_stats.get("gram_groups", 0.0)
+            )
+            if step_idx % self.log_every_steps == 0:
+                self.log(
+                    "train/structure_delta_loss",
+                    loss_structure_delta.detach(),
+                    on_step=True,
+                    prog_bar=False,
+                    sync_dist=True,
+                )
+                self.log(
+                    "train/structure_delta_weight",
+                    torch.as_tensor(structure_delta_w, device=self.device),
+                    on_step=True,
+                    prog_bar=False,
+                    sync_dist=True,
+                )
+                self.log(
+                    "train/structure_delta_improvement",
+                    torch.as_tensor(
+                        float(structure_delta_stats.get("improvement", 0.0)),
+                        device=self.device,
+                    ),
+                    on_step=True,
+                    prog_bar=False,
+                    sync_dist=True,
+                )
+
         degree_pair_w_base = float(
             getattr(self.cfg.model, "degree_pair_dist_loss_weight", 0.0) or 0.0
         )
@@ -9368,6 +16438,335 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 self.log(
                     "train/degree_pair_dist_weight",
                     torch.as_tensor(degree_pair_w, device=self.device),
+                    on_step=True,
+                    prog_bar=False,
+                    sync_dist=True,
+                )
+
+        closure_bucket_w_base = float(
+            getattr(self.cfg.model, "closure_bucket_dist_loss_weight", 0.0) or 0.0
+        )
+        closure_bucket_w = self._warmup_weight(
+            closure_bucket_w_base,
+            int(getattr(self.cfg.model, "closure_bucket_dist_loss_warmup_epochs", 0) or 0),
+            self._auxiliary_time_factor(
+                sparse_noisy_data,
+                float(getattr(self.cfg.model, "closure_bucket_dist_loss_t_power", 0.0) or 0.0),
+            ),
+        )
+        if closure_bucket_w > 0 and not skip_auxiliary_structure_losses:
+            loss_closure_bucket, closure_bucket_stats = (
+                self._compute_closure_bucket_distribution_loss(sparse_pred, data, true_data)
+            )
+            loss = loss + closure_bucket_w * loss_closure_bucket
+            if not hasattr(self, "_epoch_closure_bucket_dist_loss_sum"):
+                self._epoch_closure_bucket_dist_loss_sum = 0.0
+                self._epoch_closure_bucket_dist_loss_count = 0
+                self._epoch_closure_bucket_dist_weighted_sum = 0.0
+                self._epoch_closure_bucket_dist_active_sum = 0.0
+            self._epoch_closure_bucket_dist_loss_sum += float(
+                loss_closure_bucket.detach().cpu()
+            )
+            self._epoch_closure_bucket_dist_loss_count += 1
+            self._epoch_closure_bucket_dist_weighted_sum += float(
+                (closure_bucket_w * loss_closure_bucket).detach().cpu()
+            )
+            self._epoch_closure_bucket_dist_active_sum += float(
+                closure_bucket_stats.get("active_families", 0.0)
+            )
+            if step_idx % self.log_every_steps == 0:
+                self.log(
+                    "train/closure_bucket_dist_loss",
+                    loss_closure_bucket.detach(),
+                    on_step=True,
+                    prog_bar=False,
+                    sync_dist=True,
+                )
+                self.log(
+                    "train/closure_bucket_dist_weight",
+                    torch.as_tensor(closure_bucket_w, device=self.device),
+                    on_step=True,
+                    prog_bar=False,
+                    sync_dist=True,
+                )
+
+        node_closure_w_base = float(
+            getattr(self.cfg.model, "node_closure_dist_loss_weight", 0.0) or 0.0
+        )
+        node_closure_w = self._warmup_weight(
+            node_closure_w_base,
+            int(getattr(self.cfg.model, "node_closure_dist_loss_warmup_epochs", 0) or 0),
+            self._auxiliary_time_factor(
+                sparse_noisy_data,
+                float(getattr(self.cfg.model, "node_closure_dist_loss_t_power", 0.0) or 0.0),
+            ),
+        )
+        if node_closure_w > 0 and not skip_auxiliary_structure_losses:
+            loss_node_closure, node_closure_stats = (
+                self._compute_node_closure_distribution_loss(sparse_pred, data, true_data)
+            )
+            loss = loss + node_closure_w * loss_node_closure
+            if not hasattr(self, "_epoch_node_closure_dist_loss_sum"):
+                self._epoch_node_closure_dist_loss_sum = 0.0
+                self._epoch_node_closure_dist_loss_count = 0
+                self._epoch_node_closure_dist_weighted_sum = 0.0
+                self._epoch_node_closure_dist_active_sum = 0.0
+            self._epoch_node_closure_dist_loss_sum += float(
+                loss_node_closure.detach().cpu()
+            )
+            self._epoch_node_closure_dist_loss_count += 1
+            self._epoch_node_closure_dist_weighted_sum += float(
+                (node_closure_w * loss_node_closure).detach().cpu()
+            )
+            self._epoch_node_closure_dist_active_sum += float(
+                node_closure_stats.get("active_groups", 0.0)
+            )
+            if step_idx % self.log_every_steps == 0:
+                self.log(
+                    "train/node_closure_dist_loss",
+                    loss_node_closure.detach(),
+                    on_step=True,
+                    prog_bar=False,
+                    sync_dist=True,
+                )
+                self.log(
+                    "train/node_closure_dist_weight",
+                    torch.as_tensor(node_closure_w, device=self.device),
+                    on_step=True,
+                    prog_bar=False,
+                    sync_dist=True,
+                )
+
+        edge_support_w_base = float(
+            getattr(self.cfg.model, "edge_support_dist_loss_weight", 0.0) or 0.0
+        )
+        edge_support_w = self._warmup_weight(
+            edge_support_w_base,
+            int(getattr(self.cfg.model, "edge_support_dist_loss_warmup_epochs", 0) or 0),
+            self._auxiliary_time_factor(
+                sparse_noisy_data,
+                float(getattr(self.cfg.model, "edge_support_dist_loss_t_power", 0.0) or 0.0),
+            ),
+        )
+        if edge_support_w > 0 and not skip_auxiliary_structure_losses:
+            loss_edge_support, edge_support_stats = (
+                self._compute_edge_support_distribution_loss(sparse_pred, data, true_data)
+            )
+            loss = loss + edge_support_w * loss_edge_support
+            if not hasattr(self, "_epoch_edge_support_dist_loss_sum"):
+                self._epoch_edge_support_dist_loss_sum = 0.0
+                self._epoch_edge_support_dist_loss_count = 0
+                self._epoch_edge_support_dist_weighted_sum = 0.0
+                self._epoch_edge_support_dist_active_sum = 0.0
+            self._epoch_edge_support_dist_loss_sum += float(
+                loss_edge_support.detach().cpu()
+            )
+            self._epoch_edge_support_dist_loss_count += 1
+            self._epoch_edge_support_dist_weighted_sum += float(
+                (edge_support_w * loss_edge_support).detach().cpu()
+            )
+            self._epoch_edge_support_dist_active_sum += float(
+                edge_support_stats.get("active_families", 0.0)
+            )
+            if step_idx % self.log_every_steps == 0:
+                self.log(
+                    "train/edge_support_dist_loss",
+                    loss_edge_support.detach(),
+                    on_step=True,
+                    prog_bar=False,
+                    sync_dist=True,
+                )
+                self.log(
+                    "train/edge_support_dist_weight",
+                    torch.as_tensor(edge_support_w, device=self.device),
+                    on_step=True,
+                    prog_bar=False,
+                    sync_dist=True,
+                )
+
+        low_degree_closure_w_base = float(
+            getattr(self.cfg.model, "low_degree_closure_loss_weight", 0.0) or 0.0
+        )
+        low_degree_closure_w = self._warmup_weight(
+            low_degree_closure_w_base,
+            int(getattr(self.cfg.model, "low_degree_closure_loss_warmup_epochs", 0) or 0),
+            self._auxiliary_time_factor(
+                sparse_noisy_data,
+                float(getattr(self.cfg.model, "low_degree_closure_loss_t_power", 0.0) or 0.0),
+            ),
+        )
+        if low_degree_closure_w > 0 and not skip_auxiliary_structure_losses:
+            loss_low_degree_closure, low_degree_closure_stats = (
+                self._compute_low_degree_closure_coverage_loss(sparse_pred, data, true_data)
+            )
+            loss = loss + low_degree_closure_w * loss_low_degree_closure
+            if not hasattr(self, "_epoch_low_degree_closure_loss_sum"):
+                self._epoch_low_degree_closure_loss_sum = 0.0
+                self._epoch_low_degree_closure_loss_count = 0
+                self._epoch_low_degree_closure_weighted_sum = 0.0
+                self._epoch_low_degree_closure_active_sum = 0.0
+            self._epoch_low_degree_closure_loss_sum += float(
+                loss_low_degree_closure.detach().cpu()
+            )
+            self._epoch_low_degree_closure_loss_count += 1
+            self._epoch_low_degree_closure_weighted_sum += float(
+                (low_degree_closure_w * loss_low_degree_closure).detach().cpu()
+            )
+            self._epoch_low_degree_closure_active_sum += float(
+                low_degree_closure_stats.get("active_groups", 0.0)
+            )
+            if step_idx % self.log_every_steps == 0:
+                self.log(
+                    "train/low_degree_closure_loss",
+                    loss_low_degree_closure.detach(),
+                    on_step=True,
+                    prog_bar=False,
+                    sync_dist=True,
+                )
+                self.log(
+                    "train/low_degree_closure_weight",
+                    torch.as_tensor(low_degree_closure_w, device=self.device),
+                    on_step=True,
+                    prog_bar=False,
+                    sync_dist=True,
+                )
+
+        degree_role_w_base = float(
+            getattr(self.cfg.model, "degree_role_dist_loss_weight", 0.0) or 0.0
+        )
+        degree_role_w = self._warmup_weight(
+            degree_role_w_base,
+            int(getattr(self.cfg.model, "degree_role_dist_loss_warmup_epochs", 0) or 0),
+            self._auxiliary_time_factor(
+                sparse_noisy_data,
+                float(getattr(self.cfg.model, "degree_role_dist_loss_t_power", 0.0) or 0.0),
+            ),
+        )
+        if degree_role_w > 0 and not skip_auxiliary_structure_losses:
+            loss_degree_role, degree_role_stats = (
+                self._compute_degree_role_distribution_loss(sparse_pred, data, true_data)
+            )
+            loss = loss + degree_role_w * loss_degree_role
+            if not hasattr(self, "_epoch_degree_role_dist_loss_sum"):
+                self._epoch_degree_role_dist_loss_sum = 0.0
+                self._epoch_degree_role_dist_loss_count = 0
+                self._epoch_degree_role_dist_weighted_sum = 0.0
+                self._epoch_degree_role_dist_active_sum = 0.0
+            self._epoch_degree_role_dist_loss_sum += float(
+                loss_degree_role.detach().cpu()
+            )
+            self._epoch_degree_role_dist_loss_count += 1
+            self._epoch_degree_role_dist_weighted_sum += float(
+                (degree_role_w * loss_degree_role).detach().cpu()
+            )
+            self._epoch_degree_role_dist_active_sum += float(
+                degree_role_stats.get("active_groups", 0.0)
+            )
+            if step_idx % self.log_every_steps == 0:
+                self.log(
+                    "train/degree_role_dist_loss",
+                    loss_degree_role.detach(),
+                    on_step=True,
+                    prog_bar=False,
+                    sync_dist=True,
+                )
+                self.log(
+                    "train/degree_role_dist_weight",
+                    torch.as_tensor(degree_role_w, device=self.device),
+                    on_step=True,
+                    prog_bar=False,
+                    sync_dist=True,
+                )
+
+        closure_anti_w_base = float(
+            getattr(self.cfg.model, "closure_anti_concentration_loss_weight", 0.0) or 0.0
+        )
+        closure_anti_w = self._warmup_weight(
+            closure_anti_w_base,
+            int(getattr(self.cfg.model, "closure_anti_concentration_loss_warmup_epochs", 0) or 0),
+            self._auxiliary_time_factor(
+                sparse_noisy_data,
+                float(getattr(self.cfg.model, "closure_anti_concentration_loss_t_power", 0.0) or 0.0),
+            ),
+        )
+        if closure_anti_w > 0 and not skip_auxiliary_structure_losses:
+            loss_closure_anti, closure_anti_stats = (
+                self._compute_closure_anti_concentration_loss(sparse_pred, data, true_data)
+            )
+            loss = loss + closure_anti_w * loss_closure_anti
+            if not hasattr(self, "_epoch_closure_anti_concentration_loss_sum"):
+                self._epoch_closure_anti_concentration_loss_sum = 0.0
+                self._epoch_closure_anti_concentration_loss_count = 0
+                self._epoch_closure_anti_concentration_weighted_sum = 0.0
+                self._epoch_closure_anti_concentration_active_sum = 0.0
+            self._epoch_closure_anti_concentration_loss_sum += float(
+                loss_closure_anti.detach().cpu()
+            )
+            self._epoch_closure_anti_concentration_loss_count += 1
+            self._epoch_closure_anti_concentration_weighted_sum += float(
+                (closure_anti_w * loss_closure_anti).detach().cpu()
+            )
+            self._epoch_closure_anti_concentration_active_sum += float(
+                closure_anti_stats.get("active_groups", 0.0)
+            )
+            if step_idx % self.log_every_steps == 0:
+                self.log(
+                    "train/closure_anti_concentration_loss",
+                    loss_closure_anti.detach(),
+                    on_step=True,
+                    prog_bar=False,
+                    sync_dist=True,
+                )
+                self.log(
+                    "train/closure_anti_concentration_weight",
+                    torch.as_tensor(closure_anti_w, device=self.device),
+                    on_step=True,
+                    prog_bar=False,
+                    sync_dist=True,
+                )
+
+        typed_signature_w_base = float(
+            getattr(self.cfg.model, "typed_rooted_signature_loss_weight", 0.0) or 0.0
+        )
+        typed_signature_w = self._warmup_weight(
+            typed_signature_w_base,
+            int(getattr(self.cfg.model, "typed_rooted_signature_loss_warmup_epochs", 0) or 0),
+            self._auxiliary_time_factor(
+                sparse_noisy_data,
+                float(getattr(self.cfg.model, "typed_rooted_signature_loss_t_power", 0.0) or 0.0),
+            ),
+        )
+        if typed_signature_w > 0 and not skip_auxiliary_structure_losses:
+            loss_typed_signature, typed_signature_stats = (
+                self._compute_typed_rooted_signature_loss(sparse_pred, data, true_data)
+            )
+            loss = loss + typed_signature_w * loss_typed_signature
+            if not hasattr(self, "_epoch_typed_rooted_signature_loss_sum"):
+                self._epoch_typed_rooted_signature_loss_sum = 0.0
+                self._epoch_typed_rooted_signature_loss_count = 0
+                self._epoch_typed_rooted_signature_weighted_sum = 0.0
+                self._epoch_typed_rooted_signature_active_sum = 0.0
+            self._epoch_typed_rooted_signature_loss_sum += float(
+                loss_typed_signature.detach().cpu()
+            )
+            self._epoch_typed_rooted_signature_loss_count += 1
+            self._epoch_typed_rooted_signature_weighted_sum += float(
+                (typed_signature_w * loss_typed_signature).detach().cpu()
+            )
+            self._epoch_typed_rooted_signature_active_sum += float(
+                typed_signature_stats.get("active_terms", 0.0)
+            )
+            if step_idx % self.log_every_steps == 0:
+                self.log(
+                    "train/typed_rooted_signature_loss",
+                    loss_typed_signature.detach(),
+                    on_step=True,
+                    prog_bar=False,
+                    sync_dist=True,
+                )
+                self.log(
+                    "train/typed_rooted_signature_weight",
+                    torch.as_tensor(typed_signature_w, device=self.device),
                     on_step=True,
                     prog_bar=False,
                     sync_dist=True,
@@ -9419,6 +16818,116 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 self.log(
                     "train/closure_rank_weight",
                     torch.as_tensor(closure_rank_w, device=self.device),
+                    on_step=True,
+                    prog_bar=False,
+                    sync_dist=True,
+                )
+
+        structure_utility_w_base = float(
+            getattr(self.cfg.model, "structure_utility_rank_loss_weight", 0.0) or 0.0
+        )
+        structure_utility_w = self._warmup_weight(
+            structure_utility_w_base,
+            int(getattr(self.cfg.model, "structure_utility_rank_loss_warmup_epochs", 0) or 0),
+            self._auxiliary_time_factor(
+                sparse_noisy_data,
+                float(getattr(self.cfg.model, "structure_utility_rank_loss_t_power", 0.0) or 0.0),
+            ),
+        )
+        if structure_utility_w > 0 and not skip_auxiliary_structure_losses:
+            loss_structure_utility, structure_utility_stats = (
+                self._compute_structure_utility_ranking_loss(
+                    sparse_pred, data, true_data, num_nodes=data.x.shape[0]
+                )
+            )
+            loss = loss + structure_utility_w * loss_structure_utility
+            if not hasattr(self, "_epoch_structure_utility_rank_loss_sum"):
+                self._epoch_structure_utility_rank_loss_sum = 0.0
+                self._epoch_structure_utility_rank_loss_count = 0
+                self._epoch_structure_utility_rank_weighted_sum = 0.0
+                self._epoch_structure_utility_rank_active_sum = 0.0
+                self._epoch_structure_utility_rank_pairs_sum = 0.0
+            self._epoch_structure_utility_rank_loss_sum += float(
+                loss_structure_utility.detach().cpu()
+            )
+            self._epoch_structure_utility_rank_loss_count += 1
+            self._epoch_structure_utility_rank_weighted_sum += float(
+                (structure_utility_w * loss_structure_utility).detach().cpu()
+            )
+            self._epoch_structure_utility_rank_active_sum += float(
+                structure_utility_stats.get("active_families", 0.0)
+            )
+            self._epoch_structure_utility_rank_pairs_sum += float(
+                structure_utility_stats.get("pairs", 0.0)
+            )
+            if step_idx % self.log_every_steps == 0:
+                self.log(
+                    "train/structure_utility_rank_loss",
+                    loss_structure_utility.detach(),
+                    on_step=True,
+                    prog_bar=False,
+                    sync_dist=True,
+                )
+                self.log(
+                    "train/structure_utility_rank_weight",
+                    torch.as_tensor(structure_utility_w, device=self.device),
+                    on_step=True,
+                    prog_bar=False,
+                    sync_dist=True,
+                )
+
+        node_role_coverage_w_base = float(
+            getattr(self.cfg.model, "node_role_coverage_rank_loss_weight", 0.0) or 0.0
+        )
+        node_role_coverage_w = self._warmup_weight(
+            node_role_coverage_w_base,
+            int(getattr(self.cfg.model, "node_role_coverage_rank_loss_warmup_epochs", 0) or 0),
+            self._auxiliary_time_factor(
+                sparse_noisy_data,
+                float(getattr(self.cfg.model, "node_role_coverage_rank_loss_t_power", 0.0) or 0.0),
+            ),
+        )
+        if node_role_coverage_w > 0 and not skip_auxiliary_structure_losses:
+            loss_node_role_coverage, node_role_coverage_stats = (
+                self._compute_node_role_coverage_ranking_loss(
+                    sparse_pred, data, true_data, num_nodes=data.x.shape[0]
+                )
+            )
+            loss = loss + node_role_coverage_w * loss_node_role_coverage
+            if not hasattr(self, "_epoch_node_role_coverage_rank_loss_sum"):
+                self._epoch_node_role_coverage_rank_loss_sum = 0.0
+                self._epoch_node_role_coverage_rank_loss_count = 0
+                self._epoch_node_role_coverage_rank_weighted_sum = 0.0
+                self._epoch_node_role_coverage_rank_active_sum = 0.0
+                self._epoch_node_role_coverage_rank_pairs_sum = 0.0
+                self._epoch_node_role_coverage_rank_utility_sum = 0.0
+            self._epoch_node_role_coverage_rank_loss_sum += float(
+                loss_node_role_coverage.detach().cpu()
+            )
+            self._epoch_node_role_coverage_rank_loss_count += 1
+            self._epoch_node_role_coverage_rank_weighted_sum += float(
+                (node_role_coverage_w * loss_node_role_coverage).detach().cpu()
+            )
+            self._epoch_node_role_coverage_rank_active_sum += float(
+                node_role_coverage_stats.get("active_families", 0.0)
+            )
+            self._epoch_node_role_coverage_rank_pairs_sum += float(
+                node_role_coverage_stats.get("pairs", 0.0)
+            )
+            self._epoch_node_role_coverage_rank_utility_sum += float(
+                node_role_coverage_stats.get("utility", 0.0)
+            )
+            if step_idx % self.log_every_steps == 0:
+                self.log(
+                    "train/node_role_coverage_rank_loss",
+                    loss_node_role_coverage.detach(),
+                    on_step=True,
+                    prog_bar=False,
+                    sync_dist=True,
+                )
+                self.log(
+                    "train/node_role_coverage_rank_weight",
+                    torch.as_tensor(node_role_coverage_w, device=self.device),
                     on_step=True,
                     prog_bar=False,
                     sync_dist=True,
@@ -9597,6 +17106,13 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             if pred_edge.numel() == 0 or target.numel() == 0:
                     return
             pred_edge_flat = pred_edge.reshape(-1, pred_edge.shape[-1])
+            if pred_edge_flat.numel() > 0 and not torch.isfinite(pred_edge_flat).all():
+                    pred_edge_flat = torch.nan_to_num(
+                        pred_edge_flat,
+                        nan=0.0,
+                        posinf=1.0e4,
+                        neginf=-1.0e10,
+                    )
             true_labels = target.reshape(-1).long().clamp(min=0, max=pred_edge_flat.shape[-1] - 1)
             true_exist = true_labels > 0
             prob = torch.softmax(pred_edge_flat, dim=-1)
@@ -9650,15 +17166,66 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         self._epoch_family_count_loss_count = 0
         self._epoch_family_count_weighted_sum = 0.0
         self._epoch_family_count_active_sum = 0.0
+        self._epoch_structure_delta_loss_sum = 0.0
+        self._epoch_structure_delta_loss_count = 0
+        self._epoch_structure_delta_weighted_sum = 0.0
+        self._epoch_structure_delta_active_sum = 0.0
+        self._epoch_structure_delta_degree_sum = 0.0
+        self._epoch_structure_delta_interface_sum = 0.0
+        self._epoch_structure_delta_gram_sum = 0.0
+        self._epoch_structure_delta_improve_sum = 0.0
+        self._epoch_structure_delta_gram_groups_sum = 0.0
         self._epoch_degree_pair_dist_loss_sum = 0.0
         self._epoch_degree_pair_dist_loss_count = 0
         self._epoch_degree_pair_dist_weighted_sum = 0.0
         self._epoch_degree_pair_dist_active_sum = 0.0
+        self._epoch_closure_bucket_dist_loss_sum = 0.0
+        self._epoch_closure_bucket_dist_loss_count = 0
+        self._epoch_closure_bucket_dist_weighted_sum = 0.0
+        self._epoch_closure_bucket_dist_active_sum = 0.0
+        self._epoch_node_closure_dist_loss_sum = 0.0
+        self._epoch_node_closure_dist_loss_count = 0
+        self._epoch_node_closure_dist_weighted_sum = 0.0
+        self._epoch_node_closure_dist_active_sum = 0.0
+        self._epoch_edge_support_dist_loss_sum = 0.0
+        self._epoch_edge_support_dist_loss_count = 0
+        self._epoch_edge_support_dist_weighted_sum = 0.0
+        self._epoch_edge_support_dist_active_sum = 0.0
+        self._epoch_low_degree_closure_loss_sum = 0.0
+        self._epoch_low_degree_closure_loss_count = 0
+        self._epoch_low_degree_closure_weighted_sum = 0.0
+        self._epoch_low_degree_closure_active_sum = 0.0
+        self._epoch_degree_role_dist_loss_sum = 0.0
+        self._epoch_degree_role_dist_loss_count = 0
+        self._epoch_degree_role_dist_weighted_sum = 0.0
+        self._epoch_degree_role_dist_active_sum = 0.0
+        self._epoch_closure_anti_concentration_loss_sum = 0.0
+        self._epoch_closure_anti_concentration_loss_count = 0
+        self._epoch_closure_anti_concentration_weighted_sum = 0.0
+        self._epoch_closure_anti_concentration_active_sum = 0.0
+        self._epoch_typed_rooted_signature_loss_sum = 0.0
+        self._epoch_typed_rooted_signature_loss_count = 0
+        self._epoch_typed_rooted_signature_weighted_sum = 0.0
+        self._epoch_typed_rooted_signature_active_sum = 0.0
         self._epoch_closure_rank_loss_sum = 0.0
         self._epoch_closure_rank_loss_count = 0
         self._epoch_closure_rank_weighted_sum = 0.0
         self._epoch_closure_rank_active_sum = 0.0
         self._epoch_closure_rank_pairs_sum = 0.0
+        self._epoch_structure_utility_rank_loss_sum = 0.0
+        self._epoch_structure_utility_rank_loss_count = 0
+        self._epoch_structure_utility_rank_weighted_sum = 0.0
+        self._epoch_structure_utility_rank_active_sum = 0.0
+        self._epoch_structure_utility_rank_pairs_sum = 0.0
+        self._epoch_node_role_coverage_rank_loss_sum = 0.0
+        self._epoch_node_role_coverage_rank_loss_count = 0
+        self._epoch_node_role_coverage_rank_weighted_sum = 0.0
+        self._epoch_node_role_coverage_rank_active_sum = 0.0
+        self._epoch_node_role_coverage_rank_pairs_sum = 0.0
+        self._epoch_node_role_coverage_rank_utility_sum = 0.0
+        self._epoch_learned_structure_target_loss_sum = 0.0
+        self._epoch_learned_structure_target_weighted_sum = 0.0
+        self._epoch_learned_structure_target_loss_count = 0
         self._epoch_diag_count = 0
         self._epoch_diag_t_sum = 0.0
         self._epoch_diag_query_pos_ratio_sum = 0.0
@@ -9678,6 +17245,10 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         self._epoch_struct_probe_closure_mean_gap_sum = 0.0
         self._epoch_struct_probe_closure_mean_gap_count = 0
         self._epoch_struct_probe_k_sum = 0.0
+        self._epoch_rare_family_query_pos = 0
+        self._epoch_rare_family_query_hard = 0
+        self._epoch_rare_family_query_easy = 0
+        self._epoch_rare_family_query_random = 0
 
     def on_train_epoch_end(self) -> None:
         # 只在 epoch 结束时统一从 TrainLossDiscrete 取出本 epoch 的所有训练指标，并一次性 log 到 wandb / Lightning
@@ -9727,6 +17298,25 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             family_count_loss = 0.0
             family_count_wloss = 0.0
             family_count_active = 0.0
+        structure_delta_count = int(getattr(self, "_epoch_structure_delta_loss_count", 0) or 0)
+        if structure_delta_count > 0:
+            structure_delta_loss = float(getattr(self, "_epoch_structure_delta_loss_sum", 0.0)) / float(structure_delta_count)
+            structure_delta_wloss = float(getattr(self, "_epoch_structure_delta_weighted_sum", 0.0)) / float(structure_delta_count)
+            structure_delta_active = float(getattr(self, "_epoch_structure_delta_active_sum", 0.0)) / float(structure_delta_count)
+            structure_delta_degree = float(getattr(self, "_epoch_structure_delta_degree_sum", 0.0)) / float(structure_delta_count)
+            structure_delta_interface = float(getattr(self, "_epoch_structure_delta_interface_sum", 0.0)) / float(structure_delta_count)
+            structure_delta_gram = float(getattr(self, "_epoch_structure_delta_gram_sum", 0.0)) / float(structure_delta_count)
+            structure_delta_improve = float(getattr(self, "_epoch_structure_delta_improve_sum", 0.0)) / float(structure_delta_count)
+            structure_delta_gram_groups = float(getattr(self, "_epoch_structure_delta_gram_groups_sum", 0.0)) / float(structure_delta_count)
+        else:
+            structure_delta_loss = 0.0
+            structure_delta_wloss = 0.0
+            structure_delta_active = 0.0
+            structure_delta_degree = 0.0
+            structure_delta_interface = 0.0
+            structure_delta_gram = 0.0
+            structure_delta_improve = 0.0
+            structure_delta_gram_groups = 0.0
         degree_pair_count = int(getattr(self, "_epoch_degree_pair_dist_loss_count", 0) or 0)
         if degree_pair_count > 0:
             degree_pair_loss = float(getattr(self, "_epoch_degree_pair_dist_loss_sum", 0.0)) / float(degree_pair_count)
@@ -9736,6 +17326,69 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             degree_pair_loss = 0.0
             degree_pair_wloss = 0.0
             degree_pair_active = 0.0
+        closure_bucket_count = int(getattr(self, "_epoch_closure_bucket_dist_loss_count", 0) or 0)
+        if closure_bucket_count > 0:
+            closure_bucket_loss = float(getattr(self, "_epoch_closure_bucket_dist_loss_sum", 0.0)) / float(closure_bucket_count)
+            closure_bucket_wloss = float(getattr(self, "_epoch_closure_bucket_dist_weighted_sum", 0.0)) / float(closure_bucket_count)
+            closure_bucket_active = float(getattr(self, "_epoch_closure_bucket_dist_active_sum", 0.0)) / float(closure_bucket_count)
+        else:
+            closure_bucket_loss = 0.0
+            closure_bucket_wloss = 0.0
+            closure_bucket_active = 0.0
+        node_closure_count = int(getattr(self, "_epoch_node_closure_dist_loss_count", 0) or 0)
+        if node_closure_count > 0:
+            node_closure_loss = float(getattr(self, "_epoch_node_closure_dist_loss_sum", 0.0)) / float(node_closure_count)
+            node_closure_wloss = float(getattr(self, "_epoch_node_closure_dist_weighted_sum", 0.0)) / float(node_closure_count)
+            node_closure_active = float(getattr(self, "_epoch_node_closure_dist_active_sum", 0.0)) / float(node_closure_count)
+        else:
+            node_closure_loss = 0.0
+            node_closure_wloss = 0.0
+            node_closure_active = 0.0
+        edge_support_count = int(getattr(self, "_epoch_edge_support_dist_loss_count", 0) or 0)
+        if edge_support_count > 0:
+            edge_support_loss = float(getattr(self, "_epoch_edge_support_dist_loss_sum", 0.0)) / float(edge_support_count)
+            edge_support_wloss = float(getattr(self, "_epoch_edge_support_dist_weighted_sum", 0.0)) / float(edge_support_count)
+            edge_support_active = float(getattr(self, "_epoch_edge_support_dist_active_sum", 0.0)) / float(edge_support_count)
+        else:
+            edge_support_loss = 0.0
+            edge_support_wloss = 0.0
+            edge_support_active = 0.0
+        low_degree_closure_count = int(getattr(self, "_epoch_low_degree_closure_loss_count", 0) or 0)
+        if low_degree_closure_count > 0:
+            low_degree_closure_loss = float(getattr(self, "_epoch_low_degree_closure_loss_sum", 0.0)) / float(low_degree_closure_count)
+            low_degree_closure_wloss = float(getattr(self, "_epoch_low_degree_closure_weighted_sum", 0.0)) / float(low_degree_closure_count)
+            low_degree_closure_active = float(getattr(self, "_epoch_low_degree_closure_active_sum", 0.0)) / float(low_degree_closure_count)
+        else:
+            low_degree_closure_loss = 0.0
+            low_degree_closure_wloss = 0.0
+            low_degree_closure_active = 0.0
+        degree_role_count = int(getattr(self, "_epoch_degree_role_dist_loss_count", 0) or 0)
+        if degree_role_count > 0:
+            degree_role_loss = float(getattr(self, "_epoch_degree_role_dist_loss_sum", 0.0)) / float(degree_role_count)
+            degree_role_wloss = float(getattr(self, "_epoch_degree_role_dist_weighted_sum", 0.0)) / float(degree_role_count)
+            degree_role_active = float(getattr(self, "_epoch_degree_role_dist_active_sum", 0.0)) / float(degree_role_count)
+        else:
+            degree_role_loss = 0.0
+            degree_role_wloss = 0.0
+            degree_role_active = 0.0
+        closure_anti_count = int(getattr(self, "_epoch_closure_anti_concentration_loss_count", 0) or 0)
+        if closure_anti_count > 0:
+            closure_anti_loss = float(getattr(self, "_epoch_closure_anti_concentration_loss_sum", 0.0)) / float(closure_anti_count)
+            closure_anti_wloss = float(getattr(self, "_epoch_closure_anti_concentration_weighted_sum", 0.0)) / float(closure_anti_count)
+            closure_anti_active = float(getattr(self, "_epoch_closure_anti_concentration_active_sum", 0.0)) / float(closure_anti_count)
+        else:
+            closure_anti_loss = 0.0
+            closure_anti_wloss = 0.0
+            closure_anti_active = 0.0
+        typed_signature_count = int(getattr(self, "_epoch_typed_rooted_signature_loss_count", 0) or 0)
+        if typed_signature_count > 0:
+            typed_signature_loss = float(getattr(self, "_epoch_typed_rooted_signature_loss_sum", 0.0)) / float(typed_signature_count)
+            typed_signature_wloss = float(getattr(self, "_epoch_typed_rooted_signature_weighted_sum", 0.0)) / float(typed_signature_count)
+            typed_signature_active = float(getattr(self, "_epoch_typed_rooted_signature_active_sum", 0.0)) / float(typed_signature_count)
+        else:
+            typed_signature_loss = 0.0
+            typed_signature_wloss = 0.0
+            typed_signature_active = 0.0
         closure_rank_count = int(getattr(self, "_epoch_closure_rank_loss_count", 0) or 0)
         if closure_rank_count > 0:
             closure_rank_loss = float(getattr(self, "_epoch_closure_rank_loss_sum", 0.0)) / float(closure_rank_count)
@@ -9747,6 +17400,76 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             closure_rank_wloss = 0.0
             closure_rank_active = 0.0
             closure_rank_pairs = 0.0
+        structure_utility_count = int(
+            getattr(self, "_epoch_structure_utility_rank_loss_count", 0) or 0
+        )
+        if structure_utility_count > 0:
+            structure_utility_loss = (
+                float(getattr(self, "_epoch_structure_utility_rank_loss_sum", 0.0))
+                / float(structure_utility_count)
+            )
+            structure_utility_wloss = (
+                float(getattr(self, "_epoch_structure_utility_rank_weighted_sum", 0.0))
+                / float(structure_utility_count)
+            )
+            structure_utility_active = (
+                float(getattr(self, "_epoch_structure_utility_rank_active_sum", 0.0))
+                / float(structure_utility_count)
+            )
+            structure_utility_pairs = (
+                float(getattr(self, "_epoch_structure_utility_rank_pairs_sum", 0.0))
+                / float(structure_utility_count)
+            )
+        else:
+            structure_utility_loss = 0.0
+            structure_utility_wloss = 0.0
+            structure_utility_active = 0.0
+            structure_utility_pairs = 0.0
+        node_role_coverage_count = int(
+            getattr(self, "_epoch_node_role_coverage_rank_loss_count", 0) or 0
+        )
+        if node_role_coverage_count > 0:
+            node_role_coverage_loss = (
+                float(getattr(self, "_epoch_node_role_coverage_rank_loss_sum", 0.0))
+                / float(node_role_coverage_count)
+            )
+            node_role_coverage_wloss = (
+                float(getattr(self, "_epoch_node_role_coverage_rank_weighted_sum", 0.0))
+                / float(node_role_coverage_count)
+            )
+            node_role_coverage_active = (
+                float(getattr(self, "_epoch_node_role_coverage_rank_active_sum", 0.0))
+                / float(node_role_coverage_count)
+            )
+            node_role_coverage_pairs = (
+                float(getattr(self, "_epoch_node_role_coverage_rank_pairs_sum", 0.0))
+                / float(node_role_coverage_count)
+            )
+            node_role_coverage_utility = (
+                float(getattr(self, "_epoch_node_role_coverage_rank_utility_sum", 0.0))
+                / float(node_role_coverage_count)
+            )
+        else:
+            node_role_coverage_loss = 0.0
+            node_role_coverage_wloss = 0.0
+            node_role_coverage_active = 0.0
+            node_role_coverage_pairs = 0.0
+            node_role_coverage_utility = 0.0
+        learned_target_count = int(
+            getattr(self, "_epoch_learned_structure_target_loss_count", 0) or 0
+        )
+        if learned_target_count > 0:
+            learned_target_loss = (
+                float(getattr(self, "_epoch_learned_structure_target_loss_sum", 0.0))
+                / float(learned_target_count)
+            )
+            learned_target_wloss = (
+                float(getattr(self, "_epoch_learned_structure_target_weighted_sum", 0.0))
+                / float(learned_target_count)
+            )
+        else:
+            learned_target_loss = 0.0
+            learned_target_wloss = 0.0
         struct_probe_count = int(getattr(self, "_epoch_struct_probe_count", 0) or 0)
         if struct_probe_count > 0:
             struct_probe_precision = float(
@@ -9800,10 +17523,21 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             or closure_count > 0
             or family_role_count > 0
             or family_count_count > 0
+            or structure_delta_count > 0
             or degree_pair_count > 0
+            or closure_bucket_count > 0
+            or node_closure_count > 0
+            or edge_support_count > 0
+            or low_degree_closure_count > 0
+            or degree_role_count > 0
+            or closure_anti_count > 0
+            or typed_signature_count > 0
             or closure_rank_count > 0
+            or structure_utility_count > 0
+            or node_role_coverage_count > 0
+            or learned_target_count > 0
         )
-        total_train = edge_nll + degree_wloss + edge_count_wloss + closure_wloss + family_role_wloss + family_count_wloss + degree_pair_wloss + closure_rank_wloss if isinstance(edge_nll, (int, float)) and edge_nll >= 0 else -1
+        total_train = edge_nll + degree_wloss + edge_count_wloss + closure_wloss + family_role_wloss + family_count_wloss + structure_delta_wloss + degree_pair_wloss + closure_bucket_wloss + node_closure_wloss + edge_support_wloss + low_degree_closure_wloss + degree_role_wloss + closure_anti_wloss + typed_signature_wloss + closure_rank_wloss + structure_utility_wloss + node_role_coverage_wloss + learned_target_wloss if isinstance(edge_nll, (int, float)) and edge_nll >= 0 else -1
         diag_count = int(getattr(self, "_epoch_diag_count", 0) or 0)
         if diag_count > 0:
             diag_t = float(getattr(self, "_epoch_diag_t_sum", 0.0)) / float(diag_count)
@@ -9820,6 +17554,15 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             epoch_loss["train_epoch/neg_p_exist_mean"] = diag_neg_p
         else:
             diag_t = diag_qpos = diag_pred_pos = diag_pos_p = diag_neg_p = -1.0
+        rare_pos = int(getattr(self, "_epoch_rare_family_query_pos", 0) or 0)
+        rare_hard = int(getattr(self, "_epoch_rare_family_query_hard", 0) or 0)
+        rare_easy = int(getattr(self, "_epoch_rare_family_query_easy", 0) or 0)
+        rare_random = int(getattr(self, "_epoch_rare_family_query_random", 0) or 0)
+        if rare_pos or rare_hard or rare_easy or rare_random:
+            epoch_loss["train_epoch/rare_family_query_pos"] = rare_pos
+            epoch_loss["train_epoch/rare_family_query_hard"] = rare_hard
+            epoch_loss["train_epoch/rare_family_query_easy"] = rare_easy
+            epoch_loss["train_epoch/rare_family_query_random"] = rare_random
         if degree_count > 0:
             epoch_loss["train_epoch/degree_L1"] = degree_l1
             epoch_loss["train_epoch/degree_weighted"] = degree_wloss
@@ -9838,15 +17581,80 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             epoch_loss["train_epoch/family_count_loss"] = family_count_loss
             epoch_loss["train_epoch/family_count_weighted"] = family_count_wloss
             epoch_loss["train_epoch/family_count_active_families"] = family_count_active
+        if structure_delta_count > 0:
+            epoch_loss["train_epoch/structure_delta_loss"] = structure_delta_loss
+            epoch_loss["train_epoch/structure_delta_weighted"] = structure_delta_wloss
+            epoch_loss["train_epoch/structure_delta_active_groups"] = structure_delta_active
+            epoch_loss["train_epoch/structure_delta_degree"] = structure_delta_degree
+            epoch_loss["train_epoch/structure_delta_interface"] = structure_delta_interface
+            epoch_loss["train_epoch/structure_delta_gram"] = structure_delta_gram
+            epoch_loss["train_epoch/structure_delta_improvement"] = structure_delta_improve
+            epoch_loss["train_epoch/structure_delta_gram_groups"] = structure_delta_gram_groups
         if degree_pair_count > 0:
             epoch_loss["train_epoch/degree_pair_dist_loss"] = degree_pair_loss
             epoch_loss["train_epoch/degree_pair_dist_weighted"] = degree_pair_wloss
             epoch_loss["train_epoch/degree_pair_dist_active_families"] = degree_pair_active
+        if closure_bucket_count > 0:
+            epoch_loss["train_epoch/closure_bucket_dist_loss"] = closure_bucket_loss
+            epoch_loss["train_epoch/closure_bucket_dist_weighted"] = closure_bucket_wloss
+            epoch_loss["train_epoch/closure_bucket_dist_active_families"] = closure_bucket_active
+        if node_closure_count > 0:
+            epoch_loss["train_epoch/node_closure_dist_loss"] = node_closure_loss
+            epoch_loss["train_epoch/node_closure_dist_weighted"] = node_closure_wloss
+            epoch_loss["train_epoch/node_closure_dist_active_groups"] = node_closure_active
+        if edge_support_count > 0:
+            epoch_loss["train_epoch/edge_support_dist_loss"] = edge_support_loss
+            epoch_loss["train_epoch/edge_support_dist_weighted"] = edge_support_wloss
+            epoch_loss["train_epoch/edge_support_dist_active_families"] = edge_support_active
+        if low_degree_closure_count > 0:
+            epoch_loss["train_epoch/low_degree_closure_loss"] = low_degree_closure_loss
+            epoch_loss["train_epoch/low_degree_closure_weighted"] = low_degree_closure_wloss
+            epoch_loss["train_epoch/low_degree_closure_active_groups"] = low_degree_closure_active
+        if degree_role_count > 0:
+            epoch_loss["train_epoch/degree_role_dist_loss"] = degree_role_loss
+            epoch_loss["train_epoch/degree_role_dist_weighted"] = degree_role_wloss
+            epoch_loss["train_epoch/degree_role_dist_active_groups"] = degree_role_active
+        if closure_anti_count > 0:
+            epoch_loss["train_epoch/closure_anti_concentration_loss"] = closure_anti_loss
+            epoch_loss["train_epoch/closure_anti_concentration_weighted"] = closure_anti_wloss
+            epoch_loss["train_epoch/closure_anti_concentration_active_groups"] = closure_anti_active
+        if typed_signature_count > 0:
+            epoch_loss["train_epoch/typed_rooted_signature_loss"] = typed_signature_loss
+            epoch_loss["train_epoch/typed_rooted_signature_weighted"] = typed_signature_wloss
+            epoch_loss["train_epoch/typed_rooted_signature_active_terms"] = typed_signature_active
         if closure_rank_count > 0:
             epoch_loss["train_epoch/closure_rank_loss"] = closure_rank_loss
             epoch_loss["train_epoch/closure_rank_weighted"] = closure_rank_wloss
             epoch_loss["train_epoch/closure_rank_active_families"] = closure_rank_active
             epoch_loss["train_epoch/closure_rank_pairs"] = closure_rank_pairs
+        if structure_utility_count > 0:
+            epoch_loss["train_epoch/structure_utility_rank_loss"] = structure_utility_loss
+            epoch_loss["train_epoch/structure_utility_rank_weighted"] = structure_utility_wloss
+            epoch_loss["train_epoch/structure_utility_rank_active_families"] = structure_utility_active
+            epoch_loss["train_epoch/structure_utility_rank_pairs"] = structure_utility_pairs
+        if node_role_coverage_count > 0:
+            epoch_loss["train_epoch/node_role_coverage_rank_loss"] = node_role_coverage_loss
+            epoch_loss["train_epoch/node_role_coverage_rank_weighted"] = node_role_coverage_wloss
+            epoch_loss["train_epoch/node_role_coverage_rank_active_families"] = node_role_coverage_active
+            epoch_loss["train_epoch/node_role_coverage_rank_pairs"] = node_role_coverage_pairs
+            epoch_loss["train_epoch/node_role_coverage_rank_utility"] = node_role_coverage_utility
+        if learned_target_count > 0:
+            epoch_loss["train_epoch/learned_structure_target_loss"] = learned_target_loss
+            epoch_loss["train_epoch/learned_structure_target_weighted"] = learned_target_wloss
+            learned_targets = self._learned_structure_target_tensors()
+            if learned_targets:
+                epoch_loss["train_epoch/learned_target_triangles"] = float(
+                    learned_targets["triangles"].detach().cpu()
+                )
+                epoch_loss["train_epoch/learned_target_clustering"] = float(
+                    learned_targets["clustering"].detach().cpu()
+                )
+                epoch_loss["train_epoch/learned_target_lcc"] = float(
+                    learned_targets["lcc_size"].detach().cpu()
+                )
+                epoch_loss["train_epoch/learned_target_assortativity"] = float(
+                    learned_targets["assortativity"].detach().cpu()
+                )
         if struct_probe_count > 0:
             epoch_loss["train_epoch/struct_probe_topk_precision"] = struct_probe_precision
             epoch_loss["train_epoch/struct_probe_topk_recall"] = struct_probe_recall
@@ -9873,17 +17681,77 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             f" -- family_count_wloss: {family_count_wloss:.6f}"
             f" -- family_count_fams: {family_count_active:.1f}"
         ) if family_count_count > 0 else ""
+        structure_delta_str = (
+            f" -- structure_delta: {structure_delta_loss:.6f}"
+            f" -- structure_delta_wloss: {structure_delta_wloss:.6f}"
+            f" -- structure_delta_groups: {structure_delta_active:.1f}"
+            f" -- structure_delta_deg/if/gram/imp: "
+            f"{structure_delta_degree:.4f}/{structure_delta_interface:.4f}/"
+            f"{structure_delta_gram:.4f}/{structure_delta_improve:.4f}"
+        ) if structure_delta_count > 0 else ""
         degree_pair_str = (
             f" -- degree_pair_dist: {degree_pair_loss:.6f}"
             f" -- degree_pair_wloss: {degree_pair_wloss:.6f}"
             f" -- degree_pair_fams: {degree_pair_active:.1f}"
         ) if degree_pair_count > 0 else ""
+        closure_bucket_str = (
+            f" -- closure_bucket: {closure_bucket_loss:.6f}"
+            f" -- closure_bucket_wloss: {closure_bucket_wloss:.6f}"
+            f" -- closure_bucket_fams: {closure_bucket_active:.1f}"
+        ) if closure_bucket_count > 0 else ""
+        node_closure_str = (
+            f" -- node_closure: {node_closure_loss:.6f}"
+            f" -- node_closure_wloss: {node_closure_wloss:.6f}"
+            f" -- node_closure_groups: {node_closure_active:.1f}"
+        ) if node_closure_count > 0 else ""
+        edge_support_str = (
+            f" -- edge_support: {edge_support_loss:.6f}"
+            f" -- edge_support_wloss: {edge_support_wloss:.6f}"
+            f" -- edge_support_fams: {edge_support_active:.1f}"
+        ) if edge_support_count > 0 else ""
+        low_degree_closure_str = (
+            f" -- lowdeg_closure: {low_degree_closure_loss:.6f}"
+            f" -- lowdeg_closure_wloss: {low_degree_closure_wloss:.6f}"
+            f" -- lowdeg_closure_groups: {low_degree_closure_active:.1f}"
+        ) if low_degree_closure_count > 0 else ""
+        degree_role_str = (
+            f" -- degree_role: {degree_role_loss:.6f}"
+            f" -- degree_role_wloss: {degree_role_wloss:.6f}"
+            f" -- degree_role_groups: {degree_role_active:.1f}"
+        ) if degree_role_count > 0 else ""
+        closure_anti_str = (
+            f" -- closure_anti: {closure_anti_loss:.6f}"
+            f" -- closure_anti_wloss: {closure_anti_wloss:.6f}"
+            f" -- closure_anti_groups: {closure_anti_active:.1f}"
+        ) if closure_anti_count > 0 else ""
+        typed_signature_str = (
+            f" -- typed_signature: {typed_signature_loss:.6f}"
+            f" -- typed_signature_wloss: {typed_signature_wloss:.6f}"
+            f" -- typed_signature_terms: {typed_signature_active:.1f}"
+        ) if typed_signature_count > 0 else ""
         closure_rank_str = (
             f" -- closure_rank: {closure_rank_loss:.6f}"
             f" -- closure_rank_wloss: {closure_rank_wloss:.6f}"
             f" -- closure_rank_fams: {closure_rank_active:.1f}"
             f" -- closure_rank_pairs: {closure_rank_pairs:.0f}"
         ) if closure_rank_count > 0 else ""
+        structure_utility_str = (
+            f" -- structure_utility_rank: {structure_utility_loss:.6f}"
+            f" -- structure_utility_wloss: {structure_utility_wloss:.6f}"
+            f" -- structure_utility_fams: {structure_utility_active:.1f}"
+            f" -- structure_utility_pairs: {structure_utility_pairs:.0f}"
+        ) if structure_utility_count > 0 else ""
+        node_role_coverage_str = (
+            f" -- node_role_cov_rank: {node_role_coverage_loss:.6f}"
+            f" -- node_role_cov_wloss: {node_role_coverage_wloss:.6f}"
+            f" -- node_role_cov_fams: {node_role_coverage_active:.1f}"
+            f" -- node_role_cov_pairs: {node_role_coverage_pairs:.0f}"
+            f" -- node_role_cov_util: {node_role_coverage_utility:.4f}"
+        ) if node_role_coverage_count > 0 else ""
+        learned_target_str = (
+            f" -- learned_target: {learned_target_loss:.6f}"
+            f" -- learned_target_wloss: {learned_target_wloss:.6f}"
+        ) if learned_target_count > 0 else ""
         struct_probe_str = (
             f" -- struct_probe[topK_p={struct_probe_precision:.4f}"
             f", famL1={struct_probe_family_l1:.4f}"
@@ -9896,6 +17764,9 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             f" -- t_norm: {diag_t:.3f} -- q_pos: {diag_qpos:.4f} -- pred_pos: {diag_pred_pos:.4f} "
             f"-- pos_p: {diag_pos_p:.4f} -- neg_p: {diag_neg_p:.4f}"
         ) if diag_count > 0 else ""
+        rare_query_str = (
+            f" -- rare_query[pos={rare_pos},hard={rare_hard},easy={rare_easy},random={rare_random}]"
+        ) if (rare_pos or rare_hard or rare_easy or rare_random) else ""
         gate_str = ""
         if bool(getattr(self.cfg.model, "use_query_context_gate", False)):
             gate_values = [
@@ -9988,8 +17859,8 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             f"exist_BCE: {exist_bce:.4f} -- subtype_CE: {subtype_ce:.4f} -- "
             f"pos_acc: {pos_acc:.4f} -- neg_acc: {neg_str}"
             f"{degree_str}{edge_count_str}{closure_str}{family_role_str}"
-            f"{family_count_str}{degree_pair_str}{closure_rank_str}"
-            f"{struct_probe_str}{total_str}{diag_str}{gate_str}"
+            f"{family_count_str}{structure_delta_str}{degree_pair_str}{closure_bucket_str}{node_closure_str}{edge_support_str}{low_degree_closure_str}{degree_role_str}{closure_anti_str}{typed_signature_str}{closure_rank_str}{structure_utility_str}{node_role_coverage_str}{learned_target_str}"
+            f"{struct_probe_str}{total_str}{diag_str}{rare_query_str}{gate_str}"
         )
 
         if wandb.run:
@@ -10013,10 +17884,36 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             "train_epoch/closure_pos_weighted",
             "train_epoch/family_count_loss",
             "train_epoch/family_count_weighted",
+            "train_epoch/structure_delta_loss",
+            "train_epoch/structure_delta_weighted",
+            "train_epoch/structure_delta_active_groups",
+            "train_epoch/structure_delta_degree",
+            "train_epoch/structure_delta_interface",
+            "train_epoch/structure_delta_gram",
+            "train_epoch/structure_delta_improvement",
+            "train_epoch/structure_delta_gram_groups",
             "train_epoch/degree_pair_dist_loss",
             "train_epoch/degree_pair_dist_weighted",
+            "train_epoch/closure_bucket_dist_loss",
+            "train_epoch/closure_bucket_dist_weighted",
+            "train_epoch/node_closure_dist_loss",
+            "train_epoch/node_closure_dist_weighted",
+            "train_epoch/edge_support_dist_loss",
+            "train_epoch/edge_support_dist_weighted",
+            "train_epoch/low_degree_closure_loss",
+            "train_epoch/low_degree_closure_weighted",
+            "train_epoch/degree_role_dist_loss",
+            "train_epoch/degree_role_dist_weighted",
+            "train_epoch/closure_anti_concentration_loss",
+            "train_epoch/closure_anti_concentration_weighted",
+            "train_epoch/typed_rooted_signature_loss",
+            "train_epoch/typed_rooted_signature_weighted",
             "train_epoch/closure_rank_loss",
             "train_epoch/closure_rank_weighted",
+            "train_epoch/structure_utility_rank_loss",
+            "train_epoch/structure_utility_rank_weighted",
+            "train_epoch/node_role_coverage_rank_loss",
+            "train_epoch/node_role_coverage_rank_weighted",
             "train_epoch/struct_probe_topk_precision",
             "train_epoch/struct_probe_topk_recall",
             "train_epoch/struct_probe_family_l1",
@@ -10030,6 +17927,10 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             "train_epoch/pred_pos_rate",
             "train_epoch/pos_p_exist_mean",
             "train_epoch/neg_p_exist_mean",
+            "train_epoch/rare_family_query_pos",
+            "train_epoch/rare_family_query_hard",
+            "train_epoch/rare_family_query_easy",
+            "train_epoch/rare_family_query_random",
         ):
             if key in epoch_loss:
                     self.log(key, epoch_loss[key], sync_dist=True)
@@ -10236,59 +18137,93 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             return
 
         n_to_generate = max(1, int(getattr(self.cfg.general, "samples_to_generate", 1) or 1))
-        n_to_generate = min(n_to_generate, max(1, int(getattr(self.cfg.train, "batch_size", 1) or 1)))
+        n_to_generate = math.ceil(
+            n_to_generate / max(getattr(self._trainer, "num_devices", 1), 1)
+        )
         self.print(
             f"Validation sampling: generating {n_to_generate} sample(s) at epoch {current_epoch}"
         )
-        use_fixed_nodes = bool(getattr(self.cfg.general, "cond_edge_gen_fixed_nodes", False))
-        use_sample_nodes = bool(getattr(self.cfg.general, "cond_edge_gen_sample_nodes", False))
-        if use_fixed_nodes and hasattr(self.dataset_info, "datamodule"):
-            use_test_graph = getattr(self.cfg.general, "cond_edge_gen_use_test_graph", True)
-            if use_test_graph and hasattr(self.dataset_info.datamodule, "test_dataset"):
-                fixed_single = self.dataset_info.datamodule.test_dataset[0].clone()
-            else:
-                fixed_single = self.dataset_info.datamodule.train_dataset[0].clone()
-            fixed_single = self._permute_fixed_graph_within_node_types(
-                fixed_single,
-                getattr(self.cfg.general, "fixed_node_type_permutation_seed", None),
-            )
-            fixed_single = self.dataset_info.to_one_hot(fixed_single)
-            from torch_geometric.data import Batch
+        if self.device.type == "cuda":
+            torch.cuda.empty_cache()
+        was_training = bool(self.training)
+        self.eval()
+        sample_chunks = []
+        generated_count = 0
+        remaining = n_to_generate
+        batch_size = max(1, int(getattr(self.cfg.train, "batch_size", 1) or 1))
+        try:
+            use_fixed_nodes = bool(getattr(self.cfg.general, "cond_edge_gen_fixed_nodes", False))
+            use_sample_nodes = bool(getattr(self.cfg.general, "cond_edge_gen_sample_nodes", False))
+            while remaining > 0:
+                to_generate = min(remaining, batch_size)
+                if use_fixed_nodes and hasattr(self.dataset_info, "datamodule"):
+                    use_test_graph = getattr(self.cfg.general, "cond_edge_gen_use_test_graph", True)
+                    if use_test_graph and hasattr(self.dataset_info.datamodule, "test_dataset"):
+                        fixed_single = self.dataset_info.datamodule.test_dataset[0].clone()
+                    else:
+                        fixed_single = self.dataset_info.datamodule.train_dataset[0].clone()
+                    fixed_single = self._permute_fixed_graph_within_node_types(
+                        fixed_single,
+                        getattr(self.cfg.general, "fixed_node_type_permutation_seed", None),
+                    )
+                    fixed_single = self.dataset_info.to_one_hot(fixed_single)
+                    from torch_geometric.data import Batch
 
-            fixed_batch = Batch.from_data_list(
-                [fixed_single.clone() for _ in range(n_to_generate)]
-            ).to(self.device)
-            samples = self.sample_batch_fixed_nodes(
-                fixed_batch,
-                keep_chain=0,
-                number_chain_steps=self.number_chain_steps,
-                save_final=n_to_generate,
+                    fixed_batch = Batch.from_data_list(
+                        [fixed_single.clone() for _ in range(to_generate)]
+                    ).to(self.device)
+                    sampled_batch = self.sample_batch_fixed_nodes(
+                        fixed_batch,
+                        keep_chain=0,
+                        number_chain_steps=self.number_chain_steps,
+                        save_final=to_generate,
+                    )
+                else:
+                    sample_num_nodes = getattr(self.cfg.general, "sample_num_nodes", None)
+                    if sample_num_nodes is not None:
+                        num_nodes = sample_num_nodes
+                    elif use_sample_nodes and hasattr(self.dataset_info, "datamodule"):
+                        train_data = self.dataset_info.datamodule.train_dataset[0]
+                        num_nodes = getattr(
+                            train_data,
+                            "num_nodes",
+                            train_data.x.shape[0] if hasattr(train_data, "x") else 20,
+                        )
+                    else:
+                        num_nodes = 20
+                    sampled_batch = self.sample_batch(
+                        batch_id=generated_count,
+                        batch_size=to_generate,
+                        num_nodes=num_nodes,
+                        save_final=to_generate,
+                        keep_chain=0,
+                        number_chain_steps=self.number_chain_steps,
+                    )
+                sample_chunks.append(sampled_batch)
+                generated_count += to_generate
+                remaining -= to_generate
+                if self.device.type == "cuda":
+                    torch.cuda.empty_cache()
+            samples = utils.concat_sparse_graphs(sample_chunks)
+            to_log, _ = self.val_sampling_metrics.compute_all_metrics(
+                samples, current_epoch, local_rank=self.local_rank
             )
-        else:
-            sample_num_nodes = getattr(self.cfg.general, "sample_num_nodes", None)
-            if sample_num_nodes is not None:
-                num_nodes = sample_num_nodes
-            elif use_sample_nodes and hasattr(self.dataset_info, "datamodule"):
-                train_data = self.dataset_info.datamodule.train_dataset[0]
-                num_nodes = getattr(
-                    train_data,
-                    "num_nodes",
-                    train_data.x.shape[0] if hasattr(train_data, "x") else 20,
-                )
-            else:
-                num_nodes = 20
-            samples = self.sample_batch(
-                batch_id=0,
-                batch_size=n_to_generate,
-                num_nodes=num_nodes,
-                save_final=n_to_generate,
-                keep_chain=0,
-                number_chain_steps=self.number_chain_steps,
+        except RuntimeError as exc:
+            if "out of memory" not in str(exc).lower():
+                raise
+            self.print(
+                "[VAL-SAMPLING] skipped due to CUDA OOM; "
+                "training will continue. Use test_only/final sampling for "
+                "official generation metrics."
             )
-
-        to_log, _ = self.val_sampling_metrics.compute_all_metrics(
-            samples, current_epoch, local_rank=self.local_rank
-        )
+            if self.device.type == "cuda":
+                torch.cuda.empty_cache()
+            self.val_sampling_metrics.reset()
+            if was_training:
+                self.train()
+            return
+        if was_training:
+            self.train()
         with open(os.path.join(os.getcwd(), f"val_epoch{current_epoch}.json"), "w") as file:
             json.dump(to_log, file)
         internal_metrics = self._compute_same_type_internal_sampling_metrics(samples)
@@ -11631,6 +19566,588 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                         triangles += 1
         return int(triangles)
 
+    def _clone_sparse_sample_for_sampling(self, sparse_sampled_data):
+        cloned = utils.SparsePlaceHolder(
+            node=sparse_sampled_data.node.clone(),
+            edge_index=sparse_sampled_data.edge_index.clone(),
+            edge_attr=sparse_sampled_data.edge_attr.clone(),
+            y=sparse_sampled_data.y.clone(),
+            ptr=(
+                None
+                if getattr(sparse_sampled_data, "ptr", None) is None
+                else sparse_sampled_data.ptr.clone()
+            ),
+            batch=(
+                None
+                if getattr(sparse_sampled_data, "batch", None) is None
+                else sparse_sampled_data.batch.clone()
+            ),
+            charge=(
+                None
+                if getattr(sparse_sampled_data, "charge", None) is None
+                else sparse_sampled_data.charge.clone()
+            ),
+        )
+        for key, value in getattr(sparse_sampled_data, "__dict__", {}).items():
+            if hasattr(cloned, key):
+                continue
+            if torch.is_tensor(value):
+                setattr(cloned, key, value.clone())
+            else:
+                setattr(cloned, key, value)
+        return cloned
+
+    def _sampling_edge_state_signature(self, sparse_sampled_data):
+        edge_index = getattr(sparse_sampled_data, "edge_index", None)
+        edge_attr = getattr(sparse_sampled_data, "edge_attr", None)
+        if edge_index is None or edge_attr is None or edge_index.numel() == 0:
+            return ()
+        edge_attr_discrete = self._edge_attr_to_discrete(edge_attr).long()
+        if edge_attr_discrete.numel() == 0:
+            return ()
+        exist_mask = edge_attr_discrete != 0
+        if not bool(exist_mask.any().item()):
+            return ()
+        edges = edge_index[:, exist_mask].detach().to("cpu").long().t().tolist()
+        attrs = edge_attr_discrete[exist_mask].detach().to("cpu").long().tolist()
+        return tuple(sorted((int(u), int(v), int(a)) for (u, v), a in zip(edges, attrs)))
+
+    def _sampling_no_change_stop_in_window(self, remaining_step):
+        remaining_frac = float(remaining_step) / max(float(self.T), 1.0)
+        lo = float(
+            getattr(
+                self.cfg.model,
+                "sampling_no_change_stop_min_step_frac",
+                0.0,
+            )
+            or 0.0
+        )
+        hi = float(
+            getattr(
+                self.cfg.model,
+                "sampling_no_change_stop_max_step_frac",
+                1.0,
+            )
+            or 1.0
+        )
+        return bool(lo <= remaining_frac <= hi), float(remaining_frac)
+
+    def _sampling_structure_plateau_stop_in_window(self, remaining_step):
+        remaining_frac = float(remaining_step) / max(float(self.T), 1.0)
+        lo = float(
+            getattr(
+                self.cfg.model,
+                "sampling_structure_plateau_stop_min_step_frac",
+                0.0,
+            )
+            or 0.0
+        )
+        hi = float(
+            getattr(
+                self.cfg.model,
+                "sampling_structure_plateau_stop_max_step_frac",
+                1.0,
+            )
+            or 1.0
+        )
+        return bool(lo <= remaining_frac <= hi), float(remaining_frac)
+
+    def _sampling_structure_bad_stall_stop_in_window(self, remaining_step):
+        remaining_frac = float(remaining_step) / max(float(self.T), 1.0)
+        lo = float(
+            getattr(
+                self.cfg.model,
+                "sampling_structure_bad_stall_min_step_frac",
+                0.0,
+            )
+            or 0.0
+        )
+        hi = float(
+            getattr(
+                self.cfg.model,
+                "sampling_structure_bad_stall_max_step_frac",
+                1.0,
+            )
+            or 1.0
+        )
+        return bool(lo <= remaining_frac <= hi), float(remaining_frac)
+
+    def _sampling_structure_bad_stall_status(
+        self,
+        early_stop_status,
+        early_stop_best_gap,
+        remaining_step,
+    ):
+        if not bool(
+            getattr(self.cfg.model, "sampling_structure_bad_stall_stop", False)
+        ):
+            return None
+        if early_stop_status is None:
+            return None
+        in_window, remaining_frac = self._sampling_structure_bad_stall_stop_in_window(
+            remaining_step
+        )
+        if not in_window:
+            return None
+        min_gap = float(
+            getattr(
+                self.cfg.model,
+                "sampling_structure_bad_stall_min_abs_gap",
+                0.75,
+            )
+            or 0.0
+        )
+        current_gap = float(early_stop_status.get("rel_gap", float("inf")))
+        best_gap = float(early_stop_best_gap)
+        if current_gap < min_gap or best_gap < min_gap:
+            return None
+        return {
+            "current_gap": float(current_gap),
+            "best_gap": float(best_gap),
+            "min_gap": float(min_gap),
+            "remaining_frac": float(remaining_frac),
+        }
+
+    def _sampling_structure_plateau_metrics(self):
+        raw = getattr(
+            self.cfg.model,
+            "sampling_structure_plateau_stop_metrics",
+            "triangles,clustering,lcc_size",
+        )
+        if isinstance(raw, str):
+            metrics = [item.strip() for item in raw.split(",") if item.strip()]
+        else:
+            metrics = [str(item) for item in (raw or [])]
+        return [m for m in metrics if m in {"triangles", "clustering", "lcc_size", "assortativity"}]
+
+    def _sampling_structure_plateau_deltas(self):
+        return {
+            "triangles": float(
+                getattr(
+                    self.cfg.model,
+                    "sampling_structure_plateau_stop_triangle_delta",
+                    5.0,
+                )
+                or 0.0
+            ),
+            "clustering": float(
+                getattr(
+                    self.cfg.model,
+                    "sampling_structure_plateau_stop_metric_delta",
+                    0.002,
+                )
+                or 0.0
+            ),
+            "lcc_size": float(
+                getattr(
+                    self.cfg.model,
+                    "sampling_structure_plateau_stop_lcc_delta",
+                    10.0,
+                )
+                or 0.0
+            ),
+            "assortativity": float(
+                getattr(
+                    self.cfg.model,
+                    "sampling_structure_plateau_stop_assort_delta",
+                    0.02,
+                )
+                or 0.0
+            ),
+        }
+
+    def _sampling_structure_plateau_values(self, early_stop_status):
+        if early_stop_status is None:
+            return None
+        metrics = self._sampling_structure_plateau_metrics()
+        if not metrics:
+            return None
+        return {
+            metric: float(early_stop_status[metric])
+            for metric in metrics
+            if metric in early_stop_status
+        }
+
+    def _sampling_structure_plateau_same(self, prev_values, cur_values):
+        if not prev_values or not cur_values:
+            return False, {}
+        deltas = self._sampling_structure_plateau_deltas()
+        diffs = {}
+        stable = True
+        for metric in self._sampling_structure_plateau_metrics():
+            if metric not in prev_values or metric not in cur_values:
+                stable = False
+                continue
+            diff = abs(float(cur_values[metric]) - float(prev_values[metric]))
+            diffs[metric] = diff
+            if diff > float(deltas.get(metric, 0.0)):
+                stable = False
+        return stable, diffs
+
+    def _sampling_lcc_floor_target(self):
+        target_lcc = self._sampling_structure_target_value(
+            "lcc_size",
+            (
+                "sampling_structure_early_stop_target_lcc",
+                "sampling_structure_limiter_target_lcc",
+            ),
+        )
+        if target_lcc is None:
+            return None, None
+        frac = float(
+            getattr(self.cfg.model, "sampling_connectivity_hard_lcc_frac", 0.95)
+            or 0.0
+        )
+        return float(target_lcc), float(target_lcc) * max(0.0, min(1.0, frac))
+
+    def _sampling_early_stop_lcc_floor_met(self, early_stop_status):
+        if early_stop_status is None:
+            return True
+        _, floor = self._sampling_lcc_floor_target()
+        if floor is None:
+            return True
+        return float(early_stop_status.get("lcc_size", 0.0)) >= float(floor)
+
+    def _sampling_should_update_early_best(
+        self,
+        early_stop_status,
+        best_gap,
+        best_lcc_value,
+        best_lcc_floor_met,
+    ):
+        require_floor = bool(
+            getattr(self.cfg.model, "sampling_early_stop_require_lcc_floor", False)
+        )
+        current_gap = float(early_stop_status.get("rel_gap", float("inf")))
+        current_lcc = float(early_stop_status.get("lcc_size", 0.0))
+        current_floor_met = self._sampling_early_stop_lcc_floor_met(early_stop_status)
+        if not require_floor:
+            return current_gap < float(best_gap), current_floor_met, current_lcc
+        if current_floor_met and not bool(best_lcc_floor_met):
+            return True, current_floor_met, current_lcc
+        if current_floor_met and bool(best_lcc_floor_met):
+            return current_gap < float(best_gap), current_floor_met, current_lcc
+        if not bool(best_lcc_floor_met):
+            if current_lcc > float(best_lcc_value):
+                return True, current_floor_met, current_lcc
+            if current_lcc == float(best_lcc_value) and current_gap < float(best_gap):
+                return True, current_floor_met, current_lcc
+        return False, current_floor_met, current_lcc
+
+    def _sampling_structure_early_stop_status(self, sparse_sampled_data, remaining_step):
+        if not bool(getattr(self.cfg.model, "sampling_structure_early_stop", False)):
+            return None
+        target_triangles = self._sampling_structure_target_value(
+            "triangles",
+            (
+                "sampling_structure_early_stop_target_triangles",
+                "sampling_structure_budget_target_triangles",
+            ),
+        )
+        target_clustering = self._sampling_structure_target_value(
+            "clustering",
+            ("sampling_structure_early_stop_target_clustering",),
+        )
+        target_lcc = self._sampling_structure_target_value(
+            "lcc_size",
+            ("sampling_structure_early_stop_target_lcc",),
+        )
+        target_assortativity = self._sampling_structure_target_value(
+            "assortativity",
+            ("sampling_structure_early_stop_target_assortativity",),
+        )
+        targets = {
+            "triangles": target_triangles,
+            "clustering": target_clustering,
+            "lcc_size": target_lcc,
+            "assortativity": target_assortativity,
+        }
+        targets = {
+            key: float(value)
+            for key, value in targets.items()
+            if value is not None
+        }
+        if not targets:
+            return None
+
+        remaining_frac = float(remaining_step) / max(float(self.T), 1.0)
+        lo = float(
+            getattr(
+                self.cfg.model,
+                "sampling_structure_early_stop_min_step_frac",
+                0.0,
+            )
+            or 0.0
+        )
+        hi = float(
+            getattr(
+                self.cfg.model,
+                "sampling_structure_early_stop_max_step_frac",
+                1.0,
+            )
+            or 1.0
+        )
+
+        edge_attr_discrete = self._edge_attr_to_discrete(sparse_sampled_data.edge_attr)
+        stats = self._sampling_current_structure_stats(
+            sparse_sampled_data.edge_index,
+            edge_attr_discrete.long(),
+            int(sparse_sampled_data.node.shape[0]),
+        )
+        triangle_tol = float(
+            getattr(
+                self.cfg.model,
+                "sampling_structure_early_stop_triangle_tolerance",
+                0.03,
+            )
+            or 0.0
+        )
+        metric_tol = float(
+            getattr(
+                self.cfg.model,
+                "sampling_structure_early_stop_metric_tolerance",
+                0.10,
+            )
+            or 0.0
+        )
+        gaps = {}
+        hits = {}
+        for key, target in targets.items():
+            value = float(stats.get(key, 0.0))
+            denom = max(abs(float(target)), 1.0e-8)
+            rel_gap = abs(value - float(target)) / denom
+            signed_gap = (value - float(target)) / denom
+            tol = triangle_tol if key == "triangles" else metric_tol
+            gaps[key] = {
+                "value": value,
+                "target": float(target),
+                "rel_gap": float(rel_gap),
+                "signed_gap": float(signed_gap),
+                "tolerance": float(tol),
+            }
+            hits[key] = bool(rel_gap <= tol)
+        in_step_window = lo <= remaining_frac <= hi
+        all_hit = bool(in_step_window and all(hits.values()))
+        score_gap = max((entry["rel_gap"] for entry in gaps.values()), default=float("inf"))
+        return {
+            "triangles": int(round(stats.get("triangles", 0.0))),
+            "clustering": float(stats.get("clustering", 0.0)),
+            "lcc_size": int(round(stats.get("lcc_size", 0.0))),
+            "assortativity": float(stats.get("assortativity", 0.0)),
+            "target_triangles": int(round(targets.get("triangles", 0.0))),
+            "rel_gap": float(score_gap),
+            "signed_gap": float(gaps.get("triangles", {}).get("signed_gap", 0.0)),
+            "hit": all_hit,
+            "remaining_frac": float(remaining_frac),
+            "in_step_window": bool(in_step_window),
+            "tolerance": float(max([entry["tolerance"] for entry in gaps.values()], default=0.0)),
+            "gaps": gaps,
+            "hits": hits,
+        }
+
+    def _sampling_structure_degrade_status(
+        self,
+        early_stop_status,
+        early_stop_best_gap,
+        early_stop_best_metric_gaps,
+        steps_since_best,
+    ):
+        if not bool(
+            getattr(self.cfg.model, "sampling_structure_early_stop_degrade", False)
+        ):
+            return None
+        if early_stop_status is None or early_stop_best_gap == float("inf"):
+            return None
+
+        min_steps_after_best = max(
+            0,
+            int(
+                getattr(
+                    self.cfg.model,
+                    "sampling_structure_early_stop_degrade_min_steps_after_best",
+                    3,
+                )
+                or 0
+            ),
+        )
+        if int(steps_since_best) < min_steps_after_best:
+            return None
+
+        ratio = float(
+            getattr(
+                self.cfg.model,
+                "sampling_structure_early_stop_degrade_ratio",
+                1.5,
+            )
+            or 1.5
+        )
+        min_delta = float(
+            getattr(
+                self.cfg.model,
+                "sampling_structure_early_stop_degrade_min_delta",
+                0.05,
+            )
+            or 0.0
+        )
+        watch_raw = getattr(
+            self.cfg.model,
+            "sampling_structure_early_stop_degrade_watch_metrics",
+            "assortativity",
+        )
+        if isinstance(watch_raw, str):
+            watch_metrics = [
+                item.strip()
+                for item in watch_raw.split(",")
+                if item.strip()
+            ]
+        else:
+            watch_metrics = list(watch_raw or [])
+
+        current_gap = float(early_stop_status.get("rel_gap", float("inf")))
+        global_threshold = max(
+            float(early_stop_best_gap) * ratio,
+            float(early_stop_best_gap) + min_delta,
+        )
+        reasons = []
+        if current_gap > global_threshold:
+            reasons.append(
+                f"max_abs {current_gap:.4f}>{global_threshold:.4f}"
+            )
+
+        gaps = early_stop_status.get("gaps", {})
+        for metric in watch_metrics:
+            entry = gaps.get(metric)
+            if entry is None:
+                continue
+            current_metric_gap = float(entry.get("rel_gap", float("inf")))
+            best_metric_gap = float(
+                early_stop_best_metric_gaps.get(metric, float("inf"))
+            )
+            if best_metric_gap == float("inf"):
+                continue
+            metric_threshold = max(
+                best_metric_gap * ratio,
+                best_metric_gap + min_delta,
+            )
+            if current_metric_gap > metric_threshold:
+                reasons.append(
+                    f"{metric} {current_metric_gap:.4f}>{metric_threshold:.4f}"
+                )
+
+        if not reasons:
+            return None
+        return {
+            "degraded": True,
+            "reasons": reasons,
+            "steps_since_best": int(steps_since_best),
+            "current_gap": float(current_gap),
+            "best_gap": float(early_stop_best_gap),
+        }
+
+    def _sampling_current_structure_stats(
+        self,
+        edge_index: torch.Tensor,
+        edge_attr_discrete: torch.Tensor,
+        num_nodes: int,
+    ):
+        if (
+            edge_index is None
+            or edge_attr_discrete is None
+            or edge_index.numel() == 0
+            or edge_attr_discrete.numel() == 0
+            or num_nodes <= 0
+        ):
+            return {
+                "triangles": 0.0,
+                "clustering": 0.0,
+                "lcc_size": 0.0,
+                "assortativity": 0.0,
+            }
+
+        exist_mask = edge_attr_discrete != 0
+        if not exist_mask.any():
+            return {
+                "triangles": 0.0,
+                "clustering": 0.0,
+                "lcc_size": 1.0 if num_nodes > 0 else 0.0,
+                "assortativity": 0.0,
+            }
+
+        ei = edge_index[:, exist_mask]
+        src = ei[0].detach().cpu().tolist()
+        dst = ei[1].detach().cpu().tolist()
+        neighbors = [set() for _ in range(int(num_nodes))]
+        edges = set()
+        for u_raw, v_raw in zip(src, dst):
+            u = int(u_raw)
+            v = int(v_raw)
+            if u == v or u < 0 or v < 0 or u >= num_nodes or v >= num_nodes:
+                continue
+            a, b = (u, v) if u < v else (v, u)
+            if (a, b) in edges:
+                continue
+            edges.add((a, b))
+            neighbors[a].add(b)
+            neighbors[b].add(a)
+
+        triangles = 0
+        local_clustering_sum = 0.0
+        for u in range(int(num_nodes)):
+            nu = neighbors[u]
+            deg_u = len(nu)
+            if deg_u < 2:
+                continue
+            links = 0
+            nu_list = sorted(nu)
+            for idx, v in enumerate(nu_list):
+                nv = neighbors[v]
+                for w in nu_list[idx + 1:]:
+                    if w in nv:
+                        links += 1
+            triangles += links
+            local_clustering_sum += float(links) / float(deg_u * (deg_u - 1) / 2.0)
+        triangles = triangles / 3.0
+        clustering = local_clustering_sum / float(max(num_nodes, 1))
+
+        visited = [False] * int(num_nodes)
+        lcc_size = 0
+        for start in range(int(num_nodes)):
+            if visited[start]:
+                continue
+            stack = [start]
+            visited[start] = True
+            size = 0
+            while stack:
+                u = stack.pop()
+                size += 1
+                for v in neighbors[u]:
+                    if not visited[v]:
+                        visited[v] = True
+                        stack.append(v)
+            lcc_size = max(lcc_size, size)
+
+        assortativity = 0.0
+        if edges:
+            deg = [len(nu) for nu in neighbors]
+            xs = np.asarray([deg[u] for u, _ in edges], dtype=np.float64)
+            ys = np.asarray([deg[v] for _, v in edges], dtype=np.float64)
+            if xs.size > 1:
+                x_mean = xs.mean()
+                y_mean = ys.mean()
+                cov = ((xs - x_mean) * (ys - y_mean)).mean()
+                x_std = xs.std()
+                y_std = ys.std()
+                denom = x_std * y_std
+                if denom > 0:
+                    assortativity = float(cov / denom)
+
+        return {
+            "triangles": float(triangles),
+            "clustering": float(clustering),
+            "lcc_size": float(lcc_size),
+            "assortativity": float(assortativity),
+        }
+
     def _replace_edges_with_labels(
         self,
         base_edge_index: torch.Tensor,
@@ -12303,7 +20820,96 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         sampling_log = []
         trace_triangles = bool(getattr(self.cfg.general, "log_sampling_triangle_trace", False))
         prev_step_triangles = None
-        if hasattr(self, 'local_rank') and self.local_rank == 0:
+        early_stop_enabled = bool(
+            getattr(self.cfg.model, "sampling_structure_early_stop", False)
+        )
+        early_stop_patience = max(
+            1,
+            int(
+                getattr(
+                    self.cfg.model,
+                    "sampling_structure_early_stop_patience",
+                    2,
+                )
+                or 1
+            ),
+        )
+        early_stop_restore_best = bool(
+            getattr(
+                self.cfg.model,
+                "sampling_structure_early_stop_restore_best",
+                True,
+            )
+        )
+        early_stop_hits = 0
+        early_stop_final_step = None
+        early_stop_best_gap = float("inf")
+        early_stop_best_step = None
+        early_stop_best_sample = None
+        early_stop_best_metric_gaps = {}
+        early_stop_best_lcc_value = -float("inf")
+        early_stop_best_lcc_floor_met = False
+        early_stop_steps_since_best = 0
+        early_stop_degrade_hits = 0
+        early_stop_degrade_patience = max(
+            1,
+            int(
+                getattr(
+                    self.cfg.model,
+                    "sampling_structure_early_stop_degrade_patience",
+                    5,
+                )
+                or 1
+            ),
+        )
+        no_change_stop_enabled = bool(
+            getattr(self.cfg.model, "sampling_no_change_stop", False)
+        )
+        no_change_stop_patience = max(
+            1,
+            int(
+                getattr(self.cfg.model, "sampling_no_change_stop_patience", 3)
+                or 1
+            ),
+        )
+        no_change_stop_hits = 0
+        no_change_stop_prev_signature = (
+            self._sampling_edge_state_signature(sparse_sampled_data)
+            if no_change_stop_enabled
+            else None
+        )
+        plateau_stop_enabled = bool(
+            getattr(self.cfg.model, "sampling_structure_plateau_stop", False)
+        )
+        plateau_stop_patience = max(
+            1,
+            int(
+                getattr(
+                    self.cfg.model,
+                    "sampling_structure_plateau_stop_patience",
+                    5,
+                )
+                or 1
+            ),
+        )
+        plateau_stop_hits = 0
+        plateau_stop_prev_values = None
+        bad_stall_stop_enabled = bool(
+            getattr(self.cfg.model, "sampling_structure_bad_stall_stop", False)
+        )
+        bad_stall_stop_patience = max(
+            1,
+            int(
+                getattr(
+                    self.cfg.model,
+                    "sampling_structure_bad_stall_patience",
+                    8,
+                )
+                or 1
+            ),
+        )
+        bad_stall_stop_hits = 0
+        if getattr(self, "local_rank", 0) == 0:
             # 记录初始状态
             init_edge_count = sparse_sampled_data.edge_index.shape[1] if sparse_sampled_data.edge_index.numel() > 0 else 0
             init_node_count = sparse_sampled_data.node.shape[0]
@@ -12347,7 +20953,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             )
             
             # 记录采样过程：每一步的状态
-            if hasattr(self, 'local_rank') and self.local_rank == 0:
+            if getattr(self, "local_rank", 0) == 0:
                     edge_count = sparse_sampled_data.edge_index.shape[1] if sparse_sampled_data.edge_index.numel() > 0 else 0
                     node_count = sparse_sampled_data.node.shape[0]
                     edge_attr_discrete = sparse_sampled_data.edge_attr.argmax(dim=-1) if sparse_sampled_data.edge_attr.dim() > 1 else sparse_sampled_data.edge_attr
@@ -12370,24 +20976,329 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                             0 if prev_step_triangles is None else step_triangles - prev_step_triangles
                         )
                         prev_step_triangles = step_triangles
+                    early_stop_status = self._sampling_structure_early_stop_status(
+                        sparse_sampled_data,
+                        int(s_int),
+                    )
+                    if early_stop_status is not None:
+                        step_entry["early_stop_target_triangles"] = int(
+                            early_stop_status["target_triangles"]
+                        )
+                        step_entry["early_stop_triangle_gap"] = float(
+                            early_stop_status["rel_gap"]
+                        )
+                        step_entry["early_stop_triangle_signed_gap"] = float(
+                            early_stop_status["gaps"]
+                            .get("triangles", {})
+                            .get("signed_gap", 0.0)
+                        )
+                        step_entry["early_stop_hit"] = bool(early_stop_status["hit"])
+                        step_entry["early_stop_metric_gaps"] = early_stop_status["gaps"]
+                        step_entry["early_stop_metric_hits"] = early_stop_status["hits"]
+                        update_best, current_lcc_floor_met, current_lcc_value = (
+                            self._sampling_should_update_early_best(
+                                early_stop_status,
+                                early_stop_best_gap,
+                                early_stop_best_lcc_value,
+                                early_stop_best_lcc_floor_met,
+                            )
+                        )
+                        if update_best:
+                            early_stop_best_gap = float(early_stop_status["rel_gap"])
+                            early_stop_best_step = int(s_int)
+                            early_stop_best_sample = self._clone_sparse_sample_for_sampling(
+                                sparse_sampled_data
+                            )
+                            early_stop_best_metric_gaps = {
+                                name: float(entry["rel_gap"])
+                                for name, entry in early_stop_status["gaps"].items()
+                            }
+                            early_stop_best_lcc_value = float(current_lcc_value)
+                            early_stop_best_lcc_floor_met = bool(current_lcc_floor_met)
+                            early_stop_steps_since_best = 0
+                            early_stop_degrade_hits = 0
+                        else:
+                            early_stop_steps_since_best += 1
+                        if early_stop_status["hit"]:
+                            early_stop_hits += 1
+                        else:
+                            early_stop_hits = 0
+                        degrade_status = self._sampling_structure_degrade_status(
+                            early_stop_status,
+                            early_stop_best_gap,
+                            early_stop_best_metric_gaps,
+                            early_stop_steps_since_best,
+                        )
+                        if degrade_status is not None:
+                            early_stop_degrade_hits += 1
+                        else:
+                            early_stop_degrade_hits = 0
+                        bad_stall_status = self._sampling_structure_bad_stall_status(
+                            early_stop_status,
+                            early_stop_best_gap,
+                            int(s_int),
+                        )
+                        if bad_stall_status is not None:
+                            bad_stall_stop_hits += 1
+                        else:
+                            bad_stall_stop_hits = 0
+                        gap_msg = " ".join(
+                            [
+                                (
+                                    f"{name}={entry['value']:.6g}/"
+                                    f"{entry['target']:.6g}"
+                                    f"({entry['signed_gap']:+.3f},"
+                                    f"tol={entry['tolerance']:.2f},"
+                                    f"{'ok' if early_stop_status['hits'].get(name, False) else 'no'})"
+                                )
+                                for name, entry in early_stop_status["gaps"].items()
+                            ]
+                        )
+                        print(
+                            "[采样-EARLY-STOP] "
+                            f"step={int(s_int)} "
+                            f"{gap_msg} "
+                            f"max_abs={early_stop_status['rel_gap']:.4f} "
+                            f"hit={early_stop_hits}/{early_stop_patience}"
+                        )
+                        if degrade_status is not None:
+                            print(
+                                "[采样-EARLY-STOP-DEGRADE] "
+                                f"step={int(s_int)} "
+                                f"bad={early_stop_degrade_hits}/{early_stop_degrade_patience} "
+                                f"since_best={degrade_status['steps_since_best']} "
+                                f"best_step={early_stop_best_step} "
+                                f"best_abs_gap={early_stop_best_gap:.4f} "
+                                f"reason={'; '.join(degrade_status['reasons'])}"
+                            )
+                        if bad_stall_status is not None:
+                            print(
+                                "[采样-STRUCTURE-BAD-STALL-STOP] "
+                                f"step={int(s_int)} "
+                                f"hit={bad_stall_stop_hits}/{bad_stall_stop_patience} "
+                                f"current_abs_gap={bad_stall_status['current_gap']:.4f} "
+                                f"best_abs_gap={bad_stall_status['best_gap']:.4f} "
+                                f"min_abs_gap={bad_stall_status['min_gap']:.4f} "
+                                f"remaining_frac={bad_stall_status['remaining_frac']:.4f}"
+                            )
+                    if no_change_stop_enabled:
+                        no_change_signature = self._sampling_edge_state_signature(
+                            sparse_sampled_data
+                        )
+                        no_change_in_window, no_change_remaining_frac = (
+                            self._sampling_no_change_stop_in_window(int(s_int))
+                        )
+                        no_change_same = (
+                            no_change_stop_prev_signature is not None
+                            and no_change_signature == no_change_stop_prev_signature
+                        )
+                        if no_change_in_window and no_change_same:
+                            no_change_stop_hits += 1
+                        else:
+                            no_change_stop_hits = 0
+                        no_change_stop_prev_signature = no_change_signature
+                        step_entry["no_change_stop_hits"] = int(no_change_stop_hits)
+                        step_entry["no_change_stop_same"] = bool(no_change_same)
+                        step_entry["no_change_stop_in_window"] = bool(no_change_in_window)
+                        if no_change_same:
+                            print(
+                                "[采样-NO-CHANGE-STOP] "
+                                f"step={int(s_int)} "
+                                f"hit={no_change_stop_hits}/{no_change_stop_patience} "
+                                f"remaining_frac={no_change_remaining_frac:.4f} "
+                                f"in_window={no_change_in_window}"
+                            )
+                    if plateau_stop_enabled:
+                        plateau_values = self._sampling_structure_plateau_values(
+                            early_stop_status
+                        )
+                        plateau_in_window, plateau_remaining_frac = (
+                            self._sampling_structure_plateau_stop_in_window(int(s_int))
+                        )
+                        plateau_same, plateau_diffs = self._sampling_structure_plateau_same(
+                            plateau_stop_prev_values,
+                            plateau_values,
+                        )
+                        if plateau_in_window and plateau_same:
+                            plateau_stop_hits += 1
+                        else:
+                            plateau_stop_hits = 0
+                        plateau_stop_prev_values = plateau_values
+                        step_entry["plateau_stop_hits"] = int(plateau_stop_hits)
+                        step_entry["plateau_stop_same"] = bool(plateau_same)
+                        step_entry["plateau_stop_in_window"] = bool(plateau_in_window)
+                        step_entry["plateau_stop_diffs"] = {
+                            key: float(value) for key, value in plateau_diffs.items()
+                        }
+                        if plateau_same:
+                            diff_msg = ",".join(
+                                f"{key}={value:.4g}"
+                                for key, value in plateau_diffs.items()
+                            )
+                            print(
+                                "[采样-STRUCTURE-PLATEAU-STOP] "
+                                f"step={int(s_int)} "
+                                f"hit={plateau_stop_hits}/{plateau_stop_patience} "
+                                f"remaining_frac={plateau_remaining_frac:.4f} "
+                                f"in_window={plateau_in_window} "
+                                f"diffs={diff_msg}"
+                            )
                     sampling_log.append(step_entry)
             self._record_test_intermediate_sample(int(s_int), sparse_sampled_data)
             # keep_chain can be very small, e.g., 1
             if ((s_int * number_chain_steps) % self.T == 0) and (keep_chain != 0):
                     chain.append(sparse_sampled_data)
+            if early_stop_enabled and early_stop_hits >= early_stop_patience:
+                early_stop_final_step = int(s_int)
+                if (
+                    early_stop_restore_best
+                    and early_stop_best_sample is not None
+                ):
+                    sparse_sampled_data = early_stop_best_sample
+                    early_stop_final_step = int(early_stop_best_step)
+                    print(
+                        "[采样-EARLY-STOP] "
+                        f"restore best step={early_stop_best_step} "
+                        f"best_abs_gap={early_stop_best_gap:.4f}"
+                    )
+                print(
+                    "[采样-EARLY-STOP] "
+                    f"stop full-step sampling at remaining_step={early_stop_final_step}"
+                )
+                break
+            if (
+                early_stop_enabled
+                and early_stop_degrade_hits >= early_stop_degrade_patience
+            ):
+                early_stop_final_step = int(s_int)
+                if (
+                    early_stop_restore_best
+                    and early_stop_best_sample is not None
+                ):
+                    sparse_sampled_data = early_stop_best_sample
+                    early_stop_final_step = int(early_stop_best_step)
+                    print(
+                        "[采样-EARLY-STOP-DEGRADE] "
+                        f"restore best step={early_stop_best_step} "
+                        f"best_abs_gap={early_stop_best_gap:.4f}"
+                    )
+                print(
+                    "[采样-EARLY-STOP-DEGRADE] "
+                    f"stop full-step sampling at remaining_step={early_stop_final_step}"
+                )
+                break
+            if (
+                bad_stall_stop_enabled
+                and bad_stall_stop_hits >= bad_stall_stop_patience
+            ):
+                early_stop_final_step = int(s_int)
+                if (
+                    early_stop_restore_best
+                    and early_stop_best_sample is not None
+                ):
+                    sparse_sampled_data = early_stop_best_sample
+                    early_stop_final_step = int(early_stop_best_step)
+                    print(
+                        "[采样-STRUCTURE-BAD-STALL-STOP] "
+                        f"restore best step={early_stop_best_step} "
+                        f"best_abs_gap={early_stop_best_gap:.4f}"
+                    )
+                print(
+                    "[采样-STRUCTURE-BAD-STALL-STOP] "
+                    f"stop full-step sampling at remaining_step={early_stop_final_step} "
+                    f"stable_bad_steps={bad_stall_stop_hits}"
+                )
+                break
+            if (
+                no_change_stop_enabled
+                and no_change_stop_hits >= no_change_stop_patience
+            ):
+                early_stop_final_step = int(s_int)
+                if getattr(self, "local_rank", 0) == 0:
+                    print(
+                        "[采样-NO-CHANGE-STOP] "
+                        f"stop full-step sampling at remaining_step={early_stop_final_step} "
+                        f"stable_steps={no_change_stop_hits}"
+                )
+                break
+            if (
+                plateau_stop_enabled
+                and plateau_stop_hits >= plateau_stop_patience
+            ):
+                if (
+                    bool(
+                        getattr(
+                            self.cfg.model,
+                            "sampling_early_stop_require_lcc_floor",
+                            False,
+                        )
+                    )
+                    and not self._sampling_early_stop_lcc_floor_met(
+                        early_stop_status
+                    )
+                ):
+                    if getattr(self, "local_rank", 0) == 0:
+                        _, lcc_floor = self._sampling_lcc_floor_target()
+                        current_lcc = (
+                            None
+                            if early_stop_status is None
+                            else early_stop_status.get("lcc_size", None)
+                        )
+                        print(
+                            "[采样-STRUCTURE-PLATEAU-STOP] "
+                            f"blocked_by_lcc_floor current_lcc={current_lcc} "
+                            f"floor={lcc_floor} stable_steps={plateau_stop_hits}"
+                        )
+                    plateau_stop_hits = 0
+                    continue
+                early_stop_final_step = int(s_int)
+                if (
+                    early_stop_restore_best
+                    and early_stop_best_sample is not None
+                ):
+                    sparse_sampled_data = early_stop_best_sample
+                    early_stop_final_step = int(early_stop_best_step)
+                    print(
+                        "[采样-STRUCTURE-PLATEAU-STOP] "
+                        f"restore best step={early_stop_best_step} "
+                        f"best_abs_gap={early_stop_best_gap:.4f}"
+                    )
+                if getattr(self, "local_rank", 0) == 0:
+                    print(
+                        "[采样-STRUCTURE-PLATEAU-STOP] "
+                        f"stop full-step sampling at remaining_step={early_stop_final_step} "
+                        f"stable_steps={plateau_stop_hits}"
+                    )
+                break
+
+        if (
+            early_stop_enabled
+            and early_stop_restore_best
+            and early_stop_final_step is None
+            and early_stop_best_sample is not None
+        ):
+            sparse_sampled_data = early_stop_best_sample
+            early_stop_final_step = int(early_stop_best_step)
+            if getattr(self, "local_rank", 0) == 0:
+                print(
+                    "[采样-EARLY-STOP] "
+                    f"restore best final step={early_stop_best_step} "
+                    f"best_abs_gap={early_stop_best_gap:.4f}"
+                )
 
         # 记录最终状态
-        if hasattr(self, 'local_rank') and self.local_rank == 0:
+        if getattr(self, "local_rank", 0) == 0:
             final_edge_count = sparse_sampled_data.edge_index.shape[1] if sparse_sampled_data.edge_index.numel() > 0 else 0
             final_node_count = sparse_sampled_data.node.shape[0]
             edge_attr_discrete = sparse_sampled_data.edge_attr.argmax(dim=-1) if sparse_sampled_data.edge_attr.dim() > 1 else sparse_sampled_data.edge_attr
             final_non_zero_edges = (edge_attr_discrete != 0).sum().item() if edge_attr_discrete.numel() > 0 else 0
             final_entry = {
-                'step': 0,
-                't_norm': 0.0,
+                'step': 0 if early_stop_final_step is None else int(early_stop_final_step),
+                't_norm': 0.0 if early_stop_final_step is None else float(early_stop_final_step) / float(self.T),
                 'num_nodes': final_node_count,
                 'num_edges': final_edge_count,
-                'num_nonzero_edges': final_non_zero_edges
+                'num_nonzero_edges': final_non_zero_edges,
+                'early_stopped': bool(early_stop_final_step is not None),
             }
             if trace_triangles:
                 final_triangles = self._count_total_triangles_sparse(
@@ -12399,6 +21310,25 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 final_entry["delta_triangles"] = int(
                     0 if prev_step_triangles is None else final_triangles - prev_step_triangles
                 )
+            if early_stop_final_step is not None:
+                final_status = self._sampling_structure_early_stop_status(
+                    sparse_sampled_data,
+                    int(early_stop_final_step),
+                )
+                if final_status is not None:
+                    final_entry["early_stop_target_triangles"] = int(
+                        final_status["target_triangles"]
+                    )
+                    final_entry["early_stop_triangle_gap"] = float(
+                        final_status["rel_gap"]
+                    )
+                    final_entry["early_stop_triangle_signed_gap"] = float(
+                        final_status["gaps"]
+                        .get("triangles", {})
+                        .get("signed_gap", 0.0)
+                    )
+                    final_entry["early_stop_metric_gaps"] = final_status["gaps"]
+                    final_entry["early_stop_metric_hits"] = final_status["hits"]
             sampling_log.append(final_entry)
             # 保存采样记录到文件（统一放到 output/sparse_diffusion 下）
             try:
@@ -12425,6 +21355,20 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                         serializable_entry["triangles"] = int(entry["triangles"])
                     if "delta_triangles" in entry:
                         serializable_entry["delta_triangles"] = int(entry["delta_triangles"])
+                    if "early_stopped" in entry:
+                        serializable_entry["early_stopped"] = bool(entry["early_stopped"])
+                    if "early_stop_target_triangles" in entry:
+                        serializable_entry["early_stop_target_triangles"] = int(entry["early_stop_target_triangles"])
+                    if "early_stop_triangle_gap" in entry:
+                        serializable_entry["early_stop_triangle_gap"] = float(entry["early_stop_triangle_gap"])
+                    if "early_stop_triangle_signed_gap" in entry:
+                        serializable_entry["early_stop_triangle_signed_gap"] = float(entry["early_stop_triangle_signed_gap"])
+                    if "early_stop_hit" in entry:
+                        serializable_entry["early_stop_hit"] = bool(entry["early_stop_hit"])
+                    if "early_stop_metric_gaps" in entry:
+                        serializable_entry["early_stop_metric_gaps"] = entry["early_stop_metric_gaps"]
+                    if "early_stop_metric_hits" in entry:
+                        serializable_entry["early_stop_metric_hits"] = entry["early_stop_metric_hits"]
                     sampling_log_serializable.append(serializable_entry)
                 with open(log_file, 'w') as f:
                     json.dump(sampling_log_serializable, f, indent=2)
@@ -12637,6 +21581,94 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         n_steps = len(transitions)
         verbose_sampling = getattr(self.cfg.general, "verbose_sampling", False)
         disable_tqdm = self.local_rank != 0 if hasattr(self, "local_rank") else False
+        early_stop_enabled = bool(
+            getattr(self.cfg.model, "sampling_structure_early_stop", False)
+        )
+        early_stop_patience = max(
+            1,
+            int(
+                getattr(
+                    self.cfg.model,
+                    "sampling_structure_early_stop_patience",
+                    2,
+                )
+                or 1
+            ),
+        )
+        early_stop_restore_best = bool(
+            getattr(
+                self.cfg.model,
+                "sampling_structure_early_stop_restore_best",
+                True,
+            )
+        )
+        early_stop_hits = 0
+        early_stop_best_gap = float("inf")
+        early_stop_best_step = None
+        early_stop_best_sample = None
+        early_stop_best_metric_gaps = {}
+        early_stop_best_lcc_value = -float("inf")
+        early_stop_best_lcc_floor_met = False
+        early_stop_steps_since_best = 0
+        early_stop_degrade_hits = 0
+        early_stop_degrade_patience = max(
+            1,
+            int(
+                getattr(
+                    self.cfg.model,
+                    "sampling_structure_early_stop_degrade_patience",
+                    5,
+                )
+                or 1
+            ),
+        )
+        no_change_stop_enabled = bool(
+            getattr(self.cfg.model, "sampling_no_change_stop", False)
+        )
+        no_change_stop_patience = max(
+            1,
+            int(
+                getattr(self.cfg.model, "sampling_no_change_stop_patience", 3)
+                or 1
+            ),
+        )
+        no_change_stop_hits = 0
+        no_change_stop_prev_signature = (
+            self._sampling_edge_state_signature(sparse_sampled_data)
+            if no_change_stop_enabled
+            else None
+        )
+        plateau_stop_enabled = bool(
+            getattr(self.cfg.model, "sampling_structure_plateau_stop", False)
+        )
+        plateau_stop_patience = max(
+            1,
+            int(
+                getattr(
+                    self.cfg.model,
+                    "sampling_structure_plateau_stop_patience",
+                    5,
+                )
+                or 1
+            ),
+        )
+        plateau_stop_hits = 0
+        plateau_stop_prev_values = None
+        bad_stall_stop_enabled = bool(
+            getattr(self.cfg.model, "sampling_structure_bad_stall_stop", False)
+        )
+        bad_stall_stop_patience = max(
+            1,
+            int(
+                getattr(
+                    self.cfg.model,
+                    "sampling_structure_bad_stall_patience",
+                    8,
+                )
+                or 1
+            ),
+        )
+        bad_stall_stop_hits = 0
         from tqdm import tqdm
         for step_index, (t_int, s_int) in enumerate(
             tqdm(transitions, total=n_steps, disable=disable_tqdm)
@@ -12662,6 +21694,284 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             self._record_test_intermediate_sample(int(s_int), sparse_sampled_data, node_override=fixed_node_subtypes)
             if ((s_int * number_chain_steps) % self.T == 0) and (keep_chain != 0):
                     chain.append(sparse_sampled_data)
+            if no_change_stop_enabled:
+                no_change_signature = self._sampling_edge_state_signature(
+                    sparse_sampled_data
+                )
+                no_change_in_window, no_change_remaining_frac = (
+                    self._sampling_no_change_stop_in_window(int(s_int))
+                )
+                no_change_same = (
+                    no_change_stop_prev_signature is not None
+                    and no_change_signature == no_change_stop_prev_signature
+                )
+                if no_change_in_window and no_change_same:
+                    no_change_stop_hits += 1
+                else:
+                    no_change_stop_hits = 0
+                no_change_stop_prev_signature = no_change_signature
+                if no_change_same and getattr(self, "local_rank", 0) == 0:
+                    print(
+                        "[采样-NO-CHANGE-STOP] "
+                        f"step={int(s_int)} "
+                        f"hit={no_change_stop_hits}/{no_change_stop_patience} "
+                        f"remaining_frac={no_change_remaining_frac:.4f} "
+                        f"in_window={no_change_in_window}"
+                    )
+                if no_change_stop_hits >= no_change_stop_patience:
+                    if getattr(self, "local_rank", 0) == 0:
+                        print(
+                            "[采样-NO-CHANGE-STOP] "
+                            f"stop fixed-node full-step sampling at remaining_step={int(s_int)} "
+                            f"stable_steps={no_change_stop_hits}"
+                        )
+                    break
+            early_stop_status = self._sampling_structure_early_stop_status(
+                sparse_sampled_data,
+                int(s_int),
+            )
+            if early_stop_status is not None:
+                update_best, current_lcc_floor_met, current_lcc_value = (
+                    self._sampling_should_update_early_best(
+                        early_stop_status,
+                        early_stop_best_gap,
+                        early_stop_best_lcc_value,
+                        early_stop_best_lcc_floor_met,
+                    )
+                )
+                if update_best:
+                    early_stop_best_gap = float(early_stop_status["rel_gap"])
+                    early_stop_best_step = int(s_int)
+                    early_stop_best_sample = self._clone_sparse_sample_for_sampling(
+                        sparse_sampled_data
+                    )
+                    early_stop_best_metric_gaps = {
+                        name: float(entry["rel_gap"])
+                        for name, entry in early_stop_status["gaps"].items()
+                    }
+                    early_stop_best_lcc_value = float(current_lcc_value)
+                    early_stop_best_lcc_floor_met = bool(current_lcc_floor_met)
+                    early_stop_steps_since_best = 0
+                    early_stop_degrade_hits = 0
+                else:
+                    early_stop_steps_since_best += 1
+                if early_stop_status["hit"]:
+                    early_stop_hits += 1
+                else:
+                    early_stop_hits = 0
+                degrade_status = self._sampling_structure_degrade_status(
+                    early_stop_status,
+                    early_stop_best_gap,
+                    early_stop_best_metric_gaps,
+                    early_stop_steps_since_best,
+                )
+                if degrade_status is not None:
+                    early_stop_degrade_hits += 1
+                else:
+                    early_stop_degrade_hits = 0
+                bad_stall_status = self._sampling_structure_bad_stall_status(
+                    early_stop_status,
+                    early_stop_best_gap,
+                    int(s_int),
+                )
+                if bad_stall_status is not None:
+                    bad_stall_stop_hits += 1
+                else:
+                    bad_stall_stop_hits = 0
+                if getattr(self, "local_rank", 0) == 0:
+                    gap_msg = " ".join(
+                        [
+                            (
+                                f"{name}={entry['value']:.6g}/"
+                                f"{entry['target']:.6g}"
+                                f"({entry['signed_gap']:+.3f},"
+                                f"tol={entry['tolerance']:.2f},"
+                                f"{'ok' if early_stop_status['hits'].get(name, False) else 'no'})"
+                            )
+                            for name, entry in early_stop_status["gaps"].items()
+                        ]
+                    )
+                    print(
+                        "[采样-EARLY-STOP] "
+                        f"step={int(s_int)} "
+                        f"{gap_msg} "
+                        f"max_abs={early_stop_status['rel_gap']:.4f} "
+                        f"hit={early_stop_hits}/{early_stop_patience}"
+                    )
+                    if degrade_status is not None:
+                        print(
+                            "[采样-EARLY-STOP-DEGRADE] "
+                            f"step={int(s_int)} "
+                            f"bad={early_stop_degrade_hits}/{early_stop_degrade_patience} "
+                            f"since_best={degrade_status['steps_since_best']} "
+                            f"best_step={early_stop_best_step} "
+                            f"best_abs_gap={early_stop_best_gap:.4f} "
+                            f"reason={'; '.join(degrade_status['reasons'])}"
+                        )
+                    if bad_stall_status is not None:
+                        print(
+                            "[采样-STRUCTURE-BAD-STALL-STOP] "
+                            f"step={int(s_int)} "
+                            f"hit={bad_stall_stop_hits}/{bad_stall_stop_patience} "
+                            f"current_abs_gap={bad_stall_status['current_gap']:.4f} "
+                            f"best_abs_gap={bad_stall_status['best_gap']:.4f} "
+                            f"min_abs_gap={bad_stall_status['min_gap']:.4f} "
+                            f"remaining_frac={bad_stall_status['remaining_frac']:.4f}"
+                        )
+                if early_stop_enabled and early_stop_hits >= early_stop_patience:
+                    if (
+                        early_stop_restore_best
+                        and early_stop_best_sample is not None
+                    ):
+                        sparse_sampled_data = early_stop_best_sample
+                        if getattr(self, "local_rank", 0) == 0:
+                            print(
+                                "[采样-EARLY-STOP] "
+                                f"restore best step={early_stop_best_step} "
+                                f"best_abs_gap={early_stop_best_gap:.4f}"
+                            )
+                    if getattr(self, "local_rank", 0) == 0:
+                        print(
+                            "[采样-EARLY-STOP] "
+                            f"stop fixed-node full-step sampling at remaining_step={early_stop_best_step if early_stop_restore_best else int(s_int)}"
+                        )
+                    break
+                if (
+                    bad_stall_stop_enabled
+                    and bad_stall_stop_hits >= bad_stall_stop_patience
+                ):
+                    if (
+                        early_stop_restore_best
+                        and early_stop_best_sample is not None
+                    ):
+                        sparse_sampled_data = early_stop_best_sample
+                        if getattr(self, "local_rank", 0) == 0:
+                            print(
+                                "[采样-STRUCTURE-BAD-STALL-STOP] "
+                                f"restore best step={early_stop_best_step} "
+                                f"best_abs_gap={early_stop_best_gap:.4f}"
+                            )
+                    if getattr(self, "local_rank", 0) == 0:
+                        stop_step = early_stop_best_step if (
+                            early_stop_restore_best
+                            and early_stop_best_sample is not None
+                        ) else int(s_int)
+                        print(
+                            "[采样-STRUCTURE-BAD-STALL-STOP] "
+                            f"stop fixed-node full-step sampling at remaining_step={stop_step} "
+                            f"stable_bad_steps={bad_stall_stop_hits}"
+                        )
+                    break
+                if (
+                    early_stop_enabled
+                    and early_stop_degrade_hits >= early_stop_degrade_patience
+                ):
+                    if (
+                        early_stop_restore_best
+                        and early_stop_best_sample is not None
+                    ):
+                        sparse_sampled_data = early_stop_best_sample
+                        if getattr(self, "local_rank", 0) == 0:
+                            print(
+                                "[采样-EARLY-STOP-DEGRADE] "
+                                f"restore best step={early_stop_best_step} "
+                                f"best_abs_gap={early_stop_best_gap:.4f}"
+                            )
+                    if getattr(self, "local_rank", 0) == 0:
+                        print(
+                            "[采样-EARLY-STOP-DEGRADE] "
+                            f"stop fixed-node full-step sampling at remaining_step={early_stop_best_step if early_stop_restore_best else int(s_int)}"
+                        )
+                    break
+                if plateau_stop_enabled:
+                    plateau_values = self._sampling_structure_plateau_values(
+                        early_stop_status
+                    )
+                    plateau_in_window, plateau_remaining_frac = (
+                        self._sampling_structure_plateau_stop_in_window(int(s_int))
+                    )
+                    plateau_same, plateau_diffs = self._sampling_structure_plateau_same(
+                        plateau_stop_prev_values,
+                        plateau_values,
+                    )
+                    if plateau_in_window and plateau_same:
+                        plateau_stop_hits += 1
+                    else:
+                        plateau_stop_hits = 0
+                    plateau_stop_prev_values = plateau_values
+                    if plateau_same and getattr(self, "local_rank", 0) == 0:
+                        diff_msg = ",".join(
+                            f"{key}={value:.4g}"
+                            for key, value in plateau_diffs.items()
+                        )
+                        print(
+                            "[采样-STRUCTURE-PLATEAU-STOP] "
+                            f"step={int(s_int)} "
+                            f"hit={plateau_stop_hits}/{plateau_stop_patience} "
+                            f"remaining_frac={plateau_remaining_frac:.4f} "
+                            f"in_window={plateau_in_window} "
+                            f"diffs={diff_msg}"
+                        )
+                    if plateau_stop_hits >= plateau_stop_patience:
+                        if (
+                            bool(
+                                getattr(
+                                    self.cfg.model,
+                                    "sampling_early_stop_require_lcc_floor",
+                                    False,
+                                )
+                            )
+                            and not self._sampling_early_stop_lcc_floor_met(
+                                early_stop_status
+                            )
+                        ):
+                            if getattr(self, "local_rank", 0) == 0:
+                                _, lcc_floor = self._sampling_lcc_floor_target()
+                                current_lcc = early_stop_status.get(
+                                    "lcc_size", None
+                                )
+                                print(
+                                    "[采样-STRUCTURE-PLATEAU-STOP] "
+                                    f"blocked_by_lcc_floor current_lcc={current_lcc} "
+                                    f"floor={lcc_floor} stable_steps={plateau_stop_hits}"
+                                )
+                            plateau_stop_hits = 0
+                            continue
+                        if (
+                            early_stop_restore_best
+                            and early_stop_best_sample is not None
+                        ):
+                            sparse_sampled_data = early_stop_best_sample
+                            if getattr(self, "local_rank", 0) == 0:
+                                print(
+                                    "[采样-STRUCTURE-PLATEAU-STOP] "
+                                    f"restore best step={early_stop_best_step} "
+                                    f"best_abs_gap={early_stop_best_gap:.4f}"
+                                )
+                        if getattr(self, "local_rank", 0) == 0:
+                            stop_step = early_stop_best_step if (
+                                early_stop_restore_best
+                                and early_stop_best_sample is not None
+                            ) else int(s_int)
+                            print(
+                                "[采样-STRUCTURE-PLATEAU-STOP] "
+                                f"stop fixed-node full-step sampling at remaining_step={stop_step} "
+                                f"stable_steps={plateau_stop_hits}"
+                            )
+                        break
+
+        if (
+            early_stop_enabled
+            and early_stop_restore_best
+            and early_stop_best_sample is not None
+        ):
+            sparse_sampled_data = early_stop_best_sample
+            if getattr(self, "local_rank", 0) == 0:
+                print(
+                    "[采样-EARLY-STOP] "
+                    f"restore best final fixed-node step={early_stop_best_step} "
+                    f"best_abs_gap={early_stop_best_gap:.4f}"
+                )
 
         generated_graphs = self._snapshot_sparse_sample_for_metrics(
             sparse_sampled_data, node_override=fixed_node_subtypes
@@ -13404,8 +22714,12 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                     }
                 )
             if verbose_sampling:
+                calibrated_masked = self._mask_edge_logits_by_query_family(
+                    query_logits, selected_query_family
+                )
                 calibrated_exist_logits = (
-                    torch.logsumexp(query_logits[:, 1:], dim=-1) - query_logits[:, 0]
+                    torch.logsumexp(calibrated_masked[:, 1:], dim=-1)
+                    - calibrated_masked[:, 0]
                 )
             query_logits = self._edge_reverse_posterior_logits(
                 query_logits,

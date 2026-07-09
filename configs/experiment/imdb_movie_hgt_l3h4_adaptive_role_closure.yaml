@@ -1,0 +1,70 @@
+# @package _global_
+defaults:
+  - imdb_movie_hgt_l3h4_role_degree_anti_conc
+
+general:
+  name: dihug_imdb_adaptive_role_closure
+
+model:
+  # Generic node-role closure objective. The role set is inferred from the clean
+  # training graph: low-degree nodes are included, and higher-degree nodes are
+  # included only when the target graph actually assigns them closure mass.
+  node_closure_dist_loss_weight: 0.02
+  node_closure_dist_include_endpoints: true
+  node_closure_dist_mass_weight: 0.25
+  node_closure_dist_second_moment_weight: 0.25
+  node_closure_dist_top_weight: 0.25
+  node_closure_dist_chunk_size: 512
+
+  low_degree_closure_loss_weight: 0.04
+  low_degree_closure_include_endpoints: true
+  low_degree_closure_role_mode: adaptive
+  low_degree_closure_max_degree: 3
+  low_degree_closure_degree_cap: 8
+  low_degree_closure_saturation_scale: 1.0
+  low_degree_closure_fraction_weight: 1.5
+  low_degree_closure_bce_weight: 1.0
+  low_degree_closure_chunk_size: 512
+
+  degree_role_dist_loss_weight: 0.015
+
+  node_role_coverage_rank_loss_weight: 0.03
+  node_role_coverage_rank_loss_warmup_epochs: 5
+  node_role_coverage_rank_loss_t_power: 0.0
+  node_role_coverage_rank_pairs_per_family: 1024
+  node_role_coverage_rank_min_query_edges: 32
+  node_role_coverage_rank_include_endpoints: true
+  node_role_coverage_rank_role_gate: adaptive
+  node_role_coverage_rank_closure_mode: adaptive
+  node_role_coverage_rank_common_cap: 2.0
+  node_role_coverage_rank_common_neighbor_chunk_size: 512
+  node_role_coverage_rank_degree_weight: 0.25
+  node_role_coverage_rank_closure_weight: 1.0
+
+  # Anti-concentration remains target-adaptive: it only penalizes top-heavy
+  # predicted closure above the clean graph's top-heavy fraction.
+  closure_anti_concentration_loss_weight: 0.008
+  closure_anti_concentration_include_endpoints: true
+  closure_anti_concentration_top_frac: 0.05
+  closure_anti_concentration_slack: 1.05
+  closure_anti_concentration_chunk_size: 512
+
+  sampling_node_role_budget_controller: true
+  sampling_node_role_budget_role_gate: adaptive
+  sampling_node_role_budget_closure_mode: adaptive
+  sampling_node_role_budget_degree_weight: 0.35
+  sampling_node_role_budget_closure_weight: 1.75
+  sampling_node_role_budget_over_penalty: 0.35
+  sampling_node_role_budget_closure_unit_target_max: 1.0
+  sampling_node_role_budget_diag: true
+  sampling_node_role_budget_diag_log_every: 10
+  sampling_node_role_budget_repair: true
+  sampling_node_role_budget_repair_max_swaps: 128
+  sampling_node_role_budget_repair_pair_top_adds: 96
+  sampling_node_role_budget_repair_pair_top_drops: 96
+  sampling_node_role_budget_repair_max_pool_per_family: 256
+  sampling_node_role_budget_repair_role_gain_weight: 1.0
+  sampling_node_role_budget_repair_model_score_weight: 0.15
+  sampling_node_role_budget_repair_score_margin: 2.5
+  sampling_node_role_budget_repair_protect_bridges: true
+  sampling_node_role_budget_log_every: 1

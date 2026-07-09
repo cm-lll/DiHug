@@ -28,16 +28,8 @@ autoregressive: false
 
 # DiHuG denoiser / query settings
 # denoiser: graph_transformer keeps the inherited SparseDiff layer; hgt uses pyHGT-style HGTConv.
-denoiser: hgt
-# HGT time conditioning: SparseDiff-style y/t FiLM on node/edge hidden states.
-use_time_film: false
-# Per-layer edge-state update for HGT, closer to SparseDiff's joint X/E/y updates.
-use_edge_state_update: false
-# Edge state update mode: "all" = update at every layer; "last" = only update at the last layer (saves VRAM).
-edge_state_update_mode: "all"
-# Scale of the raw input edge-state residual added to edge logits during
+denoiser: graph_transformer
 # training/forward. SparseDiff-style residual denoising uses 1.0.
-edge_input_residual_scale: 1.0
 block_query: false
 block_partition_mode: connected_bfs
 block_partition_rho: null
@@ -63,24 +55,18 @@ block_query_inter_fill: false
 block_query_max_edges_per_family: 0
 # true=block query 之外继续拼接原来的全局 uniform query；false=训练只用 block query。
 block_query_include_uniform: true
+# true=after building a hetero block-query unit, resample the visible noisy
+# context only inside that unit using the global family transition. This keeps
+# training corruption block-scoped while sharing the same global edge marginal.
+train_block_unit_noising: false
 train_partition_source: noisy
 sampling_partition: auto
-# Query-free staged family training: encode full visible G_t once, then decode
 # same-type families first and cross-type families second. Query candidates do
 # not participate in message passing.
-train_family_staged_queryfree: false
-train_family_staged_query_chunk_size: 65536
-train_family_staged_max_chunks: 0
-# current | no_edge. Applies to query-free training losses: no_edge asks the
 # decoder to rank candidates from context/node embeddings rather than the
 # candidate's current noisy E_t state.
-train_queryfree_query_state: current
-# Family-specific residual adapters on top of the shared edge head.
 # The final adapter layer is zero-initialized, so enabling this starts from the
 # base head behavior and learns per-family corrections.
-use_family_edge_adapters: false
-family_edge_adapter_hidden_dim: 64
-train_family_staged_balance_by_family: true
 # sampling block query mode: uniform | type_template. type_template uses train-time block type-count templates, not true block members.
 sampling_block_mode: uniform
 # true=采样初始化时按训练 block/family 边数模板随机生成初始边，而不是只用全局 family 平均边数。
@@ -94,19 +80,28 @@ sampling_block_family_budget_intra_multiplier: 1.0
 sampling_block_family_budget_inter_multiplier: 1.0
 sampling_block_family_budget_keep_policy: random
 block_partition_workers: 0
-use_edge_phi_fusion: true
-use_dual_softmax: true
 # Sparse GraphTransformerConv hetero X/E/y layer options. These are used when
 # model.denoiser=graph_transformer. They keep the DiGress/SparseDiff X-E-y
 # update path while adding HGT-style family/type specialization.
 use_family_film: false
-use_family_edge_update: false
-family_edge_update_hidden_dim: 128
 # HGT-style relation matrices in the node message channel. These are distinct
 # from E->attention FiLM: relation matrices transform K/V for each edge family,
 # while edge FiLM still modulates attention with the current noisy edge state.
 use_relation_attention_matrix: false
 use_relation_message_matrix: false
+# HGT-style learnable relation/family prior on attention logits. This is
+# complementary to E->attention FiLM and to the family-inner softmax.
+use_relation_pri: false
+# HGT-style node update tail after message aggregation:
+# GELU -> target-type A-Linear -> type-specific skip gate -> type-specific norm.
+use_hgt_node_update: false
+# HGT-style family-specific edge update after flattened edge interaction state.
+use_hgt_edge_update: false
+# Add the averaged family condition to node-side G-FiLM.
+use_family_y_in_node_film: false
+# Keep final node type logits fixed to the input node categories. This is useful
+# for hetero edge repair, where changing coarse node type can make edge families illegal.
+fix_node_output_types: false
 # Sparse hetero graph-level y features computed from the current sparse noisy
 # graph: family counts/densities, same-vs-cross edge ratio, and type degree
 # statistics. This avoids dense spectral/cycle features for large hetero graphs.
@@ -118,7 +113,6 @@ use_sparse_hetero_y: false
 use_sparse_family_y: false
 sparse_family_y_degree_bins: 5
 # Add family_y[edge_family] to edge_attr before the E->attention FiLM.
-use_family_y_in_attention: false
 # Add family_y[edge_family] to global y before the y->E FiLM.
 use_family_y_in_edge_film: false
 # Apply y->E FiLM with per-family linear maps. This lets the same global y
@@ -130,35 +124,16 @@ use_family_y_film: false
 # module starts from the base denoiser behavior.
 use_edge_struct_features: false
 edge_struct_feature_dim: 8
-edge_struct_hidden_dim: 64
-edge_struct_residual_scale: 1.0
 # If true, concatenate projected family_y[f] to the candidate-edge structural
 # features before predicting the residual.
-edge_struct_use_family_y: false
-# Split visible G_t edges and temporary no-edge query links into separately
 # normalized attention channels, then learn their mixture per HGT layer/head.
-use_query_context_gate: false
-query_context_gate_init: 0.2
-# Add a learned residual to query logits from current-G_t common-neighbor
 # closure, endpoint degree scale, and endpoint degree imbalance.
-use_two_hop_structure: false
-two_hop_structure_hidden_dim: 64
-# Add typed two-hop path counts to the two-hop residual: common-neighbor
 # counts by middle node type, plus first-leg and second-leg family counts.
-use_typed_two_hop_structure: false
 # Scale the learned structural residual before adding it to edge logits.
-two_hop_structure_scale: 1.0
 # fixed | linear_t | quadratic_t | alpha_bar_squared
 # The effective residual scale is two_hop_structure_scale times this
 # time-dependent reliability factor.
-two_hop_structure_schedule: fixed
-# A-stage experiment: expose current-G_t endpoint roles to the edge decoder
 # without adding any role-distribution supervision.
-use_endpoint_role_residual: false
-endpoint_role_hidden_dim: 64
-endpoint_role_family_dim: 16
-endpoint_role_scale: 1.0
-# B-stage experiment: teach the endpoint-role residual how to use degree roles
 # through a soft family-role ranking/distribution objective on current query
 # edges. Disabled by default.
 family_role_loss_weight: 0.0
@@ -212,18 +187,12 @@ sampling_reverse_posterior_mix_scale: 1.0
 # Compute clean-vs-mixed exact-K intervention diagnostics without another
 # model forward. Intended for sampling mechanism experiments.
 sampling_ranking_intervention_diag: false
-# Sampling-only override for the raw input edge-state residual added to edge
-# logits. null keeps model.edge_input_residual_scale. Use 0.0 for exact-K/top-K
 # ablations where the residual can lock the selected edge set across steps.
-sampling_edge_input_residual_scale: null
 # Sampling-only global exact-K path: encode the current visible G_t once, then
 # decode candidate edges without inserting query candidates into message passing.
 # This matches query-free training and avoids current-query-state lock-in.
-sampling_queryfree_decode: false
-# current | no_edge. For exact-K clean re-ranking, no_edge prevents the decoder
 # from using the candidate's current E_t state as a shortcut. Posterior logic
 # still receives the true current label separately.
-sampling_queryfree_query_state: current
 # When reverse posterior sampling is enabled, use stochastic Bernoulli decisions
 # on intermediate steps as in SparseDiff for legacy local selection policies.
 # Global gumbel_exact_k/deterministic_exact_k remain global exact-K at every step.
@@ -262,7 +231,18 @@ sampling_reverse_posterior_stochastic_steps: true
 sampling_edge_selection: bernoulli
 sampling_topk_structure_family_balance: none
 # Gumbel exact-K only. Lower values approach deterministic family Top-K.
-sampling_gumbel_temperature: 1.0
+sampling_gumbel_temperature: 0.01
+# Sampling ablation for exact-K candidate scores before degree-pair and
+# structure-controller biases are added. none keeps model logits; zero removes
+# model ranking; random replaces model ranking with deterministic seeded noise.
+sampling_score_override: none  # none | zero | random
+# Diagnostic exact-K churn. When >0, after exact-K selection each
+# graph/family is forced to contain at least this fraction of non-current
+# edges by swapping out the lowest-score currently retained edges for the
+# highest-score unselected non-current candidates. This preserves exact family
+# quotas and is off by default.
+sampling_exact_k_min_edge_churn: 0.0
+sampling_exact_k_churn_min_step_frac: 0.0
 # Optional sampling-only partition-view experiment. Both views receive exactly
 # the same canonical query pool and frozen G_t; only the grouping of queries
 # inside the HGT computation graph differs.
@@ -292,6 +272,18 @@ sampling_exact_k_connectivity_repair: false
 # Maximum number of same-family exchanges during final exact-K repair.
 # 0 means no explicit limit (at most components_before - 1 exchanges).
 sampling_exact_k_repair_max_swaps: 0
+# Hard LCC-first exact-K repair. When enabled, the sampler performs
+# quota-preserving same-family swaps after exact-K and before ordinary structure
+# swaps until LCC reaches target_lcc * sampling_connectivity_hard_lcc_frac, or
+# no feasible bridge/drop exchange remains.
+sampling_connectivity_hard_repair: false
+sampling_connectivity_hard_lcc_frac: 0.95
+# When LCC is below the hard floor, structure swap accepts only positive-LCC
+# swaps so triangle/clustering/assortativity cannot outrank connectivity.
+sampling_connectivity_hard_lexicographic: false
+# Require the restored early-stop best snapshot to satisfy the same LCC floor.
+# If no snapshot meets the floor yet, keep the one with the largest LCC.
+sampling_early_stop_require_lcc_floor: false
 # topk_density_repair only: repair connectivity only after the explicitly marked
 # final denoising step. Set false only for an every-step ablation.
 sampling_connectivity_repair_final_only: true
@@ -320,6 +312,198 @@ sampling_structure_guidance_max_step_frac: 1.0
 # null means infer sign from the reference graph when available; negative target
 # favors dissimilar endpoint degree bins, positive target favors similar bins.
 sampling_structure_guidance_assort_target: null
+# Low-degree flat-closure controller.  It biases exact-K ranking toward
+# distributed common-neighbor closures and penalizes closures that concentrate
+# around high-degree endpoints.  The default "*" filters make it a generic
+# controller; dataset-specific runs can narrow endpoint/support/family filters
+# to typed motifs, e.g. Actor/Director nodes with a shared Movie neighbor.
+sampling_typed_flat_closure_controller: false
+sampling_typed_flat_closure_weight: 0.0
+sampling_typed_flat_closure_high_degree_penalty: 0.0
+sampling_typed_flat_closure_endpoint_types: "*"
+sampling_typed_flat_closure_support_types: "*"
+sampling_typed_flat_closure_families: "*"
+sampling_typed_flat_closure_low_degree_max: 3
+sampling_typed_flat_closure_high_degree_min: 6
+sampling_typed_flat_closure_common_cap: 2.0
+sampling_typed_flat_closure_power: 0.0
+sampling_typed_flat_closure_min_step_frac: 0.0
+sampling_typed_flat_closure_max_step_frac: 1.0
+sampling_typed_flat_closure_log_every: 10
+# Node role / closure budget controller. It reads node-level degree and
+# triangle-participation budgets from the training graph, compares them with the
+# current sampled graph, and biases exact-K candidate ranking toward edges that
+# repair under-filled node roles. This is a sampling-time prior learned/stored
+# from training data rather than a hard oracle edge target.
+sampling_node_role_budget_controller: false
+sampling_node_role_budget_degree_weight: 0.0
+sampling_node_role_budget_closure_weight: 0.0
+sampling_node_role_budget_over_penalty: 0.0
+sampling_node_role_budget_common_cap: 2.0
+sampling_node_role_budget_degree_scale: 4.0
+sampling_node_role_budget_closure_scale: 1.0
+sampling_node_role_budget_closure_mode: count  # count | coverage | adaptive
+sampling_node_role_budget_closure_threshold: 0.5
+sampling_node_role_budget_closure_unit_target_max: 1.0
+sampling_node_role_budget_low_degree_max: 3
+sampling_node_role_budget_role_gate: low_degree  # low_degree | adaptive | target | all
+sampling_node_role_budget_min_step_frac: 0.0
+sampling_node_role_budget_max_step_frac: 1.0
+sampling_node_role_budget_power: 0.0
+sampling_node_role_budget_log_every: 10
+sampling_node_role_budget_diag: false
+sampling_node_role_budget_diag_log_every: 10
+sampling_node_role_budget_repair: false
+sampling_node_role_budget_repair_max_swaps: 0
+sampling_node_role_budget_repair_pool_multiplier: 4
+sampling_node_role_budget_repair_pair_top_adds: 64
+sampling_node_role_budget_repair_pair_top_drops: 64
+sampling_node_role_budget_repair_max_pool_per_family: 512
+sampling_node_role_budget_repair_role_gain_weight: 1.0
+sampling_node_role_budget_repair_model_score_weight: 0.25
+sampling_node_role_budget_repair_score_margin: 2.0
+sampling_node_role_budget_repair_min_gain: 1.0e-6
+sampling_node_role_budget_repair_protect_bridges: true
+sampling_node_role_budget_repair_min_step_frac: 0.0
+sampling_node_role_budget_repair_max_step_frac: 1.0
+sampling_node_role_budget_repair_log_every: 1
+# Where sampling-time structural targets come from:
+# config = read explicit target_* values below;
+# learned = read the checkpoint's learned graph-level target head, falling back
+# to config only when the checkpoint has no such head.
+sampling_structure_target_source: config
+# Learn graph-level structural targets during training, then reuse them during
+# sampling as non-oracle limiter/budget/early-stop targets.
+use_learned_structure_targets: false
+learned_structure_target_loss_weight: 0.0
+learned_structure_target_source: train_stats
+learned_structure_target_trainable: false
+learned_structure_target_load_from_ckpt: false
+learned_structure_target_max_train_graphs: 0
+learned_structure_target_init_triangles: 1.0
+learned_structure_target_init_clustering: 0.1
+learned_structure_target_init_lcc: 1.0
+learned_structure_target_init_assortativity: 0.0
+learned_structure_target_triangle_weight: 1.0
+learned_structure_target_clustering_weight: 1.0
+learned_structure_target_lcc_weight: 1.0
+learned_structure_target_assortativity_weight: 1.0
+learned_structure_target_log: true
+# Delta-aware sampling controller. It compares the current sampled graph against
+# training-prior structural budgets and flips closure guidance when the graph is
+# already over-closed. This is off by default and only affects exact-K scores.
+sampling_structure_budget_controller: false
+sampling_structure_budget_target_triangles: null
+sampling_structure_budget_target_clustering: null
+sampling_structure_budget_target_assortativity: null
+sampling_structure_budget_triangle_tolerance: 0.0
+sampling_structure_budget_closure_weight: 0.0
+sampling_structure_budget_clustering_weight: 0.0
+sampling_structure_budget_assort_weight: 0.0
+sampling_structure_budget_delta_clip: 2.0
+sampling_structure_budget_log_every: 1
+# Multi-metric limiter for exact-K score biases.  Unlike the budget controller,
+# this is mainly a guardrail: once a metric is inside its tolerance band, it
+# penalizes candidates likely to push that metric out of the band while allowing
+# other still-bad metrics to keep improving. Degree protection uses the same
+# reference degree bins as degree-pair exact-K, so it is a cheap proxy for the
+# evaluator's degree-distribution MMD rather than the exact MMD itself.
+sampling_structure_limiter: false
+sampling_structure_limiter_weight: 1.0
+sampling_structure_limiter_target_triangles: null
+sampling_structure_limiter_target_clustering: null
+sampling_structure_limiter_target_lcc: null
+sampling_structure_limiter_target_assortativity: null
+sampling_structure_limiter_triangle_tolerance: 0.08
+sampling_structure_limiter_clustering_tolerance: 0.10
+sampling_structure_limiter_lcc_tolerance: 0.05
+sampling_structure_limiter_assort_tolerance: 0.15
+sampling_structure_limiter_degree_hist_tolerance: 0.15
+sampling_structure_limiter_triangle_weight: 1.0
+sampling_structure_limiter_clustering_weight: 1.0
+sampling_structure_limiter_lcc_weight: 1.0
+sampling_structure_limiter_assort_weight: 1.0
+sampling_structure_limiter_degree_weight: 1.0
+sampling_structure_limiter_delta_clip: 1.0
+# Boundary-swap version of the structure limiter.  Instead of adding a global
+# bias to every exact-K candidate, it first lets exact-K choose each
+# graph/family quota, then tries a small number of quota-preserving swaps
+# between low-score selected edges and high-score unselected boundary edges.
+# Metric targets/tolerances/weights are reused from sampling_structure_limiter.
+sampling_structure_swap_limiter: false
+sampling_structure_swap_limiter_weight: 1.0
+sampling_structure_swap_limiter_model_score_weight: 1.0
+sampling_structure_swap_limiter_gain_scale: 5.0
+sampling_structure_swap_limiter_max_swaps: 256
+sampling_structure_swap_limiter_pool_multiplier: 4
+sampling_structure_swap_limiter_pair_top_adds: 64
+sampling_structure_swap_limiter_pair_top_drops: 64
+sampling_structure_swap_limiter_score_margin: 2.0
+sampling_structure_swap_limiter_lcc_bridge_bonus: 0.0
+sampling_structure_swap_limiter_protect_lcc_bridges: false
+# Hard connectivity guard for the boundary-swap limiter. When enabled, bridge
+# drops are rejected, inter-component additions are promoted into the swap pool,
+# and swaps that move LCC below the configured target band are rejected.
+sampling_structure_swap_limiter_connectivity_guard: false
+sampling_structure_swap_limiter_connectivity_guard_tolerance: 0.05
+sampling_structure_swap_limiter_connectivity_gain_weight: 2.0
+sampling_structure_swap_limiter_connectivity_candidate_bonus: 4.0
+sampling_structure_swap_limiter_min_step_frac: 0.0
+sampling_structure_swap_limiter_max_step_frac: 1.0
+sampling_structure_swap_limiter_log_every: 1
+# Full-step sampling can stop once a training-prior structure budget is reached.
+# This is a sampling-only diagnostic/controller: it does not use true edge
+# membership, but it can use training-graph structural priors such as triangle
+# count in the single-graph PubMed repair setting.
+sampling_structure_early_stop: false
+sampling_structure_early_stop_target_triangles: null
+sampling_structure_early_stop_target_clustering: null
+sampling_structure_early_stop_target_lcc: null
+sampling_structure_early_stop_target_assortativity: null
+sampling_structure_early_stop_triangle_tolerance: 0.03
+sampling_structure_early_stop_metric_tolerance: 0.10
+sampling_structure_early_stop_patience: 2
+sampling_structure_early_stop_min_step_frac: 0.0
+sampling_structure_early_stop_max_step_frac: 1.0
+sampling_structure_early_stop_restore_best: true
+# Stop full-step sampling when the sampled non-no-edge edge set is exactly
+# unchanged for N consecutive denoising steps. This catches exact-K/posterior
+# self-locking even when no structure target is configured.
+sampling_no_change_stop: false
+sampling_no_change_stop_patience: 3
+sampling_no_change_stop_min_step_frac: 0.0
+sampling_no_change_stop_max_step_frac: 1.0
+# Stop full-step sampling when structure metrics have entered a plateau even if
+# the exact edge set still changes by a few quota-preserving swaps. This catches
+# trajectories where exact-K/posterior keeps churning edges but triangles,
+# clustering, and LCC no longer move meaningfully.
+sampling_structure_plateau_stop: false
+sampling_structure_plateau_stop_patience: 5
+sampling_structure_plateau_stop_metrics: "triangles,clustering"
+sampling_structure_plateau_stop_triangle_delta: 5.0
+sampling_structure_plateau_stop_metric_delta: 0.002
+sampling_structure_plateau_stop_lcc_delta: 10.0
+sampling_structure_plateau_stop_assort_delta: 0.02
+sampling_structure_plateau_stop_min_step_frac: 0.0
+sampling_structure_plateau_stop_max_step_frac: 1.0
+# Stop full-step sampling when the trajectory is clearly stuck far away from
+# all configured structure targets. This is intended for score ablations such
+# as zero/random, where the sample may jitter forever without reaching targets
+# or degrading from a good best snapshot.
+sampling_structure_bad_stall_stop: false
+sampling_structure_bad_stall_patience: 8
+sampling_structure_bad_stall_min_abs_gap: 0.75
+sampling_structure_bad_stall_min_step_frac: 0.0
+sampling_structure_bad_stall_max_step_frac: 1.0
+# Stop full-step sampling when the trajectory has clearly moved away from the
+# best structural snapshot already seen. The sampler then restores that best
+# snapshot, saving time when one metric keeps deteriorating.
+sampling_structure_early_stop_degrade: false
+sampling_structure_early_stop_degrade_patience: 5
+sampling_structure_early_stop_degrade_ratio: 1.5
+sampling_structure_early_stop_degrade_min_delta: 0.05
+sampling_structure_early_stop_degrade_min_steps_after_best: 3
+sampling_structure_early_stop_degrade_watch_metrics: "assortativity"
 # Query-level calibration loss: |mean(P(edge)) - mean(true_edge)|.
 # This keeps Bernoulli sampling probabilities aligned with sparse graph density.
 edge_count_loss_weight: 0.0
@@ -343,6 +527,123 @@ degree_pair_dist_target_smoothing: 0.0
 # Optional high-noise emphasis for soft structural objectives. 0 keeps the
 # weight constant; 1 multiplies by t/T; 2 by (t/T)^2.
 degree_pair_dist_loss_t_power: 0.0
+# Training-only closure-contribution distribution supervision. Unlike
+# closure_rank_loss, which only ranks high-common-neighbor candidates above
+# low-common-neighbor candidates, this objective matches where the clean closure
+# mass is distributed across relation families and endpoint clean-degree buckets.
+# It targets anti-hub/local-flat triangle patterns such as IMDB: triangles should
+# be produced by the right endpoint roles, not merely in the right total count.
+closure_bucket_dist_loss_weight: 0.0
+closure_bucket_dist_loss_warmup_epochs: 0
+closure_bucket_dist_loss_type: js  # js | kl | l1 | mse
+closure_bucket_dist_min_query_edges: 32
+closure_bucket_dist_target_smoothing: 0.0
+closure_bucket_dist_loss_t_power: 0.0
+closure_bucket_dist_score_log1p: false
+closure_bucket_dist_common_cap: 0.0
+# Training-only node-centered closure distribution supervision. It converts
+# query-edge existence probabilities into expected triangle participation for
+# each clean common-neighbor center node, then matches this per-node closure
+# distribution inside node-type x clean-degree buckets. This directly targets
+# distributed low-degree closure patterns, unlike edge-centered closure buckets.
+node_closure_dist_loss_weight: 0.0
+node_closure_dist_loss_warmup_epochs: 0
+node_closure_dist_loss_t_power: 0.0
+node_closure_dist_loss_type: js  # js | kl | l1 | mse
+node_closure_dist_degree_cap: 8
+node_closure_dist_min_group_nodes: 4
+node_closure_dist_min_target_mass: 1.0
+node_closure_dist_mass_weight: 0.25
+node_closure_dist_second_moment_weight: 0.25
+node_closure_dist_top_frac: 0.10
+node_closure_dist_top_weight: 0.25
+node_closure_dist_common_cap: 0.0
+node_closure_dist_include_endpoints: false
+node_closure_dist_chunk_size: 4096
+# Training-only edge triangle-support distribution supervision. It matches how
+# predicted clean edges distribute over relation family x endpoint-degree bucket
+# x clean common-neighbor support. This discourages concentrating many triangles
+# on a few high-support edges when the real graph has many lightly supported
+# triangle edges.
+edge_support_dist_loss_weight: 0.0
+edge_support_dist_loss_warmup_epochs: 0
+edge_support_dist_loss_t_power: 0.0
+edge_support_dist_loss_type: js  # js | kl | l1 | mse
+edge_support_dist_degree_cap: 8
+edge_support_dist_support_cap: 8
+edge_support_dist_min_query_edges: 32
+edge_support_dist_target_smoothing: 0.0
+# Training-only low-degree closure coverage supervision. It converts expected
+# node-centered closure mass into a soft "node is closed" probability and
+# matches the closed-node fraction within node-type x clean-degree buckets.
+low_degree_closure_loss_weight: 0.0
+low_degree_closure_loss_warmup_epochs: 0
+low_degree_closure_loss_t_power: 0.0
+low_degree_closure_max_degree: 3
+low_degree_closure_degree_cap: 0
+low_degree_closure_role_mode: low_degree  # low_degree | adaptive | target | all
+low_degree_closure_min_group_nodes: 4
+low_degree_closure_min_target_closed: 1.0
+low_degree_closure_target_threshold: 0.5
+low_degree_closure_saturation_scale: 1.0
+low_degree_closure_fraction_weight: 1.0
+low_degree_closure_bce_weight: 1.0
+low_degree_closure_chunk_size: 4096
+low_degree_closure_common_cap: 0.0
+low_degree_closure_include_endpoints: false
+# Training-only endpoint role distribution supervision. It matches how expected
+# clean edge endpoints distribute over node-type x clean-degree buckets. This is
+# a lightweight way to teach the denoiser that many low-degree nodes, not only a
+# few high-degree hubs, should receive edges.
+degree_role_dist_loss_weight: 0.0
+degree_role_dist_loss_warmup_epochs: 0
+degree_role_dist_loss_t_power: 0.0
+degree_role_dist_loss_type: js  # js | kl | l1 | mse
+degree_role_dist_degree_cap: 8
+degree_role_dist_min_target_mass: 1.0
+degree_role_dist_target_smoothing: 0.0
+# Training-only closure anti-concentration supervision. It converts query-edge
+# probabilities into expected clean-common-neighbor closure mass per node and
+# penalizes top-heavy predicted closure when the clean graph distributes closure
+# over many nodes of the same type/degree role.
+closure_anti_concentration_loss_weight: 0.0
+closure_anti_concentration_loss_warmup_epochs: 0
+closure_anti_concentration_loss_t_power: 0.0
+closure_anti_concentration_degree_cap: 8
+closure_anti_concentration_max_degree: 0  # <=0 means all degrees
+closure_anti_concentration_min_group_nodes: 8
+closure_anti_concentration_min_target_mass: 1.0
+closure_anti_concentration_top_frac: 0.05
+closure_anti_concentration_slack: 1.05
+closure_anti_concentration_chunk_size: 4096
+closure_anti_concentration_common_cap: 0.0
+closure_anti_concentration_include_endpoints: false
+# Training-only typed rooted structural signature supervision.  This is the
+# finite, computable truncation of the structure-complete objective: query-edge
+# probabilities induce typed endpoint-role, typed support, typed closed-center
+# motif, low-degree closed-node, and closure-concentration statistics, which are
+# matched against the clean query graph.  It is off by default and enabled only
+# in dedicated structure-signature experiments.
+typed_rooted_signature_loss_weight: 0.0
+typed_rooted_signature_loss_warmup_epochs: 0
+typed_rooted_signature_loss_t_power: 0.0
+typed_rooted_signature_loss_type: js  # js | kl | l1 | mse
+typed_rooted_signature_degree_cap: 8
+typed_rooted_signature_support_cap: 8
+typed_rooted_signature_max_nodes: 3000
+typed_rooted_signature_max_query_edges: 0
+typed_rooted_signature_chunk_size: 512
+typed_rooted_signature_common_cap: 0.0
+typed_rooted_signature_endpoint_weight: 1.0
+typed_rooted_signature_support_weight: 1.0
+typed_rooted_signature_motif_weight: 1.0
+typed_rooted_signature_lowdeg_weight: 1.0
+typed_rooted_signature_concentration_weight: 1.0
+typed_rooted_signature_low_degree_max: 3
+typed_rooted_signature_min_group_nodes: 4
+typed_rooted_signature_closed_threshold: 0.5
+typed_rooted_signature_top_frac: 0.05
+typed_rooted_signature_top_slack: 1.05
 # Family-wise expected edge-count supervision. This is a low-order structural
 # moment: for each relation family, align sum P(edge) on the query candidates
 # with the clean family density represented in the same query set.
@@ -351,6 +652,25 @@ family_count_loss_warmup_epochs: 0
 family_count_loss_type: l1  # l1 | mse
 family_count_loss_min_query_edges: 32
 family_count_loss_t_power: 0.0
+# Training-only progressive structural denoising objective. It compares the
+# model's soft predicted query structure with the clean target, and optionally
+# asks it to improve over the current noisy graph at the same t. Disabled by
+# default; enable as an ablation alongside BCE/CE.
+structure_delta_loss_weight: 0.0
+structure_delta_loss_warmup_epochs: 0
+# Low-noise emphasis: 0 keeps weight constant; 1 multiplies by (1 - t/T).
+structure_delta_low_noise_t_power: 0.0
+structure_delta_loss_type: mse  # mse | l1
+structure_delta_min_query_edges: 32
+structure_delta_degree_weight: 1.0
+structure_delta_interface_weight: 1.0
+structure_delta_gram_weight: 0.25
+structure_delta_improvement_weight: 0.5
+structure_delta_hinge_margin: 0.0
+# Gram matching materializes a local dense adjacency per graph/family only
+# below these caps; degree/interface terms still run when Gram is skipped.
+structure_delta_max_nodes_per_group: 256
+structure_delta_max_edges_per_group: 80000
 # Closure-aware positive auxiliary loss: 对真实图中共同邻居多的正边额外加权，强化局部闭包/三角形关键边。
 closure_pos_loss_weight: 0.0
 closure_pos_loss_warmup_epochs: 0
@@ -376,6 +696,67 @@ closure_rank_margin: 0.0
 # Common-neighbor counts for closure_rank are computed in chunks to avoid
 # materializing query_edges x num_nodes at once.
 closure_rank_common_neighbor_chunk_size: 65536
+
+# Exact-K-aligned structural utility ranking.  Unlike edge CE, this does not
+# require a candidate to be a clean edge.  Within each relation family, it
+# computes a clean-context structural utility for query candidates, takes the
+# same quota K as the clean family positives, and asks utility-top-K candidates
+# to outrank low-utility candidates.  This makes the training signal closer to
+# sampling-time family exact-K selection.
+structure_utility_rank_loss_weight: 0.0
+structure_utility_rank_loss_warmup_epochs: 0
+structure_utility_rank_loss_t_power: 0.0
+structure_utility_rank_pairs_per_family: 2048
+structure_utility_rank_min_query_edges: 64
+structure_utility_rank_common_weight: 1.0
+structure_utility_rank_low_degree_weight: 1.0
+structure_utility_rank_degree_penalty: 0.0
+structure_utility_rank_true_edge_weight: 0.0
+structure_utility_rank_low_degree_max: 3
+structure_utility_rank_bottom_quantile: 0.5
+structure_utility_rank_margin: 0.0
+structure_utility_rank_score_log1p: true
+structure_utility_rank_common_neighbor_chunk_size: 65536
+
+# Exact-K-aligned node-role coverage ranking.  This is a selected-set style
+# training signal: candidates are ranked by the marginal role-budget gain they
+# would provide to clean-graph node roles.  Low/unit-closure roles use coverage
+# gain so one high-yield edge cannot dominate by closing the same local role
+# many times; higher-count roles use count gain so centralized real structures
+# are still allowed.
+node_role_coverage_rank_loss_weight: 0.0
+node_role_coverage_rank_loss_warmup_epochs: 0
+node_role_coverage_rank_loss_t_power: 0.0
+node_role_coverage_rank_pairs_per_family: 1024
+node_role_coverage_rank_min_query_edges: 32
+node_role_coverage_rank_margin: 0.0
+node_role_coverage_rank_bottom_quantile: 0.5
+node_role_coverage_rank_common_cap: 2.0
+node_role_coverage_rank_include_endpoints: true
+node_role_coverage_rank_role_gate: adaptive  # low_degree | adaptive | target | all
+node_role_coverage_rank_closure_mode: adaptive  # count | coverage | adaptive
+node_role_coverage_rank_low_degree_max: 3
+node_role_coverage_rank_degree_scale: 4.0
+node_role_coverage_rank_closure_scale: 1.0
+node_role_coverage_rank_closure_threshold: 0.5
+node_role_coverage_rank_closure_unit_target_max: 1.0
+node_role_coverage_rank_degree_weight: 0.25
+node_role_coverage_rank_closure_weight: 1.0
+node_role_coverage_rank_common_neighbor_chunk_size: 4096
+
+# Trainable structure controller. This learns a small bucket bias over candidate
+# existence logits instead of using oracle sampling-time structural brakes.
+# The same parameters can be reused during sampling by enabling this flag in the
+# checkpoint config.
+use_learned_structure_controller: false
+learned_structure_controller_scale: 1.0
+learned_structure_controller_init: 0.0
+learned_structure_controller_l2: 0.0
+learned_structure_controller_common_bins: 4
+learned_structure_controller_use_family: true
+learned_structure_controller_use_common: true
+learned_structure_controller_use_degree_pair: true
+learned_structure_controller_log: true
 # Training-time hard top-K structure probe. This does not affect gradients.
 # Every N epochs, select K query edges by model existence score where K equals
 # the number of clean positives in the query block, then log structural proxies
@@ -383,23 +764,11 @@ closure_rank_common_neighbor_chunk_size: 65536
 train_structure_probe_every_epochs: 0
 train_structure_probe_min_query_edges: 256
 
-# true=进入全图 ideal 分支；false=SparseDiff 原版目标，直接 CE(pred, real)。
-structure_only_global: false
-# ideal 优化时 query soft 的梯度步长（仅 structure_only_global 时有效）；三角形不足时可略提高到 0.15
-structure_ideal_lr: 0.15
-# ideal 优化梯度下降迭代步数；原图三角形多、生成少时可提高到 10~12
-structure_ideal_steps: 10
 # true=ideal 固定 query 显式边数 k=k_noisy（仅优化「哪 k 条为 1」），边数中性，多轮采样时场景边数一致；false=sigmoid 独立概率
-# 异质图下 fix_k 时默认在关系族内限制边数（每族 k_fam 不变）
-structure_ideal_fix_k: true
-# fix_k=false 时生效：ideal 边数偏置。null/1.0=不偏置；>1 促使 ideal 有更多边（如 1.2=偏多 20%）；<1 促使更少边。配合 exist_pos_weight 可调节预测边数。
-structure_ideal_edge_count_ratio: null
-structure_ideal_edge_count_loss_weight: 0.0
 # 结构指标类型：legacy=relation_matrix/metapath2/3/subtype_degree；graph_metrics=DegreeMMD/Clustering/Triangles/EdgeTypesTV
 structure_loss_type: 'graph_metrics'
 degree_mmd_loss_weight: 0.0
 clustering_loss_weight: 0.0
-# ideal 优化时三角形项权重；原图 300+ 三角形、生成仅几十时可提高到 5~8
 triangles_loss_weight: 0.0
 # 楔形闭包损失权重：在真实图存在 2-hop 路径的位置，约束预测边是否闭合；用于补足“只看三角形总量”的不足
 wedge_closure_loss_weight: 0.0
@@ -454,6 +823,28 @@ log_predict_behavior: false
 # 单图/极稀疏图训练增强：将所有真实正边追加到每步 query 中作为监督目标。
 # 注意：正边只作为 query target，输入计算图中仍是 no-edge query 占位，不直接泄漏标签。
 query_include_all_positive_edges: false
+# Block-aware structural necessity sampling.  When enabled, the training query
+# set is augmented only for relation families that are automatically classified
+# as sparse but structurally high-leverage from the reference training graph.
+rare_family_structural_sampling: false
+rare_family_tier2_expected_pos_threshold: 2.0
+rare_family_tier2_importance_threshold: 10.0
+rare_family_tier2_density_threshold: 0.001
+rare_family_tier1_expected_pos_threshold: 5.0
+rare_family_tier1_importance_threshold: 5.0
+rare_family_tier1_density_threshold: 0.01
+rare_family_min_positive_edges: 1
+rare_family_low_degree_max: 3
+rare_family_tier2_neg_per_pos: 8
+rare_family_tier1_neg_per_pos: 4
+rare_family_tier2_hard_ratio: 0.40
+rare_family_tier1_hard_ratio: 0.20
+rare_family_easy_ratio: 0.30
+rare_family_random_ratio: 0.30
+rare_family_hard_warmup_epochs: 10
+rare_family_hard_min_time_factor: 0.25
+rare_family_max_negatives_per_family: 256
+rare_family_max_positives_per_family: 0
 # 单图训练增强：每个 Lightning step 内重复采样 query K 次，平均 loss 后反传。
 train_query_repeats: 1
 # 训练噪声时间步调度：random=原始随机采样；cycle=按训练步循环覆盖 1..diffusion_steps。
@@ -471,6 +862,9 @@ train_all_blocks_step_mode: sequential
 train_all_blocks_shuffle: true
 # <=0 时使用 ceil(1 / edge_fraction) 作为 block 数。
 train_all_blocks_count: 0
+# true=实际 hetero_metis block 数必须等于 train_all_blocks_count
+# （<=0 时等于 ceil(1 / edge_fraction)），否则直接中止，避免取模导致漏块/重复块。
+train_all_blocks_strict_count: false
 # 轻量 degree-aware loss：约束 query 上预测存在概率形成的节点度分布。
 degree_loss_weight: 0.0
 # degree 辅助项 warmup；建议和 edge_count_loss_warmup_epochs 一起使用

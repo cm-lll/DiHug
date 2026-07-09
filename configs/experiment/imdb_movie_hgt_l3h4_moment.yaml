@@ -1,0 +1,55 @@
+# @package _global_
+defaults:
+  - pubmed_hetero_xey_hgt_clean_pw20
+  - override /dataset: imdb_movie_subgraphs
+
+general:
+  name: imdb_movie_l3h4_moment
+  wandb: disabled
+  gpus: 1
+  run_test_after_train: false
+  enable_test_sampling: false
+  enable_val_sampling: false
+  enable_val_pred_metrics: false
+
+train:
+  n_epochs: 100
+  batch_size: 1
+  save_model: true
+
+model:
+  # Keep IMDB training aligned with the latest PubMed l3h4 moment recipe.
+  n_layers: 3
+  hidden_dims:
+    dx: 128
+    de: 64
+    dy: 64
+    n_head: 4
+    dim_ffX: 256
+    dim_ffE: 128
+    dim_ffy: 128
+
+  edge_fraction: 0.1
+  block_query: true
+  block_partition_mode: hetero_metis
+  block_query_full_block: true
+  block_query_inter_fill: true
+  block_query_include_uniform: false
+  query_include_all_positive_edges: false
+  train_all_blocks_per_noise: true
+  train_all_blocks_step_mode: sequential
+  train_all_blocks_shuffle: true
+  train_all_blocks_count: 0
+  train_all_blocks_strict_count: true
+  train_block_unit_noising: false
+  train_structure_probe_every_epochs: 0
+
+  structure_delta_loss_weight: 0.0
+  closure_rank_loss_weight: 0.0
+
+  family_count_loss_weight: 0.01
+  family_count_loss_t_power: 1.0
+  family_count_loss_warmup_epochs: 5
+  degree_pair_dist_loss_weight: 0.02
+  degree_pair_dist_loss_t_power: 1.0
+  degree_pair_dist_loss_warmup_epochs: 5

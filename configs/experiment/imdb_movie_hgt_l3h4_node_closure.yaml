@@ -1,0 +1,26 @@
+# @package _global_
+defaults:
+  - imdb_movie_hgt_l3h4_learned_limiter
+
+general:
+  name: imdb_movie_l3h4_node_closure
+
+model:
+  # Node-centered closure supervision: query-edge probabilities are accumulated
+  # to clean common-neighbor center nodes and matched within node-type x clean
+  # degree buckets. This targets IMDB's many low-degree Actor/Director nodes
+  # that each close a small local triangle.
+  closure_bucket_dist_loss_weight: 0.0
+  node_closure_dist_loss_weight: 0.02
+  node_closure_dist_loss_warmup_epochs: 5
+  node_closure_dist_loss_t_power: 1.0
+  node_closure_dist_loss_type: js
+  node_closure_dist_degree_cap: 6
+  node_closure_dist_min_group_nodes: 4
+  node_closure_dist_min_target_mass: 1.0
+  node_closure_dist_mass_weight: 0.25
+  node_closure_dist_second_moment_weight: 0.25
+  node_closure_dist_top_frac: 0.10
+  node_closure_dist_top_weight: 0.25
+  node_closure_dist_common_cap: 0.0
+  node_closure_dist_chunk_size: 2048

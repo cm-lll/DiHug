@@ -1,0 +1,31 @@
+# @package _global_
+defaults:
+  - pubmed_hetero_xey_hgt_typed_signature_pw20
+
+general:
+  name: pubmed_structure_utility_rank_pw20
+
+model:
+  # Keep the model-only sampling setup from the typed-signature diagnostic, but
+  # replace the soft signature loss with exact-K-aligned structural ranking.
+  typed_rooted_signature_loss_weight: 0.0
+  edge_exist_weight: 0.5
+  edge_subtype_weight: 1.0
+  family_count_loss_weight: 0.01
+  family_count_loss_t_power: 1.0
+  family_count_loss_warmup_epochs: 5
+
+  structure_utility_rank_loss_weight: 0.05
+  structure_utility_rank_loss_warmup_epochs: 5
+  structure_utility_rank_loss_t_power: 0.0
+  structure_utility_rank_pairs_per_family: 1024
+  structure_utility_rank_min_query_edges: 64
+  structure_utility_rank_common_weight: 1.0
+  structure_utility_rank_low_degree_weight: 1.0
+  structure_utility_rank_degree_penalty: 0.0
+  structure_utility_rank_true_edge_weight: 0.0
+  structure_utility_rank_low_degree_max: 3
+  structure_utility_rank_bottom_quantile: 0.5
+  structure_utility_rank_margin: 0.0
+  structure_utility_rank_score_log1p: true
+  structure_utility_rank_common_neighbor_chunk_size: 4096

@@ -1,0 +1,39 @@
+# @package _global_
+defaults:
+  - imdb_movie_hgt_l3h4_node_closure
+
+general:
+  name: imdb_movie_l3h4_edge_support_closure
+
+model:
+  # Keep node-centered distribution supervision, and add two sharper IMDB-style
+  # closure targets: edge support distribution and low-degree closure coverage.
+  edge_support_dist_loss_weight: 0.02
+  edge_support_dist_loss_warmup_epochs: 5
+  edge_support_dist_loss_t_power: 1.0
+  edge_support_dist_loss_type: js
+  edge_support_dist_degree_cap: 8
+  edge_support_dist_support_cap: 8
+  edge_support_dist_min_query_edges: 16
+  edge_support_dist_target_smoothing: 0.0
+
+  low_degree_closure_loss_weight: 0.02
+  low_degree_closure_loss_warmup_epochs: 5
+  low_degree_closure_loss_t_power: 1.0
+  low_degree_closure_max_degree: 3
+  low_degree_closure_min_group_nodes: 4
+  low_degree_closure_min_target_closed: 1.0
+  low_degree_closure_target_threshold: 0.5
+  low_degree_closure_fraction_weight: 1.0
+  low_degree_closure_bce_weight: 1.0
+  low_degree_closure_chunk_size: 2048
+
+  sampling_node_role_budget_controller: true
+  sampling_node_role_budget_degree_weight: 0.35
+  sampling_node_role_budget_closure_weight: 1.50
+  sampling_node_role_budget_over_penalty: 0.35
+  sampling_node_role_budget_common_cap: 2.0
+  sampling_node_role_budget_degree_scale: 4.0
+  sampling_node_role_budget_closure_scale: 1.0
+  sampling_node_role_budget_low_degree_max: 3
+  sampling_node_role_budget_log_every: 1

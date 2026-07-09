@@ -1,0 +1,23 @@
+# @package _global_
+defaults:
+  - pubmed_hetero_xey_hgt_edge_support_closure_pw20
+
+general:
+  name: dihug_pubmed1565_hgt_xey_role_degree_anti_conc_pw20
+
+model:
+  # PubMed is already close under the combo/structural-prior sampler, so keep
+  # these role-distribution terms conservative.
+  degree_role_dist_loss_weight: 0.005
+  degree_role_dist_loss_warmup_epochs: 5
+  degree_role_dist_loss_t_power: 1.0
+  degree_role_dist_degree_cap: 8
+
+  closure_anti_concentration_loss_weight: 0.005
+  closure_anti_concentration_loss_warmup_epochs: 5
+  closure_anti_concentration_loss_t_power: 1.0
+  closure_anti_concentration_degree_cap: 8
+  closure_anti_concentration_max_degree: 0
+  closure_anti_concentration_top_frac: 0.05
+  closure_anti_concentration_slack: 1.05
+  closure_anti_concentration_chunk_size: 256

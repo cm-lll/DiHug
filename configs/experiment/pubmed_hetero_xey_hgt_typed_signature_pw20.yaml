@@ -1,0 +1,107 @@
+# @package _global_
+defaults:
+  - pubmed_hetero_xey_hgt_clean_pw20
+
+general:
+  name: pubmed_typed_signature_pw20
+  wandb: disabled
+  gpus: 1
+  run_test_after_train: true
+  enable_validation: true
+  check_val_every_n_epochs: 30
+  enable_val_sampling: true
+  sample_every_val: 1
+  samples_to_generate: 1
+  samples_to_save: 1
+  chains_to_save: 0
+  enable_test_sampling: true
+  enable_val_pred_metrics: false
+  test_variance: 1
+  final_model_samples_to_generate: 4
+  final_model_samples_to_save: 4
+  final_model_chains_to_save: 0
+  test_sampling_full_steps: false
+  sampling_skip: 10
+  test_sampling_metrics_every: 1
+  verbose_sampling: false
+  log_sampling_triangle_trace: true
+
+train:
+  n_epochs: 100
+  batch_size: 1
+  save_model: true
+
+model:
+  # PubMed full-cover block units are close to the 11GB limit with the 5-layer
+  # HGT setting.  Use the same compact denoiser shape as the IMDB structure
+  # experiments so the training-time structural signature has enough headroom.
+  n_layers: 3
+  hidden_dims:
+    dx: 128
+    de: 64
+    dy: 64
+    n_head: 4
+    dim_ffX: 256
+    dim_ffE: 128
+    dim_ffy: 128
+
+  # Keep the current block-unit mechanism unchanged.
+  edge_fraction: 0.1
+  block_query: true
+  block_partition_mode: hetero_metis
+  block_query_full_block: true
+  block_query_inter_fill: true
+  block_query_include_uniform: false
+  query_include_all_positive_edges: false
+  train_all_blocks_per_noise: true
+  train_all_blocks_step_mode: sequential
+  train_all_blocks_shuffle: true
+  train_all_blocks_count: 0
+  train_all_blocks_strict_count: true
+
+  # Model-only sampling diagnostics: no posterior, no limiter/controller/repair.
+  sampling_block_mode: type_template
+  sampling_block_template_init: false
+  sampling_block_marginal_init: true
+  sampling_edge_selection: gumbel_exact_k
+  sampling_gumbel_temperature: 0.01
+  sampling_calibrate_exist_pos_weight: true
+  sampling_use_reverse_posterior: false
+  sampling_exact_k_connectivity_repair: false
+  sampling_connectivity_hard_repair: false
+  sampling_structure_budget_controller: false
+  sampling_structure_limiter: false
+  sampling_structure_swap_limiter: false
+  sampling_node_role_budget_controller: false
+  sampling_typed_flat_closure_controller: false
+  use_learned_structure_controller: false
+  use_learned_structure_targets: false
+
+  # Edge identity is retained only as a local anchor.  The typed rooted
+  # signature objective supplies the structural supervision.
+  edge_exist_weight: 0.5
+  edge_subtype_weight: 1.0
+  family_count_loss_weight: 0.01
+  family_count_loss_t_power: 1.0
+  family_count_loss_warmup_epochs: 5
+  typed_rooted_signature_loss_weight: 0.05
+  typed_rooted_signature_loss_warmup_epochs: 5
+  typed_rooted_signature_loss_t_power: 1.0
+  typed_rooted_signature_loss_type: js
+  typed_rooted_signature_degree_cap: 8
+  typed_rooted_signature_support_cap: 8
+  typed_rooted_signature_max_query_edges: 8192
+  typed_rooted_signature_chunk_size: 64
+  typed_rooted_signature_endpoint_weight: 1.0
+  typed_rooted_signature_support_weight: 1.0
+  typed_rooted_signature_motif_weight: 1.0
+  typed_rooted_signature_lowdeg_weight: 1.0
+  typed_rooted_signature_concentration_weight: 1.0
+
+  degree_pair_dist_loss_weight: 0.0
+  closure_rank_loss_weight: 0.0
+  node_closure_dist_loss_weight: 0.0
+  edge_support_dist_loss_weight: 0.0
+  low_degree_closure_loss_weight: 0.0
+  degree_role_dist_loss_weight: 0.0
+  closure_anti_concentration_loss_weight: 0.0

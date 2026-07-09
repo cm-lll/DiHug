@@ -38,14 +38,16 @@ def _build_self_attn_block(
     use_type_modulation: bool,
     edge_only: bool,
     use_family_film: bool,
-    use_family_edge_update: bool,
     use_relation_attention_matrix: bool,
     use_relation_message_matrix: bool,
+    use_relation_pri: bool,
+    use_hgt_node_update: bool,
+    use_hgt_edge_update: bool,
+    use_family_y_in_node_film: bool,
+    edge_struct_feature_dim: int,
     use_family_y_film: bool,
-    use_family_y_in_attention: bool,
     use_family_y_in_edge_film: bool,
     family_y_dim: int,
-    family_edge_update_hidden_dim: int,
 ):
     if heterogeneous:
         return HeterogeneousTransformerConv(
@@ -68,14 +70,16 @@ def _build_self_attn_block(
             use_type_modulation=use_type_modulation,
             edge_only=edge_only,
             use_family_film=use_family_film,
-            use_family_edge_update=use_family_edge_update,
             use_relation_attention_matrix=use_relation_attention_matrix,
             use_relation_message_matrix=use_relation_message_matrix,
+            use_relation_pri=use_relation_pri,
+            use_hgt_node_update=use_hgt_node_update,
+            use_hgt_edge_update=use_hgt_edge_update,
+            use_family_y_in_node_film=use_family_y_in_node_film,
+            edge_struct_feature_dim=edge_struct_feature_dim,
             use_family_y_film=use_family_y_film,
-            use_family_y_in_attention=use_family_y_in_attention,
             use_family_y_in_edge_film=use_family_y_in_edge_film,
             family_y_dim=family_y_dim,
-            family_edge_update_hidden_dim=family_edge_update_hidden_dim,
         )
     return TransformerConv(
         dx=dx,
@@ -127,14 +131,16 @@ class XEyTransformerLayer(nn.Module):
         use_type_modulation: bool = True,  # 是否使用类别调制子类别
         edge_only: bool = False,  # 若 True：只更新边 E=f(QK,E)，不更新节点 X（用于最后几层「E=QK+E」重复）
         use_family_film: bool = False,
-        use_family_edge_update: bool = False,
         use_relation_attention_matrix: bool = False,
         use_relation_message_matrix: bool = False,
+        use_relation_pri: bool = False,
+        use_hgt_node_update: bool = False,
+        use_hgt_edge_update: bool = False,
+        use_family_y_in_node_film: bool = False,
+        edge_struct_feature_dim: int = 0,
         use_family_y_film: bool = False,
-        use_family_y_in_attention: bool = False,
         use_family_y_in_edge_film: bool = False,
         family_y_dim: int = 0,
-        family_edge_update_hidden_dim: int = 128,
     ) -> None:
         kw = {"device": device, "dtype": dtype}
         super().__init__()
@@ -142,6 +148,8 @@ class XEyTransformerLayer(nn.Module):
         self.last_layer = last_layer
         self.heterogeneous = heterogeneous
         self.edge_only = edge_only
+        self.use_hgt_node_update = bool(use_hgt_node_update)
+        self.use_hgt_edge_update = bool(use_hgt_edge_update)
 
         self.self_attn = _build_self_attn_block(
             heterogeneous=heterogeneous,
@@ -161,14 +169,16 @@ class XEyTransformerLayer(nn.Module):
             use_type_modulation=use_type_modulation,
             edge_only=edge_only,
             use_family_film=use_family_film,
-            use_family_edge_update=use_family_edge_update,
             use_relation_attention_matrix=use_relation_attention_matrix,
             use_relation_message_matrix=use_relation_message_matrix,
+            use_relation_pri=use_relation_pri,
+            use_hgt_node_update=use_hgt_node_update,
+            use_hgt_edge_update=use_hgt_edge_update,
+            use_family_y_in_node_film=use_family_y_in_node_film,
+            edge_struct_feature_dim=edge_struct_feature_dim,
             use_family_y_film=use_family_y_film,
-            use_family_y_in_attention=use_family_y_in_attention,
             use_family_y_in_edge_film=use_family_y_in_edge_film,
             family_y_dim=family_y_dim,
-            family_edge_update_hidden_dim=family_edge_update_hidden_dim,
         )
 
         self.linX1 = Linear(dx, dim_ffX, **kw)
@@ -202,6 +212,7 @@ class XEyTransformerLayer(nn.Module):
         relation_type_ids: Optional[Tensor] = None,
         edge_family_ids: Optional[Tensor] = None,
         family_y_hidden: Optional[Tensor] = None,
+        edge_struct_features: Optional[Tensor] = None,
         type_offsets: Optional[dict] = None,
     ):
         """Pass the input through the encoder layer.
@@ -219,6 +230,7 @@ class XEyTransformerLayer(nn.Module):
                 relation_type_ids=relation_type_ids,
                 edge_family_ids=edge_family_ids,
                 family_y_hidden=family_y_hidden,
+                edge_struct_features=edge_struct_features,
                 type_offsets=type_offsets,
             )
         else:
@@ -226,31 +238,43 @@ class XEyTransformerLayer(nn.Module):
 
         if self.edge_only:
             # Edge-only mode: keep node states fixed, only update edges.
-            edge_attr = self.normE1(edge_attr + new_edge_attr)
+            if self.use_hgt_edge_update:
+                edge_attr = new_edge_attr
+            else:
+                edge_attr = self.normE1(edge_attr + new_edge_attr)
             if self.last_layer:
                 y = self.norm_y1(y + new_y)
             else:
                 y = new_y
-            ff_outputE = self.linE2(self.activation(self.linE1(edge_attr)))
-            edge_attr = self.normE2(edge_attr + ff_outputE)
+            if not self.use_hgt_edge_update:
+                ff_outputE = self.linE2(self.activation(self.linE1(edge_attr)))
+                edge_attr = self.normE2(edge_attr + ff_outputE)
             if self.last_layer:
                 ff_output_y = self.lin_y2(self.activation(self.lin_y1(y)))
                 y = self.norm_y2(y + ff_output_y)
             return X, edge_attr, y
 
-        X = self.normX1(X + new_x)
-        edge_attr = self.normE1(edge_attr + new_edge_attr)
+        if self.use_hgt_node_update:
+            X = new_x
+        else:
+            X = self.normX1(X + new_x)
+        if self.use_hgt_edge_update:
+            edge_attr = new_edge_attr
+        else:
+            edge_attr = self.normE1(edge_attr + new_edge_attr)
 
         if self.last_layer:
             y = self.norm_y1(y + new_y)
         else:
             y = new_y
 
-        ff_outputX = self.linX2(self.activation(self.linX1(X)))
-        X = self.normX2(X + ff_outputX)
+        if not self.use_hgt_node_update:
+            ff_outputX = self.linX2(self.activation(self.linX1(X)))
+            X = self.normX2(X + ff_outputX)
 
-        ff_outputE = self.linE2(self.activation(self.linE1(edge_attr)))
-        edge_attr = self.normE2(edge_attr + ff_outputE)
+        if not self.use_hgt_edge_update:
+            ff_outputE = self.linE2(self.activation(self.linE1(edge_attr)))
+            edge_attr = self.normE2(edge_attr + ff_outputE)
 
         if self.last_layer:
             ff_output_y = self.lin_y2(self.activation(self.lin_y1(y)))
@@ -285,19 +309,22 @@ class EdgeOnlyTransformerLayer(nn.Module):
         edge_family_offsets: Optional[dict] = None,
         use_type_modulation: bool = True,
         use_family_film: bool = False,
-        use_family_edge_update: bool = False,
         use_relation_attention_matrix: bool = False,
         use_relation_message_matrix: bool = False,
+        use_relation_pri: bool = False,
+        use_hgt_node_update: bool = False,
+        use_hgt_edge_update: bool = False,
+        use_family_y_in_node_film: bool = False,
+        edge_struct_feature_dim: int = 0,
         use_family_y_film: bool = False,
-        use_family_y_in_attention: bool = False,
         use_family_y_in_edge_film: bool = False,
         family_y_dim: int = 0,
-        family_edge_update_hidden_dim: int = 128,
     ) -> None:
         kw = {"device": device, "dtype": dtype}
         super().__init__()
         self.last_layer = last_layer
         self.heterogeneous = heterogeneous
+        self.use_hgt_edge_update = bool(use_hgt_edge_update)
         self.self_attn = _build_self_attn_block(
             heterogeneous=heterogeneous,
             dx=dx,
@@ -316,14 +343,16 @@ class EdgeOnlyTransformerLayer(nn.Module):
             use_type_modulation=use_type_modulation,
             edge_only=True,
             use_family_film=use_family_film,
-            use_family_edge_update=use_family_edge_update,
             use_relation_attention_matrix=use_relation_attention_matrix,
             use_relation_message_matrix=use_relation_message_matrix,
+            use_relation_pri=use_relation_pri,
+            use_hgt_node_update=use_hgt_node_update,
+            use_hgt_edge_update=use_hgt_edge_update,
+            use_family_y_in_node_film=use_family_y_in_node_film,
+            edge_struct_feature_dim=edge_struct_feature_dim,
             use_family_y_film=use_family_y_film,
-            use_family_y_in_attention=use_family_y_in_attention,
             use_family_y_in_edge_film=use_family_y_in_edge_film,
             family_y_dim=family_y_dim,
-            family_edge_update_hidden_dim=family_edge_update_hidden_dim,
         )
 
         self.linE1 = Linear(de, dim_ffE, **kw)
@@ -349,6 +378,7 @@ class EdgeOnlyTransformerLayer(nn.Module):
         relation_type_ids: Optional[Tensor] = None,
         edge_family_ids: Optional[Tensor] = None,
         family_y_hidden: Optional[Tensor] = None,
+        edge_struct_features: Optional[Tensor] = None,
         type_offsets: Optional[dict] = None,
     ):
         if self.heterogeneous:
@@ -363,19 +393,24 @@ class EdgeOnlyTransformerLayer(nn.Module):
                 relation_type_ids=relation_type_ids,
                 edge_family_ids=edge_family_ids,
                 family_y_hidden=family_y_hidden,
+                edge_struct_features=edge_struct_features,
                 type_offsets=type_offsets,
             )
         else:
             _, new_edge_attr, new_y = self.self_attn(X, edge_index, edge_attr, y, batch)
 
-        edge_attr = self.normE1(edge_attr + new_edge_attr)
+        if self.use_hgt_edge_update:
+            edge_attr = new_edge_attr
+        else:
+            edge_attr = self.normE1(edge_attr + new_edge_attr)
         if self.last_layer:
             y = self.norm_y1(y + new_y)
         else:
             y = new_y
 
-        ff_outputE = self.linE2(self.activation(self.linE1(edge_attr)))
-        edge_attr = self.normE2(edge_attr + ff_outputE)
+        if not self.use_hgt_edge_update:
+            ff_outputE = self.linE2(self.activation(self.linE1(edge_attr)))
+            edge_attr = self.normE2(edge_attr + ff_outputE)
         if self.last_layer:
             ff_output_y = self.lin_y2(self.activation(self.lin_y1(y)))
             y = self.norm_y2(y + ff_output_y)
@@ -405,19 +440,18 @@ class GraphTransformerConv(nn.Module):
         use_type_modulation: bool = True,
         edge_only_model: bool = False,  # True：所有层仅更新边，节点仅作条件输入（固定节点、只生成边）
         use_family_film: bool = False,
-        use_family_edge_update: bool = False,
         use_relation_attention_matrix: bool = False,
         use_relation_message_matrix: bool = False,
+        use_relation_pri: bool = False,
+        use_hgt_node_update: bool = False,
+        use_hgt_edge_update: bool = False,
+        use_family_y_in_node_film: bool = False,
         use_family_y_film: bool = False,
-        use_family_y_in_attention: bool = False,
         use_family_y_in_edge_film: bool = False,
         family_y_dim: int = 0,
-        family_edge_update_hidden_dim: int = 128,
         use_edge_struct_features: bool = False,
         edge_struct_feature_dim: int = 8,
-        edge_struct_hidden_dim: int = 64,
-        edge_struct_residual_scale: float = 1.0,
-        edge_struct_use_family_y: bool = False,
+        fix_node_output_types: bool = False,
     ):
         super().__init__()
         self.n_layers = n_layers
@@ -433,8 +467,8 @@ class GraphTransformerConv(nn.Module):
         self.family_y_dim = max(int(family_y_dim or 0), 0)
         self.use_edge_struct_features = bool(use_edge_struct_features)
         self.edge_struct_feature_dim = max(int(edge_struct_feature_dim or 0), 0)
-        self.edge_struct_residual_scale = float(edge_struct_residual_scale or 0.0)
-        self.edge_struct_use_family_y = bool(edge_struct_use_family_y)
+        self.use_hgt_edge_update = bool(use_hgt_edge_update)
+        self.fix_node_output_types = bool(fix_node_output_types)
 
         # 调试信息：记录模型初始化时的input_dims
         print(f"[DEBUG] GraphTransformerConv.__init__: input_dims.X = {input_dims.X}, input_dims.E = {input_dims.E}, input_dims.charge = {input_dims.charge}, sn_hidden_dim = {sn_hidden_dim}")
@@ -479,15 +513,17 @@ class GraphTransformerConv(nn.Module):
                 edge_family_offsets=edge_family_offsets,
                 use_type_modulation=use_type_modulation,
                 use_family_film=use_family_film,
-                use_family_edge_update=use_family_edge_update,
-                use_relation_attention_matrix=use_relation_attention_matrix,
+                    use_relation_attention_matrix=use_relation_attention_matrix,
                 use_relation_message_matrix=use_relation_message_matrix,
+                use_relation_pri=use_relation_pri,
+                use_hgt_node_update=use_hgt_node_update,
+                use_hgt_edge_update=use_hgt_edge_update,
+                use_family_y_in_node_film=use_family_y_in_node_film,
+                edge_struct_feature_dim=edge_struct_feature_dim,
                 use_family_y_film=use_family_y_film,
-                use_family_y_in_attention=use_family_y_in_attention,
-                use_family_y_in_edge_film=use_family_y_in_edge_film,
+                    use_family_y_in_edge_film=use_family_y_in_edge_film,
                 family_y_dim=hidden_dims["dy"] if self.family_y_dim > 0 else 0,
-                family_edge_update_hidden_dim=family_edge_update_hidden_dim,
-            )
+                )
             if self.edge_only_model:
                 layer = EdgeOnlyTransformerLayer(**common_kwargs)
             else:
@@ -507,21 +543,7 @@ class GraphTransformerConv(nn.Module):
         if self.output_y:
             self.out_ln_y = nn.LayerNorm(hidden_dims["dy"])
             self.lin_out_y = nn.Linear(hidden_dims["dy"], output_dims.y)
-        if self.use_edge_struct_features and self.edge_struct_feature_dim > 0:
-            edge_struct_in = self.edge_struct_feature_dim
-            if self.edge_struct_use_family_y:
-                edge_struct_in += hidden_dims["dy"]
-            self.edge_struct_residual_head = nn.Sequential(
-                nn.LayerNorm(edge_struct_in),
-                nn.Linear(edge_struct_in, edge_struct_hidden_dim),
-                nn.GELU(),
-                nn.Linear(edge_struct_hidden_dim, output_dims.E),
-            )
-            init.zeros_(self.edge_struct_residual_head[-1].weight)
-            init.zeros_(self.edge_struct_residual_head[-1].bias)
-        else:
-            self.edge_struct_residual_head = None
-
+        # edge_struct_features are consumed inside each HGT edge update layer.
     def forward(
         self, 
         X, 
@@ -573,13 +595,14 @@ class GraphTransformerConv(nn.Module):
                     relation_type_ids=relation_type_ids,
                     edge_family_ids=edge_family_ids,
                     family_y_hidden=family_y_hidden,
+                    edge_struct_features=edge_struct_features,
                     type_offsets=self.type_offsets,
                 )
             else:
                 X, edge_attr, y = layer(X, edge_index, edge_attr, y, batch)
 
         # Output block
-        if self.edge_only_model:
+        if self.edge_only_model or self.fix_node_output_types:
             X = X_fixed
             charges = X_charge_fixed
         else:
@@ -605,47 +628,7 @@ class GraphTransformerConv(nn.Module):
             edge_attr_out = top_edge_attr + bot_edge_attr
 
         edge_attr = edge_attr_out + edge_attr0[:, : self.out_dim_E]
-        if (
-            self.edge_struct_residual_head is not None
-            and edge_struct_features is not None
-            and edge_struct_features.numel() > 0
-            and edge_struct_features.shape[0] == edge_attr.shape[0]
-        ):
-            struct_input = edge_struct_features.to(
-                device=edge_attr.device, dtype=edge_attr.dtype
-            )
-            if struct_input.size(-1) != self.edge_struct_feature_dim:
-                if struct_input.size(-1) > self.edge_struct_feature_dim:
-                    struct_input = struct_input[:, : self.edge_struct_feature_dim]
-                else:
-                    pad = struct_input.new_zeros(
-                        struct_input.size(0),
-                        self.edge_struct_feature_dim - struct_input.size(-1),
-                    )
-                    struct_input = torch.cat([struct_input, pad], dim=-1)
-            if self.edge_struct_use_family_y:
-                fam_cond = struct_input.new_zeros((struct_input.size(0), y.size(-1)))
-                if (
-                    family_y_hidden is not None
-                    and edge_family_ids is not None
-                    and edge_family_ids.numel() == struct_input.size(0)
-                ):
-                    edge_batch = batch[edge_index_out[0].long()].long()
-                    fam_ids = edge_family_ids.to(edge_attr.device).long()
-                    valid = (
-                        (edge_batch >= 0)
-                        & (edge_batch < family_y_hidden.size(0))
-                        & (fam_ids >= 0)
-                        & (fam_ids < family_y_hidden.size(1))
-                    )
-                    if valid.any():
-                        fam_cond[valid] = family_y_hidden[
-                            edge_batch[valid], fam_ids[valid]
-                        ].to(dtype=edge_attr.dtype)
-                struct_input = torch.cat([struct_input, fam_cond], dim=-1)
-            edge_attr = edge_attr + self.edge_struct_residual_scale * self.edge_struct_residual_head(
-                struct_input
-            )
+
 
         if self.output_y:
             y = y + y0[:, : self.out_dim_y]
