@@ -59,6 +59,11 @@ edge_score_structure_diag: false
 edge_score_structure_diag_max_negatives: 100000
 # 记录采样过程中每个 t 步的全图三角形数量及增量，并写入 sampling_log.json
 log_sampling_triangle_trace: false
+# Record hard-graph typed degree and degree-2 closure roles at reverse steps.
+# Diagnostic only; it never reads clean/reference edges.
+log_sampling_population_role_trace: false
+# Reverse-step interval for population-role trace records when enabled.
+sampling_population_role_trace_every: 1
 # 记录采样时“模型预测 argmax / 解析后验后 argmax / 最终采样结果”的三角形差异，用于判断后验是否压低三角形
 log_sampling_posterior_triangle_gap: false
 # 采样时是否使用解析后验（p(z_s|z_t,z_0)）；false 则仅用模型预测采样（等价于后验为单位阵）

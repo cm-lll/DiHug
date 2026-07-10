@@ -13171,54 +13171,55 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         require_closed = bool(
             getattr(self.cfg.model, "population_role_require_target_closure", True)
         )
-        type_nodes = [
-            (scope & (node_type == type_id)).nonzero(as_tuple=False).reshape(-1)
-            for type_id in range(num_types)
-        ]
-        for root_type in range(num_types):
-            roots = type_nodes[root_type]
-            if roots.numel() == 0:
-                continue
-            for first_type in range(num_types):
-                if first_type == root_type or type_nodes[first_type].numel() == 0:
+        if wedge_weight > 0 or closure_weight > 0:
+            type_nodes = [
+                (scope & (node_type == type_id)).nonzero(as_tuple=False).reshape(-1)
+                for type_id in range(num_types)
+            ]
+            for root_type in range(num_types):
+                roots = type_nodes[root_type]
+                if roots.numel() == 0:
                     continue
-                for second_type in range(first_type + 1, num_types):
-                    if second_type == root_type or type_nodes[second_type].numel() == 0:
+                for first_type in range(num_types):
+                    if first_type == root_type or type_nodes[first_type].numel() == 0:
                         continue
-                    first = type_nodes[first_type]
-                    second = type_nodes[second_type]
-                    pred_rf = pred_matrix[roots][:, first]
-                    pred_rs = pred_matrix[roots][:, second]
-                    pred_fs = pred_matrix[first][:, second]
-                    target_rf = target_matrix[roots][:, first]
-                    target_rs = target_matrix[roots][:, second]
-                    target_fs = target_matrix[first][:, second]
+                    for second_type in range(first_type + 1, num_types):
+                        if second_type == root_type or type_nodes[second_type].numel() == 0:
+                            continue
+                        first = type_nodes[first_type]
+                        second = type_nodes[second_type]
+                        pred_rf = pred_matrix[roots][:, first]
+                        pred_rs = pred_matrix[roots][:, second]
+                        pred_fs = pred_matrix[first][:, second]
+                        target_rf = target_matrix[roots][:, first]
+                        target_rs = target_matrix[roots][:, second]
+                        target_fs = target_matrix[first][:, second]
 
-                    pred_wedge = pred_rf.sum(dim=-1) * pred_rs.sum(dim=-1)
-                    target_wedge = target_rf.sum(dim=-1) * target_rs.sum(dim=-1)
-                    pred_closure = ((pred_rf @ pred_fs) * pred_rs).sum(dim=-1)
-                    target_closure = ((target_rf @ target_fs) * target_rs).sum(dim=-1)
-                    pred_wedge_mass = (pred_deg2[roots] * pred_wedge).sum()
-                    target_wedge_mass = (target_deg2[roots] * target_wedge).sum().detach()
-                    pred_closure_mass = (pred_deg2[roots] * pred_closure).sum()
-                    target_closure_mass = (target_deg2[roots] * target_closure).sum().detach()
-                    if target_wedge_mass <= max(min_target, eps):
-                        continue
-                    if require_closed and target_closure_mass <= max(min_target, eps):
-                        continue
-                    if wedge_weight > 0:
-                        losses.append(
-                            wedge_weight
-                            * (pred_wedge_mass - target_wedge_mass).abs()
-                            / target_wedge_mass.clamp(min=1.0)
-                        )
-                    if closure_weight > 0 and target_closure_mass > max(min_target, eps):
-                        losses.append(
-                            closure_weight
-                            * (pred_closure_mass - target_closure_mass).abs()
-                            / target_closure_mass.clamp(min=1.0)
-                        )
-                    active_roles += 1
+                        pred_wedge = pred_rf.sum(dim=-1) * pred_rs.sum(dim=-1)
+                        target_wedge = target_rf.sum(dim=-1) * target_rs.sum(dim=-1)
+                        pred_closure = ((pred_rf @ pred_fs) * pred_rs).sum(dim=-1)
+                        target_closure = ((target_rf @ target_fs) * target_rs).sum(dim=-1)
+                        pred_wedge_mass = (pred_deg2[roots] * pred_wedge).sum()
+                        target_wedge_mass = (target_deg2[roots] * target_wedge).sum().detach()
+                        pred_closure_mass = (pred_deg2[roots] * pred_closure).sum()
+                        target_closure_mass = (target_deg2[roots] * target_closure).sum().detach()
+                        if target_wedge_mass <= max(min_target, eps):
+                            continue
+                        if require_closed and target_closure_mass <= max(min_target, eps):
+                            continue
+                        if wedge_weight > 0:
+                            losses.append(
+                                wedge_weight
+                                * (pred_wedge_mass - target_wedge_mass).abs()
+                                / target_wedge_mass.clamp(min=1.0)
+                            )
+                        if closure_weight > 0 and target_closure_mass > max(min_target, eps):
+                            losses.append(
+                                closure_weight
+                                * (pred_closure_mass - target_closure_mass).abs()
+                                / target_closure_mass.clamp(min=1.0)
+                            )
+                        active_roles += 1
 
         if not losses:
             return pred_edge.sum() * 0.0, {"active_roles": 0.0}
@@ -21490,6 +21491,103 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             sample.charge = sample.charge.argmax(-1) - 1
         return sample
 
+    def _sampling_population_role_snapshot(self, sparse_sampled_data, node_override=None):
+        """Summarize hard low-degree roles from the current sampled graph only.
+
+        This is a sampling diagnostic, not a training target: it never reads
+        clean/reference edges. Node types come from fixed anchors when present;
+        degrees, wedges, and closures come from this reverse-step hard graph.
+        """
+        sample = self._snapshot_sparse_sample_for_metrics(
+            sparse_sampled_data, node_override=node_override
+        )
+        num_nodes = int(sample.node.numel())
+        type_offsets = getattr(self.dataset_info, "type_offsets", {}) or {}
+        sorted_types = sorted(
+            ((str(name), int(offset)) for name, offset in type_offsets.items()),
+            key=lambda item: item[1],
+        )
+        if num_nodes <= 0 or not sorted_types:
+            return {"positive_edges": 0, "degree_hist": {}, "typed_deg2": {}}
+
+        node_type = self._node_type_ids_from_subtype(sample.node.long()).cpu()
+        type_names = {type_id: name for type_id, (name, _) in enumerate(sorted_types)}
+        neighbors = [set() for _ in range(num_nodes)]
+        undirected_edges = set()
+        edge_index = sample.edge_index.long().cpu()
+        edge_label = sample.edge_attr.reshape(-1).long().cpu()
+        for edge_pos, label in enumerate(edge_label.tolist()):
+            if label <= 0:
+                continue
+            src = int(edge_index[0, edge_pos])
+            dst = int(edge_index[1, edge_pos])
+            if src < 0 or dst < 0 or src >= num_nodes or dst >= num_nodes or src == dst:
+                continue
+            left, right = (src, dst) if src < dst else (dst, src)
+            if (left, right) in undirected_edges:
+                continue
+            undirected_edges.add((left, right))
+            neighbors[left].add(right)
+            neighbors[right].add(left)
+
+        degree_hist = {
+            type_name: {"0": 0, "1": 0, "2": 0, "3": 0, "4+": 0}
+            for type_name in type_names.values()
+        }
+        typed_deg2 = {}
+        for node_idx, node_neighbors in enumerate(neighbors):
+            type_id = int(node_type[node_idx])
+            if type_id < 0 or type_id not in type_names:
+                continue
+            type_name = type_names[type_id]
+            degree = len(node_neighbors)
+            degree_hist[type_name][str(degree) if degree <= 3 else "4+"] += 1
+            if degree != 2:
+                continue
+            first, second = sorted(node_neighbors)
+            first_type = int(node_type[first])
+            second_type = int(node_type[second])
+            if (
+                first_type < 0
+                or second_type < 0
+                or first_type == second_type
+                or first_type not in type_names
+                or second_type not in type_names
+            ):
+                continue
+            neighbor_names = sorted((type_names[first_type], type_names[second_type]))
+            role_key = f"{type_name}|{neighbor_names[0]}+{neighbor_names[1]}"
+            role = typed_deg2.setdefault(role_key, {"wedges": 0, "closed": 0})
+            role["wedges"] += 1
+            edge_key = (first, second) if first < second else (second, first)
+            if edge_key in undirected_edges:
+                role["closed"] += 1
+
+        return {
+            "positive_edges": len(undirected_edges),
+            "degree_hist": degree_hist,
+            "typed_deg2": typed_deg2,
+        }
+
+    def _save_sampling_population_role_trace(self, entries):
+        if not entries or getattr(self, "local_rank", 0) != 0:
+            return
+        counter = int(getattr(self, "_sampling_population_role_trace_counter", 0))
+        self._sampling_population_role_trace_counter = counter + 1
+        log_dir = os.path.join(
+            utils.get_model_output_root(),
+            "sampling_logs",
+            str(self.cfg.general.name),
+            f"epoch{self.current_epoch}",
+        )
+        os.makedirs(log_dir, exist_ok=True)
+        path = os.path.join(
+            log_dir, f"fixed_nodes_population_role_trace_{counter:03d}.json"
+        )
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(entries, handle, indent=2)
+        print(f"[TEST-SAMPLING] saved population-role trace: {path}")
+
     def _record_test_intermediate_sample(self, remaining_step, sparse_sampled_data, node_override=None):
         every = self._test_sampling_metrics_every()
         if every <= 0 or int(remaining_step) % every != 0:
@@ -22212,6 +22310,19 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             device=self.device,
         )
         sparse_sampled_data.anchor_node_subtype = fixed_node_subtypes.to(self.device)
+        population_role_trace_enabled = bool(
+            getattr(self.cfg.general, "log_sampling_population_role_trace", False)
+        )
+        population_role_trace_every = max(
+            1,
+            int(
+                getattr(
+                    self.cfg.general, "sampling_population_role_trace_every", 1
+                )
+                or 1
+            ),
+        )
+        population_role_trace = []
         equivariance_partition_mode = str(
             getattr(
                 self.cfg.general,
@@ -22368,6 +22479,18 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             sparse_sampled_data = self._apply_block_template_initial_edges(sparse_sampled_data)
             sparse_sampled_data = self._prepare_connectivity_candidates(sparse_sampled_data)
 
+        if population_role_trace_enabled:
+            population_role_trace.append(
+                {
+                    "remaining_step": int(self.T),
+                    "t_norm": 1.0,
+                    "stage": "initial",
+                    "population_role": self._sampling_population_role_snapshot(
+                        sparse_sampled_data, node_override=fixed_node_subtypes
+                    ),
+                }
+            )
+
         chain = utils.SparseChainPlaceHolder(keep_chain=keep_chain)
         transitions = self._sampling_time_transitions()
         n_steps = len(transitions)
@@ -22484,6 +22607,20 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                     self._verbose_step_index = None
                     self._verbose_total_steps = None
             self._record_test_intermediate_sample(int(s_int), sparse_sampled_data, node_override=fixed_node_subtypes)
+            if (
+                population_role_trace_enabled
+                and int(s_int) % population_role_trace_every == 0
+            ):
+                population_role_trace.append(
+                    {
+                        "remaining_step": int(s_int),
+                        "t_norm": float(s_int) / float(self.T),
+                        "stage": "reverse",
+                        "population_role": self._sampling_population_role_snapshot(
+                            sparse_sampled_data, node_override=fixed_node_subtypes
+                        ),
+                    }
+                )
             if ((s_int * number_chain_steps) % self.T == 0) and (keep_chain != 0):
                     chain.append(sparse_sampled_data)
             if no_change_stop_enabled:
@@ -22768,6 +22905,23 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         generated_graphs = self._snapshot_sparse_sample_for_metrics(
             sparse_sampled_data, node_override=fixed_node_subtypes
         )
+        if population_role_trace_enabled:
+            final_step = (
+                int(early_stop_best_step)
+                if early_stop_best_step is not None and early_stop_restore_best
+                else 0
+            )
+            population_role_trace.append(
+                {
+                    "remaining_step": final_step,
+                    "t_norm": float(final_step) / float(self.T),
+                    "stage": "final",
+                    "population_role": self._sampling_population_role_snapshot(
+                        sparse_sampled_data, node_override=fixed_node_subtypes
+                    ),
+                }
+            )
+            self._save_sampling_population_role_trace(population_role_trace)
         return generated_graphs
 
     def sample_node(self, pred_X, p_s_and_t_given_0_X, node_mask):
