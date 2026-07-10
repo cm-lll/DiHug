@@ -1,0 +1,16 @@
+# @package _global_
+defaults:
+  - imdb_movie_hgt_l3h4_population_role
+
+general:
+  name: imdb_movie_l3h4_population_role_quota
+
+model:
+  # Match structural roles on the same family-cardinality surface used by
+  # exact-K sampling. The projection is query-local and therefore preserves
+  # block training; no clean adjacency is exposed to the denoiser.
+  population_role_projection_mode: soft_quota
+  population_role_projection_temperature: 0.5
+  population_role_projection_min_temperature: 0.1
+  population_role_projection_anneal_epochs: 100
+  population_role_projection_bisection_iters: 40
