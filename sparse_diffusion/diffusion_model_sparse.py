@@ -13038,6 +13038,213 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             return zero, {"active_groups": 0.0}
         return torch.stack(losses).mean(), {"active_groups": float(active_groups)}
 
+    def _population_role_projection_temperature(self):
+        start = max(
+            1e-4,
+            float(
+                getattr(
+                    self.cfg.model,
+                    "population_role_projection_temperature",
+                    0.5,
+                )
+                or 0.5
+            ),
+        )
+        minimum = max(
+            1e-4,
+            float(
+                getattr(
+                    self.cfg.model,
+                    "population_role_projection_min_temperature",
+                    start,
+                )
+                or start
+            ),
+        )
+        minimum = min(start, minimum)
+        anneal_epochs = max(
+            0,
+            int(
+                getattr(
+                    self.cfg.model,
+                    "population_role_projection_anneal_epochs",
+                    0,
+                )
+                or 0
+            ),
+        )
+        if anneal_epochs <= 1 or start <= minimum:
+            return minimum
+        progress = min(
+            max(float(self.current_epoch) / float(anneal_epochs - 1), 0.0),
+            1.0,
+        )
+        return float(start * ((minimum / start) ** progress))
+
+    def _soft_fixed_cardinality_projection(
+        self,
+        scores,
+        target_mass,
+        temperature,
+        iterations,
+    ):
+        """Entropy-regularized top-K projection with an implicit threshold gradient."""
+        num_candidates = int(scores.numel())
+        if num_candidates <= 0:
+            return scores
+        target_value = float(target_mass.detach().cpu())
+        target_value = min(max(target_value, 0.0), float(num_candidates))
+        if target_value <= 0.0:
+            return scores * 0.0
+        if target_value >= float(num_candidates):
+            return scores * 0.0 + 1.0
+
+        temperature = max(float(temperature), 1e-4)
+        iterations = max(int(iterations), 1)
+        with torch.no_grad():
+            detached = scores.detach()
+            margin = max(30.0 * temperature, 1.0)
+            lower = detached.min() - margin
+            upper = detached.max() + margin
+            target_tensor = detached.new_tensor(target_value)
+            for _ in range(iterations):
+                midpoint = 0.5 * (lower + upper)
+                mass = torch.sigmoid(
+                    (detached - midpoint) / temperature
+                ).sum()
+                lower = torch.where(mass > target_tensor, midpoint, lower)
+                upper = torch.where(mass > target_tensor, upper, midpoint)
+            threshold_value = 0.5 * (lower + upper)
+
+        # For F(s, lambda) = sum(sigmoid((s-lambda)/tau)) - K = 0,
+        # implicit differentiation gives d lambda / d s_j = w_j / sum_i w_i.
+        # Reintroduce exactly that first-order dependence while preserving the
+        # bisection solution in the forward pass.
+        probe = torch.sigmoid((scores - threshold_value) / temperature)
+        tangent_weight = (probe * (1.0 - probe)).detach()
+        tangent_total = tangent_weight.sum()
+        if float(tangent_total.detach().cpu()) > 1e-12:
+            weighted_score = (tangent_weight * scores).sum() / tangent_total
+            threshold = threshold_value + weighted_score - weighted_score.detach()
+        else:
+            threshold = threshold_value
+        return torch.sigmoid((scores - threshold) / temperature)
+
+    def _project_population_role_probabilities(
+        self,
+        scores,
+        raw_prob,
+        target_exist,
+        query_family,
+        graph_id,
+    ):
+        mode = str(
+            getattr(
+                self.cfg.model,
+                "population_role_projection_mode",
+                "raw",
+            )
+            or "raw"
+        ).lower()
+        if mode == "raw":
+            return raw_prob, {
+                "projection_groups": 0.0,
+                "projection_mass_mae": 0.0,
+                "projection_raw_rel_error": 0.0,
+                "projection_softness": 0.0,
+                "projection_temperature": 0.0,
+            }
+        if mode not in ("soft_quota", "straight_through"):
+            raise ValueError(
+                "model.population_role_projection_mode must be one of "
+                f"raw, soft_quota, straight_through; got {mode}"
+            )
+
+        temperature = self._population_role_projection_temperature()
+        iterations = max(
+            1,
+            int(
+                getattr(
+                    self.cfg.model,
+                    "population_role_projection_bisection_iters",
+                    40,
+                )
+                or 40
+            ),
+        )
+        projected = raw_prob.clone()
+        valid = query_family >= 0
+        if not bool(valid.any()):
+            return raw_prob, {
+                "projection_groups": 0.0,
+                "projection_mass_mae": 0.0,
+                "projection_raw_rel_error": 0.0,
+                "projection_softness": 0.0,
+                "projection_temperature": float(temperature),
+            }
+
+        family_span = int(query_family[valid].max().detach().item()) + 1
+        group_id = graph_id * max(family_span, 1) + query_family.clamp(min=0)
+        mass_errors = []
+        raw_rel_errors = []
+        softness_values = []
+        active_groups = 0
+        for group in torch.unique(group_id[valid], sorted=True):
+            mask = valid & (group_id == group)
+            group_scores = scores[mask]
+            target_mass = target_exist[mask].sum().detach()
+            soft = self._soft_fixed_cardinality_projection(
+                group_scores,
+                target_mass,
+                temperature,
+                iterations,
+            )
+            if mode == "straight_through":
+                k = int(round(float(target_mass.detach().cpu())))
+                k = min(max(k, 0), int(group_scores.numel()))
+                hard = torch.zeros_like(soft)
+                if k > 0:
+                    chosen = torch.topk(
+                        group_scores,
+                        k=k,
+                        largest=True,
+                        sorted=False,
+                    ).indices
+                    hard[chosen] = 1.0
+                selected = hard + soft - soft.detach()
+            else:
+                selected = soft
+            projected[mask] = selected
+            target_scale = target_mass.clamp(min=1.0)
+            mass_errors.append((soft.sum() - target_mass).abs())
+            raw_rel_errors.append(
+                (raw_prob[mask].sum() - target_mass).abs() / target_scale
+            )
+            softness_values.append((soft * (1.0 - soft)).mean())
+            active_groups += 1
+
+        if active_groups <= 0:
+            return raw_prob, {
+                "projection_groups": 0.0,
+                "projection_mass_mae": 0.0,
+                "projection_raw_rel_error": 0.0,
+                "projection_softness": 0.0,
+                "projection_temperature": float(temperature),
+            }
+        return projected, {
+            "projection_groups": float(active_groups),
+            "projection_mass_mae": float(
+                torch.stack(mass_errors).mean().detach().cpu()
+            ),
+            "projection_raw_rel_error": float(
+                torch.stack(raw_rel_errors).mean().detach().cpu()
+            ),
+            "projection_softness": float(
+                torch.stack(softness_values).mean().detach().cpu()
+            ),
+            "projection_temperature": float(temperature),
+        }
+
     def _compute_population_role_loss(self, pred, clean_data, true_data):
         """Match typed low-degree structural roles without node-ID alignment.
 
@@ -13074,7 +13281,10 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             target = target.argmax(dim=-1)
         target_exist = (target.reshape(-1).long().to(device) > 0).to(dtype=dtype)
         logits = pred_edge.reshape(-1, pred_edge.shape[-1])
-        pred_exist = (1.0 - torch.softmax(logits, dim=-1)[:, 0]).clamp(0.0, 1.0)
+        pred_exist_raw = (
+            1.0 - torch.softmax(logits, dim=-1)[:, 0]
+        ).clamp(0.0, 1.0)
+        exist_score = torch.logsumexp(logits[:, 1:], dim=-1) - logits[:, 0]
 
         src = edge_index[0].long().to(device)
         dst = edge_index[1].long().to(device)
@@ -13091,8 +13301,30 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             return pred_edge.sum() * 0.0, {"active_roles": 0.0}
         src = src[valid_q]
         dst = dst[valid_q]
-        pred_exist = pred_exist[valid_q]
+        pred_exist_raw = pred_exist_raw[valid_q]
+        exist_score = exist_score[valid_q]
         target_exist = target_exist[valid_q]
+
+        _, query_family = self._infer_query_family_from_clean_node_types(
+            torch.stack([src, dst], dim=0),
+            clean_data.x,
+        )
+        if query_family is None:
+            query_family = torch.full_like(src, -1)
+        else:
+            query_family = query_family.to(device).long().reshape(-1)
+        clean_batch = getattr(clean_data, "batch", None)
+        if clean_batch is None or int(clean_batch.numel()) != num_nodes:
+            graph_id = torch.zeros_like(src)
+        else:
+            graph_id = clean_batch.to(device).long()[src]
+        pred_exist, projection_stats = self._project_population_role_probabilities(
+            exist_score,
+            pred_exist_raw,
+            target_exist,
+            query_family,
+            graph_id,
+        )
 
         # Build symmetric query-local probability/target matrices.  They only
         # contain current block candidates, so this does not circumvent block
@@ -13223,11 +13455,13 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
 
         if not losses:
             return pred_edge.sum() * 0.0, {"active_roles": 0.0}
-        return torch.stack(losses).mean(), {
+        stats = {
             "active_roles": float(active_roles),
             "pred_deg2_mass": float(pred_deg2[scope].sum().detach().cpu()),
             "target_deg2_mass": float(target_deg2[scope].sum().detach().cpu()),
         }
+        stats.update(projection_stats)
+        return torch.stack(losses).mean(), stats
 
     def _compute_typed_root_neighbor_loss(self, pred, clean_data, true_data):
         """Match low-degree root degree, neighbor-type mix, and closure coverage.
@@ -17217,6 +17451,11 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 self._epoch_population_role_active_sum = 0.0
                 self._epoch_population_role_pred_deg2_sum = 0.0
                 self._epoch_population_role_target_deg2_sum = 0.0
+                self._epoch_population_role_projection_group_sum = 0.0
+                self._epoch_population_role_projection_mass_mae_sum = 0.0
+                self._epoch_population_role_projection_raw_rel_sum = 0.0
+                self._epoch_population_role_projection_softness_sum = 0.0
+                self._epoch_population_role_projection_temperature_sum = 0.0
             self._epoch_population_role_loss_sum += float(loss_population_role.detach().cpu())
             self._epoch_population_role_loss_count += 1
             self._epoch_population_role_weighted_sum += float(
@@ -17230,6 +17469,21 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             )
             self._epoch_population_role_target_deg2_sum += float(
                 population_role_stats.get("target_deg2_mass", 0.0)
+            )
+            self._epoch_population_role_projection_group_sum += float(
+                population_role_stats.get("projection_groups", 0.0)
+            )
+            self._epoch_population_role_projection_mass_mae_sum += float(
+                population_role_stats.get("projection_mass_mae", 0.0)
+            )
+            self._epoch_population_role_projection_raw_rel_sum += float(
+                population_role_stats.get("projection_raw_rel_error", 0.0)
+            )
+            self._epoch_population_role_projection_softness_sum += float(
+                population_role_stats.get("projection_softness", 0.0)
+            )
+            self._epoch_population_role_projection_temperature_sum += float(
+                population_role_stats.get("projection_temperature", 0.0)
             )
             if step_idx % self.log_every_steps == 0:
                 self.log(
@@ -17246,6 +17500,17 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                     prog_bar=False,
                     sync_dist=True,
                 )
+                if population_role_stats.get("projection_groups", 0.0) > 0:
+                    self.log(
+                        "train/population_role_projection_mass_mae",
+                        torch.as_tensor(
+                            population_role_stats.get("projection_mass_mae", 0.0),
+                            device=self.device,
+                        ),
+                        on_step=True,
+                        prog_bar=False,
+                        sync_dist=True,
+                    )
 
         typed_root_neighbor_w_base = float(
             getattr(self.cfg.model, "typed_root_neighbor_loss_weight", 0.0) or 0.0
@@ -17892,6 +18157,11 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         self._epoch_population_role_active_sum = 0.0
         self._epoch_population_role_pred_deg2_sum = 0.0
         self._epoch_population_role_target_deg2_sum = 0.0
+        self._epoch_population_role_projection_group_sum = 0.0
+        self._epoch_population_role_projection_mass_mae_sum = 0.0
+        self._epoch_population_role_projection_raw_rel_sum = 0.0
+        self._epoch_population_role_projection_softness_sum = 0.0
+        self._epoch_population_role_projection_temperature_sum = 0.0
         self._epoch_typed_root_neighbor_loss_sum = 0.0
         self._epoch_typed_root_neighbor_loss_count = 0
         self._epoch_typed_root_neighbor_weighted_sum = 0.0
@@ -18077,12 +18347,22 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             population_role_active = float(getattr(self, "_epoch_population_role_active_sum", 0.0)) / float(population_role_count)
             population_role_pred_deg2 = float(getattr(self, "_epoch_population_role_pred_deg2_sum", 0.0)) / float(population_role_count)
             population_role_target_deg2 = float(getattr(self, "_epoch_population_role_target_deg2_sum", 0.0)) / float(population_role_count)
+            population_role_projection_groups = float(getattr(self, "_epoch_population_role_projection_group_sum", 0.0)) / float(population_role_count)
+            population_role_projection_mass_mae = float(getattr(self, "_epoch_population_role_projection_mass_mae_sum", 0.0)) / float(population_role_count)
+            population_role_projection_raw_rel = float(getattr(self, "_epoch_population_role_projection_raw_rel_sum", 0.0)) / float(population_role_count)
+            population_role_projection_softness = float(getattr(self, "_epoch_population_role_projection_softness_sum", 0.0)) / float(population_role_count)
+            population_role_projection_temperature = float(getattr(self, "_epoch_population_role_projection_temperature_sum", 0.0)) / float(population_role_count)
         else:
             population_role_loss = 0.0
             population_role_wloss = 0.0
             population_role_active = 0.0
             population_role_pred_deg2 = 0.0
             population_role_target_deg2 = 0.0
+            population_role_projection_groups = 0.0
+            population_role_projection_mass_mae = 0.0
+            population_role_projection_raw_rel = 0.0
+            population_role_projection_softness = 0.0
+            population_role_projection_temperature = 0.0
         typed_root_neighbor_count = int(getattr(self, "_epoch_typed_root_neighbor_loss_count", 0) or 0)
         if typed_root_neighbor_count > 0:
             typed_root_neighbor_loss = float(getattr(self, "_epoch_typed_root_neighbor_loss_sum", 0.0)) / float(typed_root_neighbor_count)
@@ -18361,6 +18641,11 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             epoch_loss["train_epoch/population_role_active_roles"] = population_role_active
             epoch_loss["train_epoch/population_role_pred_deg2_mass"] = population_role_pred_deg2
             epoch_loss["train_epoch/population_role_target_deg2_mass"] = population_role_target_deg2
+            epoch_loss["train_epoch/population_role_projection_groups"] = population_role_projection_groups
+            epoch_loss["train_epoch/population_role_projection_mass_mae"] = population_role_projection_mass_mae
+            epoch_loss["train_epoch/population_role_projection_raw_rel"] = population_role_projection_raw_rel
+            epoch_loss["train_epoch/population_role_projection_softness"] = population_role_projection_softness
+            epoch_loss["train_epoch/population_role_projection_temperature"] = population_role_projection_temperature
         if typed_root_neighbor_count > 0:
             epoch_loss["train_epoch/typed_root_neighbor_loss"] = typed_root_neighbor_loss
             epoch_loss["train_epoch/typed_root_neighbor_weighted"] = typed_root_neighbor_wloss
@@ -18482,6 +18767,11 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             f" -- population_role_roles: {population_role_active:.1f}"
             f" -- population_role_deg2[pred={population_role_pred_deg2:.2f}"
             f",target={population_role_target_deg2:.2f}]"
+            f" -- population_role_quota[groups={population_role_projection_groups:.1f}"
+            f",mass_mae={population_role_projection_mass_mae:.3g}"
+            f",raw_rel={population_role_projection_raw_rel:.3f}"
+            f",soft={population_role_projection_softness:.3f}"
+            f",temp={population_role_projection_temperature:.3f}]"
         ) if population_role_count > 0 else ""
         typed_root_neighbor_str = (
             f" -- typed_root_neighbor: {typed_root_neighbor_loss:.6f}"
@@ -18686,6 +18976,11 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             "train_epoch/population_role_active_roles",
             "train_epoch/population_role_pred_deg2_mass",
             "train_epoch/population_role_target_deg2_mass",
+            "train_epoch/population_role_projection_groups",
+            "train_epoch/population_role_projection_mass_mae",
+            "train_epoch/population_role_projection_raw_rel",
+            "train_epoch/population_role_projection_softness",
+            "train_epoch/population_role_projection_temperature",
             "train_epoch/typed_root_neighbor_loss",
             "train_epoch/typed_root_neighbor_weighted",
             "train_epoch/typed_root_neighbor_pred_closed_soft",

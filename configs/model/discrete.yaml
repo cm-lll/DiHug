@@ -605,6 +605,15 @@ population_role_wedge_weight: 0.5
 population_role_closure_weight: 1.0
 population_role_min_target_mass: 1.0
 population_role_require_target_closure: true
+# raw: compute structural roles from independent existence probabilities.
+# soft_quota: entropy-project each graph-family onto its query-local clean edge
+# count before computing roles. straight_through uses the same soft projection
+# for gradients but a deterministic hard top-K state in the forward pass.
+population_role_projection_mode: raw  # raw | soft_quota | straight_through
+population_role_projection_temperature: 0.5
+population_role_projection_min_temperature: 0.1
+population_role_projection_anneal_epochs: 100
+population_role_projection_bisection_iters: 40
 # Training-only endpoint role distribution supervision. It matches how expected
 # clean edge endpoints distribute over node-type x clean-degree buckets. This is
 # a lightweight way to teach the denoiser that many low-degree nodes, not only a
