@@ -13038,6 +13038,196 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             return zero, {"active_groups": 0.0}
         return torch.stack(losses).mean(), {"active_groups": float(active_groups)}
 
+    def _compute_population_role_loss(self, pred, clean_data, true_data):
+        """Match typed low-degree structural roles without node-ID alignment.
+
+        The older rooted objectives use a clean node's own degree and neighbors
+        as its target.  That is unsuitable when nodes of one type have no
+        identity feature at generation time.  Here every statistic is pooled
+        over the current block query: type-wise soft degree histograms plus the
+        total degree-2 typed wedge and typed closure mass for every distinct
+        type triple.  The block query remains the only source of candidates.
+        """
+        pred_edge = pred.edge_attr
+        edge_index = pred.edge_index
+        target = true_data.edge_attr
+        if (
+            pred_edge.numel() == 0
+            or edge_index.numel() == 0
+            or target.numel() == 0
+            or not self.heterogeneous
+        ):
+            return pred_edge.sum() * 0.0, {"active_roles": 0.0}
+
+        num_nodes = int(clean_data.x.shape[0])
+        device = pred_edge.device
+        dtype = pred_edge.dtype
+        node_type = self._clean_node_type_ids(clean_data.x, device)
+        if node_type is None or int(node_type.numel()) != num_nodes:
+            return pred_edge.sum() * 0.0, {"active_roles": 0.0}
+        valid_types = node_type >= 0
+        if not bool(valid_types.any()):
+            return pred_edge.sum() * 0.0, {"active_roles": 0.0}
+        num_types = int(node_type[valid_types].max().item()) + 1
+
+        if target.dim() > 1:
+            target = target.argmax(dim=-1)
+        target_exist = (target.reshape(-1).long().to(device) > 0).to(dtype=dtype)
+        logits = pred_edge.reshape(-1, pred_edge.shape[-1])
+        pred_exist = (1.0 - torch.softmax(logits, dim=-1)[:, 0]).clamp(0.0, 1.0)
+
+        src = edge_index[0].long().to(device)
+        dst = edge_index[1].long().to(device)
+        valid_q = (
+            (src >= 0)
+            & (src < num_nodes)
+            & (dst >= 0)
+            & (dst < num_nodes)
+            & (src != dst)
+            & (node_type[src] >= 0)
+            & (node_type[dst] >= 0)
+        )
+        if not bool(valid_q.any()):
+            return pred_edge.sum() * 0.0, {"active_roles": 0.0}
+        src = src[valid_q]
+        dst = dst[valid_q]
+        pred_exist = pred_exist[valid_q]
+        target_exist = target_exist[valid_q]
+
+        # Build symmetric query-local probability/target matrices.  They only
+        # contain current block candidates, so this does not circumvent block
+        # training or use clean edges as decoder input.
+        flat_size = int(num_nodes * num_nodes)
+        key = src * num_nodes + dst
+        reverse_key = dst * num_nodes + src
+        pred_flat = pred_edge.new_zeros(flat_size)
+        target_flat = pred_edge.new_zeros(flat_size)
+        pred_flat.scatter_add_(0, key, pred_exist)
+        pred_flat.scatter_add_(0, reverse_key, pred_exist)
+        target_flat.scatter_add_(0, key, target_exist)
+        target_flat.scatter_add_(0, reverse_key, target_exist)
+        pred_matrix = pred_flat.view(num_nodes, num_nodes).clamp(0.0, 1.0)
+        target_matrix = target_flat.view(num_nodes, num_nodes).clamp(0.0, 1.0)
+        pred_degree = pred_matrix.sum(dim=-1)
+        target_degree = target_matrix.sum(dim=-1)
+
+        scope = torch.zeros(num_nodes, dtype=torch.bool, device=device)
+        scope[src] = True
+        scope[dst] = True
+        scope = scope & valid_types
+        if not bool(scope.any()):
+            return pred_edge.sum() * 0.0, {"active_roles": 0.0}
+
+        degree_cap = max(
+            2,
+            int(getattr(self.cfg.model, "population_role_degree_cap", 6) or 6),
+        )
+        temperature = max(
+            1e-3,
+            float(getattr(self.cfg.model, "population_role_degree_temperature", 0.75) or 0.75),
+        )
+        degree_bins = torch.arange(degree_cap + 1, device=device, dtype=dtype)
+        pred_hist_membership = torch.softmax(
+            -0.5 * ((pred_degree.unsqueeze(-1) - degree_bins) / temperature).pow(2),
+            dim=-1,
+        )
+        target_bin = target_degree.long().clamp(min=0, max=degree_cap)
+        target_hist_membership = F.one_hot(
+            target_bin, num_classes=degree_cap + 1
+        ).to(dtype=dtype)
+        pred_deg2 = pred_hist_membership[:, 2]
+        target_deg2 = (target_degree == 2).to(dtype=dtype)
+        min_target = float(
+            getattr(self.cfg.model, "population_role_min_target_mass", 1.0) or 0.0
+        )
+        eps = 1e-8
+        losses = []
+        active_roles = 0
+
+        degree_weight = float(
+            getattr(self.cfg.model, "population_role_degree_weight", 1.0) or 0.0
+        )
+        if degree_weight > 0:
+            for type_id in range(num_types):
+                mask = scope & (node_type == type_id)
+                if not bool(mask.any()):
+                    continue
+                target_hist = target_hist_membership[mask].sum(dim=0)
+                pred_hist = pred_hist_membership[mask].sum(dim=0)
+                if target_hist.sum().detach() <= eps or pred_hist.sum() <= eps:
+                    continue
+                losses.append(
+                    degree_weight
+                    * self._js_divergence_from_masses(pred_hist, target_hist.detach(), eps=eps)
+                )
+                active_roles += 1
+
+        wedge_weight = float(
+            getattr(self.cfg.model, "population_role_wedge_weight", 0.5) or 0.0
+        )
+        closure_weight = float(
+            getattr(self.cfg.model, "population_role_closure_weight", 1.0) or 0.0
+        )
+        require_closed = bool(
+            getattr(self.cfg.model, "population_role_require_target_closure", True)
+        )
+        type_nodes = [
+            (scope & (node_type == type_id)).nonzero(as_tuple=False).reshape(-1)
+            for type_id in range(num_types)
+        ]
+        for root_type in range(num_types):
+            roots = type_nodes[root_type]
+            if roots.numel() == 0:
+                continue
+            for first_type in range(num_types):
+                if first_type == root_type or type_nodes[first_type].numel() == 0:
+                    continue
+                for second_type in range(first_type + 1, num_types):
+                    if second_type == root_type or type_nodes[second_type].numel() == 0:
+                        continue
+                    first = type_nodes[first_type]
+                    second = type_nodes[second_type]
+                    pred_rf = pred_matrix[roots][:, first]
+                    pred_rs = pred_matrix[roots][:, second]
+                    pred_fs = pred_matrix[first][:, second]
+                    target_rf = target_matrix[roots][:, first]
+                    target_rs = target_matrix[roots][:, second]
+                    target_fs = target_matrix[first][:, second]
+
+                    pred_wedge = pred_rf.sum(dim=-1) * pred_rs.sum(dim=-1)
+                    target_wedge = target_rf.sum(dim=-1) * target_rs.sum(dim=-1)
+                    pred_closure = ((pred_rf @ pred_fs) * pred_rs).sum(dim=-1)
+                    target_closure = ((target_rf @ target_fs) * target_rs).sum(dim=-1)
+                    pred_wedge_mass = (pred_deg2[roots] * pred_wedge).sum()
+                    target_wedge_mass = (target_deg2[roots] * target_wedge).sum().detach()
+                    pred_closure_mass = (pred_deg2[roots] * pred_closure).sum()
+                    target_closure_mass = (target_deg2[roots] * target_closure).sum().detach()
+                    if target_wedge_mass <= max(min_target, eps):
+                        continue
+                    if require_closed and target_closure_mass <= max(min_target, eps):
+                        continue
+                    if wedge_weight > 0:
+                        losses.append(
+                            wedge_weight
+                            * (pred_wedge_mass - target_wedge_mass).abs()
+                            / target_wedge_mass.clamp(min=1.0)
+                        )
+                    if closure_weight > 0 and target_closure_mass > max(min_target, eps):
+                        losses.append(
+                            closure_weight
+                            * (pred_closure_mass - target_closure_mass).abs()
+                            / target_closure_mass.clamp(min=1.0)
+                        )
+                    active_roles += 1
+
+        if not losses:
+            return pred_edge.sum() * 0.0, {"active_roles": 0.0}
+        return torch.stack(losses).mean(), {
+            "active_roles": float(active_roles),
+            "pred_deg2_mass": float(pred_deg2[scope].sum().detach().cpu()),
+            "target_deg2_mass": float(target_deg2[scope].sum().detach().cpu()),
+        }
+
     def _compute_typed_root_neighbor_loss(self, pred, clean_data, true_data):
         """Match low-degree root degree, neighbor-type mix, and closure coverage.
 
@@ -13266,6 +13456,14 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         eps = max(1e-6, float(torch.finfo(dtype).eps) * 16.0)
 
         losses = []
+        degree_loss_value = pred_edge.new_tensor(0.0)
+        type_loss_value = pred_edge.new_tensor(0.0)
+        closure_bce_value = pred_edge.new_tensor(0.0)
+        closure_frac_value = pred_edge.new_tensor(0.0)
+        pred_closed_probe = (
+            1.0 - torch.exp(-pred_root_closure[root_active].clamp(min=0.0) / saturation)
+        ).clamp(min=0.0, max=1.0)
+        target_vec_probe = target_closed[root_active]
         if degree_w > 0:
             pred_degree_root = pred_degree[root_nodes]
             target_degree_root = target_degree[root_nodes]
@@ -13273,6 +13471,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 (pred_degree_root[root_active] - target_degree_root[root_active].detach()).abs()
                 / target_degree_root[root_active].detach().clamp(min=1.0)
             ).mean()
+            degree_loss_value = degree_loss.detach()
             losses.append(degree_w * degree_loss)
         if type_w > 0:
             pred_neighbor_root = pred_neighbor[root_nodes][root_active]
@@ -13282,24 +13481,33 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             pred_dist = pred_neighbor_root / pred_degree_root.unsqueeze(-1).clamp(min=eps)
             target_dist = target_neighbor_root / target_degree_root.unsqueeze(-1).detach().clamp(min=eps)
             type_loss = (pred_dist - target_dist).abs().sum(dim=-1).mean()
+            type_loss_value = type_loss.detach()
             losses.append(type_w * type_loss)
         if closure_w > 0:
-            pred_closed = (
-                1.0 - torch.exp(-pred_root_closure[root_active].clamp(min=0.0) / saturation)
-            ).clamp(min=eps, max=1.0 - eps)
-            target_vec = target_closed[root_active]
+            pred_closed = pred_closed_probe.clamp(min=eps, max=1.0 - eps)
+            target_vec = target_vec_probe
             closure_bce = -(
                 target_vec * pred_closed.log()
                 + (1.0 - target_vec) * (1.0 - pred_closed).log()
             ).mean()
             closure_frac = (pred_closed.mean() - target_vec.mean().detach()).abs()
+            closure_bce_value = closure_bce.detach()
+            closure_frac_value = closure_frac.detach()
             losses.append(closure_w * (closure_bce + closure_frac))
 
         if not losses:
             zero = pred_edge.sum() * 0.0
             return zero, {"active_roots": 0.0}
+        pred_closed_hard = (pred_closed_probe > threshold).to(dtype=dtype)
         return torch.stack(losses).mean(), {
-            "active_roots": float(root_active.sum().detach().cpu())
+            "active_roots": float(root_active.sum().detach().cpu()),
+            "pred_closed_soft": float(pred_closed_probe.mean().detach().cpu()),
+            "pred_closed_hard": float(pred_closed_hard.mean().detach().cpu()),
+            "target_closed": float(target_vec_probe.mean().detach().cpu()),
+            "degree_rel": float(degree_loss_value.detach().cpu()),
+            "type_l1": float(type_loss_value.detach().cpu()),
+            "closure_bce": float(closure_bce_value.detach().cpu()),
+            "closure_frac": float(closure_frac_value.detach().cpu()),
         }
 
     def _compute_degree_role_distribution_loss(self, pred, clean_data, true_data):
@@ -16985,6 +17193,59 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                     sync_dist=True,
                 )
 
+        population_role_w_base = float(
+            getattr(self.cfg.model, "population_role_loss_weight", 0.0) or 0.0
+        )
+        population_role_w = self._warmup_weight(
+            population_role_w_base,
+            int(getattr(self.cfg.model, "population_role_loss_warmup_epochs", 0) or 0),
+            self._auxiliary_time_factor(
+                sparse_noisy_data,
+                float(getattr(self.cfg.model, "population_role_loss_t_power", 0.0) or 0.0),
+            ),
+        )
+        if population_role_w > 0 and not skip_auxiliary_structure_losses:
+            loss_population_role, population_role_stats = self._compute_population_role_loss(
+                sparse_pred, data, true_data
+            )
+            loss = loss + population_role_w * loss_population_role
+            if not hasattr(self, "_epoch_population_role_loss_sum"):
+                self._epoch_population_role_loss_sum = 0.0
+                self._epoch_population_role_loss_count = 0
+                self._epoch_population_role_weighted_sum = 0.0
+                self._epoch_population_role_active_sum = 0.0
+                self._epoch_population_role_pred_deg2_sum = 0.0
+                self._epoch_population_role_target_deg2_sum = 0.0
+            self._epoch_population_role_loss_sum += float(loss_population_role.detach().cpu())
+            self._epoch_population_role_loss_count += 1
+            self._epoch_population_role_weighted_sum += float(
+                (population_role_w * loss_population_role).detach().cpu()
+            )
+            self._epoch_population_role_active_sum += float(
+                population_role_stats.get("active_roles", 0.0)
+            )
+            self._epoch_population_role_pred_deg2_sum += float(
+                population_role_stats.get("pred_deg2_mass", 0.0)
+            )
+            self._epoch_population_role_target_deg2_sum += float(
+                population_role_stats.get("target_deg2_mass", 0.0)
+            )
+            if step_idx % self.log_every_steps == 0:
+                self.log(
+                    "train/population_role_loss",
+                    loss_population_role.detach(),
+                    on_step=True,
+                    prog_bar=False,
+                    sync_dist=True,
+                )
+                self.log(
+                    "train/population_role_weight",
+                    torch.as_tensor(population_role_w, device=self.device),
+                    on_step=True,
+                    prog_bar=False,
+                    sync_dist=True,
+                )
+
         typed_root_neighbor_w_base = float(
             getattr(self.cfg.model, "typed_root_neighbor_loss_weight", 0.0) or 0.0
         )
@@ -17006,6 +17267,13 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 self._epoch_typed_root_neighbor_loss_count = 0
                 self._epoch_typed_root_neighbor_weighted_sum = 0.0
                 self._epoch_typed_root_neighbor_active_sum = 0.0
+                self._epoch_typed_root_neighbor_soft_sum = 0.0
+                self._epoch_typed_root_neighbor_hard_sum = 0.0
+                self._epoch_typed_root_neighbor_target_sum = 0.0
+                self._epoch_typed_root_neighbor_degree_rel_sum = 0.0
+                self._epoch_typed_root_neighbor_type_l1_sum = 0.0
+                self._epoch_typed_root_neighbor_closure_bce_sum = 0.0
+                self._epoch_typed_root_neighbor_closure_frac_sum = 0.0
             self._epoch_typed_root_neighbor_loss_sum += float(
                 loss_typed_root_neighbor.detach().cpu()
             )
@@ -17015,6 +17283,27 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             )
             self._epoch_typed_root_neighbor_active_sum += float(
                 typed_root_neighbor_stats.get("active_roots", 0.0)
+            )
+            self._epoch_typed_root_neighbor_soft_sum += float(
+                typed_root_neighbor_stats.get("pred_closed_soft", 0.0)
+            )
+            self._epoch_typed_root_neighbor_hard_sum += float(
+                typed_root_neighbor_stats.get("pred_closed_hard", 0.0)
+            )
+            self._epoch_typed_root_neighbor_target_sum += float(
+                typed_root_neighbor_stats.get("target_closed", 0.0)
+            )
+            self._epoch_typed_root_neighbor_degree_rel_sum += float(
+                typed_root_neighbor_stats.get("degree_rel", 0.0)
+            )
+            self._epoch_typed_root_neighbor_type_l1_sum += float(
+                typed_root_neighbor_stats.get("type_l1", 0.0)
+            )
+            self._epoch_typed_root_neighbor_closure_bce_sum += float(
+                typed_root_neighbor_stats.get("closure_bce", 0.0)
+            )
+            self._epoch_typed_root_neighbor_closure_frac_sum += float(
+                typed_root_neighbor_stats.get("closure_frac", 0.0)
             )
             if step_idx % self.log_every_steps == 0:
                 self.log(
@@ -17596,10 +17885,23 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         self._epoch_low_degree_closure_loss_count = 0
         self._epoch_low_degree_closure_weighted_sum = 0.0
         self._epoch_low_degree_closure_active_sum = 0.0
+        self._epoch_population_role_loss_sum = 0.0
+        self._epoch_population_role_loss_count = 0
+        self._epoch_population_role_weighted_sum = 0.0
+        self._epoch_population_role_active_sum = 0.0
+        self._epoch_population_role_pred_deg2_sum = 0.0
+        self._epoch_population_role_target_deg2_sum = 0.0
         self._epoch_typed_root_neighbor_loss_sum = 0.0
         self._epoch_typed_root_neighbor_loss_count = 0
         self._epoch_typed_root_neighbor_weighted_sum = 0.0
         self._epoch_typed_root_neighbor_active_sum = 0.0
+        self._epoch_typed_root_neighbor_soft_sum = 0.0
+        self._epoch_typed_root_neighbor_hard_sum = 0.0
+        self._epoch_typed_root_neighbor_target_sum = 0.0
+        self._epoch_typed_root_neighbor_degree_rel_sum = 0.0
+        self._epoch_typed_root_neighbor_type_l1_sum = 0.0
+        self._epoch_typed_root_neighbor_closure_bce_sum = 0.0
+        self._epoch_typed_root_neighbor_closure_frac_sum = 0.0
         self._epoch_degree_role_dist_loss_sum = 0.0
         self._epoch_degree_role_dist_loss_count = 0
         self._epoch_degree_role_dist_weighted_sum = 0.0
@@ -17767,15 +18069,42 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             low_degree_closure_loss = 0.0
             low_degree_closure_wloss = 0.0
             low_degree_closure_active = 0.0
+        population_role_count = int(getattr(self, "_epoch_population_role_loss_count", 0) or 0)
+        if population_role_count > 0:
+            population_role_loss = float(getattr(self, "_epoch_population_role_loss_sum", 0.0)) / float(population_role_count)
+            population_role_wloss = float(getattr(self, "_epoch_population_role_weighted_sum", 0.0)) / float(population_role_count)
+            population_role_active = float(getattr(self, "_epoch_population_role_active_sum", 0.0)) / float(population_role_count)
+            population_role_pred_deg2 = float(getattr(self, "_epoch_population_role_pred_deg2_sum", 0.0)) / float(population_role_count)
+            population_role_target_deg2 = float(getattr(self, "_epoch_population_role_target_deg2_sum", 0.0)) / float(population_role_count)
+        else:
+            population_role_loss = 0.0
+            population_role_wloss = 0.0
+            population_role_active = 0.0
+            population_role_pred_deg2 = 0.0
+            population_role_target_deg2 = 0.0
         typed_root_neighbor_count = int(getattr(self, "_epoch_typed_root_neighbor_loss_count", 0) or 0)
         if typed_root_neighbor_count > 0:
             typed_root_neighbor_loss = float(getattr(self, "_epoch_typed_root_neighbor_loss_sum", 0.0)) / float(typed_root_neighbor_count)
             typed_root_neighbor_wloss = float(getattr(self, "_epoch_typed_root_neighbor_weighted_sum", 0.0)) / float(typed_root_neighbor_count)
             typed_root_neighbor_active = float(getattr(self, "_epoch_typed_root_neighbor_active_sum", 0.0)) / float(typed_root_neighbor_count)
+            typed_root_neighbor_soft = float(getattr(self, "_epoch_typed_root_neighbor_soft_sum", 0.0)) / float(typed_root_neighbor_count)
+            typed_root_neighbor_hard = float(getattr(self, "_epoch_typed_root_neighbor_hard_sum", 0.0)) / float(typed_root_neighbor_count)
+            typed_root_neighbor_target = float(getattr(self, "_epoch_typed_root_neighbor_target_sum", 0.0)) / float(typed_root_neighbor_count)
+            typed_root_neighbor_degree_rel = float(getattr(self, "_epoch_typed_root_neighbor_degree_rel_sum", 0.0)) / float(typed_root_neighbor_count)
+            typed_root_neighbor_type_l1 = float(getattr(self, "_epoch_typed_root_neighbor_type_l1_sum", 0.0)) / float(typed_root_neighbor_count)
+            typed_root_neighbor_closure_bce = float(getattr(self, "_epoch_typed_root_neighbor_closure_bce_sum", 0.0)) / float(typed_root_neighbor_count)
+            typed_root_neighbor_closure_frac = float(getattr(self, "_epoch_typed_root_neighbor_closure_frac_sum", 0.0)) / float(typed_root_neighbor_count)
         else:
             typed_root_neighbor_loss = 0.0
             typed_root_neighbor_wloss = 0.0
             typed_root_neighbor_active = 0.0
+            typed_root_neighbor_soft = 0.0
+            typed_root_neighbor_hard = 0.0
+            typed_root_neighbor_target = 0.0
+            typed_root_neighbor_degree_rel = 0.0
+            typed_root_neighbor_type_l1 = 0.0
+            typed_root_neighbor_closure_bce = 0.0
+            typed_root_neighbor_closure_frac = 0.0
         degree_role_count = int(getattr(self, "_epoch_degree_role_dist_loss_count", 0) or 0)
         if degree_role_count > 0:
             degree_role_loss = float(getattr(self, "_epoch_degree_role_dist_loss_sum", 0.0)) / float(degree_role_count)
@@ -17952,7 +18281,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             or node_role_coverage_count > 0
             or learned_target_count > 0
         )
-        total_train = edge_nll + degree_wloss + edge_count_wloss + closure_wloss + family_role_wloss + family_count_wloss + structure_delta_wloss + degree_pair_wloss + closure_bucket_wloss + node_closure_wloss + edge_support_wloss + low_degree_closure_wloss + typed_root_neighbor_wloss + degree_role_wloss + closure_anti_wloss + typed_signature_wloss + closure_rank_wloss + structure_utility_wloss + node_role_coverage_wloss + learned_target_wloss if isinstance(edge_nll, (int, float)) and edge_nll >= 0 else -1
+        total_train = edge_nll + degree_wloss + edge_count_wloss + closure_wloss + family_role_wloss + family_count_wloss + structure_delta_wloss + degree_pair_wloss + closure_bucket_wloss + node_closure_wloss + edge_support_wloss + low_degree_closure_wloss + population_role_wloss + typed_root_neighbor_wloss + degree_role_wloss + closure_anti_wloss + typed_signature_wloss + closure_rank_wloss + structure_utility_wloss + node_role_coverage_wloss + learned_target_wloss if isinstance(edge_nll, (int, float)) and edge_nll >= 0 else -1
         diag_count = int(getattr(self, "_epoch_diag_count", 0) or 0)
         if diag_count > 0:
             diag_t = float(getattr(self, "_epoch_diag_t_sum", 0.0)) / float(diag_count)
@@ -18025,10 +18354,23 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             epoch_loss["train_epoch/low_degree_closure_loss"] = low_degree_closure_loss
             epoch_loss["train_epoch/low_degree_closure_weighted"] = low_degree_closure_wloss
             epoch_loss["train_epoch/low_degree_closure_active_groups"] = low_degree_closure_active
+        if population_role_count > 0:
+            epoch_loss["train_epoch/population_role_loss"] = population_role_loss
+            epoch_loss["train_epoch/population_role_weighted"] = population_role_wloss
+            epoch_loss["train_epoch/population_role_active_roles"] = population_role_active
+            epoch_loss["train_epoch/population_role_pred_deg2_mass"] = population_role_pred_deg2
+            epoch_loss["train_epoch/population_role_target_deg2_mass"] = population_role_target_deg2
         if typed_root_neighbor_count > 0:
             epoch_loss["train_epoch/typed_root_neighbor_loss"] = typed_root_neighbor_loss
             epoch_loss["train_epoch/typed_root_neighbor_weighted"] = typed_root_neighbor_wloss
             epoch_loss["train_epoch/typed_root_neighbor_active_roots"] = typed_root_neighbor_active
+            epoch_loss["train_epoch/typed_root_neighbor_pred_closed_soft"] = typed_root_neighbor_soft
+            epoch_loss["train_epoch/typed_root_neighbor_pred_closed_hard"] = typed_root_neighbor_hard
+            epoch_loss["train_epoch/typed_root_neighbor_target_closed"] = typed_root_neighbor_target
+            epoch_loss["train_epoch/typed_root_neighbor_degree_rel"] = typed_root_neighbor_degree_rel
+            epoch_loss["train_epoch/typed_root_neighbor_type_l1"] = typed_root_neighbor_type_l1
+            epoch_loss["train_epoch/typed_root_neighbor_closure_bce"] = typed_root_neighbor_closure_bce
+            epoch_loss["train_epoch/typed_root_neighbor_closure_frac"] = typed_root_neighbor_closure_frac
         if degree_role_count > 0:
             epoch_loss["train_epoch/degree_role_dist_loss"] = degree_role_loss
             epoch_loss["train_epoch/degree_role_dist_weighted"] = degree_role_wloss
@@ -18133,10 +18475,22 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             f" -- lowdeg_closure_wloss: {low_degree_closure_wloss:.6f}"
             f" -- lowdeg_closure_groups: {low_degree_closure_active:.1f}"
         ) if low_degree_closure_count > 0 else ""
+        population_role_str = (
+            f" -- population_role: {population_role_loss:.6f}"
+            f" -- population_role_wloss: {population_role_wloss:.6f}"
+            f" -- population_role_roles: {population_role_active:.1f}"
+            f" -- population_role_deg2[pred={population_role_pred_deg2:.2f}"
+            f",target={population_role_target_deg2:.2f}]"
+        ) if population_role_count > 0 else ""
         typed_root_neighbor_str = (
             f" -- typed_root_neighbor: {typed_root_neighbor_loss:.6f}"
             f" -- typed_root_neighbor_wloss: {typed_root_neighbor_wloss:.6f}"
             f" -- typed_root_neighbor_roots: {typed_root_neighbor_active:.1f}"
+            f" -- typed_root_probe[soft={typed_root_neighbor_soft:.3f}"
+            f",hard={typed_root_neighbor_hard:.3f}"
+            f",target={typed_root_neighbor_target:.3f}"
+            f",degRel={typed_root_neighbor_degree_rel:.3f}"
+            f",typeL1={typed_root_neighbor_type_l1:.3f}]"
         ) if typed_root_neighbor_count > 0 else ""
         degree_role_str = (
             f" -- degree_role: {degree_role_loss:.6f}"
@@ -18283,7 +18637,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             f"exist_BCE: {exist_bce:.4f} -- subtype_CE: {subtype_ce:.4f} -- "
             f"pos_acc: {pos_acc:.4f} -- neg_acc: {neg_str}"
             f"{degree_str}{edge_count_str}{closure_str}{family_role_str}"
-            f"{family_count_str}{structure_delta_str}{degree_pair_str}{closure_bucket_str}{node_closure_str}{edge_support_str}{low_degree_closure_str}{typed_root_neighbor_str}{degree_role_str}{closure_anti_str}{typed_signature_str}{closure_rank_str}{structure_utility_str}{node_role_coverage_str}{learned_target_str}"
+            f"{family_count_str}{structure_delta_str}{degree_pair_str}{closure_bucket_str}{node_closure_str}{edge_support_str}{low_degree_closure_str}{population_role_str}{typed_root_neighbor_str}{degree_role_str}{closure_anti_str}{typed_signature_str}{closure_rank_str}{structure_utility_str}{node_role_coverage_str}{learned_target_str}"
             f"{struct_probe_str}{total_str}{diag_str}{rare_query_str}{gate_str}"
         )
 
@@ -18326,8 +18680,20 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             "train_epoch/edge_support_dist_weighted",
             "train_epoch/low_degree_closure_loss",
             "train_epoch/low_degree_closure_weighted",
+            "train_epoch/population_role_loss",
+            "train_epoch/population_role_weighted",
+            "train_epoch/population_role_active_roles",
+            "train_epoch/population_role_pred_deg2_mass",
+            "train_epoch/population_role_target_deg2_mass",
             "train_epoch/typed_root_neighbor_loss",
             "train_epoch/typed_root_neighbor_weighted",
+            "train_epoch/typed_root_neighbor_pred_closed_soft",
+            "train_epoch/typed_root_neighbor_pred_closed_hard",
+            "train_epoch/typed_root_neighbor_target_closed",
+            "train_epoch/typed_root_neighbor_degree_rel",
+            "train_epoch/typed_root_neighbor_type_l1",
+            "train_epoch/typed_root_neighbor_closure_bce",
+            "train_epoch/typed_root_neighbor_closure_frac",
             "train_epoch/degree_role_dist_loss",
             "train_epoch/degree_role_dist_weighted",
             "train_epoch/closure_anti_concentration_loss",
