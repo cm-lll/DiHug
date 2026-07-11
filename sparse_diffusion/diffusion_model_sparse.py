@@ -13564,6 +13564,296 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         stats.update(projection_stats)
         return torch.stack(weighted_components).sum() / max(active_weight, eps), stats
 
+    @staticmethod
+    def _gqer_exist_scores(logits):
+        logits = logits.reshape(-1, logits.shape[-1])
+        return torch.logsumexp(logits[:, 1:], dim=-1) - logits[:, 0]
+
+    @staticmethod
+    def _gqer_matrix_from_selection(edge_index, selected, num_nodes, dtype):
+        matrix = torch.zeros(
+            (num_nodes, num_nodes), dtype=dtype, device=edge_index.device
+        )
+        chosen = edge_index[:, selected]
+        if chosen.numel() > 0:
+            matrix[chosen[0], chosen[1]] = 1.0
+            matrix[chosen[1], chosen[0]] = 1.0
+        return matrix
+
+    def _gqer_target_matrix(self, clean_data, dtype):
+        num_nodes = int(clean_data.x.shape[0])
+        labels = clean_data.edge_attr
+        if labels.dim() > 1:
+            labels = labels.argmax(dim=-1)
+        positive = labels.reshape(-1).long() > 0
+        edges = clean_data.edge_index[:, positive].long()
+        matrix = torch.zeros(
+            (num_nodes, num_nodes), dtype=dtype, device=clean_data.x.device
+        )
+        if edges.numel() > 0:
+            matrix[edges[0], edges[1]] = 1.0
+            matrix[edges[1], edges[0]] = 1.0
+        return matrix
+
+    def _gqer_structural_objective(self, matrix, target_matrix, clean_data):
+        num_nodes = int(matrix.shape[0])
+        node_type = self._clean_node_type_ids(clean_data.x, matrix.device)
+        if node_type is None or int(node_type.numel()) != num_nodes:
+            return matrix.sum() * 0.0, {"active_multiset_groups": 0.0}
+        valid = node_type >= 0
+        if not bool(valid.any()):
+            return matrix.sum() * 0.0, {"active_multiset_groups": 0.0}
+        num_types = int(node_type[valid].max().item()) + 1
+        return self._compute_adaptive_multiset_population_role_loss(
+            matrix.reshape(-1),
+            matrix,
+            target_matrix,
+            matrix.sum(dim=-1),
+            target_matrix.sum(dim=-1),
+            valid,
+            node_type,
+            num_types,
+            {},
+        )
+
+    def _prepare_gqer_state(self, candidate_parts, clean_data):
+        if not candidate_parts:
+            return None
+        num_nodes = int(clean_data.x.shape[0])
+        edge_index = torch.cat([part["edge_index"] for part in candidate_parts], dim=1)
+        scores = torch.cat([part["scores"] for part in candidate_parts])
+        families = torch.cat([part["family"] for part in candidate_parts]).long()
+        edge_batch = torch.cat([part["batch"] for part in candidate_parts]).long()
+        owners = torch.cat([part["owner"] for part in candidate_parts]).long()
+        u = torch.minimum(edge_index[0], edge_index[1])
+        v = torch.maximum(edge_index[0], edge_index[1])
+        keys = u * num_nodes + v
+        valid = (u != v) & (families >= 0)
+        if not bool(valid.any()):
+            return None
+        edge_index = torch.stack([u[valid], v[valid]], dim=0)
+        keys = keys[valid]
+        scores = scores[valid]
+        families = families[valid]
+        edge_batch = edge_batch[valid]
+        owners = owners[valid]
+
+        order = torch.argsort(keys)
+        edge_index = edge_index[:, order]
+        keys = keys[order]
+        scores = scores[order]
+        families = families[order]
+        edge_batch = edge_batch[order]
+        owners = owners[order]
+        _, inverse = torch.unique_consecutive(keys, return_inverse=True)
+        num_unique = int(inverse[-1].item()) + 1
+        max_scores = torch.full(
+            (num_unique,), -float("inf"), dtype=scores.dtype, device=scores.device
+        )
+        max_scores.scatter_reduce_(0, inverse, scores, reduce="amax", include_self=True)
+        positions = torch.arange(scores.numel(), device=scores.device)
+        sentinel = int(scores.numel())
+        chosen = torch.full(
+            (num_unique,), sentinel, dtype=torch.long, device=scores.device
+        )
+        is_max = scores == max_scores[inverse]
+        chosen.scatter_reduce_(
+            0,
+            inverse,
+            torch.where(is_max, positions, torch.full_like(positions, sentinel)),
+            reduce="amin",
+            include_self=True,
+        )
+        chosen = chosen[chosen < sentinel]
+        edge_index = edge_index[:, chosen]
+        keys = keys[chosen]
+        scores = scores[chosen]
+        families = families[chosen]
+        edge_batch = edge_batch[chosen]
+        owners = owners[chosen]
+
+        avg_counts = getattr(
+            self.dataset_info, "edge_family_avg_edge_counts", {}
+        ) or {}
+        edge_family_offsets = (
+            getattr(self.dataset_info, "edge_family_offsets", {}) or {}
+        )
+        # Keep this ID convention identical to
+        # _infer_query_family_from_clean_node_types. edge_family2id may contain
+        # all schema relations, including zero-support reverse families, while
+        # query-family IDs enumerate the active offset-ordered families.
+        id2family = {
+            family_id: str(name)
+            for family_id, (name, _) in enumerate(
+                sorted(edge_family_offsets.items(), key=lambda item: item[1])
+            )
+        }
+        selected = torch.zeros(scores.numel(), dtype=torch.bool, device=scores.device)
+        thresholds = torch.zeros_like(scores)
+        active_groups = 0
+        for graph_id in torch.unique(edge_batch, sorted=True):
+            for family_id in torch.unique(families[edge_batch == graph_id], sorted=True):
+                fam_int = int(family_id.item())
+                mask = (edge_batch == graph_id) & (families == family_id)
+                idx = mask.nonzero(as_tuple=True)[0]
+                target = max(
+                    0,
+                    int(round(float(avg_counts.get(id2family.get(fam_int, ""), 0.0) or 0.0))),
+                )
+                take = min(target, int(idx.numel()))
+                if take <= 0:
+                    continue
+                top = torch.topk(scores[idx], k=take, largest=True).indices
+                selected[idx[top]] = True
+                thresholds[idx] = scores[idx[top]].min()
+                active_groups += 1
+        if not bool(selected.any()):
+            return None
+
+        hard_matrix = self._gqer_matrix_from_selection(
+            edge_index, selected, num_nodes, scores.dtype
+        ).detach().requires_grad_(True)
+        target_matrix = self._gqer_target_matrix(clean_data, scores.dtype)
+        objective, hard_stats = self._gqer_structural_objective(
+            hard_matrix, target_matrix, clean_data
+        )
+        utility_grad = torch.autograd.grad(
+            objective,
+            hard_matrix,
+            retain_graph=False,
+            create_graph=False,
+            allow_unused=True,
+        )[0]
+        if utility_grad is None or not torch.isfinite(utility_grad).all():
+            return None
+        utility_matrix = -(utility_grad + utility_grad.transpose(0, 1)).detach()
+        utility = utility_matrix[edge_index[0], edge_index[1]]
+
+        proposed = selected.clone()
+        swap_weight = torch.zeros_like(scores)
+        max_swaps = max(
+            1, int(getattr(self.cfg.model, "gqer_max_swaps_per_family", 8) or 8)
+        )
+        min_gap = max(
+            0.0,
+            float(getattr(self.cfg.model, "gqer_min_utility_gap", 1e-8) or 0.0),
+        )
+        swap_count = 0
+        improving_count = 0
+        utility_gaps = []
+        for graph_id in torch.unique(edge_batch, sorted=True):
+            for family_id in torch.unique(families[edge_batch == graph_id], sorted=True):
+                mask = (edge_batch == graph_id) & (families == family_id)
+                inside = (mask & selected).nonzero(as_tuple=True)[0]
+                outside = (mask & ~selected).nonzero(as_tuple=True)[0]
+                if inside.numel() == 0 or outside.numel() == 0:
+                    continue
+                inside = inside[torch.argsort(utility[inside])]
+                outside = outside[torch.argsort(utility[outside], descending=True)]
+                count = min(int(inside.numel()), int(outside.numel()))
+                gaps = utility[outside[:count]] - utility[inside[:count]]
+                improving = gaps > min_gap
+                improving_count += int(improving.sum().item())
+                take = min(max_swaps, int(improving.sum().item()))
+                if take <= 0:
+                    continue
+                in_swap = inside[:count][improving][:take]
+                out_swap = outside[:count][improving][:take]
+                pair_gap = utility[out_swap] - utility[in_swap]
+                proposed[in_swap] = False
+                proposed[out_swap] = True
+                swap_weight[in_swap] = pair_gap
+                swap_weight[out_swap] = pair_gap
+                utility_gaps.append(pair_gap)
+                swap_count += take
+
+        proposal_matrix = self._gqer_matrix_from_selection(
+            edge_index, proposed, num_nodes, scores.dtype
+        )
+        with torch.no_grad():
+            proposal_objective, proposal_stats = self._gqer_structural_objective(
+                proposal_matrix, target_matrix, clean_data
+            )
+        objective_value = float(objective.detach().cpu())
+        proposal_value = float(proposal_objective.detach().cpu())
+        accepted = swap_count > 0 and proposal_value < objective_value
+        if not accepted:
+            proposed = selected
+            swap_weight.zero_()
+            swap_count = 0
+
+        positive_weights = swap_weight[swap_weight > 0]
+        if positive_weights.numel() > 0:
+            swap_weight = swap_weight / positive_weights.mean().clamp(min=1e-8)
+            max_weight = max(
+                1.0,
+                float(getattr(self.cfg.model, "gqer_max_pair_weight", 5.0) or 5.0),
+            )
+            swap_weight.clamp_(max=max_weight)
+        return {
+            "keys": keys,
+            "owners": owners,
+            "selected": selected,
+            "proposed": proposed,
+            "thresholds": thresholds,
+            "swap_weight": swap_weight,
+            "objective": objective_value,
+            "proposal_objective": proposal_value,
+            "objective_improvement": max(objective_value - proposal_value, 0.0)
+            if accepted
+            else 0.0,
+            "active_families": float(active_groups),
+            "swaps": float(swap_count),
+            "improving_swaps": float(improving_count),
+            "utility_gap": float(
+                torch.cat(utility_gaps).mean().detach().cpu()
+            ) if utility_gaps else 0.0,
+            "hard_wedge_mae": float(hard_stats.get("tail_wedge_log_mae", 0.0)),
+            "hard_closure_mae": float(hard_stats.get("closure_rate_mae", 0.0)),
+            "proposal_wedge_mae": float(
+                proposal_stats.get("tail_wedge_log_mae", 0.0)
+            ),
+            "proposal_closure_mae": float(
+                proposal_stats.get("closure_rate_mae", 0.0)
+            ),
+        }
+
+    def _compute_gqer_block_rank_loss(self, pred, clean_data, state, block_id):
+        if state is None or pred.edge_attr.numel() == 0:
+            return pred.edge_attr.sum() * 0.0, {"pairs": 0.0}
+        num_nodes = int(clean_data.x.shape[0])
+        edges = pred.edge_index.long()
+        u = torch.minimum(edges[0], edges[1])
+        v = torch.maximum(edges[0], edges[1])
+        keys = u * num_nodes + v
+        positions = torch.searchsorted(state["keys"], keys)
+        in_range = positions < state["keys"].numel()
+        safe = positions.clamp(max=max(int(state["keys"].numel()) - 1, 0))
+        matched = in_range & (state["keys"][safe] == keys)
+        matched = matched & (state["owners"][safe] == int(block_id))
+        changed = state["selected"][safe] != state["proposed"][safe]
+        mask = matched & changed
+        if not bool(mask.any()):
+            return pred.edge_attr.sum() * 0.0, {"pairs": 0.0}
+
+        idx = mask.nonzero(as_tuple=True)[0]
+        state_idx = safe[idx]
+        scores = self._gqer_exist_scores(pred.edge_attr)[idx]
+        desired = state["proposed"][state_idx].to(scores.dtype)
+        sign = desired * 2.0 - 1.0
+        threshold = state["thresholds"][state_idx].detach()
+        weights = state["swap_weight"][state_idx].detach().clamp(min=1e-8)
+        margin = max(
+            0.0, float(getattr(self.cfg.model, "gqer_score_margin", 0.1) or 0.0)
+        )
+        terms = F.softplus(margin - sign * (scores - threshold))
+        loss = (weights * terms).sum() / weights.sum().clamp(min=1e-8)
+        satisfied = (sign * (scores.detach() - threshold) > 0).float().mean()
+        return loss, {
+            "pairs": float(idx.numel() / 2.0),
+            "boundary_satisfied": float(satisfied.cpu()),
+        }
+
     def _compute_population_role_loss(
         self,
         pred,
@@ -15517,6 +15807,15 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         if num_types <= 0:
             return None, None
         pair_to_family = node_subtype.new_full((num_types, num_types), -1)
+        pair_priority = torch.full(
+            (num_types, num_types),
+            -float("inf"),
+            dtype=torch.float32,
+            device=node_subtype.device,
+        )
+        family_counts = (
+            getattr(self.dataset_info, "edge_family_avg_edge_counts", {}) or {}
+        )
         for fam_id, (fam_name, _) in enumerate(
             sorted(edge_family_offsets.items(), key=lambda kv: kv[1])
         ):
@@ -15527,11 +15826,19 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 continue
             src_type = type_name_to_id[src_name]
             dst_type = type_name_to_id[dst_name]
-            pair_to_family[src_type, dst_type] = fam_id
+            priority = float(family_counts.get(str(fam_name), 0.0) or 0.0)
             # Query edges are canonical in most training paths, but positive
             # augmentation and undirected utilities can still present the
-            # reverse endpoint order. Treat both as the same family.
-            pair_to_family[dst_type, src_type] = fam_id
+            # reverse endpoint order. Choose the supported canonical family
+            # for both directions instead of letting a zero-support reverse
+            # schema relation overwrite it.
+            for first_type, second_type in (
+                (src_type, dst_type),
+                (dst_type, src_type),
+            ):
+                if priority > float(pair_priority[first_type, second_type]):
+                    pair_to_family[first_type, second_type] = fam_id
+                    pair_priority[first_type, second_type] = priority
         src_type = node_type_ids[edge_index[0].long()].clamp(min=0)
         dst_type = node_type_ids[edge_index[1].long()].clamp(min=0)
         query_family = pair_to_family[src_type, dst_type]
@@ -15796,6 +16103,107 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             if bool(getattr(self.cfg.model, "train_all_blocks_shuffle", True)) and block_count > 1:
                 block_order = block_order[torch.randperm(block_count, device=self.device)]
 
+            gqer_weight = self._warmup_weight(
+                float(getattr(self.cfg.model, "gqer_loss_weight", 0.0) or 0.0),
+                int(getattr(self.cfg.model, "gqer_loss_warmup_epochs", 0) or 0),
+                self._auxiliary_low_noise_factor(
+                    sparse_noisy_data,
+                    float(getattr(self.cfg.model, "gqer_loss_t_power", 0.0) or 0.0),
+                ),
+            )
+            gqer_state = None
+            if gqer_weight > 0:
+                candidate_parts = []
+                gqer_inter_state = {}
+                was_training = self.training
+                self.eval()
+                try:
+                    with torch.no_grad():
+                        for block_id_t in block_order:
+                            block_id = int(block_id_t.item())
+                            stat_out = self._training_step_once(
+                                data_one_hot,
+                                i,
+                                data_is_one_hot=True,
+                                sparse_noisy_data_override=dict(sparse_noisy_data),
+                                forced_block_id=block_id,
+                                block_inter_state=gqer_inter_state,
+                                skip_auxiliary_structure_losses=True,
+                                record_structure_probe=False,
+                                diagnostic_only=True,
+                            )
+                            if stat_out is None or "pred_edge_attr" not in stat_out:
+                                continue
+                            stat_edges = stat_out["pred_edge_index"].long()
+                            _, stat_family = self._infer_query_family_from_clean_node_types(
+                                stat_edges, data_one_hot.x
+                            )
+                            if stat_family is None:
+                                continue
+                            candidate_parts.append(
+                                {
+                                    "edge_index": stat_edges.detach(),
+                                    "scores": self._gqer_exist_scores(
+                                        stat_out["pred_edge_attr"]
+                                    ).detach(),
+                                    "family": stat_family.to(self.device).long().detach(),
+                                    "batch": data_one_hot.batch[
+                                        stat_edges[0]
+                                    ].long().detach(),
+                                    "owner": torch.full(
+                                        (stat_edges.shape[1],),
+                                        block_id,
+                                        dtype=torch.long,
+                                        device=self.device,
+                                    ),
+                                }
+                            )
+                finally:
+                    self.train(was_training)
+                with torch.enable_grad():
+                    gqer_state = self._prepare_gqer_state(
+                        candidate_parts, data_one_hot
+                    )
+                if gqer_state is not None:
+                    if not hasattr(self, "_epoch_gqer_state_count"):
+                        self._epoch_gqer_state_count = 0
+                        self._epoch_gqer_active_sum = 0.0
+                        self._epoch_gqer_swap_sum = 0.0
+                        self._epoch_gqer_improving_sum = 0.0
+                        self._epoch_gqer_utility_gap_sum = 0.0
+                        self._epoch_gqer_objective_sum = 0.0
+                        self._epoch_gqer_improvement_sum = 0.0
+                        self._epoch_gqer_hard_wedge_sum = 0.0
+                        self._epoch_gqer_hard_closure_sum = 0.0
+                    self._epoch_gqer_state_count += 1
+                    self._epoch_gqer_active_sum += gqer_state["active_families"]
+                    self._epoch_gqer_swap_sum += gqer_state["swaps"]
+                    self._epoch_gqer_improving_sum += gqer_state["improving_swaps"]
+                    self._epoch_gqer_utility_gap_sum += gqer_state["utility_gap"]
+                    self._epoch_gqer_objective_sum += gqer_state["objective"]
+                    self._epoch_gqer_improvement_sum += gqer_state[
+                        "objective_improvement"
+                    ]
+                    self._epoch_gqer_hard_wedge_sum += gqer_state[
+                        "hard_wedge_mae"
+                    ]
+                    self._epoch_gqer_hard_closure_sum += gqer_state[
+                        "hard_closure_mae"
+                    ]
+                    if getattr(self, "local_rank", 0) == 0:
+                        print(
+                            "[GQER-GLOBAL] "
+                            f"epoch={int(self.current_epoch)} "
+                            f"families={gqer_state['active_families']:.0f} "
+                            f"swaps={gqer_state['swaps']:.0f}/"
+                            f"improving={gqer_state['improving_swaps']:.0f} "
+                            f"utility_gap={gqer_state['utility_gap']:.4g} "
+                            f"objective={gqer_state['objective']:.5f}->"
+                            f"{gqer_state['proposal_objective']:.5f} "
+                            f"hard_mae[wedge={gqer_state['hard_wedge_mae']:.4f},"
+                            f"closure={gqer_state['hard_closure_mae']:.4f}]"
+                        )
+
             losses_detached = []
             query_build_time = 0.0
             comp_graph_time = 0.0
@@ -15870,11 +16278,48 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                     ),
                     return_query_outputs=(
                         step_mode in {"accumulate_global", "accumulate_streaming_global"}
+                        or gqer_state is not None
                     ),
                 )
                 if out is None:
                     continue
                 loss_piece = out["loss"]
+                if gqer_state is not None and "pred_edge_attr" in out:
+                    pred_gqer = utils.SparsePlaceHolder(
+                        node=data_one_hot.x,
+                        charge=data_one_hot.charge,
+                        edge_attr=out["pred_edge_attr"],
+                        edge_index=out["pred_edge_index"],
+                        y=data_one_hot.y,
+                        batch=data_one_hot.batch,
+                    )
+                    loss_gqer, gqer_block_stats = self._compute_gqer_block_rank_loss(
+                        pred_gqer,
+                        data_one_hot,
+                        gqer_state,
+                        int(block_id_t.item()),
+                    )
+                    loss_piece = loss_piece + gqer_weight * loss_gqer
+                    if not hasattr(self, "_epoch_gqer_rank_count"):
+                        self._epoch_gqer_rank_count = 0
+                        self._epoch_gqer_rank_loss_sum = 0.0
+                        self._epoch_gqer_weighted_sum = 0.0
+                        self._epoch_gqer_pair_sum = 0.0
+                        self._epoch_gqer_satisfied_sum = 0.0
+                    if gqer_block_stats.get("pairs", 0.0) > 0:
+                        self._epoch_gqer_rank_count += 1
+                        self._epoch_gqer_rank_loss_sum += float(
+                            loss_gqer.detach().cpu()
+                        )
+                        self._epoch_gqer_weighted_sum += float(
+                            (gqer_weight * loss_gqer).detach().cpu()
+                        )
+                        self._epoch_gqer_pair_sum += float(
+                            gqer_block_stats.get("pairs", 0.0)
+                        )
+                        self._epoch_gqer_satisfied_sum += float(
+                            gqer_block_stats.get("boundary_satisfied", 0.0)
+                        )
                 forward_done = self._profile_time(profile_efficiency)
                 if step_mode == "accumulate_global":
                     if "pred_edge_attr" in out:
@@ -18789,6 +19234,20 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         self._epoch_population_role_tail_wedge_mae_sum = 0.0
         self._epoch_population_role_closure_rate_mae_sum = 0.0
         self._epoch_population_role_multiset_group_sum = 0.0
+        self._epoch_gqer_state_count = 0
+        self._epoch_gqer_active_sum = 0.0
+        self._epoch_gqer_swap_sum = 0.0
+        self._epoch_gqer_improving_sum = 0.0
+        self._epoch_gqer_utility_gap_sum = 0.0
+        self._epoch_gqer_objective_sum = 0.0
+        self._epoch_gqer_improvement_sum = 0.0
+        self._epoch_gqer_hard_wedge_sum = 0.0
+        self._epoch_gqer_hard_closure_sum = 0.0
+        self._epoch_gqer_rank_count = 0
+        self._epoch_gqer_rank_loss_sum = 0.0
+        self._epoch_gqer_weighted_sum = 0.0
+        self._epoch_gqer_pair_sum = 0.0
+        self._epoch_gqer_satisfied_sum = 0.0
         self._epoch_typed_root_neighbor_loss_sum = 0.0
         self._epoch_typed_root_neighbor_loss_count = 0
         self._epoch_typed_root_neighbor_weighted_sum = 0.0
@@ -18997,6 +19456,28 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             population_role_tail_wedge_mae = 0.0
             population_role_closure_rate_mae = 0.0
             population_role_multiset_groups = 0.0
+        gqer_state_count = int(getattr(self, "_epoch_gqer_state_count", 0) or 0)
+        gqer_rank_count = int(getattr(self, "_epoch_gqer_rank_count", 0) or 0)
+        if gqer_state_count > 0:
+            gqer_active = self._epoch_gqer_active_sum / float(gqer_state_count)
+            gqer_swaps = self._epoch_gqer_swap_sum / float(gqer_state_count)
+            gqer_improving = self._epoch_gqer_improving_sum / float(gqer_state_count)
+            gqer_utility_gap = self._epoch_gqer_utility_gap_sum / float(gqer_state_count)
+            gqer_objective = self._epoch_gqer_objective_sum / float(gqer_state_count)
+            gqer_improvement = self._epoch_gqer_improvement_sum / float(gqer_state_count)
+            gqer_hard_wedge = self._epoch_gqer_hard_wedge_sum / float(gqer_state_count)
+            gqer_hard_closure = self._epoch_gqer_hard_closure_sum / float(gqer_state_count)
+        else:
+            gqer_active = gqer_swaps = gqer_improving = 0.0
+            gqer_utility_gap = gqer_objective = gqer_improvement = 0.0
+            gqer_hard_wedge = gqer_hard_closure = 0.0
+        if gqer_rank_count > 0:
+            gqer_rank_loss = self._epoch_gqer_rank_loss_sum / float(gqer_rank_count)
+            gqer_wloss = self._epoch_gqer_weighted_sum / float(gqer_rank_count)
+            gqer_pairs = self._epoch_gqer_pair_sum / float(gqer_rank_count)
+            gqer_satisfied = self._epoch_gqer_satisfied_sum / float(gqer_rank_count)
+        else:
+            gqer_rank_loss = gqer_wloss = gqer_pairs = gqer_satisfied = 0.0
         typed_root_neighbor_count = int(getattr(self, "_epoch_typed_root_neighbor_loss_count", 0) or 0)
         if typed_root_neighbor_count > 0:
             typed_root_neighbor_loss = float(getattr(self, "_epoch_typed_root_neighbor_loss_sum", 0.0)) / float(typed_root_neighbor_count)
@@ -19187,6 +19668,8 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             or node_closure_count > 0
             or edge_support_count > 0
             or low_degree_closure_count > 0
+            or gqer_state_count > 0
+            or gqer_rank_count > 0
             or typed_root_neighbor_count > 0
             or degree_role_count > 0
             or closure_anti_count > 0
@@ -19196,7 +19679,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             or node_role_coverage_count > 0
             or learned_target_count > 0
         )
-        total_train = edge_nll + degree_wloss + edge_count_wloss + closure_wloss + family_role_wloss + family_count_wloss + structure_delta_wloss + degree_pair_wloss + closure_bucket_wloss + node_closure_wloss + edge_support_wloss + low_degree_closure_wloss + population_role_wloss + typed_root_neighbor_wloss + degree_role_wloss + closure_anti_wloss + typed_signature_wloss + closure_rank_wloss + structure_utility_wloss + node_role_coverage_wloss + learned_target_wloss if isinstance(edge_nll, (int, float)) and edge_nll >= 0 else -1
+        total_train = edge_nll + degree_wloss + edge_count_wloss + closure_wloss + family_role_wloss + family_count_wloss + structure_delta_wloss + degree_pair_wloss + closure_bucket_wloss + node_closure_wloss + edge_support_wloss + low_degree_closure_wloss + population_role_wloss + gqer_wloss + typed_root_neighbor_wloss + degree_role_wloss + closure_anti_wloss + typed_signature_wloss + closure_rank_wloss + structure_utility_wloss + node_role_coverage_wloss + learned_target_wloss if isinstance(edge_nll, (int, float)) and edge_nll >= 0 else -1
         diag_count = int(getattr(self, "_epoch_diag_count", 0) or 0)
         if diag_count > 0:
             diag_t = float(getattr(self, "_epoch_diag_t_sum", 0.0)) / float(diag_count)
@@ -19283,6 +19766,20 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             epoch_loss["train_epoch/population_role_tail_wedge_log_mae"] = population_role_tail_wedge_mae
             epoch_loss["train_epoch/population_role_closure_rate_mae"] = population_role_closure_rate_mae
             epoch_loss["train_epoch/population_role_multiset_groups"] = population_role_multiset_groups
+        if gqer_state_count > 0:
+            epoch_loss["train_epoch/gqer_active_families"] = gqer_active
+            epoch_loss["train_epoch/gqer_swaps"] = gqer_swaps
+            epoch_loss["train_epoch/gqer_improving_swaps"] = gqer_improving
+            epoch_loss["train_epoch/gqer_utility_gap"] = gqer_utility_gap
+            epoch_loss["train_epoch/gqer_objective"] = gqer_objective
+            epoch_loss["train_epoch/gqer_objective_improvement"] = gqer_improvement
+            epoch_loss["train_epoch/gqer_global_hard_wedge_mae"] = gqer_hard_wedge
+            epoch_loss["train_epoch/gqer_global_hard_closure_mae"] = gqer_hard_closure
+        if gqer_rank_count > 0:
+            epoch_loss["train_epoch/gqer_rank_loss"] = gqer_rank_loss
+            epoch_loss["train_epoch/gqer_rank_weighted"] = gqer_wloss
+            epoch_loss["train_epoch/gqer_exchange_pairs"] = gqer_pairs
+            epoch_loss["train_epoch/gqer_boundary_satisfied"] = gqer_satisfied
         if typed_root_neighbor_count > 0:
             epoch_loss["train_epoch/typed_root_neighbor_loss"] = typed_root_neighbor_loss
             epoch_loss["train_epoch/typed_root_neighbor_weighted"] = typed_root_neighbor_wloss
@@ -19413,6 +19910,15 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             f",wedge_log_mae={population_role_tail_wedge_mae:.3f}"
             f",closure_rate_mae={population_role_closure_rate_mae:.3f}]"
         ) if population_role_count > 0 else ""
+        gqer_str = (
+            f" -- gqer[loss={gqer_rank_loss:.5f},wloss={gqer_wloss:.5f}"
+            f",families={gqer_active:.1f},pairs={gqer_pairs:.1f}"
+            f",swaps={gqer_swaps:.1f}/{gqer_improving:.1f}"
+            f",satisfied={gqer_satisfied:.3f},utility_gap={gqer_utility_gap:.3g}"
+            f",objective={gqer_objective:.4f},improve={gqer_improvement:.4g}"
+            f",hard_wedge={gqer_hard_wedge:.3f}"
+            f",hard_closure={gqer_hard_closure:.3f}]"
+        ) if gqer_state_count > 0 else ""
         typed_root_neighbor_str = (
             f" -- typed_root_neighbor: {typed_root_neighbor_loss:.6f}"
             f" -- typed_root_neighbor_wloss: {typed_root_neighbor_wloss:.6f}"
@@ -19568,7 +20074,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             f"exist_BCE: {exist_bce:.4f} -- subtype_CE: {subtype_ce:.4f} -- "
             f"pos_acc: {pos_acc:.4f} -- neg_acc: {neg_str}"
             f"{degree_str}{edge_count_str}{closure_str}{family_role_str}"
-            f"{family_count_str}{structure_delta_str}{degree_pair_str}{closure_bucket_str}{node_closure_str}{edge_support_str}{low_degree_closure_str}{population_role_str}{typed_root_neighbor_str}{degree_role_str}{closure_anti_str}{typed_signature_str}{closure_rank_str}{structure_utility_str}{node_role_coverage_str}{learned_target_str}"
+            f"{family_count_str}{structure_delta_str}{degree_pair_str}{closure_bucket_str}{node_closure_str}{edge_support_str}{low_degree_closure_str}{population_role_str}{gqer_str}{typed_root_neighbor_str}{degree_role_str}{closure_anti_str}{typed_signature_str}{closure_rank_str}{structure_utility_str}{node_role_coverage_str}{learned_target_str}"
             f"{struct_probe_str}{total_str}{diag_str}{rare_query_str}{gate_str}"
         )
 
@@ -19624,6 +20130,18 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             "train_epoch/population_role_tail_wedge_log_mae",
             "train_epoch/population_role_closure_rate_mae",
             "train_epoch/population_role_multiset_groups",
+            "train_epoch/gqer_active_families",
+            "train_epoch/gqer_swaps",
+            "train_epoch/gqer_improving_swaps",
+            "train_epoch/gqer_utility_gap",
+            "train_epoch/gqer_objective",
+            "train_epoch/gqer_objective_improvement",
+            "train_epoch/gqer_global_hard_wedge_mae",
+            "train_epoch/gqer_global_hard_closure_mae",
+            "train_epoch/gqer_rank_loss",
+            "train_epoch/gqer_rank_weighted",
+            "train_epoch/gqer_exchange_pairs",
+            "train_epoch/gqer_boundary_satisfied",
             "train_epoch/typed_root_neighbor_loss",
             "train_epoch/typed_root_neighbor_weighted",
             "train_epoch/typed_root_neighbor_pred_closed_soft",

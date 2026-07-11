@@ -634,6 +634,18 @@ population_role_fixed_t_probe_every_n_epochs: 5
 population_role_fixed_t_probe_times: [0.1, 0.3, 0.5, 0.7]
 population_role_fixed_t_probe_block_id: 0
 population_role_fixed_t_probe_seed: 1729
+# Global quota-exchange structural ranking (GQER). A detached first pass pools
+# all block candidates, builds the same family exact-K hard graph used at
+# sampling, and obtains edge utilities from the gradient of the adaptive
+# multiset objective. The differentiable second pass only trains proposed
+# within-family exchanges across the global K-th score boundary.
+gqer_loss_weight: 0.0
+gqer_loss_warmup_epochs: 5
+gqer_loss_t_power: 2.0
+gqer_max_swaps_per_family: 8
+gqer_score_margin: 0.1
+gqer_min_utility_gap: 1.0e-8
+gqer_max_pair_weight: 5.0
 # Training-only endpoint role distribution supervision. It matches how expected
 # clean edge endpoints distribute over node-type x clean-degree buckets. This is
 # a lightweight way to teach the denoiser that many low-degree nodes, not only a

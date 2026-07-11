@@ -22,6 +22,7 @@ class _Harness:
                 population_role_multiset_min_wedge=0.1,
                 population_role_log_degree_temperature=0.2,
                 population_role_closure_rate_huber_beta=0.1,
+                gqer_score_margin=0.1,
             )
         )
 
@@ -69,6 +70,17 @@ class _Harness:
         return DiscreteDenoisingDiffusion._auxiliary_low_noise_factor(
             self, sparse_noisy_data, power
         )
+
+    def _clean_node_type_ids(self, clean_x, device):
+        return clean_x.reshape(-1).long().to(device)
+
+    def _gqer_structural_objective(self, matrix, target_matrix, clean_data):
+        return DiscreteDenoisingDiffusion._gqer_structural_objective(
+            self, matrix, target_matrix, clean_data
+        )
+
+    def _gqer_exist_scores(self, logits):
+        return DiscreteDenoisingDiffusion._gqer_exist_scores(logits)
 
 
 def test_soft_projection_matches_mass_and_has_translation_invariant_gradient():
@@ -334,3 +346,75 @@ def test_low_noise_factor_suppresses_high_noise_structure_supervision():
     assert abs(low_noise - 0.81) < 1e-6
     assert abs(high_noise - 0.01) < 1e-6
     assert low_noise > high_noise
+
+
+def test_gqer_structural_utility_prefers_missing_triangle_closure_edge():
+    harness = _Harness()
+    harness.cfg.model.population_role_degree_weight = 0.0
+    harness.cfg.model.population_role_tail_wedge_weight = 0.0
+    harness.cfg.model.population_role_multiset_wedge_weight = 0.0
+    harness.cfg.model.population_role_multiset_closure_weight = 1.0
+
+    target = torch.zeros((4, 4), dtype=torch.float32)
+    for u, v in ((0, 1), (0, 2), (1, 2)):
+        target[u, v] = target[v, u] = 1.0
+    pred = target.clone()
+    pred[1, 2] = pred[2, 1] = 0.0
+    pred.requires_grad_(True)
+    clean = SimpleNamespace(x=torch.tensor([0, 1, 2, 2]))
+
+    objective, stats = harness._gqer_structural_objective(pred, target, clean)
+    grad = torch.autograd.grad(objective, pred)[0]
+    utility = -(grad + grad.T)
+
+    assert stats["active_multiset_groups"] > 0
+    assert float(utility[1, 2]) > 0.0
+    assert float(utility[1, 2]) > float(utility[1, 3])
+
+
+def test_gqer_block_rank_loss_pushes_exchange_across_global_threshold():
+    harness = _Harness()
+    edges = torch.tensor([[0, 0, 1, 2], [1, 2, 2, 3]])
+    logits = torch.tensor(
+        [[0.0, 1.0], [0.0, -1.0], [0.0, 0.5], [0.0, -0.5]],
+        requires_grad=True,
+    )
+    pred = SimpleNamespace(edge_attr=logits, edge_index=edges)
+    keys = torch.tensor([1, 2, 6, 11])
+    state = {
+        "keys": keys,
+        "owners": torch.zeros(4, dtype=torch.long),
+        "selected": torch.tensor([True, False, True, False]),
+        "proposed": torch.tensor([False, True, True, False]),
+        "thresholds": torch.full((4,), 0.25),
+        "swap_weight": torch.tensor([1.0, 1.0, 0.0, 0.0]),
+    }
+    clean = SimpleNamespace(x=torch.zeros(4))
+
+    loss, stats = DiscreteDenoisingDiffusion._compute_gqer_block_rank_loss(
+        harness, pred, clean, state, block_id=0
+    )
+    loss.backward()
+
+    assert stats["pairs"] == 1.0
+    assert logits.grad[0, 1] > 0.0
+    assert logits.grad[1, 1] < 0.0
+
+
+def test_family_inference_prefers_supported_canonical_over_zero_reverse():
+    harness = _Harness()
+    harness.dataset_info = SimpleNamespace(
+        type_offsets={"A": 0, "B": 1},
+        fam_endpoints={
+            "link_A_B": {"src_type": "A", "dst_type": "B"},
+            "link_B_A": {"src_type": "B", "dst_type": "A"},
+        },
+        edge_family_offsets={"link_A_B": 1, "link_B_A": 2},
+        edge_family_avg_edge_counts={"link_A_B": 5.0, "link_B_A": 0.0},
+    )
+    edges = torch.tensor([[0, 1], [1, 0]])
+    _, family = DiscreteDenoisingDiffusion._infer_query_family_from_clean_node_types(
+        harness, edges, torch.tensor([0, 1])
+    )
+
+    assert torch.equal(family, torch.zeros(2, dtype=torch.long))

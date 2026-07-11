@@ -1,0 +1,15 @@
+# @package _global_
+defaults:
+  - imdb_movie_hgt_l3h4_population_multiset_quota
+
+general:
+  name: imdb_movie_l3h4_gqer
+
+model:
+  # The multiset functional remains the dataset-agnostic teacher, but its
+  # block-local soft loss is disabled. GQER trains global exact-K exchanges.
+  population_role_loss_weight: 0.0
+  gqer_loss_weight: 0.1
+  gqer_loss_warmup_epochs: 5
+  gqer_loss_t_power: 2.0
+  gqer_max_swaps_per_family: 8
