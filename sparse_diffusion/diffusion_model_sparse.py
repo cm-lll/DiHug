@@ -13245,6 +13245,322 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             "projection_temperature": float(temperature),
         }
 
+    @staticmethod
+    def _population_role_log_degree_membership(
+        degree,
+        max_degree,
+        temperature=0.2,
+    ):
+        """Soft universal degree bins with explicit low degrees and log tails."""
+        max_degree = max(int(max_degree), 0)
+        exact = [value for value in (0.0, 1.0, 2.0, 3.0) if value <= max_degree]
+        centers = list(exact)
+        lower = 4
+        while lower <= max_degree:
+            upper = min(2 * lower - 1, max_degree)
+            # Geometric centers are uniform in log1p(degree), including the
+            # truncated final interval.
+            center = ((lower + 1.0) * (upper + 1.0)) ** 0.5 - 1.0
+            centers.append(float(center))
+            lower *= 2
+        if not centers:
+            centers = [0.0]
+        centers_t = degree.new_tensor(centers)
+        log_degree = torch.log1p(degree.clamp(min=0.0)).unsqueeze(-1)
+        log_centers = torch.log1p(centers_t).unsqueeze(0)
+        temperature = max(float(temperature), 1e-3)
+        membership = torch.softmax(
+            -0.5 * ((log_degree - log_centers) / temperature).pow(2),
+            dim=-1,
+        )
+        return membership, centers_t
+
+    @staticmethod
+    def _population_role_typed_wedge_closure(
+        matrix,
+        roots,
+        first,
+        second,
+        same_neighbor_type=False,
+    ):
+        """Return per-root soft wedge and closed-wedge mass for a type multiset."""
+        if roots.numel() == 0 or first.numel() == 0 or second.numel() == 0:
+            zero = matrix.new_zeros(int(roots.numel()))
+            return zero, zero
+        root_first = matrix.index_select(0, roots).index_select(1, first)
+        if same_neighbor_type:
+            # Each unordered neighbor pair appears twice in the matrix product.
+            wedge = 0.5 * (
+                root_first.sum(dim=-1).pow(2)
+                - root_first.pow(2).sum(dim=-1)
+            ).clamp(min=0.0)
+            between = matrix.index_select(0, first).index_select(1, first)
+            closed = 0.5 * ((root_first @ between) * root_first).sum(dim=-1)
+        else:
+            root_second = matrix.index_select(0, roots).index_select(1, second)
+            wedge = root_first.sum(dim=-1) * root_second.sum(dim=-1)
+            between = matrix.index_select(0, first).index_select(1, second)
+            closed = ((root_first @ between) * root_second).sum(dim=-1)
+        return wedge.clamp(min=0.0), closed.clamp(min=0.0)
+
+    def _compute_adaptive_multiset_population_role_loss(
+        self,
+        pred_edge,
+        pred_matrix,
+        target_matrix,
+        pred_degree,
+        target_degree,
+        scope,
+        node_type,
+        num_types,
+        projection_stats,
+    ):
+        """Match permutation-invariant degree tails and automatically discovered motifs."""
+        eps = 1e-8
+        dtype = pred_matrix.dtype
+        device = pred_matrix.device
+        min_target = max(
+            0.0,
+            float(
+                getattr(
+                    self.cfg.model,
+                    "population_role_multiset_min_wedge",
+                    getattr(self.cfg.model, "population_role_min_target_mass", 1.0),
+                )
+                or 0.0
+            ),
+        )
+        degree_temperature = max(
+            1e-3,
+            float(
+                getattr(
+                    self.cfg.model,
+                    "population_role_log_degree_temperature",
+                    0.2,
+                )
+                or 0.2
+            ),
+        )
+        max_degree = max(int(pred_matrix.shape[0]) - 1, 3)
+        pred_membership, degree_centers = self._population_role_log_degree_membership(
+            pred_degree,
+            max_degree,
+            degree_temperature,
+        )
+        target_membership, _ = self._population_role_log_degree_membership(
+            target_degree,
+            max_degree,
+            degree_temperature,
+        )
+
+        pred_node_wedge = 0.5 * (
+            pred_degree.pow(2) - pred_matrix.pow(2).sum(dim=-1)
+        ).clamp(min=0.0)
+        target_node_wedge = 0.5 * (
+            target_degree.pow(2) - target_matrix.pow(2).sum(dim=-1)
+        ).clamp(min=0.0)
+        type_nodes = [
+            (scope & (node_type == type_id)).nonzero(as_tuple=False).reshape(-1)
+            for type_id in range(num_types)
+        ]
+
+        degree_weight = max(
+            0.0,
+            float(getattr(self.cfg.model, "population_role_degree_weight", 1.0) or 0.0),
+        )
+        tail_weight = max(
+            0.0,
+            float(
+                getattr(
+                    self.cfg.model,
+                    "population_role_tail_wedge_weight",
+                    1.0,
+                )
+                or 0.0
+            ),
+        )
+        motif_wedge_weight = max(
+            0.0,
+            float(
+                getattr(
+                    self.cfg.model,
+                    "population_role_multiset_wedge_weight",
+                    0.5,
+                )
+                or 0.0
+            ),
+        )
+        closure_weight = max(
+            0.0,
+            float(
+                getattr(
+                    self.cfg.model,
+                    "population_role_multiset_closure_weight",
+                    1.0,
+                )
+                or 0.0
+            ),
+        )
+        closure_beta = max(
+            1e-4,
+            float(
+                getattr(
+                    self.cfg.model,
+                    "population_role_closure_rate_huber_beta",
+                    0.1,
+                )
+                or 0.1
+            ),
+        )
+
+        degree_losses = []
+        tail_losses = []
+        motif_wedge_losses = []
+        closure_losses = []
+        wedge_log_errors = []
+        closure_rate_errors = []
+        active_roles = 0
+
+        for nodes in type_nodes:
+            if nodes.numel() == 0:
+                continue
+            pred_hist = pred_membership.index_select(0, nodes).sum(dim=0)
+            target_hist = target_membership.index_select(0, nodes).sum(dim=0).detach()
+            if degree_weight > 0 and target_hist.sum() > eps:
+                degree_losses.append(
+                    self._js_divergence_from_masses(pred_hist, target_hist, eps=eps)
+                )
+                active_roles += 1
+            if tail_weight > 0:
+                pred_wedge_hist = (
+                    pred_membership.index_select(0, nodes)
+                    * pred_node_wedge.index_select(0, nodes).unsqueeze(-1)
+                ).sum(dim=0)
+                target_wedge_hist = (
+                    target_membership.index_select(0, nodes)
+                    * target_node_wedge.index_select(0, nodes).unsqueeze(-1)
+                ).sum(dim=0).detach()
+                target_total = target_wedge_hist.sum()
+                if target_total > max(min_target, eps):
+                    distribution_loss = self._js_divergence_from_masses(
+                        pred_wedge_hist,
+                        target_wedge_hist,
+                        eps=eps,
+                    )
+                    log_error = (
+                        torch.log1p(pred_wedge_hist.sum())
+                        - torch.log1p(target_total)
+                    )
+                    mass_loss = F.smooth_l1_loss(
+                        torch.log1p(pred_wedge_hist.sum()),
+                        torch.log1p(target_total),
+                        beta=0.25,
+                    )
+                    tail_losses.append(0.5 * (distribution_loss + mass_loss))
+                    wedge_log_errors.append(log_error.abs())
+                    active_roles += 1
+
+        if motif_wedge_weight > 0 or closure_weight > 0:
+            num_bins = int(degree_centers.numel())
+            # No motif names are configured. Every root/neighbor type multiset
+            # with target wedge support in the current block activates itself.
+            for root_type, roots in enumerate(type_nodes):
+                if roots.numel() == 0:
+                    continue
+                pred_root_membership = pred_membership.index_select(0, roots)
+                target_root_membership = target_membership.index_select(0, roots)
+                for first_type in range(num_types):
+                    first = type_nodes[first_type]
+                    if first.numel() == 0:
+                        continue
+                    for second_type in range(first_type, num_types):
+                        second = type_nodes[second_type]
+                        if second.numel() == 0:
+                            continue
+                        same_type = first_type == second_type
+                        pred_wedge, pred_closed = self._population_role_typed_wedge_closure(
+                            pred_matrix,
+                            roots,
+                            first,
+                            second,
+                            same_neighbor_type=same_type,
+                        )
+                        target_wedge, target_closed = self._population_role_typed_wedge_closure(
+                            target_matrix,
+                            roots,
+                            first,
+                            second,
+                            same_neighbor_type=same_type,
+                        )
+                        for bin_id in range(num_bins):
+                            pred_bin = pred_root_membership[:, bin_id]
+                            target_bin = target_root_membership[:, bin_id]
+                            pred_wedge_mass = (pred_bin * pred_wedge).sum()
+                            target_wedge_mass = (target_bin * target_wedge).sum().detach()
+                            if target_wedge_mass <= max(min_target, eps):
+                                continue
+                            pred_closed_mass = (pred_bin * pred_closed).sum()
+                            target_closed_mass = (target_bin * target_closed).sum().detach()
+                            if motif_wedge_weight > 0:
+                                motif_wedge_losses.append(
+                                    F.smooth_l1_loss(
+                                        torch.log1p(pred_wedge_mass),
+                                        torch.log1p(target_wedge_mass),
+                                        beta=0.25,
+                                    )
+                                )
+                            if closure_weight > 0:
+                                pred_rate = (
+                                    pred_closed_mass / pred_wedge_mass.clamp(min=eps)
+                                ).clamp(0.0, 1.0)
+                                target_rate = (
+                                    target_closed_mass / target_wedge_mass.clamp(min=eps)
+                                ).clamp(0.0, 1.0)
+                                closure_losses.append(
+                                    F.smooth_l1_loss(
+                                        pred_rate,
+                                        target_rate,
+                                        beta=closure_beta,
+                                    )
+                                )
+                                closure_rate_errors.append((pred_rate - target_rate).abs())
+                            active_roles += 1
+
+        weighted_components = []
+        active_weight = 0.0
+        for weight, values in (
+            (degree_weight, degree_losses),
+            (tail_weight, tail_losses),
+            (motif_wedge_weight, motif_wedge_losses),
+            (closure_weight, closure_losses),
+        ):
+            if weight > 0 and values:
+                weighted_components.append(weight * torch.stack(values).mean())
+                active_weight += weight
+        if not weighted_components:
+            return pred_edge.sum() * 0.0, {"active_roles": 0.0}
+
+        center_delta = (degree_centers - 2.0).abs()
+        deg2_bin = int(center_delta.argmin().item())
+        stats = {
+            "active_roles": float(active_roles),
+            "pred_deg2_mass": float(
+                pred_membership[scope, deg2_bin].sum().detach().cpu()
+            ),
+            "target_deg2_mass": float(
+                target_membership[scope, deg2_bin].sum().detach().cpu()
+            ),
+            "tail_wedge_log_mae": float(
+                torch.stack(wedge_log_errors).mean().detach().cpu()
+            ) if wedge_log_errors else 0.0,
+            "closure_rate_mae": float(
+                torch.stack(closure_rate_errors).mean().detach().cpu()
+            ) if closure_rate_errors else 0.0,
+            "active_multiset_groups": float(len(closure_losses)),
+        }
+        stats.update(projection_stats)
+        return torch.stack(weighted_components).sum() / max(active_weight, eps), stats
+
     def _compute_population_role_loss(self, pred, clean_data, true_data):
         """Match typed low-degree structural roles without node-ID alignment.
 
@@ -13349,6 +13665,32 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         scope = scope & valid_types
         if not bool(scope.any()):
             return pred_edge.sum() * 0.0, {"active_roles": 0.0}
+
+        structure_mode = str(
+            getattr(
+                self.cfg.model,
+                "population_role_structure_mode",
+                "legacy",
+            )
+            or "legacy"
+        ).lower()
+        if structure_mode == "adaptive_multiset":
+            return self._compute_adaptive_multiset_population_role_loss(
+                pred_edge,
+                pred_matrix,
+                target_matrix,
+                pred_degree,
+                target_degree,
+                scope,
+                node_type,
+                num_types,
+                projection_stats,
+            )
+        if structure_mode != "legacy":
+            raise ValueError(
+                "model.population_role_structure_mode must be legacy or "
+                f"adaptive_multiset; got {structure_mode}"
+            )
 
         degree_cap = max(
             2,
@@ -17431,13 +17773,36 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         population_role_w_base = float(
             getattr(self.cfg.model, "population_role_loss_weight", 0.0) or 0.0
         )
+        population_role_time_mode = str(
+            getattr(
+                self.cfg.model,
+                "population_role_time_mode",
+                "high_noise",
+            )
+            or "high_noise"
+        ).lower()
+        population_role_time_power = float(
+            getattr(self.cfg.model, "population_role_loss_t_power", 0.0) or 0.0
+        )
+        if population_role_time_mode == "low_noise":
+            population_role_time_factor = self._auxiliary_low_noise_factor(
+                sparse_noisy_data,
+                population_role_time_power,
+            )
+        elif population_role_time_mode == "high_noise":
+            population_role_time_factor = self._auxiliary_time_factor(
+                sparse_noisy_data,
+                population_role_time_power,
+            )
+        else:
+            raise ValueError(
+                "model.population_role_time_mode must be high_noise or "
+                f"low_noise; got {population_role_time_mode}"
+            )
         population_role_w = self._warmup_weight(
             population_role_w_base,
             int(getattr(self.cfg.model, "population_role_loss_warmup_epochs", 0) or 0),
-            self._auxiliary_time_factor(
-                sparse_noisy_data,
-                float(getattr(self.cfg.model, "population_role_loss_t_power", 0.0) or 0.0),
-            ),
+            population_role_time_factor,
         )
         if population_role_w > 0 and not skip_auxiliary_structure_losses:
             loss_population_role, population_role_stats = self._compute_population_role_loss(
@@ -17456,6 +17821,9 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 self._epoch_population_role_projection_raw_rel_sum = 0.0
                 self._epoch_population_role_projection_softness_sum = 0.0
                 self._epoch_population_role_projection_temperature_sum = 0.0
+                self._epoch_population_role_tail_wedge_mae_sum = 0.0
+                self._epoch_population_role_closure_rate_mae_sum = 0.0
+                self._epoch_population_role_multiset_group_sum = 0.0
             self._epoch_population_role_loss_sum += float(loss_population_role.detach().cpu())
             self._epoch_population_role_loss_count += 1
             self._epoch_population_role_weighted_sum += float(
@@ -17484,6 +17852,15 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             )
             self._epoch_population_role_projection_temperature_sum += float(
                 population_role_stats.get("projection_temperature", 0.0)
+            )
+            self._epoch_population_role_tail_wedge_mae_sum += float(
+                population_role_stats.get("tail_wedge_log_mae", 0.0)
+            )
+            self._epoch_population_role_closure_rate_mae_sum += float(
+                population_role_stats.get("closure_rate_mae", 0.0)
+            )
+            self._epoch_population_role_multiset_group_sum += float(
+                population_role_stats.get("active_multiset_groups", 0.0)
             )
             if step_idx % self.log_every_steps == 0:
                 self.log(
@@ -18162,6 +18539,9 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         self._epoch_population_role_projection_raw_rel_sum = 0.0
         self._epoch_population_role_projection_softness_sum = 0.0
         self._epoch_population_role_projection_temperature_sum = 0.0
+        self._epoch_population_role_tail_wedge_mae_sum = 0.0
+        self._epoch_population_role_closure_rate_mae_sum = 0.0
+        self._epoch_population_role_multiset_group_sum = 0.0
         self._epoch_typed_root_neighbor_loss_sum = 0.0
         self._epoch_typed_root_neighbor_loss_count = 0
         self._epoch_typed_root_neighbor_weighted_sum = 0.0
@@ -18352,6 +18732,9 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             population_role_projection_raw_rel = float(getattr(self, "_epoch_population_role_projection_raw_rel_sum", 0.0)) / float(population_role_count)
             population_role_projection_softness = float(getattr(self, "_epoch_population_role_projection_softness_sum", 0.0)) / float(population_role_count)
             population_role_projection_temperature = float(getattr(self, "_epoch_population_role_projection_temperature_sum", 0.0)) / float(population_role_count)
+            population_role_tail_wedge_mae = float(getattr(self, "_epoch_population_role_tail_wedge_mae_sum", 0.0)) / float(population_role_count)
+            population_role_closure_rate_mae = float(getattr(self, "_epoch_population_role_closure_rate_mae_sum", 0.0)) / float(population_role_count)
+            population_role_multiset_groups = float(getattr(self, "_epoch_population_role_multiset_group_sum", 0.0)) / float(population_role_count)
         else:
             population_role_loss = 0.0
             population_role_wloss = 0.0
@@ -18363,6 +18746,9 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             population_role_projection_raw_rel = 0.0
             population_role_projection_softness = 0.0
             population_role_projection_temperature = 0.0
+            population_role_tail_wedge_mae = 0.0
+            population_role_closure_rate_mae = 0.0
+            population_role_multiset_groups = 0.0
         typed_root_neighbor_count = int(getattr(self, "_epoch_typed_root_neighbor_loss_count", 0) or 0)
         if typed_root_neighbor_count > 0:
             typed_root_neighbor_loss = float(getattr(self, "_epoch_typed_root_neighbor_loss_sum", 0.0)) / float(typed_root_neighbor_count)
@@ -18646,6 +19032,9 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             epoch_loss["train_epoch/population_role_projection_raw_rel"] = population_role_projection_raw_rel
             epoch_loss["train_epoch/population_role_projection_softness"] = population_role_projection_softness
             epoch_loss["train_epoch/population_role_projection_temperature"] = population_role_projection_temperature
+            epoch_loss["train_epoch/population_role_tail_wedge_log_mae"] = population_role_tail_wedge_mae
+            epoch_loss["train_epoch/population_role_closure_rate_mae"] = population_role_closure_rate_mae
+            epoch_loss["train_epoch/population_role_multiset_groups"] = population_role_multiset_groups
         if typed_root_neighbor_count > 0:
             epoch_loss["train_epoch/typed_root_neighbor_loss"] = typed_root_neighbor_loss
             epoch_loss["train_epoch/typed_root_neighbor_weighted"] = typed_root_neighbor_wloss
@@ -18772,6 +19161,9 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             f",raw_rel={population_role_projection_raw_rel:.3f}"
             f",soft={population_role_projection_softness:.3f}"
             f",temp={population_role_projection_temperature:.3f}]"
+            f" -- population_role_multiset[groups={population_role_multiset_groups:.1f}"
+            f",wedge_log_mae={population_role_tail_wedge_mae:.3f}"
+            f",closure_rate_mae={population_role_closure_rate_mae:.3f}]"
         ) if population_role_count > 0 else ""
         typed_root_neighbor_str = (
             f" -- typed_root_neighbor: {typed_root_neighbor_loss:.6f}"
@@ -18981,6 +19373,9 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             "train_epoch/population_role_projection_raw_rel",
             "train_epoch/population_role_projection_softness",
             "train_epoch/population_role_projection_temperature",
+            "train_epoch/population_role_tail_wedge_log_mae",
+            "train_epoch/population_role_closure_rate_mae",
+            "train_epoch/population_role_multiset_groups",
             "train_epoch/typed_root_neighbor_loss",
             "train_epoch/typed_root_neighbor_weighted",
             "train_epoch/typed_root_neighbor_pred_closed_soft",

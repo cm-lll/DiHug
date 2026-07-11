@@ -1,0 +1,21 @@
+# @package _global_
+defaults:
+  - imdb_movie_hgt_l3h4_population_role_quota
+
+general:
+  name: imdb_movie_l3h4_population_multiset_quota
+
+model:
+  # Dataset-agnostic structural moments. Supported type multisets are inferred
+  # from each target block; no IMDB relation or motif name is configured.
+  population_role_structure_mode: adaptive_multiset
+  population_role_time_mode: low_noise
+  population_role_loss_t_power: 2.0
+  population_role_loss_weight: 0.03
+  population_role_degree_weight: 1.0
+  population_role_tail_wedge_weight: 1.0
+  population_role_multiset_wedge_weight: 0.5
+  population_role_multiset_closure_weight: 1.0
+  population_role_log_degree_temperature: 0.2
+  population_role_multiset_min_wedge: 1.0
+  population_role_closure_rate_huber_beta: 0.1

@@ -15,6 +15,13 @@ class _Harness:
                 population_role_projection_min_temperature=0.1,
                 population_role_projection_anneal_epochs=100,
                 population_role_projection_bisection_iters=50,
+                population_role_degree_weight=1.0,
+                population_role_tail_wedge_weight=1.0,
+                population_role_multiset_wedge_weight=0.5,
+                population_role_multiset_closure_weight=1.0,
+                population_role_multiset_min_wedge=0.1,
+                population_role_log_degree_temperature=0.2,
+                population_role_closure_rate_huber_beta=0.1,
             )
         )
 
@@ -28,6 +35,39 @@ class _Harness:
     ):
         return DiscreteDenoisingDiffusion._soft_fixed_cardinality_projection(
             self, scores, target_mass, temperature, iterations
+        )
+
+    def _population_role_log_degree_membership(
+        self, degree, max_degree, temperature=0.2
+    ):
+        return DiscreteDenoisingDiffusion._population_role_log_degree_membership(
+            degree, max_degree, temperature
+        )
+
+    def _population_role_typed_wedge_closure(
+        self, matrix, roots, first, second, same_neighbor_type=False
+    ):
+        return DiscreteDenoisingDiffusion._population_role_typed_wedge_closure(
+            matrix,
+            roots,
+            first,
+            second,
+            same_neighbor_type=same_neighbor_type,
+        )
+
+    def _js_divergence_from_masses(self, pred_mass, target_mass, eps=1e-8):
+        return DiscreteDenoisingDiffusion._js_divergence_from_masses(
+            pred_mass, target_mass, eps=eps
+        )
+
+    def _compute_adaptive_multiset_population_role_loss(self, *args, **kwargs):
+        return DiscreteDenoisingDiffusion._compute_adaptive_multiset_population_role_loss(
+            self, *args, **kwargs
+        )
+
+    def _auxiliary_low_noise_factor(self, sparse_noisy_data, power):
+        return DiscreteDenoisingDiffusion._auxiliary_low_noise_factor(
+            self, sparse_noisy_data, power
         )
 
 
@@ -115,3 +155,139 @@ def test_projection_temperature_anneals_geometrically():
     assert start == 0.5
     assert 0.1 < middle < 0.5
     assert abs(end - 0.1) < 1e-8
+
+
+def _triangle_matrix(num_nodes=3):
+    matrix = torch.zeros((num_nodes, num_nodes), dtype=torch.float32)
+    for u, v in ((0, 1), (0, 2), (1, 2)):
+        matrix[u, v] = 1.0
+        matrix[v, u] = 1.0
+    return matrix
+
+
+def test_typed_multiset_wedge_closure_covers_all_type_multiplicities():
+    matrix = _triangle_matrix()
+    roots = torch.tensor([0])
+
+    # AAA: the root and both neighbors share one type.
+    wedge, closed = DiscreteDenoisingDiffusion._population_role_typed_wedge_closure(
+        matrix,
+        roots,
+        torch.tensor([0, 1, 2]),
+        torch.tensor([0, 1, 2]),
+        same_neighbor_type=True,
+    )
+    assert torch.allclose(wedge, torch.ones(1))
+    assert torch.allclose(closed, torch.ones(1))
+
+    # AAB/ABB: one root sees two same-type neighbors; another root sees
+    # two distinct neighbor types. No dataset-specific type name is involved.
+    wedge_same, closed_same = (
+        DiscreteDenoisingDiffusion._population_role_typed_wedge_closure(
+            matrix,
+            torch.tensor([2]),
+            torch.tensor([0, 1]),
+            torch.tensor([0, 1]),
+            same_neighbor_type=True,
+        )
+    )
+    wedge_distinct, closed_distinct = (
+        DiscreteDenoisingDiffusion._population_role_typed_wedge_closure(
+            matrix,
+            roots,
+            torch.tensor([1]),
+            torch.tensor([2]),
+            same_neighbor_type=False,
+        )
+    )
+    assert torch.allclose(wedge_same, torch.ones(1))
+    assert torch.allclose(closed_same, torch.ones(1))
+    assert torch.allclose(wedge_distinct, torch.ones(1))
+    assert torch.allclose(closed_distinct, torch.ones(1))
+
+    # ABC uses the same distinct-neighbor formula as above.
+    assert torch.allclose(wedge_distinct, closed_distinct)
+
+
+def test_typed_multiset_statistics_are_permutation_invariant_and_differentiable():
+    matrix = _triangle_matrix().requires_grad_(True)
+    roots = torch.tensor([0])
+    wedge, closed = DiscreteDenoisingDiffusion._population_role_typed_wedge_closure(
+        matrix,
+        roots,
+        torch.tensor([1]),
+        torch.tensor([2]),
+        same_neighbor_type=False,
+    )
+
+    permutation = torch.tensor([2, 0, 1])
+    inverse = torch.empty_like(permutation)
+    inverse[permutation] = torch.arange(3)
+    permuted = matrix.detach().index_select(0, permutation).index_select(1, permutation)
+    perm_wedge, perm_closed = (
+        DiscreteDenoisingDiffusion._population_role_typed_wedge_closure(
+            permuted,
+            inverse[roots],
+            inverse[torch.tensor([1])],
+            inverse[torch.tensor([2])],
+            same_neighbor_type=False,
+        )
+    )
+    assert torch.allclose(wedge.detach(), perm_wedge)
+    assert torch.allclose(closed.detach(), perm_closed)
+
+    (wedge + closed).sum().backward()
+    assert matrix.grad is not None
+    assert torch.isfinite(matrix.grad).all()
+
+
+def test_log_degree_bins_cover_long_tails_without_a_fixed_cap():
+    degree = torch.tensor([0.0, 1.0, 2.0, 3.0, 6.0, 12.0, 64.0, 674.0])
+    membership, centers = (
+        DiscreteDenoisingDiffusion._population_role_log_degree_membership(
+            degree,
+            max_degree=1024,
+            temperature=0.2,
+        )
+    )
+    assert torch.allclose(membership.sum(dim=-1), torch.ones_like(degree))
+    assert torch.isfinite(membership).all()
+    assert float(centers.max()) > 500.0
+    assert any(abs(float(value) - 2.0) < 1e-6 for value in centers)
+
+
+def test_adaptive_multiset_loss_is_zero_on_target_and_has_finite_gradient():
+    harness = _Harness()
+    target = _triangle_matrix()
+    pred = target.clone().requires_grad_(True)
+    degree = pred.sum(dim=-1)
+    target_degree = target.sum(dim=-1)
+    loss, stats = harness._compute_adaptive_multiset_population_role_loss(
+        torch.zeros((1, 2)),
+        pred,
+        target,
+        degree,
+        target_degree,
+        torch.ones(3, dtype=torch.bool),
+        torch.tensor([0, 0, 1]),
+        2,
+        {"projection_groups": 1.0},
+    )
+    assert float(loss.detach()) < 1e-7
+    assert stats["active_multiset_groups"] > 0
+    loss.backward()
+    assert pred.grad is not None
+    assert torch.isfinite(pred.grad).all()
+
+
+def test_low_noise_factor_suppresses_high_noise_structure_supervision():
+    harness = _Harness()
+    low_noise = harness._auxiliary_low_noise_factor(
+        {"t_float": torch.tensor([0.1])}, 2.0
+    )
+    high_noise = harness._auxiliary_low_noise_factor(
+        {"t_float": torch.tensor([0.9])}, 2.0
+    )
+    assert abs(low_noise - 0.81) < 1e-6
+    assert abs(high_noise - 0.01) < 1e-6
+    assert low_noise > high_noise
