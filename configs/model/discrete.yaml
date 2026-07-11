@@ -626,6 +626,14 @@ population_role_projection_temperature: 0.5
 population_role_projection_min_temperature: 0.1
 population_role_projection_anneal_epochs: 100
 population_role_projection_bisection_iters: 40
+# Evaluation-only training probe. It reuses one fixed block/query and fixed
+# noising seeds at the listed normalized times, then compares soft quota with
+# the deterministic hard top-K state used by exact-cardinality sampling.
+population_role_fixed_t_probe_enabled: false
+population_role_fixed_t_probe_every_n_epochs: 5
+population_role_fixed_t_probe_times: [0.1, 0.3, 0.5, 0.7]
+population_role_fixed_t_probe_block_id: 0
+population_role_fixed_t_probe_seed: 1729
 # Training-only endpoint role distribution supervision. It matches how expected
 # clean edge endpoints distribute over node-type x clean-degree buckets. This is
 # a lightweight way to teach the denoiser that many low-degree nodes, not only a

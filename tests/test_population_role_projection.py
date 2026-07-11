@@ -147,6 +147,49 @@ def test_straight_through_mode_is_hard_in_forward_and_soft_in_backward():
     assert float(scores.grad.abs().sum()) > 0.0
 
 
+def test_projection_mode_override_compares_soft_and_hard_without_mutating_config():
+    harness = _Harness(mode="raw")
+    scores = torch.linspace(-2.0, 2.0, 8)
+    raw_prob = torch.sigmoid(scores)
+    target = torch.tensor([1, 1, 1, 0, 0, 0, 0, 0], dtype=torch.float32)
+    family = torch.zeros(8, dtype=torch.long)
+    graph = torch.zeros(8, dtype=torch.long)
+
+    soft, _ = DiscreteDenoisingDiffusion._project_population_role_probabilities(
+        harness,
+        scores,
+        raw_prob,
+        target,
+        family,
+        graph,
+        mode_override="soft_quota",
+    )
+    hard, _ = DiscreteDenoisingDiffusion._project_population_role_probabilities(
+        harness,
+        scores,
+        raw_prob,
+        target,
+        family,
+        graph,
+        mode_override="straight_through",
+    )
+
+    assert harness.cfg.model.population_role_projection_mode == "raw"
+    assert torch.allclose(soft.sum(), torch.tensor(3.0), atol=1e-5)
+    assert float(hard.sum()) == 3.0
+    assert torch.equal(hard, (hard > 0.5).float())
+    assert not torch.equal(soft, hard)
+
+
+def test_population_role_probe_gap_reports_soft_hard_metric_difference():
+    gap = DiscreteDenoisingDiffusion._population_role_probe_gap(
+        {"tail_wedge_log_mae": 0.2, "closure_rate_mae": 0.05},
+        {"tail_wedge_log_mae": 0.7, "closure_rate_mae": 0.2},
+    )
+    assert abs(gap["wedge_log_mae"] - 0.5) < 1e-8
+    assert abs(gap["closure_rate_mae"] - 0.15) < 1e-8
+
+
 def test_projection_temperature_anneals_geometrically():
     start = _Harness(epoch=0)._population_role_projection_temperature()
     middle = _Harness(epoch=50)._population_role_projection_temperature()

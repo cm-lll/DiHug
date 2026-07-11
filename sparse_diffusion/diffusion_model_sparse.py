@@ -13137,9 +13137,12 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         target_exist,
         query_family,
         graph_id,
+        mode_override=None,
     ):
         mode = str(
-            getattr(
+            mode_override
+            if mode_override is not None
+            else getattr(
                 self.cfg.model,
                 "population_role_projection_mode",
                 "raw",
@@ -13561,7 +13564,13 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         stats.update(projection_stats)
         return torch.stack(weighted_components).sum() / max(active_weight, eps), stats
 
-    def _compute_population_role_loss(self, pred, clean_data, true_data):
+    def _compute_population_role_loss(
+        self,
+        pred,
+        clean_data,
+        true_data,
+        projection_mode_override=None,
+    ):
         """Match typed low-degree structural roles without node-ID alignment.
 
         The older rooted objectives use a clean node's own degree and neighbors
@@ -13640,6 +13649,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             target_exist,
             query_family,
             graph_id,
+            mode_override=projection_mode_override,
         )
 
         # Build symmetric query-local probability/target matrices.  They only
@@ -13804,6 +13814,234 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         }
         stats.update(projection_stats)
         return torch.stack(losses).mean(), stats
+
+    def _population_role_fixed_t_probe_enabled(self):
+        return (
+            bool(
+                getattr(
+                    self.cfg.model,
+                    "population_role_fixed_t_probe_enabled",
+                    False,
+                )
+            )
+            and self.heterogeneous
+            and str(
+                getattr(
+                    self.cfg.model,
+                    "population_role_structure_mode",
+                    "legacy",
+                )
+                or "legacy"
+            ).lower()
+            == "adaptive_multiset"
+        )
+
+    def _cache_population_role_fixed_t_probe_batch(self, data, batch_idx):
+        if (
+            not self._population_role_fixed_t_probe_enabled()
+            or int(batch_idx) != 0
+            or hasattr(self, "_population_role_fixed_t_probe_batch")
+        ):
+            return
+        cached = data.clone()
+        for key, value in cached:
+            if torch.is_tensor(value):
+                cached[key] = value.detach()
+        self._population_role_fixed_t_probe_batch = cached
+
+    @staticmethod
+    def _population_role_probe_gap(soft_stats, hard_stats):
+        return {
+            "wedge_log_mae": abs(
+                float(hard_stats.get("tail_wedge_log_mae", 0.0))
+                - float(soft_stats.get("tail_wedge_log_mae", 0.0))
+            ),
+            "closure_rate_mae": abs(
+                float(hard_stats.get("closure_rate_mae", 0.0))
+                - float(soft_stats.get("closure_rate_mae", 0.0))
+            ),
+        }
+
+    def _run_population_role_fixed_t_probe(self):
+        if not self._population_role_fixed_t_probe_enabled():
+            return
+        every = max(
+            1,
+            int(
+                getattr(
+                    self.cfg.model,
+                    "population_role_fixed_t_probe_every_n_epochs",
+                    5,
+                )
+                or 5
+            ),
+        )
+        if int(self.current_epoch) % every != 0:
+            return
+        cached = getattr(self, "_population_role_fixed_t_probe_batch", None)
+        if cached is None:
+            if getattr(self, "local_rank", 0) == 0:
+                print("[FIXED-T-POPROLE] skipped: no cached training batch")
+            return
+
+        times_cfg = getattr(
+            self.cfg.model,
+            "population_role_fixed_t_probe_times",
+            (0.1, 0.3, 0.5, 0.7),
+        )
+        times = sorted(
+            {
+                min(max(float(value), 1.0 / float(self.T)), 1.0)
+                for value in times_cfg
+            }
+        )
+        if not times:
+            return
+        block_id = max(
+            0,
+            int(
+                getattr(
+                    self.cfg.model,
+                    "population_role_fixed_t_probe_block_id",
+                    0,
+                )
+                or 0
+            ),
+        )
+        seed = int(
+            getattr(
+                self.cfg.model,
+                "population_role_fixed_t_probe_seed",
+                1729,
+            )
+            or 1729
+        )
+        clean_data = self.dataset_info.to_one_hot(cached.clone())
+        query_edge = getattr(
+            self, "_population_role_fixed_t_probe_query_edge_index", None
+        )
+        query_batch = getattr(
+            self, "_population_role_fixed_t_probe_query_batch", None
+        )
+        cuda_devices = []
+        if self.device.type == "cuda":
+            cuda_devices = [
+                self.device.index
+                if self.device.index is not None
+                else torch.cuda.current_device()
+            ]
+        was_training = self.training
+        self.eval()
+        try:
+            with torch.no_grad():
+                for t_value in times:
+                    with torch.random.fork_rng(devices=cuda_devices):
+                        torch.manual_seed(seed)
+                        if self.device.type == "cuda":
+                            torch.cuda.manual_seed_all(seed)
+                        t_int = max(
+                            1,
+                            min(
+                                int(self.T),
+                                int(round(float(t_value) * float(self.T))),
+                            ),
+                        )
+                        t_override = torch.full(
+                            (int(clean_data.num_graphs), 1),
+                            float(t_int),
+                            device=self.device,
+                        )
+                        out = self._training_step_once(
+                            clean_data,
+                            0,
+                            data_is_one_hot=True,
+                            forced_block_id=block_id,
+                            t_override=t_override,
+                            query_edge_override=query_edge,
+                            query_batch_override=query_batch,
+                            skip_auxiliary_structure_losses=True,
+                            return_query_outputs=True,
+                            record_structure_probe=False,
+                            diagnostic_only=True,
+                        )
+                    if out is None or "pred_edge_attr" not in out:
+                        continue
+                    if query_edge is None:
+                        query_edge = out["pred_edge_index"].detach().clone()
+                        query_batch = clean_data.batch[query_edge[0]].detach().clone()
+                        self._population_role_fixed_t_probe_query_edge_index = query_edge
+                        self._population_role_fixed_t_probe_query_batch = query_batch
+
+                    pred = utils.SparsePlaceHolder(
+                        node=clean_data.x,
+                        charge=clean_data.charge,
+                        edge_attr=out["pred_edge_attr"],
+                        edge_index=out["pred_edge_index"],
+                        y=clean_data.y,
+                        batch=clean_data.batch,
+                    )
+                    true_data = utils.SparsePlaceHolder(
+                        node=clean_data.x,
+                        charge=clean_data.charge,
+                        edge_attr=out["true_edge_attr"],
+                        edge_index=out["pred_edge_index"],
+                        y=clean_data.y,
+                        batch=clean_data.batch,
+                    )
+                    _, soft_stats = self._compute_population_role_loss(
+                        pred,
+                        clean_data,
+                        true_data,
+                        projection_mode_override="soft_quota",
+                    )
+                    _, hard_stats = self._compute_population_role_loss(
+                        pred,
+                        clean_data,
+                        true_data,
+                        projection_mode_override="straight_through",
+                    )
+                    gap = self._population_role_probe_gap(soft_stats, hard_stats)
+                    tag = f"t{int(round(float(t_value) * 100)):03d}"
+                    values = {
+                        f"train_probe/{tag}_soft_wedge_log_mae": float(
+                            soft_stats.get("tail_wedge_log_mae", 0.0)
+                        ),
+                        f"train_probe/{tag}_soft_closure_rate_mae": float(
+                            soft_stats.get("closure_rate_mae", 0.0)
+                        ),
+                        f"train_probe/{tag}_hard_wedge_log_mae": float(
+                            hard_stats.get("tail_wedge_log_mae", 0.0)
+                        ),
+                        f"train_probe/{tag}_hard_closure_rate_mae": float(
+                            hard_stats.get("closure_rate_mae", 0.0)
+                        ),
+                        f"train_probe/{tag}_soft_hard_wedge_gap": gap[
+                            "wedge_log_mae"
+                        ],
+                        f"train_probe/{tag}_soft_hard_closure_gap": gap[
+                            "closure_rate_mae"
+                        ],
+                    }
+                    for key, value in values.items():
+                        self.log(key, value, on_epoch=True, sync_dist=True)
+                    if getattr(self, "local_rank", 0) == 0:
+                        print(
+                            "[FIXED-T-POPROLE] "
+                            f"epoch={int(self.current_epoch)} t={float(t_value):.2f} "
+                            f"block={block_id} queries={int(out['query_edges'])} "
+                            "soft["
+                            f"wedge={values[f'train_probe/{tag}_soft_wedge_log_mae']:.4f},"
+                            f"closure={values[f'train_probe/{tag}_soft_closure_rate_mae']:.4f}] "
+                            "hard["
+                            f"wedge={values[f'train_probe/{tag}_hard_wedge_log_mae']:.4f},"
+                            f"closure={values[f'train_probe/{tag}_hard_closure_rate_mae']:.4f}] "
+                            "gap["
+                            f"wedge={gap['wedge_log_mae']:.4f},"
+                            f"closure={gap['closure_rate_mae']:.4f}] "
+                            f"groups={int(hard_stats.get('active_multiset_groups', 0.0))}"
+                        )
+        finally:
+            self.train(was_training)
 
     def _compute_typed_root_neighbor_loss(self, pred, clean_data, true_data):
         """Match low-degree root degree, neighbor-type mix, and closure coverage.
@@ -15500,6 +15738,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         return t_vals.view(bs, 1).float()
 
     def training_step(self, data, i):
+        self._cache_population_role_fixed_t_probe_batch(data, i)
         if bool(getattr(self.cfg.model, "train_family_staged_queryfree", False)):
             return self._training_step_family_staged_queryfree(data, i)
 
@@ -16626,6 +16865,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         skip_auxiliary_structure_losses=False,
         return_query_outputs=False,
         record_structure_probe=True,
+        diagnostic_only=False,
     ):
         # The above code is using the Python debugger module `pdb` to set a breakpoint at a specific
         # line of code. When the code is executed, it will pause at that line and allow you to
@@ -17336,6 +17576,13 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 posinf=1.0e4,
                 neginf=-1.0e10,
             )
+        if diagnostic_only:
+            return {
+                "pred_edge_attr": sparse_pred.edge_attr,
+                "pred_edge_index": sparse_pred.edge_index,
+                "true_edge_attr": true_data.edge_attr,
+                "query_edges": int(sparse_pred.edge_index.shape[1]),
+            }
         if record_structure_probe:
             self._record_query_topk_structure_probe(sparse_pred, true_data, data)
 
@@ -18609,6 +18856,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         self._epoch_rare_family_query_random = 0
 
     def on_train_epoch_end(self) -> None:
+        self._run_population_role_fixed_t_probe()
         # 只在 epoch 结束时统一从 TrainLossDiscrete 取出本 epoch 的所有训练指标，并一次性 log 到 wandb / Lightning
         epoch_loss = self.train_loss.log_epoch_metrics()
         exist_bce = epoch_loss.get("train_epoch/existence_BCE", -1)
