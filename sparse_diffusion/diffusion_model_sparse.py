@@ -5202,6 +5202,14 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         total_swaps = 0
         total_considered = 0
         log_records = []
+        last_exact_residual = None
+        exact_sequential = bool(
+            getattr(
+                self.cfg.model,
+                "sampling_structure_swap_limiter_exact_sequential",
+                False,
+            )
+        )
 
         for graph_idx in graph_ids:
             graph_idx = int(graph_idx)
@@ -5223,6 +5231,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 selected_edges.append((min(u, v), max(u, v)))
             if not selected_edges:
                 continue
+            selected_edge_set = set(selected_edges)
 
             degree = [len(adj[int(node)]) for node in range(total_nodes)]
             incident_tri = _incident_triangles(adj, nodes)
@@ -5274,6 +5283,111 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 ref_hist = ref_hist / torch.clamp(ref_hist.sum(), min=1.0)
                 degree_over = cur_hist - ref_hist
                 current_degree_l1 = float(degree_over.abs().sum().item())
+
+            def _exact_graph_state():
+                exact_degree = [len(adj[node]) for node in range(total_nodes)]
+                exact_incident = _incident_triangles(adj, nodes)
+                exact_triangles = float(sum(exact_incident.values()) / 3.0)
+                exact_clustering = float(
+                    sum(
+                        _clustering_value(
+                            exact_incident[int(node)], exact_degree[int(node)]
+                        )
+                        for node in nodes
+                    )
+                    / max(len(nodes), 1)
+                )
+                exact_assort = _assortativity(
+                    sorted(selected_edge_set), exact_degree
+                )
+                _, _, exact_lcc = _component_info(adj, nodes)
+                exact_degree_l1 = None
+                if (
+                    degree_w != 0.0
+                    and degree_boundaries is not None
+                    and ref_degree_bins is not None
+                    and ref_degree_bins.numel() > 0
+                ):
+                    degree_tensor = torch.tensor(
+                        exact_degree, dtype=torch.float32
+                    )
+                    boundaries_cpu = degree_boundaries.detach().cpu().to(
+                        dtype=degree_tensor.dtype
+                    )
+                    num_bins = max(
+                        2,
+                        int(
+                            getattr(
+                                self.cfg.model,
+                                "sampling_degree_pair_bins",
+                                5,
+                            )
+                            or 5
+                        ),
+                    )
+                    graph_bins = torch.bucketize(
+                        degree_tensor, boundaries_cpu
+                    ).long()[nodes].clamp(0, num_bins - 1)
+                    current_hist = torch.bincount(
+                        graph_bins, minlength=num_bins
+                    ).float()
+                    current_hist = current_hist / current_hist.sum().clamp(min=1.0)
+                    reference_bins = (
+                        ref_degree_bins.detach().cpu().long().clamp(0, num_bins - 1)
+                    )
+                    reference_hist = torch.bincount(
+                        reference_bins, minlength=num_bins
+                    ).float()
+                    reference_hist = reference_hist / reference_hist.sum().clamp(min=1.0)
+                    exact_degree_l1 = float(
+                        (current_hist - reference_hist).abs().sum().item()
+                    )
+                return {
+                    "triangles": exact_triangles,
+                    "clustering": exact_clustering,
+                    "assortativity": exact_assort,
+                    "lcc": float(exact_lcc),
+                    "degree_l1": exact_degree_l1,
+                }
+
+            def _exact_error_vector(state):
+                errors = {
+                    "triangles": _relative_excess(
+                        state["triangles"], target_tri, tri_tol
+                    ),
+                    "clustering": _relative_excess(
+                        state["clustering"], target_clust, clust_tol
+                    ),
+                    "lcc": _relative_excess(state["lcc"], target_lcc, lcc_tol),
+                    "assortativity": 0.0,
+                    "degree": 0.0,
+                }
+                if target_assort is not None:
+                    denom = max(abs(float(target_assort)), 1.0e-8)
+                    errors["assortativity"] = max(
+                        0.0,
+                        abs(
+                            (float(state["assortativity"]) - float(target_assort))
+                            / denom
+                        )
+                        - assort_tol,
+                    )
+                if state["degree_l1"] is not None:
+                    errors["degree"] = max(
+                        0.0, float(state["degree_l1"]) - degree_tol
+                    )
+                return errors
+
+            exact_state = {
+                "triangles": current_triangles,
+                "clustering": current_clustering,
+                "assortativity": current_assort,
+                "lcc": float(current_lcc),
+                "degree_l1": current_degree_l1,
+            }
+            exact_errors = _exact_error_vector(exact_state)
+            if exact_sequential:
+                last_exact_residual = max(exact_errors.values(), default=0.0)
 
             base_tri_err = _relative_excess(current_triangles, target_tri, tri_tol)
             base_clust_err = _relative_excess(current_clustering, target_clust, clust_tol)
@@ -5590,6 +5704,10 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             graph_clust_delta = 0.0
             graph_lcc_delta = 0.0
             graph_score_delta = 0.0
+            graph_initial_triangles = current_triangles
+            graph_initial_clustering = current_clustering
+            graph_initial_assort = current_assort
+            graph_initial_lcc = current_lcc
             for item in swap_candidates:
                 if total_swaps >= max_swaps:
                     break
@@ -5598,6 +5716,62 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                     continue
                 if selected_mask[add_pos] or not selected_mask[drop_pos]:
                     continue
+                if exact_sequential:
+                    add_u = int(edge_index_cpu[0, add_pos].item())
+                    add_v = int(edge_index_cpu[1, add_pos].item())
+                    drop_u = int(edge_index_cpu[0, drop_pos].item())
+                    drop_v = int(edge_index_cpu[1, drop_pos].item())
+                    add_key = (min(add_u, add_v), max(add_u, add_v))
+                    drop_key = (min(drop_u, drop_v), max(drop_u, drop_v))
+                    if drop_key not in selected_edge_set or add_key in selected_edge_set:
+                        continue
+                    adj[drop_u].remove(drop_v)
+                    adj[drop_v].remove(drop_u)
+                    selected_edge_set.remove(drop_key)
+                    adj[add_u].add(add_v)
+                    adj[add_v].add(add_u)
+                    selected_edge_set.add(add_key)
+                    trial_state = _exact_graph_state()
+                    trial_errors = _exact_error_vector(trial_state)
+                    component_weights = {
+                        "triangles": max(tri_w, 0.0),
+                        "clustering": max(clust_w, 0.0),
+                        "lcc": max(lcc_w, 0.0),
+                        "assortativity": max(assort_w, 0.0),
+                        "degree": max(degree_w, 0.0),
+                    }
+                    before_total = sum(
+                        component_weights[name] * exact_errors[name]
+                        for name in exact_errors
+                    )
+                    after_total = sum(
+                        component_weights[name] * trial_errors[name]
+                        for name in trial_errors
+                    )
+                    preserves_components = all(
+                        trial_errors[name] <= exact_errors[name] + 1.0e-9
+                        for name in exact_errors
+                        if component_weights[name] > 0.0
+                    )
+                    improves = after_total < before_total - 1.0e-9
+                    if not (preserves_components and improves):
+                        adj[add_u].remove(add_v)
+                        adj[add_v].remove(add_u)
+                        selected_edge_set.remove(add_key)
+                        adj[drop_u].add(drop_v)
+                        adj[drop_v].add(drop_u)
+                        selected_edge_set.add(drop_key)
+                        continue
+                    exact_state = trial_state
+                    exact_errors = trial_errors
+                    last_exact_residual = max(
+                        exact_errors.values(), default=0.0
+                    )
+                    current_triangles = trial_state["triangles"]
+                    current_clustering = trial_state["clustering"]
+                    current_assort = trial_state["assortativity"]
+                    current_lcc = int(round(trial_state["lcc"]))
+                    current_degree_l1 = trial_state["degree_l1"]
                 selected_mask[drop_pos] = False
                 selected_mask[add_pos] = True
                 used_add.add(add_pos)
@@ -5608,19 +5782,30 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 graph_clust_delta += float(clust_delta)
                 graph_lcc_delta += float(lcc_delta)
                 graph_score_delta += float(score_delta)
+                if exact_sequential and all(value <= 0.0 for value in exact_errors.values()):
+                    break
             if graph_swaps > 0:
                 log_records.append(
                     (
                         graph_idx,
                         graph_swaps,
-                        current_triangles,
-                        current_triangles + graph_tri_delta,
-                        current_clustering,
-                        current_clustering + graph_clust_delta,
-                        current_assort,
-                        current_lcc,
-                        current_lcc + graph_lcc_delta,
+                        graph_initial_triangles,
+                        current_triangles
+                        if exact_sequential
+                        else graph_initial_triangles + graph_tri_delta,
+                        graph_initial_clustering,
+                        current_clustering
+                        if exact_sequential
+                        else graph_initial_clustering + graph_clust_delta,
+                        graph_initial_assort,
+                        graph_initial_lcc,
+                        current_lcc
+                        if exact_sequential
+                        else graph_initial_lcc + graph_lcc_delta,
                         graph_score_delta,
+                        max(exact_errors.values(), default=0.0)
+                        if exact_sequential
+                        else float("nan"),
                     )
                 )
             if total_swaps >= max_swaps:
@@ -5648,6 +5833,12 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                     "[采样-EXACT-K-SWAP-LIMITER] "
                     f"step={int(sampling_step)} swaps=0 "
                     f"considered={total_considered}"
+                    + (
+                        f" residual_excess={last_exact_residual:.4g} "
+                        f"within_tolerance={int(last_exact_residual <= 0.0)}"
+                        if exact_sequential and last_exact_residual is not None
+                        else ""
+                    )
                 )
             return selected
 
@@ -5687,6 +5878,12 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                     f" assort={rec[6]:+.4g}"
                     f" lcc={rec[7]:.0f}->{rec[8]:.0f}"
                     f" score_delta={rec[9]:+.4g}"
+                    + (
+                        f" residual_excess={rec[10]:.4g}"
+                        f" within_tolerance={int(rec[10] <= 0.0)}"
+                        if exact_sequential
+                        else ""
+                    )
                 )
             print(
                 "[采样-EXACT-K-SWAP-LIMITER] "
@@ -13560,6 +13757,18 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 torch.stack(closure_rate_errors).mean().detach().cpu()
             ) if closure_rate_errors else 0.0,
             "active_multiset_groups": float(len(closure_losses)),
+            "degree_loss": float(
+                torch.stack(degree_losses).mean().detach().cpu()
+            ) if degree_losses else 0.0,
+            "tail_wedge_loss": float(
+                torch.stack(tail_losses).mean().detach().cpu()
+            ) if tail_losses else 0.0,
+            "motif_wedge_loss": float(
+                torch.stack(motif_wedge_losses).mean().detach().cpu()
+            ) if motif_wedge_losses else 0.0,
+            "closure_loss": float(
+                torch.stack(closure_losses).mean().detach().cpu()
+            ) if closure_losses else 0.0,
         }
         stats.update(projection_stats)
         return torch.stack(weighted_components).sum() / max(active_weight, eps), stats
@@ -13615,6 +13824,81 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             num_types,
             {},
         )
+
+    @staticmethod
+    def _gqer_component_values(stats):
+        raw = {
+            "degree": float(stats.get("degree_loss", 0.0)),
+            "tail_wedge": float(stats.get("tail_wedge_loss", 0.0)),
+            "motif_wedge": float(stats.get("motif_wedge_loss", 0.0)),
+            "closure": float(stats.get("closure_loss", 0.0)),
+        }
+        # Every component is monotone-mapped to [0, 1), so Pareto decisions do
+        # not depend on whether a dataset has hundreds or millions of wedges.
+        return {name: value / (1.0 + value) for name, value in raw.items()}
+
+    def _gqer_v2_accepts_proposal(
+        self,
+        objective_value,
+        proposal_value,
+        base_components,
+        proposal_components,
+    ):
+        """Exact, scale-aware acceptance for a quota-preserving hard proposal."""
+        min_relative = max(
+            0.0,
+            float(
+                getattr(
+                    self.cfg.model,
+                    "gqer_v2_min_relative_improvement",
+                    1e-6,
+                )
+                or 0.0
+            ),
+        )
+        required = min_relative * max(abs(float(objective_value)), 1e-8)
+        if not float(proposal_value) < float(objective_value) - required:
+            return False, "total"
+        if not bool(getattr(self.cfg.model, "gqer_v2_pareto_safe", True)):
+            return True, "accepted"
+
+        tolerance = max(
+            0.0,
+            float(
+                getattr(
+                    self.cfg.model,
+                    "gqer_v2_component_tolerance",
+                    0.02,
+                )
+                or 0.0
+            ),
+        )
+        floor = max(
+            1e-8,
+            float(
+                getattr(self.cfg.model, "gqer_v2_component_floor", 0.01)
+                or 0.01
+            ),
+        )
+        active = [
+            name
+            for name, value in base_components.items()
+            if value > 0.0 or proposal_components.get(name, 0.0) > 0.0
+        ]
+        if not active:
+            return True, "accepted"
+        primary = max(active, key=lambda name: base_components.get(name, 0.0))
+        primary_before = base_components.get(primary, 0.0)
+        primary_after = proposal_components.get(primary, 0.0)
+        if primary_after >= primary_before - min_relative * max(primary_before, floor):
+            return False, f"primary:{primary}"
+        for name in active:
+            before = base_components.get(name, 0.0)
+            after = proposal_components.get(name, 0.0)
+            allowed = before + tolerance * max(before, floor)
+            if after > allowed:
+                return False, f"component:{name}"
+        return True, "accepted"
 
     def _prepare_gqer_state(self, candidate_parts, clean_data):
         if not candidate_parts:
@@ -13731,6 +14015,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
 
         proposed = selected.clone()
         swap_weight = torch.zeros_like(scores)
+        pair_anchors = thresholds.clone()
         max_swaps = max(
             1, int(getattr(self.cfg.model, "gqer_max_swaps_per_family", 8) or 8)
         )
@@ -13738,9 +14023,8 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             0.0,
             float(getattr(self.cfg.model, "gqer_min_utility_gap", 1e-8) or 0.0),
         )
-        swap_count = 0
         improving_count = 0
-        utility_gaps = []
+        candidate_pair_groups = []
         for graph_id in torch.unique(edge_batch, sorted=True):
             for family_id in torch.unique(families[edge_batch == graph_id], sorted=True):
                 mask = (edge_batch == graph_id) & (families == family_id)
@@ -13760,27 +14044,165 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 in_swap = inside[:count][improving][:take]
                 out_swap = outside[:count][improving][:take]
                 pair_gap = utility[out_swap] - utility[in_swap]
-                proposed[in_swap] = False
-                proposed[out_swap] = True
-                swap_weight[in_swap] = pair_gap
-                swap_weight[out_swap] = pair_gap
-                utility_gaps.append(pair_gap)
-                swap_count += take
+                candidate_pair_groups.append(
+                    [
+                        (
+                            int(in_idx.item()),
+                            int(out_idx.item()),
+                            float(gap.detach().cpu()),
+                        )
+                        for in_idx, out_idx, gap in zip(
+                            in_swap, out_swap, pair_gap
+                        )
+                    ]
+                )
 
-        proposal_matrix = self._gqer_matrix_from_selection(
-            edge_index, proposed, num_nodes, scores.dtype
-        )
-        with torch.no_grad():
-            proposal_objective, proposal_stats = self._gqer_structural_objective(
-                proposal_matrix, target_matrix, clean_data
-            )
         objective_value = float(objective.detach().cpu())
-        proposal_value = float(proposal_objective.detach().cpu())
-        accepted = swap_count > 0 and proposal_value < objective_value
+        base_components = self._gqer_component_values(hard_stats)
+        proposal_value = objective_value
+        proposal_stats = hard_stats
+        proposal_components = dict(base_components)
+        accepted_pairs = []
+        backtracking_depth = 0
+        rejection_reason = "no_pairs"
+
+        def _materialize(pair_records, base_selection=None):
+            result = (
+                selected.clone()
+                if base_selection is None
+                else base_selection.clone()
+            )
+            for in_idx, out_idx, _ in pair_records:
+                result[in_idx] = False
+                result[out_idx] = True
+            return result
+
+        def _evaluate(pair_records, base_selection=None, base_value=None, base_stats=None):
+            trial = _materialize(pair_records, base_selection=base_selection)
+            trial_matrix = self._gqer_matrix_from_selection(
+                edge_index, trial, num_nodes, scores.dtype
+            )
+            with torch.no_grad():
+                trial_objective, trial_stats = self._gqer_structural_objective(
+                    trial_matrix, target_matrix, clean_data
+                )
+            trial_value = float(trial_objective.detach().cpu())
+            reference_value = objective_value if base_value is None else float(base_value)
+            reference_stats = hard_stats if base_stats is None else base_stats
+            if bool(getattr(self.cfg.model, "gqer_v2_enabled", False)):
+                ok, reason = self._gqer_v2_accepts_proposal(
+                    reference_value,
+                    trial_value,
+                    self._gqer_component_values(reference_stats),
+                    self._gqer_component_values(trial_stats),
+                )
+            else:
+                ok = trial_value < reference_value
+                reason = "accepted" if ok else "total"
+            return ok, reason, trial, trial_value, trial_stats
+
+        v2_enabled = bool(getattr(self.cfg.model, "gqer_v2_enabled", False))
+        if candidate_pair_groups:
+            if not v2_enabled:
+                attempted = [pair for group in candidate_pair_groups for pair in group]
+                (
+                    accepted,
+                    rejection_reason,
+                    proposed,
+                    proposal_value,
+                    proposal_stats,
+                ) = _evaluate(attempted)
+                if accepted:
+                    accepted_pairs = attempted
+            else:
+                max_group_size = max(len(group) for group in candidate_pair_groups)
+                divisor = 1
+                while max_group_size > 0:
+                    attempted = [
+                        pair
+                        for group in candidate_pair_groups
+                        for pair in group[: max(1, math.ceil(len(group) / divisor))]
+                    ]
+                    (
+                        accepted,
+                        rejection_reason,
+                        trial,
+                        trial_value,
+                        trial_stats,
+                    ) = _evaluate(attempted)
+                    if accepted:
+                        proposed = trial
+                        proposal_value = trial_value
+                        proposal_stats = trial_stats
+                        accepted_pairs = attempted
+                        break
+                    if not bool(
+                        getattr(self.cfg.model, "gqer_v2_backtracking", True)
+                    ) or divisor >= max_group_size:
+                        break
+                    divisor *= 2
+                    backtracking_depth += 1
+
+                if not accepted_pairs:
+                    max_trials = max(
+                        0,
+                        int(
+                            getattr(
+                                self.cfg.model,
+                                "gqer_v2_greedy_fallback_max_trials",
+                                16,
+                            )
+                            or 0
+                        ),
+                    )
+                    ranked_pairs = sorted(
+                        (pair for group in candidate_pair_groups for pair in group),
+                        key=lambda item: item[2],
+                        reverse=True,
+                    )[:max_trials]
+                    greedy_selection = selected.clone()
+                    greedy_value = objective_value
+                    greedy_stats = hard_stats
+                    for pair in ranked_pairs:
+                        (
+                            accepted,
+                            reason,
+                            trial,
+                            trial_value,
+                            trial_stats,
+                        ) = _evaluate(
+                            [pair],
+                            base_selection=greedy_selection,
+                            base_value=greedy_value,
+                            base_stats=greedy_stats,
+                        )
+                        if not accepted:
+                            rejection_reason = reason
+                            continue
+                        greedy_selection = trial
+                        greedy_value = trial_value
+                        greedy_stats = trial_stats
+                        accepted_pairs.append(pair)
+                    if accepted_pairs:
+                        proposed = greedy_selection
+                        proposal_value = greedy_value
+                        proposal_stats = greedy_stats
+                        rejection_reason = "accepted_greedy"
+
+        for in_idx, out_idx, gap in accepted_pairs:
+            gap_tensor = scores.new_tensor(gap)
+            swap_weight[in_idx] = gap_tensor
+            swap_weight[out_idx] = gap_tensor
+            pair_anchors[in_idx] = scores[out_idx].detach()
+            pair_anchors[out_idx] = scores[in_idx].detach()
+
+        swap_count = len(accepted_pairs)
+        accepted = swap_count > 0
         if not accepted:
             proposed = selected
-            swap_weight.zero_()
-            swap_count = 0
+            proposal_value = objective_value
+            proposal_stats = hard_stats
+        proposal_components = self._gqer_component_values(proposal_stats)
 
         positive_weights = swap_weight[swap_weight > 0]
         if positive_weights.numel() > 0:
@@ -13796,6 +14218,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             "selected": selected,
             "proposed": proposed,
             "thresholds": thresholds,
+            "pair_anchors": pair_anchors,
             "swap_weight": swap_weight,
             "objective": objective_value,
             "proposal_objective": proposal_value,
@@ -13806,8 +14229,9 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             "swaps": float(swap_count),
             "improving_swaps": float(improving_count),
             "utility_gap": float(
-                torch.cat(utility_gaps).mean().detach().cpu()
-            ) if utility_gaps else 0.0,
+                sum(pair[2] for pair in accepted_pairs)
+                / max(len(accepted_pairs), 1)
+            ) if accepted_pairs else 0.0,
             "hard_wedge_mae": float(hard_stats.get("tail_wedge_log_mae", 0.0)),
             "hard_closure_mae": float(hard_stats.get("closure_rate_mae", 0.0)),
             "proposal_wedge_mae": float(
@@ -13816,6 +14240,11 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             "proposal_closure_mae": float(
                 proposal_stats.get("closure_rate_mae", 0.0)
             ),
+            "accepted": float(accepted),
+            "backtracking_depth": float(backtracking_depth),
+            "rejection_reason": rejection_reason,
+            "base_components": base_components,
+            "proposal_components": proposal_components,
         }
 
     def _compute_gqer_block_rank_loss(self, pred, clean_data, state, block_id):
@@ -13841,7 +14270,14 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         scores = self._gqer_exist_scores(pred.edge_attr)[idx]
         desired = state["proposed"][state_idx].to(scores.dtype)
         sign = desired * 2.0 - 1.0
-        threshold = state["thresholds"][state_idx].detach()
+        use_pair_anchor = bool(
+            getattr(self.cfg.model, "gqer_v2_enabled", False)
+            and getattr(self.cfg.model, "gqer_v2_pair_anchor_loss", True)
+        )
+        anchor_source = state.get("pair_anchors") if use_pair_anchor else None
+        if anchor_source is None:
+            anchor_source = state["thresholds"]
+        threshold = anchor_source[state_idx].detach()
         weights = state["swap_weight"][state_idx].detach().clamp(min=1e-8)
         margin = max(
             0.0, float(getattr(self.cfg.model, "gqer_score_margin", 0.1) or 0.0)
@@ -16191,6 +16627,18 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                         "hard_closure_mae"
                     ]
                     if getattr(self, "local_rank", 0) == 0:
+                        before = gqer_state.get("base_components", {})
+                        after = gqer_state.get("proposal_components", {})
+                        component_text = ",".join(
+                            f"{name}={before.get(name, 0.0):.4f}->"
+                            f"{after.get(name, 0.0):.4f}"
+                            for name in (
+                                "degree",
+                                "tail_wedge",
+                                "motif_wedge",
+                                "closure",
+                            )
+                        )
                         print(
                             "[GQER-GLOBAL] "
                             f"epoch={int(self.current_epoch)} "
@@ -16200,6 +16648,10 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                             f"utility_gap={gqer_state['utility_gap']:.4g} "
                             f"objective={gqer_state['objective']:.5f}->"
                             f"{gqer_state['proposal_objective']:.5f} "
+                            f"accepted={int(gqer_state.get('accepted', 0.0))} "
+                            f"backtrack={int(gqer_state.get('backtracking_depth', 0.0))} "
+                            f"reason={gqer_state.get('rejection_reason', 'unknown')} "
+                            f"components[{component_text}] "
                             f"hard_mae[wedge={gqer_state['hard_wedge_mae']:.4f},"
                             f"closure={gqer_state['hard_closure_mae']:.4f}]"
                         )

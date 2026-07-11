@@ -1,0 +1,31 @@
+# @package _global_
+defaults:
+  - pubmed_hetero_xey_hgt_gqer_pw20
+
+general:
+  name: pubmed_hetero_xey_hgt_gqer_v2_pw20
+
+model:
+  gqer_v2_enabled: true
+  gqer_v2_backtracking: true
+  gqer_v2_pareto_safe: true
+  gqer_v2_pair_anchor_loss: true
+  use_learned_structure_targets: true
+  learned_structure_target_source: train_stats
+  learned_structure_target_load_from_ckpt: true
+  sampling_structure_target_source: learned
+  sampling_structure_swap_limiter: true
+  sampling_structure_swap_limiter_exact_sequential: true
+  sampling_structure_swap_limiter_min_step_frac: 0.0
+  sampling_structure_swap_limiter_max_step_frac: 0.01
+  sampling_structure_swap_limiter_max_swaps: 512
+  sampling_structure_swap_limiter_model_score_weight: 0.1
+  sampling_structure_swap_limiter_gain_scale: 10.0
+  sampling_structure_swap_limiter_score_margin: 5.0
+  sampling_structure_swap_limiter_connectivity_guard: true
+  sampling_structure_swap_limiter_protect_lcc_bridges: true
+  sampling_structure_limiter_triangle_tolerance: 0.10
+  sampling_structure_limiter_clustering_tolerance: 0.10
+  sampling_structure_limiter_lcc_tolerance: 0.10
+  sampling_structure_limiter_assort_tolerance: 0.10
+  sampling_structure_limiter_degree_hist_tolerance: 0.10

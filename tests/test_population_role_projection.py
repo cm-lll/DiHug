@@ -23,6 +23,12 @@ class _Harness:
                 population_role_log_degree_temperature=0.2,
                 population_role_closure_rate_huber_beta=0.1,
                 gqer_score_margin=0.1,
+                gqer_v2_enabled=False,
+                gqer_v2_pareto_safe=True,
+                gqer_v2_component_tolerance=0.02,
+                gqer_v2_component_floor=0.01,
+                gqer_v2_min_relative_improvement=1e-6,
+                gqer_v2_pair_anchor_loss=True,
             )
         )
 
@@ -81,6 +87,11 @@ class _Harness:
 
     def _gqer_exist_scores(self, logits):
         return DiscreteDenoisingDiffusion._gqer_exist_scores(logits)
+
+    def _gqer_v2_accepts_proposal(self, *args, **kwargs):
+        return DiscreteDenoisingDiffusion._gqer_v2_accepts_proposal(
+            self, *args, **kwargs
+        )
 
 
 def test_soft_projection_matches_mass_and_has_translation_invariant_gradient():
@@ -399,6 +410,148 @@ def test_gqer_block_rank_loss_pushes_exchange_across_global_threshold():
     assert stats["pairs"] == 1.0
     assert logits.grad[0, 1] > 0.0
     assert logits.grad[1, 1] < 0.0
+
+
+def test_gqer_v2_pareto_acceptance_rejects_closure_tradeoff():
+    harness = _Harness()
+    harness.cfg.model.gqer_v2_enabled = True
+    accepted, reason = harness._gqer_v2_accepts_proposal(
+        0.30,
+        0.20,
+        {
+            "degree": 0.20,
+            "tail_wedge": 0.30,
+            "motif_wedge": 0.25,
+            "closure": 0.10,
+        },
+        {
+            "degree": 0.15,
+            "tail_wedge": 0.20,
+            "motif_wedge": 0.20,
+            "closure": 0.20,
+        },
+    )
+    assert not accepted
+    assert reason == "component:closure"
+
+
+def test_gqer_v2_pareto_acceptance_requires_largest_residual_to_improve():
+    harness = _Harness()
+    harness.cfg.model.gqer_v2_enabled = True
+    accepted, reason = harness._gqer_v2_accepts_proposal(
+        0.30,
+        0.25,
+        {
+            "degree": 0.10,
+            "tail_wedge": 0.30,
+            "motif_wedge": 0.20,
+            "closure": 0.10,
+        },
+        {
+            "degree": 0.08,
+            "tail_wedge": 0.30,
+            "motif_wedge": 0.15,
+            "closure": 0.09,
+        },
+    )
+    assert not accepted
+    assert reason == "primary:tail_wedge"
+
+
+def test_gqer_v2_pair_anchor_pushes_actual_add_above_drop():
+    harness = _Harness()
+    harness.cfg.model.gqer_v2_enabled = True
+    edges = torch.tensor([[0, 0], [1, 2]])
+    logits = torch.tensor(
+        [[0.0, 0.8], [0.0, 0.2]],
+        requires_grad=True,
+    )
+    pred = SimpleNamespace(edge_attr=logits, edge_index=edges)
+    state = {
+        "keys": torch.tensor([1, 2]),
+        "owners": torch.zeros(2, dtype=torch.long),
+        "selected": torch.tensor([True, False]),
+        "proposed": torch.tensor([False, True]),
+        # Deliberately uninformative family threshold. V2 must use the paired
+        # first-pass anchors below instead.
+        "thresholds": torch.zeros(2),
+        "pair_anchors": torch.tensor([0.2, 0.8]),
+        "swap_weight": torch.ones(2),
+    }
+    clean = SimpleNamespace(x=torch.zeros(3))
+
+    loss, stats = DiscreteDenoisingDiffusion._compute_gqer_block_rank_loss(
+        harness, pred, clean, state, block_id=0
+    )
+    loss.backward()
+
+    assert stats["pairs"] == 1.0
+    assert logits.grad[0, 1] > 0.0
+    assert logits.grad[1, 1] < 0.0
+
+
+def test_exact_sequential_terminal_projection_preserves_quota_and_closes_triangle():
+    harness = _Harness()
+    harness.local_rank = 1
+    harness.cfg.model = SimpleNamespace(
+        sampling_structure_swap_limiter=True,
+        sampling_structure_swap_limiter_weight=1.0,
+        sampling_structure_swap_limiter_max_swaps=1,
+        sampling_structure_swap_limiter_min_step_frac=0.0,
+        sampling_structure_swap_limiter_max_step_frac=1.0,
+        sampling_structure_swap_limiter_exact_sequential=True,
+        sampling_structure_limiter_target_triangles=1.0,
+        sampling_structure_limiter_triangle_weight=1.0,
+        sampling_structure_limiter_clustering_weight=0.0,
+        sampling_structure_limiter_lcc_weight=0.0,
+        sampling_structure_limiter_assort_weight=0.0,
+        sampling_structure_limiter_degree_weight=0.0,
+        sampling_structure_limiter_triangle_tolerance=0.0,
+        sampling_structure_swap_limiter_model_score_weight=0.0,
+        sampling_structure_swap_limiter_gain_scale=5.0,
+        sampling_structure_swap_limiter_score_margin=2.0,
+        sampling_structure_swap_limiter_pool_multiplier=4,
+        sampling_structure_swap_limiter_pair_top_adds=8,
+        sampling_structure_swap_limiter_pair_top_drops=8,
+        diffusion_steps=100,
+    )
+    harness.dataset_info = SimpleNamespace()
+    harness._sampling_structure_target_value = (
+        lambda metric, names: 1.0 if metric == "triangles" else None
+    )
+    harness._ensure_sampling_degree_pair_reference = lambda: None
+    harness._sampling_lcc_floor_target = lambda: (None, None)
+
+    # Selected path: 0-1-2-3. Swapping 2-3 for 0-2 closes one triangle while
+    # retaining the same graph/family cardinality.
+    edge_index = torch.tensor(
+        [[0, 1, 2, 0, 0, 1], [1, 2, 3, 2, 3, 3]], dtype=torch.long
+    )
+    selected = torch.tensor([0, 1, 2], dtype=torch.long)
+    edge_keys = edge_index[0] * 4 + edge_index[1]
+    scores = torch.tensor([1.0, 1.0, 0.1, 0.09, 0.0, 0.0])
+    data = SimpleNamespace(
+        node=torch.zeros((4, 1)),
+        batch=torch.zeros(4, dtype=torch.long),
+    )
+
+    projected = DiscreteDenoisingDiffusion._apply_global_exact_k_structure_swap_limiter(
+        harness,
+        data=data,
+        edge_index=edge_index,
+        edge_keys=edge_keys,
+        raw_scores=scores,
+        selection_scores=scores,
+        families=torch.zeros(6, dtype=torch.long),
+        edge_batch=torch.zeros(6, dtype=torch.long),
+        selected=selected,
+        sampling_step=1,
+        log_selection=False,
+    )
+
+    assert projected.numel() == selected.numel()
+    assert 3 in projected.tolist()
+    assert 2 not in projected.tolist()
 
 
 def test_family_inference_prefers_supported_canonical_over_zero_reverse():

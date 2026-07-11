@@ -451,6 +451,11 @@ sampling_structure_swap_limiter_connectivity_candidate_bonus: 4.0
 sampling_structure_swap_limiter_min_step_frac: 0.0
 sampling_structure_swap_limiter_max_step_frac: 1.0
 sampling_structure_swap_limiter_log_every: 1
+# Re-evaluate every proposed terminal swap on the current hard graph and roll
+# it back unless the tolerance-excess vector improves without trading one
+# structural component against another. This is slower and intended for the
+# final reverse steps, where it acts as a feasibility projection.
+sampling_structure_swap_limiter_exact_sequential: false
 # Full-step sampling can stop once a training-prior structure budget is reached.
 # This is a sampling-only diagnostic/controller: it does not use true edge
 # membership, but it can use training-graph structural priors such as triangle
@@ -646,6 +651,18 @@ gqer_max_swaps_per_family: 8
 gqer_score_margin: 0.1
 gqer_min_utility_gap: 1.0e-8
 gqer_max_pair_weight: 5.0
+# V2 validates hard quota-preserving proposals against the exact multiset
+# objective. Conflicting batches are halved until accepted, followed by a
+# bounded exact-greedy fallback. Pair supervision uses the detached score of
+# the actual exchange counterpart instead of a shared family threshold.
+gqer_v2_enabled: false
+gqer_v2_backtracking: true
+gqer_v2_pareto_safe: true
+gqer_v2_component_tolerance: 0.02
+gqer_v2_component_floor: 0.01
+gqer_v2_min_relative_improvement: 1.0e-6
+gqer_v2_greedy_fallback_max_trials: 16
+gqer_v2_pair_anchor_loss: true
 # Training-only endpoint role distribution supervision. It matches how expected
 # clean edge endpoints distribute over node-type x clean-degree buckets. This is
 # a lightweight way to teach the denoiser that many low-degree nodes, not only a
