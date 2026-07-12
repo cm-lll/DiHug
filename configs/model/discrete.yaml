@@ -371,7 +371,7 @@ sampling_node_role_budget_repair_log_every: 1
 # config = read explicit target_* values below;
 # learned = read the checkpoint's learned graph-level target head, falling back
 # to config only when the checkpoint has no such head.
-sampling_structure_target_source: config
+sampling_structure_target_source: config  # config | learned | checkpoint_only
 # Learn graph-level structural targets during training, then reuse them during
 # sampling as non-oracle limiter/budget/early-stop targets.
 use_learned_structure_targets: false

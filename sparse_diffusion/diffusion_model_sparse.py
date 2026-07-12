@@ -6,6 +6,7 @@ import pickle
 import json
 import traceback
 import sys
+import copy
 
 import torch
 import wandb
@@ -396,6 +397,31 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
 
     def load_state_dict(self, state_dict, strict: bool = True):
         state_dict = dict(state_dict)
+        bundle_names = (
+            "structure_target_bundle_version",
+            "structure_target_num_nodes",
+            "structure_degree_boundaries",
+            "structure_degree_hist",
+            "structure_family_pair_counts",
+            "structure_family_totals",
+            "structure_block_type_counts",
+            "structure_block_intra_counts",
+            "structure_block_inter_counts",
+        )
+        if self._checkpoint_only_structure_targets_requested():
+            required = ("learned_structure_target_raw",) + bundle_names
+            missing = [name for name in required if name not in state_dict]
+            if missing:
+                raise RuntimeError(
+                    "checkpoint_only structure sampling requires a target bundle; "
+                    f"checkpoint is missing {missing}. Rebuild the checkpoint during "
+                    "training with the current code before strict sampling."
+                )
+        # Dynamic aggregate tensors are resized from checkpoint metadata before
+        # the ordinary PyTorch loader performs its shape checks.
+        for name in bundle_names:
+            if name in state_dict and hasattr(self, name):
+                setattr(self, name, torch.empty_like(state_dict[name]))
         if (
             bool(getattr(self.cfg.model, "use_learned_structure_targets", False))
             and not bool(getattr(self.cfg.model, "learned_structure_target_trainable", False))
@@ -428,7 +454,23 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 state_dict["learned_structure_target_raw"] = (
                     self.learned_structure_target_raw.detach().clone()
                 )
-        return super().load_state_dict(state_dict, strict=strict)
+        result = super().load_state_dict(state_dict, strict=strict)
+        if self._checkpoint_only_structure_targets_requested():
+            version = int(self.structure_target_bundle_version.item())
+            num_nodes = int(self.structure_target_num_nodes.item())
+            if version != 1 or num_nodes <= 0 or self.structure_family_totals.numel() == 0:
+                raise RuntimeError(
+                    "Invalid checkpoint_only structure target bundle: "
+                    f"version={version}, nodes={num_nodes}, "
+                    f"families={int(self.structure_family_totals.numel())}"
+                )
+            self._sampling_degree_pair_reference = None
+            if getattr(self, "local_rank", 0) == 0:
+                print(
+                    "[STRUCTURE-TARGET] source=checkpoint_only "
+                    f"version={version} nodes={num_nodes}"
+                )
+        return result
 
     def _init_learned_structure_controller(self):
         """Small trainable bucket bias used to replace oracle sampling brakes."""
@@ -473,6 +515,8 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         if not bool(getattr(self.cfg.model, "use_learned_structure_targets", False)):
             return
 
+        checkpoint_only_load = self._checkpoint_only_structure_targets_requested()
+
         def _float_cfg(name, default):
             value = getattr(self.cfg.model, name, default)
             if value is None:
@@ -487,7 +531,10 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             getattr(self.cfg.model, "learned_structure_target_source", "train_stats")
             or "train_stats"
         ).lower()
-        if source in {"train", "train_stats", "training", "dataset"}:
+        if (
+            source in {"train", "train_stats", "training", "dataset"}
+            and not checkpoint_only_load
+        ):
             stats = self._estimate_training_structure_target_stats()
         if stats is None:
             stats = {
@@ -515,6 +562,148 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             "lcc_size": float(stats.get("lcc_size", 0.0)),
             "assortativity": float(stats.get("assortativity", 0.0)),
         }
+        self._init_structure_target_bundle(from_training=not checkpoint_only_load)
+
+    def _checkpoint_only_structure_targets_requested(self):
+        source = str(
+            getattr(self.cfg.model, "sampling_structure_target_source", "config")
+            or "config"
+        ).lower()
+        test_only = getattr(self.cfg.general, "test_only", None)
+        return source == "checkpoint_only" and bool(test_only)
+
+    def _checkpoint_only_structure_sampling_active(self):
+        source = str(
+            getattr(self.cfg.model, "sampling_structure_target_source", "config")
+            or "config"
+        ).lower()
+        return source == "checkpoint_only" and not self.training
+
+    def _sampling_family_target_counts(self):
+        """Return family cardinalities without consulting a sampling reference graph."""
+        edge_family2id = getattr(self.dataset_info, "edge_family2id", {}) or {}
+        if self._checkpoint_only_structure_sampling_active():
+            totals = self.structure_family_totals.detach().cpu().reshape(-1)
+            if totals.numel() == 0:
+                raise RuntimeError(
+                    "checkpoint_only sampling requires persisted family totals"
+                )
+            return {
+                str(name): float(totals[int(family_id)].item())
+                if 0 <= int(family_id) < int(totals.numel())
+                else 0.0
+                for name, family_id in edge_family2id.items()
+            }
+        return dict(
+            getattr(self.dataset_info, "edge_family_avg_edge_counts", {}) or {}
+        )
+
+    def _sampling_dataset_info_with_checkpoint_targets(self):
+        """Expose checkpoint cardinalities to legacy heterogeneous noise helpers."""
+        if not self._checkpoint_only_structure_sampling_active():
+            return self.dataset_info
+        info = copy.copy(self.dataset_info)
+        counts = self._sampling_family_target_counts()
+        info.edge_family_avg_edge_counts = counts
+        info.edge_family_avg_counts = counts
+
+        grouped = {}
+        endpoints = getattr(info, "fam_endpoints", {}) or {}
+        for family_name, count in counts.items():
+            endpoint = endpoints.get(family_name, {}) or {}
+            src_type = endpoint.get("src_type")
+            dst_type = endpoint.get("dst_type")
+            if src_type is None or dst_type is None or float(count) <= 0.0:
+                continue
+            grouped.setdefault((src_type, dst_type), {})[family_name] = float(count)
+        for family_counts in grouped.values():
+            total = max(sum(family_counts.values()), 1.0)
+            for family_name in family_counts:
+                family_counts[family_name] /= total
+        info.edge_family_distribution = grouped
+        return info
+
+    def _init_structure_target_bundle(self, from_training):
+        empty_float = torch.empty((0,), dtype=torch.float32)
+        self.register_buffer(
+            "structure_target_bundle_version",
+            torch.tensor(1, dtype=torch.long),
+            persistent=True,
+        )
+        self.register_buffer(
+            "structure_target_num_nodes",
+            torch.tensor(0, dtype=torch.long),
+            persistent=True,
+        )
+        self.register_buffer(
+            "structure_degree_boundaries", empty_float.clone(), persistent=True
+        )
+        self.register_buffer(
+            "structure_degree_hist", empty_float.clone(), persistent=True
+        )
+        self.register_buffer(
+            "structure_family_pair_counts",
+            torch.empty((0, 0, 0), dtype=torch.float32),
+            persistent=True,
+        )
+        self.register_buffer(
+            "structure_family_totals", empty_float.clone(), persistent=True
+        )
+        self.register_buffer(
+            "structure_block_type_counts",
+            torch.empty((0, 0), dtype=torch.long),
+            persistent=True,
+        )
+        self.register_buffer(
+            "structure_block_intra_counts",
+            torch.empty((0, 0), dtype=torch.long),
+            persistent=True,
+        )
+        self.register_buffer(
+            "structure_block_inter_counts",
+            torch.empty((0, 0, 0), dtype=torch.long),
+            persistent=True,
+        )
+        if not from_training:
+            return
+        source = self._get_reference_graph_for_sampling_stats()
+        reference = self._build_sampling_degree_pair_reference(source)
+        if not reference:
+            raise RuntimeError(
+                "Unable to build checkpoint structure target bundle from training data"
+            )
+        num_bins = max(
+            2, int(getattr(self.cfg.model, "sampling_degree_pair_bins", 5) or 5)
+        )
+        family_ids = list(reference.get("pair_counts", {}).keys())
+        configured_ids = list(
+            (getattr(self.dataset_info, "edge_family2id", {}) or {}).values()
+        )
+        num_families = max(
+            [int(value) for value in family_ids + configured_ids] + [-1]
+        ) + 1
+        pair_tensor = torch.zeros(
+            (num_families, num_bins, num_bins), dtype=torch.float32
+        )
+        totals = torch.zeros((num_families,), dtype=torch.float32)
+        for family_id, pairs in reference.get("pair_counts", {}).items():
+            family_id = int(family_id)
+            if family_id < 0 or family_id >= num_families:
+                continue
+            for (left, right), count in pairs.items():
+                left, right = int(left), int(right)
+                if 0 <= left < num_bins and 0 <= right < num_bins:
+                    pair_tensor[family_id, left, right] = float(count)
+            totals[family_id] = float(
+                reference.get("family_totals", {}).get(family_id, 0)
+            )
+        self.structure_target_num_nodes = torch.tensor(
+            int(reference.get("num_nodes", 0)), dtype=torch.long
+        )
+        self.structure_degree_boundaries = reference["boundaries"].float().clone()
+        self.structure_degree_hist = reference["degree_hist"].float().clone()
+        self.structure_family_pair_counts = pair_tensor
+        self.structure_family_totals = totals
 
     def _estimate_training_structure_target_stats(self):
         datamodule = getattr(self.dataset_info, "datamodule", None)
@@ -684,10 +873,19 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             getattr(self.cfg.model, "sampling_structure_target_source", "config")
             or "config"
         ).lower()
-        if source in {"learned", "learned_if_available", "auto"}:
+        if source in {
+            "learned",
+            "learned_if_available",
+            "auto",
+            "checkpoint_only",
+        }:
             learned = self._learned_structure_target_value(metric)
             if learned is not None:
                 return learned
+            if source == "checkpoint_only":
+                raise RuntimeError(
+                    f"checkpoint_only target bundle has no value for {metric!r}"
+                )
             if source == "learned":
                 # Old checkpoints can still be sampled with explicit config
                 # targets, but they will not silently fabricate learned values.
@@ -1054,7 +1252,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 type_counts[:, type_id] = torch.bincount(batch[mask], minlength=bs).float()
 
         expected_counts = torch.zeros((num_families,), device=self.device, dtype=torch.float32)
-        avg_counts = getattr(self.dataset_info, "edge_family_avg_edge_counts", {}) or {}
+        avg_counts = self._sampling_family_target_counts()
         for fam_name, fam_id in edge_family2id.items():
             expected_counts[int(fam_id)] = float(avg_counts.get(fam_name, 0.0) or 0.0)
 
@@ -1477,6 +1675,10 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         if templates:
             self._hetero_block_templates = templates
             self._hetero_block_template_type_order = [name for name, _ in sorted_types]
+            if hasattr(self, "structure_block_type_counts"):
+                self.structure_block_type_counts = torch.tensor(
+                    templates, dtype=torch.long, device=self.device
+                )
             if getattr(self, "local_rank", 0) == 0 and not getattr(self, "_logged_hetero_block_templates", False):
                 print(f"[BLOCK] cached type templates: {len(templates)} blocks, type_order={self._hetero_block_template_type_order}")
                 self._logged_hetero_block_templates = True
@@ -1513,6 +1715,29 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             "intra": intra,
             "inter": inter,
         }
+        if hasattr(self, "structure_block_intra_counts"):
+            num_blocks = int(len(blocks))
+            configured_ids = list(
+                (getattr(self.dataset_info, "edge_family2id", {}) or {}).values()
+            )
+            observed_ids = [int(key[-1]) for key in list(intra) + list(inter)]
+            num_families = max(
+                [int(value) for value in configured_ids + observed_ids] + [-1]
+            ) + 1
+            intra_tensor = torch.zeros(
+                (num_blocks, num_families), dtype=torch.long, device=self.device
+            )
+            inter_tensor = torch.zeros(
+                (num_blocks, num_blocks, num_families),
+                dtype=torch.long,
+                device=self.device,
+            )
+            for (block_id, family_id), count in intra.items():
+                intra_tensor[int(block_id), int(family_id)] = int(count)
+            for (left, right, family_id), count in inter.items():
+                inter_tensor[int(left), int(right), int(family_id)] = int(count)
+            self.structure_block_intra_counts = intra_tensor
+            self.structure_block_inter_counts = inter_tensor
         if getattr(self, "local_rank", 0) == 0 and not getattr(self, "_logged_hetero_block_edge_templates", False):
             total_intra = sum(intra.values())
             total_inter = sum(inter.values())
@@ -1609,9 +1834,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         fam_endpoints = getattr(self.dataset_info, "fam_endpoints", {})
         type_offsets = getattr(self.dataset_info, "type_offsets", {})
         edge_family_offsets = getattr(self.dataset_info, "edge_family_offsets", {})
-        edge_family_avg_edge_counts = (
-            getattr(self.dataset_info, "edge_family_avg_edge_counts", {}) or {}
-        )
+        edge_family_avg_edge_counts = self._sampling_family_target_counts()
         if not (id2edge_family and fam_endpoints and type_offsets and edge_family_offsets and all_blocks):
             return None, None, None
         if inter_state is None:
@@ -2265,6 +2488,53 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
     def _ensure_hetero_block_templates_from_data(self, data=None):
         """Build block type templates on demand, e.g. for test_only checkpoints."""
         if getattr(self, "_hetero_block_templates", None):
+            return
+        if self._checkpoint_only_structure_sampling_active():
+            type_counts = self.structure_block_type_counts.detach().cpu().long()
+            intra_counts = self.structure_block_intra_counts.detach().cpu().long()
+            inter_counts = self.structure_block_inter_counts.detach().cpu().long()
+            if type_counts.numel() == 0 or intra_counts.numel() == 0:
+                raise RuntimeError(
+                    "checkpoint_only sampling requires persisted block templates"
+                )
+            self._hetero_block_templates = [
+                tuple(int(value) for value in row.tolist()) for row in type_counts
+            ]
+            sorted_types = sorted(
+                (
+                    (str(name), int(offset))
+                    for name, offset in (
+                        getattr(self.dataset_info, "type_offsets", {}) or {}
+                    ).items()
+                ),
+                key=lambda item: item[1],
+            )
+            self._hetero_block_template_type_order = [
+                name for name, _ in sorted_types
+            ]
+            intra = {}
+            for item in (intra_counts > 0).nonzero(as_tuple=False):
+                block_id, family_id = int(item[0]), int(item[1])
+                intra[(block_id, family_id)] = int(
+                    intra_counts[block_id, family_id].item()
+                )
+            inter = {}
+            for item in (inter_counts > 0).nonzero(as_tuple=False):
+                left, right, family_id = map(int, item.tolist())
+                inter[(left, right, family_id)] = int(
+                    inter_counts[left, right, family_id].item()
+                )
+            self._hetero_block_edge_templates = {
+                "num_blocks": int(type_counts.shape[0]),
+                "intra": intra,
+                "inter": inter,
+            }
+            if getattr(self, "local_rank", 0) == 0:
+                print(
+                    "[BLOCK-TARGET] source=checkpoint_only "
+                    f"blocks={int(type_counts.shape[0])} "
+                    f"intra={sum(intra.values())} inter={sum(inter.values())}"
+                )
             return
         source = data
         if source is None and hasattr(self.dataset_info, "datamodule"):
@@ -3197,6 +3467,10 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         return fam_ids
 
     def _get_reference_graph_for_sampling_stats(self):
+        if self._checkpoint_only_structure_sampling_active():
+            raise RuntimeError(
+                "checkpoint_only sampling forbids reading train/test reference graphs"
+            )
         source = None
         if hasattr(self.dataset_info, "datamodule"):
             dm = self.dataset_info.datamodule
@@ -3217,26 +3491,29 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             pass
         return source
 
-    def _ensure_sampling_degree_pair_reference(self):
-        if getattr(self, "_sampling_degree_pair_reference", None) is not None:
-            return self._sampling_degree_pair_reference
-        source = self._get_reference_graph_for_sampling_stats()
-        if source is None or not hasattr(source, "edge_index") or not hasattr(source, "edge_attr"):
-            self._sampling_degree_pair_reference = {}
-            return self._sampling_degree_pair_reference
+    def _build_sampling_degree_pair_reference(self, source):
+        if (
+            source is None
+            or not hasattr(source, "edge_index")
+            or not hasattr(source, "edge_attr")
+        ):
+            return {}
         edge_index = source.edge_index.detach().cpu().long()
         edge_attr = source.edge_attr.detach().cpu()
-        if edge_attr.dim() > 1:
-            labels = edge_attr.argmax(dim=-1).long()
-        else:
-            labels = edge_attr.long().reshape(-1)
-        n_nodes = int(source.x.shape[0] if hasattr(source, "x") else source.node.shape[0])
+        labels = (
+            edge_attr.argmax(dim=-1).long()
+            if edge_attr.dim() > 1
+            else edge_attr.long().reshape(-1)
+        )
+        n_nodes = int(
+            source.x.shape[0]
+            if hasattr(source, "x")
+            else source.node.shape[0]
+        )
         label_to_fam = self._label_to_family_lookup().cpu()
         if edge_index.numel() == 0 or labels.numel() == 0 or n_nodes <= 0:
-            self._sampling_degree_pair_reference = {}
-            return self._sampling_degree_pair_reference
+            return {}
 
-        # Use unique undirected positive edges for degree bins and family pair statistics.
         seen = set()
         edges = []
         fams = []
@@ -3251,48 +3528,148 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             fam = int(label_to_fam[label].item())
             if fam < 0:
                 continue
-            a, b = (u, v) if u < v else (v, u)
-            key = (a, b, fam)
+            left, right = (u, v) if u < v else (v, u)
+            key = (left, right, fam)
             if key in seen:
                 continue
             seen.add(key)
-            edges.append((a, b))
+            edges.append((left, right))
             fams.append(fam)
 
         degree = torch.zeros(n_nodes, dtype=torch.float32)
-        for u, v in edges:
-            degree[u] += 1.0
-            degree[v] += 1.0
-        num_bins = max(2, int(getattr(self.cfg.model, "sampling_degree_pair_bins", 5) or 5))
+        for left, right in edges:
+            degree[left] += 1.0
+            degree[right] += 1.0
+        num_bins = max(
+            2, int(getattr(self.cfg.model, "sampling_degree_pair_bins", 5) or 5)
+        )
         if n_nodes > 1:
-            qs = torch.linspace(0, 1, steps=num_bins + 1)[1:-1]
-            boundaries = torch.quantile(degree, qs).unique(sorted=True)
+            quantiles = torch.linspace(0, 1, steps=num_bins + 1)[1:-1]
+            boundaries = torch.quantile(degree, quantiles).unique(sorted=True)
         else:
             boundaries = torch.empty((0,), dtype=torch.float32)
         degree_bins = torch.bucketize(degree, boundaries).long()
+        degree_hist = torch.bincount(
+            degree_bins.clamp(0, num_bins - 1), minlength=num_bins
+        ).float()
+        degree_hist = degree_hist / degree_hist.sum().clamp(min=1.0)
 
         pair_counts = {}
         family_totals = {}
-        for (u, v), fam in zip(edges, fams):
-            bu = int(degree_bins[u].item())
-            bv = int(degree_bins[v].item())
-            a, b = (bu, bv) if bu <= bv else (bv, bu)
-            fam = int(fam)
-            d = pair_counts.setdefault(fam, {})
-            d[(a, b)] = int(d.get((a, b), 0)) + 1
-            family_totals[fam] = int(family_totals.get(fam, 0)) + 1
-        ref = {
+        for (left, right), fam in zip(edges, fams):
+            bin_left = int(degree_bins[left].item())
+            bin_right = int(degree_bins[right].item())
+            a, b = (
+                (bin_left, bin_right)
+                if bin_left <= bin_right
+                else (bin_right, bin_left)
+            )
+            family_pairs = pair_counts.setdefault(int(fam), {})
+            family_pairs[(a, b)] = int(family_pairs.get((a, b), 0)) + 1
+            family_totals[int(fam)] = int(family_totals.get(int(fam), 0)) + 1
+        return {
+            "num_nodes": n_nodes,
             "degree": degree,
             "degree_bins": degree_bins,
+            "degree_hist": degree_hist,
             "boundaries": boundaries,
             "pair_counts": pair_counts,
             "family_totals": family_totals,
         }
+
+    def _sampling_degree_reference_from_checkpoint(self):
+        if not hasattr(self, "structure_target_bundle_version"):
+            raise RuntimeError("checkpoint_only target bundle is not initialized")
+        if int(self.structure_target_bundle_version.item()) != 1:
+            raise RuntimeError(
+                "Unsupported checkpoint structure target bundle version: "
+                f"{int(self.structure_target_bundle_version.item())}"
+            )
+        pair_tensor = self.structure_family_pair_counts.detach().cpu()
+        totals_tensor = self.structure_family_totals.detach().cpu()
+        pair_counts = {}
+        family_totals = {}
+        for family_id in range(int(pair_tensor.shape[0])):
+            pairs = {}
+            nonzero = (pair_tensor[family_id] > 0).nonzero(as_tuple=False)
+            for pair in nonzero:
+                left, right = int(pair[0].item()), int(pair[1].item())
+                pairs[(left, right)] = int(
+                    round(float(pair_tensor[family_id, left, right].item()))
+                )
+            if pairs:
+                pair_counts[family_id] = pairs
+            if family_id < int(totals_tensor.numel()):
+                total = int(round(float(totals_tensor[family_id].item())))
+                if total > 0:
+                    family_totals[family_id] = total
+        runtime_bins = getattr(self, "_sampling_runtime_degree_bins", None)
+        return {
+            "num_nodes": int(self.structure_target_num_nodes.item()),
+            "degree_bins": runtime_bins,
+            "degree_hist": self.structure_degree_hist.detach().cpu(),
+            "boundaries": self.structure_degree_boundaries.detach().cpu(),
+            "pair_counts": pair_counts,
+            "family_totals": family_totals,
+        }
+
+    def _refresh_sampling_runtime_degree_bins(self, data):
+        if not self._checkpoint_only_structure_sampling_active():
+            return
+        node_obj = getattr(data, "node", None)
+        if node_obj is None:
+            node_obj = getattr(data, "x", None)
+        num_nodes = 0 if node_obj is None else int(node_obj.shape[0])
+        expected_nodes = int(self.structure_target_num_nodes.item())
+        if expected_nodes > 0 and num_nodes != expected_nodes:
+            raise RuntimeError(
+                "checkpoint structure target node-count mismatch: "
+                f"checkpoint={expected_nodes}, sampling={num_nodes}"
+            )
+        degree = torch.zeros(num_nodes, dtype=torch.float32)
+        edge_index = getattr(data, "edge_index", None)
+        edge_attr = getattr(data, "edge_attr", None)
+        if edge_index is not None and edge_attr is not None and edge_index.numel() > 0:
+            labels = (
+                edge_attr.argmax(dim=-1).long()
+                if edge_attr.dim() > 1
+                else edge_attr.long().reshape(-1)
+            )
+            positive = labels > 0
+            edges = edge_index[:, positive].detach().cpu().long()
+            seen = set()
+            for col in range(int(edges.shape[1])):
+                left = int(edges[0, col].item())
+                right = int(edges[1, col].item())
+                if left == right or left < 0 or right < 0:
+                    continue
+                if left >= num_nodes or right >= num_nodes:
+                    continue
+                key = (min(left, right), max(left, right))
+                if key in seen:
+                    continue
+                seen.add(key)
+                degree[key[0]] += 1.0
+                degree[key[1]] += 1.0
+        boundaries = self.structure_degree_boundaries.detach().cpu().float()
+        self._sampling_runtime_degree_bins = torch.bucketize(
+            degree, boundaries
+        ).long()
+        self._sampling_degree_pair_reference = None
+
+    def _ensure_sampling_degree_pair_reference(self):
+        if self._checkpoint_only_structure_sampling_active():
+            return self._sampling_degree_reference_from_checkpoint()
+        if getattr(self, "_sampling_degree_pair_reference", None) is not None:
+            return self._sampling_degree_pair_reference
+        source = self._get_reference_graph_for_sampling_stats()
+        ref = self._build_sampling_degree_pair_reference(source)
         self._sampling_degree_pair_reference = ref
         if getattr(self, "local_rank", 0) == 0 and not getattr(self, "_logged_sampling_degree_pair_reference", False):
             print(
-                f"[采样-DEGPAIR] cached reference degree-pair bins={num_bins} "
-                f"families={len(pair_counts)} edges={len(edges)} boundaries={boundaries.tolist()}"
+                "[采样-DEGPAIR] cached training reference "
+                f"families={len(ref.get('pair_counts', {}))} "
+                f"boundaries={ref.get('boundaries', torch.empty(0)).tolist()}"
             )
             self._logged_sampling_degree_pair_reference = True
         return ref
@@ -3880,6 +4257,11 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         logits = logits[chosen]
         candidate_count_after = int(raw_scores.numel())
 
+        # In checkpoint-only mode endpoint roles are derived from the current
+        # generated graph. The checkpoint contributes only aggregate bin
+        # boundaries and target distributions, never real per-node degrees.
+        self._refresh_sampling_runtime_degree_bins(data)
+
         mode = str(selection_mode).lower()
         base_seed = self._current_sampling_seed()
         score_override = str(
@@ -4053,9 +4435,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         else:
             raise ValueError(f"Unsupported global exact-K mode: {selection_mode}")
 
-        avg_counts = (
-            getattr(self.dataset_info, "edge_family_avg_edge_counts", {}) or {}
-        )
+        avg_counts = self._sampling_family_target_counts()
         edge_family2id = getattr(self.dataset_info, "edge_family2id", {}) or {}
         id2edge_family = {int(v): str(k) for k, v in edge_family2id.items()}
         graph_ids = edge_batch.unique(sorted=True)
@@ -5082,6 +5462,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         ref = self._ensure_sampling_degree_pair_reference()
         degree_boundaries = ref.get("boundaries") if ref else None
         ref_degree_bins = ref.get("degree_bins") if ref else None
+        ref_degree_hist = ref.get("degree_hist") if ref else None
 
         def _clustering_value(triangles, degree):
             degree = float(degree)
@@ -5183,21 +5564,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             return tri
 
         def _assortativity(edges, degree):
-            if len(edges) <= 1:
-                return 0.0
-            left = []
-            right = []
-            for u, v in edges:
-                left.append(float(degree[u]))
-                right.append(float(degree[v]))
-            left = torch.tensor(left, dtype=torch.float32)
-            right = torch.tensor(right, dtype=torch.float32)
-            lc = left - left.mean()
-            rc = right - right.mean()
-            denom = lc.std(unbiased=False) * rc.std(unbiased=False)
-            if float(denom.item()) <= 0.0:
-                return 0.0
-            return float(((lc * rc).mean() / denom).item())
+            return self._undirected_degree_assortativity(edges, degree)
 
         total_swaps = 0
         total_considered = 0
@@ -5263,8 +5630,10 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             if (
                 degree_w != 0.0
                 and degree_boundaries is not None
-                and ref_degree_bins is not None
-                and ref_degree_bins.numel() > 0
+                and (
+                    (ref_degree_hist is not None and ref_degree_hist.numel() > 0)
+                    or (ref_degree_bins is not None and ref_degree_bins.numel() > 0)
+                )
             ):
                 deg_tensor = torch.tensor(
                     [degree[i] for i in range(total_nodes)], dtype=torch.float32
@@ -5278,9 +5647,16 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 graph_bins = degree_bins_current[nodes].clamp(0, num_bins - 1)
                 cur_hist = torch.bincount(graph_bins, minlength=num_bins).float()
                 cur_hist = cur_hist / torch.clamp(cur_hist.sum(), min=1.0)
-                ref_bins = ref_degree_bins.detach().cpu().long().clamp(0, num_bins - 1)
-                ref_hist = torch.bincount(ref_bins, minlength=num_bins).float()
-                ref_hist = ref_hist / torch.clamp(ref_hist.sum(), min=1.0)
+                if ref_degree_hist is not None and ref_degree_hist.numel() > 0:
+                    ref_hist = ref_degree_hist.detach().cpu().float()
+                    if int(ref_hist.numel()) < num_bins:
+                        ref_hist = F.pad(ref_hist, (0, num_bins - int(ref_hist.numel())))
+                    ref_hist = ref_hist[:num_bins]
+                    ref_hist = ref_hist / torch.clamp(ref_hist.sum(), min=1.0)
+                else:
+                    ref_bins = ref_degree_bins.detach().cpu().long().clamp(0, num_bins - 1)
+                    ref_hist = torch.bincount(ref_bins, minlength=num_bins).float()
+                    ref_hist = ref_hist / torch.clamp(ref_hist.sum(), min=1.0)
                 degree_over = cur_hist - ref_hist
                 current_degree_l1 = float(degree_over.abs().sum().item())
 
@@ -5305,8 +5681,10 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 if (
                     degree_w != 0.0
                     and degree_boundaries is not None
-                    and ref_degree_bins is not None
-                    and ref_degree_bins.numel() > 0
+                    and (
+                        (ref_degree_hist is not None and ref_degree_hist.numel() > 0)
+                        or (ref_degree_bins is not None and ref_degree_bins.numel() > 0)
+                    )
                 ):
                     degree_tensor = torch.tensor(
                         exact_degree, dtype=torch.float32
@@ -5332,13 +5710,23 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                         graph_bins, minlength=num_bins
                     ).float()
                     current_hist = current_hist / current_hist.sum().clamp(min=1.0)
-                    reference_bins = (
-                        ref_degree_bins.detach().cpu().long().clamp(0, num_bins - 1)
-                    )
-                    reference_hist = torch.bincount(
-                        reference_bins, minlength=num_bins
-                    ).float()
-                    reference_hist = reference_hist / reference_hist.sum().clamp(min=1.0)
+                    if ref_degree_hist is not None and ref_degree_hist.numel() > 0:
+                        reference_hist = ref_degree_hist.detach().cpu().float()
+                        if int(reference_hist.numel()) < num_bins:
+                            reference_hist = F.pad(
+                                reference_hist,
+                                (0, num_bins - int(reference_hist.numel())),
+                            )
+                        reference_hist = reference_hist[:num_bins]
+                        reference_hist = reference_hist / reference_hist.sum().clamp(min=1.0)
+                    else:
+                        reference_bins = (
+                            ref_degree_bins.detach().cpu().long().clamp(0, num_bins - 1)
+                        )
+                        reference_hist = torch.bincount(
+                            reference_bins, minlength=num_bins
+                        ).float()
+                        reference_hist = reference_hist / reference_hist.sum().clamp(min=1.0)
                     exact_degree_l1 = float(
                         (current_hist - reference_hist).abs().sum().item()
                     )
@@ -6542,7 +6930,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         edge_batch = batch[edge_index[0]]
 
         family_targets = {}
-        avg_counts = getattr(self.dataset_info, "edge_family_avg_edge_counts", {}) or {}
+        avg_counts = self._sampling_family_target_counts()
         edge_family2id = getattr(self.dataset_info, "edge_family2id", {}) or {}
         bs = int(batch.max().item()) + 1 if batch.numel() else 1
         for fam_name, fam_id in edge_family2id.items():
@@ -6826,11 +7214,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                     for fam_id, fam_name, mask, n, _k in family_infos
                 ]
             elif balance_mode in {"target", "target_count", "family_target", "avg_count"} and family_infos:
-                avg_counts = (
-                    getattr(self.dataset_info, "edge_family_avg_edge_counts", None)
-                    or getattr(self.dataset_info, "edge_family_avg_counts", None)
-                    or {}
-                )
+                avg_counts = self._sampling_family_target_counts()
                 target_infos = []
                 for fam_id, fam_name, mask, n, k in family_infos:
                     target = avg_counts.get(fam_name, None)
@@ -7382,7 +7766,11 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                     ref = self._ensure_sampling_degree_pair_reference()
                     boundaries = ref.get("boundaries") if ref else None
                     ref_bins = ref.get("degree_bins") if ref else None
-                    if boundaries is not None and ref_bins is not None and ref_bins.numel() > 0:
+                    ref_hist_saved = ref.get("degree_hist") if ref else None
+                    if boundaries is not None and (
+                        (ref_hist_saved is not None and ref_hist_saved.numel() > 0)
+                        or (ref_bins is not None and ref_bins.numel() > 0)
+                    ):
                         if deg is None:
                             deg = adj.sum(dim=1)
                         num_bins = max(
@@ -7403,10 +7791,19 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                             minlength=num_bins,
                         ).float()
                         cur_hist = cur_hist / torch.clamp(cur_hist.sum(), min=1.0)
-                        ref_hist = torch.bincount(
-                            ref_bins.to(device=device).long().clamp(0, num_bins - 1),
-                            minlength=num_bins,
-                        ).float()
+                        if ref_hist_saved is not None and ref_hist_saved.numel() > 0:
+                            ref_hist = ref_hist_saved.to(device=device).float()
+                            if int(ref_hist.numel()) < num_bins:
+                                ref_hist = F.pad(
+                                    ref_hist,
+                                    (0, num_bins - int(ref_hist.numel())),
+                                )
+                            ref_hist = ref_hist[:num_bins]
+                        else:
+                            ref_hist = torch.bincount(
+                                ref_bins.to(device=device).long().clamp(0, num_bins - 1),
+                                minlength=num_bins,
+                            ).float()
                         ref_hist = ref_hist / torch.clamp(ref_hist.sum(), min=1.0)
                         degree_over_bins = cur_hist - ref_hist
                         current_degree_hist_l1 = float(
@@ -8906,7 +9303,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         fam_endpoints = getattr(self.dataset_info, "fam_endpoints", {})
         type_offsets = getattr(self.dataset_info, "type_offsets", {})
         edge_family_offsets = getattr(self.dataset_info, "edge_family_offsets", {})
-        edge_family_avg_edge_counts = getattr(self.dataset_info, "edge_family_avg_edge_counts", {}) or {}
+        edge_family_avg_edge_counts = self._sampling_family_target_counts()
         if not (id2edge_family and fam_endpoints and type_offsets and edge_family_offsets and pseudo_blocks):
             return None, None, None
         sorted_types = sorted(type_offsets.items(), key=lambda x: x[1])
@@ -9856,9 +10253,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             else float("nan")
         )
 
-        avg_counts = (
-            getattr(self.dataset_info, "edge_family_avg_edge_counts", {}) or {}
-        )
+        avg_counts = self._sampling_family_target_counts()
         edge_family2id = (
             getattr(self.dataset_info, "edge_family2id", {}) or {}
         )
@@ -13956,9 +14351,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         edge_batch = edge_batch[chosen]
         owners = owners[chosen]
 
-        avg_counts = getattr(
-            self.dataset_info, "edge_family_avg_edge_counts", {}
-        ) or {}
+        avg_counts = self._sampling_family_target_counts()
         edge_family_offsets = (
             getattr(self.dataset_info, "edge_family_offsets", {}) or {}
         )
@@ -16249,9 +16642,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             dtype=torch.float32,
             device=node_subtype.device,
         )
-        family_counts = (
-            getattr(self.dataset_info, "edge_family_avg_edge_counts", {}) or {}
-        )
+        family_counts = self._sampling_family_target_counts()
         for fam_id, (fam_name, _) in enumerate(
             sorted(edge_family_offsets.items(), key=lambda kv: kv[1])
         ):
@@ -17510,9 +17901,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         """Yield full legal candidate chunks grouped as intra- then cross-family tasks."""
         type_offsets = getattr(self.dataset_info, "type_offsets", {}) or {}
         fam_endpoints = getattr(self.dataset_info, "fam_endpoints", {}) or {}
-        edge_family_avg = (
-            getattr(self.dataset_info, "edge_family_avg_edge_counts", {}) or {}
-        )
+        edge_family_avg = self._sampling_family_target_counts()
         if not (self.heterogeneous and type_offsets and fam_endpoints):
             return
 
@@ -22745,6 +23134,27 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             "best_gap": float(early_stop_best_gap),
         }
 
+    @staticmethod
+    def _undirected_degree_assortativity(edges, degree):
+        """Pearson degree correlation with both orientations per undirected edge."""
+        if len(edges) <= 1:
+            return 0.0
+        left = []
+        right = []
+        for u, v in edges:
+            du = float(degree[u])
+            dv = float(degree[v])
+            left.extend((du, dv))
+            right.extend((dv, du))
+        left = np.asarray(left, dtype=np.float64)
+        right = np.asarray(right, dtype=np.float64)
+        left_centered = left - left.mean()
+        right_centered = right - right.mean()
+        denominator = left_centered.std() * right_centered.std()
+        if denominator <= 0.0:
+            return 0.0
+        return float((left_centered * right_centered).mean() / denominator)
+
     def _sampling_current_structure_stats(
         self,
         edge_index: torch.Tensor,
@@ -22830,17 +23240,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         assortativity = 0.0
         if edges:
             deg = [len(nu) for nu in neighbors]
-            xs = np.asarray([deg[u] for u, _ in edges], dtype=np.float64)
-            ys = np.asarray([deg[v] for _, v in edges], dtype=np.float64)
-            if xs.size > 1:
-                x_mean = xs.mean()
-                y_mean = ys.mean()
-                cov = ((xs - x_mean) * (ys - y_mean)).mean()
-                x_std = xs.std()
-                y_std = ys.std()
-                denom = x_std * y_std
-                if denom > 0:
-                    assortativity = float(cov / denom)
+            assortativity = self._undirected_degree_assortativity(edges, deg)
 
         return {
             "triangles": float(triangles),
@@ -23578,12 +23978,13 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         node_mask = arange < num_nodes.unsqueeze(1)
 
         # Sample noise (z_T): 异质图时用训练集每族平均边数初始化边，使 m 在首步就有合理起点
+        sampling_dataset_info = self._sampling_dataset_info_with_checkpoint_targets()
         if (self.heterogeneous
-                    and getattr(self.dataset_info, "edge_family_avg_edge_counts", None)
+                    and self._sampling_family_target_counts()
                     and getattr(self.dataset_info, "fam_endpoints", None)
                     and getattr(self.dataset_info, "type_offsets", None)):
             sparse_sampled_data = diffusion_utils.sample_sparse_discrete_feature_noise_heterogeneous(
-                    limit_dist=self.limit_dist, node_mask=node_mask, dataset_info=self.dataset_info,
+                    limit_dist=self.limit_dist, node_mask=node_mask, dataset_info=sampling_dataset_info,
                     out_dims_E=self.out_dims.E, device=self.device
             )
         else:
@@ -24189,6 +24590,14 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         """固定节点、边从噪声初始化，去噪生成边。用于 DBLP 等「同节点、造边」场景。
         fixed_data: PyG Data，需有 x (one-hot 或离散子类别), batch
         """
+        if (
+            self._checkpoint_only_structure_sampling_active()
+            and bool(getattr(self.cfg.general, "edge_score_structure_diag", False))
+        ):
+            raise RuntimeError(
+                "edge_score_structure_diag reads reference edges and is forbidden "
+                "during checkpoint_only sampling"
+            )
         if number_chain_steps is None:
             number_chain_steps = getattr(self.cfg.general, "number_chain_steps", 10)
         node = fixed_data.x
@@ -24199,9 +24608,10 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             fixed_node_subtypes = node.long()
         batch_size = int(batch.max().item()) + 1
 
+        sampling_dataset_info = self._sampling_dataset_info_with_checkpoint_targets()
         if not (
             self.heterogeneous
-            and getattr(self.dataset_info, "edge_family_avg_edge_counts", None)
+            and self._sampling_family_target_counts()
             and getattr(self.dataset_info, "fam_endpoints", None)
             and getattr(self.dataset_info, "type_offsets", None)
         ):
@@ -24213,7 +24623,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             fixed_node_subtypes=fixed_node_subtypes,
             batch=batch,
             limit_dist=self.limit_dist,
-            dataset_info=self.dataset_info,
+            dataset_info=sampling_dataset_info,
             out_dims_E=self.out_dims.E,
             device=self.device,
         )
@@ -25949,7 +26359,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         device = self.device
         type_offsets = getattr(self.dataset_info, "type_offsets", {}) or {}
         fam_endpoints = getattr(self.dataset_info, "fam_endpoints", {}) or {}
-        edge_family_avg = getattr(self.dataset_info, "edge_family_avg_edge_counts", {}) or {}
+        edge_family_avg = self._sampling_family_target_counts()
         if not self.heterogeneous or not type_offsets or not fam_endpoints:
             return sample_query_edges(num_nodes_per_graph=ptr.diff(), edge_proportion=self.edge_fraction)
 

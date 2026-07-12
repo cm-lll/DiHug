@@ -9,6 +9,7 @@ class _Harness:
     def __init__(self, mode="soft_quota", epoch=0):
         self.current_epoch = epoch
         self.cfg = SimpleNamespace(
+            general=SimpleNamespace(test_only=None),
             model=SimpleNamespace(
                 population_role_projection_mode=mode,
                 population_role_projection_temperature=0.5,
@@ -29,8 +30,10 @@ class _Harness:
                 gqer_v2_component_floor=0.01,
                 gqer_v2_min_relative_improvement=1e-6,
                 gqer_v2_pair_anchor_loss=True,
+                sampling_structure_target_source="config",
             )
         )
+        self.training = True
 
     def _population_role_projection_temperature(self):
         return DiscreteDenoisingDiffusion._population_role_projection_temperature(
@@ -88,9 +91,37 @@ class _Harness:
     def _gqer_exist_scores(self, logits):
         return DiscreteDenoisingDiffusion._gqer_exist_scores(logits)
 
+    def _undirected_degree_assortativity(self, edges, degree):
+        return DiscreteDenoisingDiffusion._undirected_degree_assortativity(
+            edges, degree
+        )
+
     def _gqer_v2_accepts_proposal(self, *args, **kwargs):
         return DiscreteDenoisingDiffusion._gqer_v2_accepts_proposal(
             self, *args, **kwargs
+        )
+
+    def _checkpoint_only_structure_sampling_active(self):
+        return DiscreteDenoisingDiffusion._checkpoint_only_structure_sampling_active(
+            self
+        )
+
+    def _sampling_degree_reference_from_checkpoint(self):
+        return DiscreteDenoisingDiffusion._sampling_degree_reference_from_checkpoint(
+            self
+        )
+
+    def _sampling_family_target_counts(self):
+        return DiscreteDenoisingDiffusion._sampling_family_target_counts(self)
+
+    def _sampling_dataset_info_with_checkpoint_targets(self):
+        return DiscreteDenoisingDiffusion._sampling_dataset_info_with_checkpoint_targets(
+            self
+        )
+
+    def _ensure_hetero_block_templates_from_data(self, data=None):
+        return DiscreteDenoisingDiffusion._ensure_hetero_block_templates_from_data(
+            self, data=data
         )
 
 
@@ -552,6 +583,140 @@ def test_exact_sequential_terminal_projection_preserves_quota_and_closes_triangl
     assert projected.numel() == selected.numel()
     assert 3 in projected.tolist()
     assert 2 not in projected.tolist()
+
+
+def test_undirected_degree_assortativity_is_relabeling_invariant():
+    edges = {(0, 1), (0, 2), (0, 3), (1, 2)}
+    degree = [3, 2, 2, 1]
+    value = DiscreteDenoisingDiffusion._undirected_degree_assortativity(
+        edges, degree
+    )
+
+    permutation = {0: 3, 1: 0, 2: 2, 3: 1}
+    relabeled_edges = {
+        tuple(sorted((permutation[u], permutation[v]))) for u, v in edges
+    }
+    relabeled_degree = [0] * 4
+    for old, new in permutation.items():
+        relabeled_degree[new] = degree[old]
+    relabeled = DiscreteDenoisingDiffusion._undirected_degree_assortativity(
+        relabeled_edges, relabeled_degree
+    )
+
+    assert abs(value - relabeled) < 1e-12
+    assert value < 0.0
+
+
+def test_checkpoint_only_degree_roles_use_current_generated_graph_without_dataset():
+    harness = _Harness()
+    harness.training = False
+    harness.cfg.general.test_only = "/tmp/model.ckpt"
+    harness.cfg.model.sampling_structure_target_source = "checkpoint_only"
+    harness.structure_target_bundle_version = torch.tensor(1)
+    harness.structure_target_num_nodes = torch.tensor(4)
+    harness.structure_degree_boundaries = torch.tensor([1.5])
+    harness.structure_degree_hist = torch.tensor([0.75, 0.25])
+    harness.structure_family_pair_counts = torch.zeros((1, 2, 2))
+    harness.structure_family_pair_counts[0, 0, 1] = 3.0
+    harness.structure_family_totals = torch.tensor([3.0])
+    harness._sampling_degree_pair_reference = None
+    harness._get_reference_graph_for_sampling_stats = lambda: (_ for _ in ()).throw(
+        AssertionError("checkpoint-only sampling read a dataset graph")
+    )
+
+    data = SimpleNamespace(
+        node=torch.zeros((4, 1)),
+        edge_index=torch.tensor([[0, 0, 0], [1, 2, 3]]),
+        edge_attr=torch.tensor([1, 1, 1]),
+    )
+    DiscreteDenoisingDiffusion._refresh_sampling_runtime_degree_bins(harness, data)
+    reference = DiscreteDenoisingDiffusion._ensure_sampling_degree_pair_reference(
+        harness
+    )
+
+    assert torch.equal(reference["degree_bins"], torch.tensor([1, 0, 0, 0]))
+    assert torch.allclose(reference["degree_hist"], torch.tensor([0.75, 0.25]))
+    assert reference["pair_counts"] == {0: {(0, 1): 3}}
+
+
+def test_checkpoint_only_load_rejects_checkpoint_without_target_bundle():
+    module = object.__new__(DiscreteDenoisingDiffusion)
+    torch.nn.Module.__init__(module)
+    module.cfg = SimpleNamespace(
+        general=SimpleNamespace(test_only="/tmp/model.ckpt"),
+        model=SimpleNamespace(
+            use_learned_structure_targets=True,
+            learned_structure_target_trainable=False,
+            learned_structure_target_load_from_ckpt=True,
+            learned_structure_target_source="train_stats",
+            sampling_structure_target_source="checkpoint_only",
+        ),
+    )
+    try:
+        DiscreteDenoisingDiffusion.load_state_dict(module, {}, strict=False)
+    except RuntimeError as exc:
+        assert "checkpoint_only structure sampling requires a target bundle" in str(exc)
+    else:
+        raise AssertionError("missing checkpoint target bundle was silently accepted")
+
+
+def test_checkpoint_only_block_templates_ignore_sampling_reference_graph():
+    harness = _Harness()
+    harness.training = False
+    harness.cfg.general.test_only = "/tmp/model.ckpt"
+    harness.cfg.model.sampling_structure_target_source = "checkpoint_only"
+    harness.dataset_info = SimpleNamespace(
+        type_offsets={"Actor": 0, "Movie": 1},
+        edge_family2id={"link_Actor_Movie": 0},
+    )
+    harness.structure_block_type_counts = torch.tensor([[2, 1], [1, 2]])
+    harness.structure_block_intra_counts = torch.tensor([[3], [4]])
+    harness.structure_block_inter_counts = torch.zeros((2, 2, 1), dtype=torch.long)
+    harness.structure_block_inter_counts[0, 1, 0] = 5
+    harness._hetero_block_templates = None
+    harness._hetero_block_edge_templates = None
+
+    reference = SimpleNamespace(
+        x=torch.tensor([0, 0, 1]),
+        edge_index=torch.tensor([[0, 1], [1, 2]]),
+        edge_attr=torch.tensor([1, 1]),
+    )
+    harness._ensure_hetero_block_templates_from_data(reference)
+
+    assert harness._hetero_block_templates == [(2, 1), (1, 2)]
+    assert harness._hetero_block_template_type_order == ["Actor", "Movie"]
+    assert harness._hetero_block_edge_templates == {
+        "num_blocks": 2,
+        "intra": {(0, 0): 3, (1, 0): 4},
+        "inter": {(0, 1, 0): 5},
+    }
+
+
+def test_checkpoint_only_family_quotas_override_dataset_sampling_statistics():
+    harness = _Harness()
+    harness.training = False
+    harness.cfg.general.test_only = "/tmp/model.ckpt"
+    harness.cfg.model.sampling_structure_target_source = "checkpoint_only"
+    harness.dataset_info = SimpleNamespace(
+        edge_family2id={"link_A_B": 0, "link_B_B": 1},
+        edge_family_avg_edge_counts={"link_A_B": 9999, "link_B_B": 9999},
+        fam_endpoints={
+            "link_A_B": {"src_type": "A", "dst_type": "B"},
+            "link_B_B": {"src_type": "B", "dst_type": "B"},
+        },
+    )
+    harness.structure_family_totals = torch.tensor([12.0, 3.0])
+
+    counts = harness._sampling_family_target_counts()
+    info = harness._sampling_dataset_info_with_checkpoint_targets()
+
+    assert counts == {"link_A_B": 12.0, "link_B_B": 3.0}
+    assert info.edge_family_avg_edge_counts == counts
+    assert info.edge_family_distribution == {
+        ("A", "B"): {"link_A_B": 1.0},
+        ("B", "B"): {"link_B_B": 1.0},
+    }
+    assert harness.dataset_info.edge_family_avg_edge_counts["link_A_B"] == 9999
 
 
 def test_family_inference_prefers_supported_canonical_over_zero_reverse():
