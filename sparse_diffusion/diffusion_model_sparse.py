@@ -1732,6 +1732,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 print(
                     f"[BLOCK] cached type templates: {len(templates)} blocks, "
                     f"type_order={self._hetero_block_template_type_order} "
+                    f"partition_backend={str(getattr(self.cfg.model, 'hetero_metis_backend', 'pymetis') or 'pymetis')} "
                     f"partition_seed={int(getattr(self.cfg.model, 'hetero_metis_partition_seed', 0) or 0)} "
                     f"partition_hash={self._structure_block_partition_hash_hex()}"
                 )
@@ -9601,6 +9602,14 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         partition_seed = int(
             getattr(self.cfg.model, "hetero_metis_partition_seed", 0) or 0
         )
+        partition_backend = str(
+            getattr(
+                self.cfg.model,
+                "hetero_metis_backend",
+                "pymetis",
+            )
+            or "pymetis"
+        ).lower()
         all_blocks = []
         graph_count = int(batch.max().item()) + 1 if batch.numel() else 1
         for graph_idx in range(graph_count):
@@ -9635,6 +9644,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 refine_preserve_high_quantile=refine_preserve_high_quantile,
                 refine_preserve_penalty_weight=refine_preserve_penalty_weight,
                 partition_seed=partition_seed,
+                backend=partition_backend,
             )
             if not blocks:
                 blocks = [list(range(int(nodes.numel())))]
@@ -10639,6 +10649,14 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         partition_seed = int(
             getattr(self.cfg.model, "hetero_metis_partition_seed", 0) or 0
         )
+        partition_backend = str(
+            getattr(
+                self.cfg.model,
+                "hetero_metis_backend",
+                "pymetis",
+            )
+            or "pymetis"
+        ).lower()
         all_query_edge_index = []
         all_query_edge_batch = []
 
@@ -10688,6 +10706,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 round(float(refine_preserve_high_quantile), 8),
                 round(float(refine_preserve_penalty_weight), 8),
                 int(partition_seed),
+                str(partition_backend),
             )
             blocks = self._true_block_cache.get(cache_key)
             if blocks is not None and getattr(self, "_hetero_block_edge_templates", None) is None:
@@ -10706,6 +10725,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                     refine_preserve_high_quantile=refine_preserve_high_quantile,
                     refine_preserve_penalty_weight=refine_preserve_penalty_weight,
                     partition_seed=partition_seed,
+                    backend=partition_backend,
                 )
                 if not blocks:
                     blocks = [list(range(int(batch_nodes.numel())))]

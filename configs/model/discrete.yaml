@@ -37,6 +37,8 @@ block_partition_rho: null
 hetero_metis_relation_balance_power: 0.5
 # Fixed independently of train.seed so model-seed comparisons use one partition.
 hetero_metis_partition_seed: 0
+# Production backend. Pin PyMetis==2023.1.1 across machines; no silent fallback.
+hetero_metis_backend: pymetis  # pymetis | deterministic_kl
 # After hetero_metis, swap same-type nodes between blocks to balance degree load/hub mass.
 hetero_metis_refine_degree_balance: false
 hetero_metis_refine_max_iter: 200

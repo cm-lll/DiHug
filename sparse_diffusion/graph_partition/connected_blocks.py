@@ -579,6 +579,7 @@ def hetero_metis_blocks_from_graph(
     refine_preserve_high_quantile: float = 0.8,
     refine_preserve_penalty_weight: float = 0.0,
     partition_seed: int = 0,
+    backend: str = "pymetis",
 ) -> List[List[int]]:
     """Hard, disjoint blocks for heterogeneous graphs.
 
@@ -602,11 +603,17 @@ def hetero_metis_blocks_from_graph(
     if sum(len(x) for x in adjacency) == 0:
         return _strip_blocks(n, target_size)
 
-    try:
-        import pymetis  # type: ignore
-    except ImportError:
+    backend = str(backend or "pymetis").lower()
+    if backend == "deterministic_kl":
         blocks = _recursive_weighted_kl_blocks(adjacency, eweights, n, num_parts)
-    else:
+    elif backend == "pymetis":
+        try:
+            import pymetis  # type: ignore
+        except ImportError as exc:
+            raise ImportError(
+                "hetero_metis_backend='pymetis' requires pymetis; use "
+                "hetero_metis_backend='deterministic_kl' for the portable backend"
+            ) from exc
         xadj = [0]
         adjncy: list[int] = []
         ewgt: list[int] = []
@@ -626,6 +633,11 @@ def hetero_metis_blocks_from_graph(
         for node_idx, part_idx in enumerate(membership):
             buckets[int(part_idx)].append(node_idx)
         blocks = [sorted(block) for block in buckets if block]
+    else:
+        raise ValueError(
+            f"Unknown heterogeneous partition backend {backend!r}; expected "
+            "'deterministic_kl' or 'pymetis'"
+        )
     blocks = blocks or [list(range(n))]
     if bool(refine_degree_balance):
         blocks = _refine_blocks_by_degree_load(
