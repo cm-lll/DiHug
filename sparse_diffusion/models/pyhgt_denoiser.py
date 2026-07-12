@@ -410,6 +410,14 @@ class PyHGTDenoiser(nn.Module):
         endpoint_role_scale: float = 1.0,
         use_family_edge_adapters: bool = False,
         family_edge_adapter_hidden_dim: int = 64,
+        use_iterative_motif_decoder: bool = False,
+        iterative_motif_rounds: int = 2,
+        iterative_motif_hidden_dim: int = 64,
+        iterative_motif_family_dim: int = 16,
+        iterative_motif_shortlist_ratio: float = 0.05,
+        iterative_motif_shortlist_min: int = 16,
+        iterative_motif_shortlist_max: int = 2048,
+        iterative_motif_probability_temperature: float = 1.0,
         use_time_film: bool = False,
         use_edge_state_update: bool = False,
         edge_state_update_mode: str = "all",
@@ -437,6 +445,21 @@ class PyHGTDenoiser(nn.Module):
             use_endpoint_role_residual
         )
         self.use_family_edge_adapters = bool(use_family_edge_adapters)
+        self.use_iterative_motif_decoder = bool(use_iterative_motif_decoder)
+        self.iterative_motif_rounds = max(int(iterative_motif_rounds), 1)
+        self.iterative_motif_shortlist_ratio = min(
+            max(float(iterative_motif_shortlist_ratio), 0.0), 1.0
+        )
+        self.iterative_motif_shortlist_min = max(
+            int(iterative_motif_shortlist_min), 1
+        )
+        self.iterative_motif_shortlist_max = max(
+            int(iterative_motif_shortlist_max),
+            self.iterative_motif_shortlist_min,
+        )
+        self.iterative_motif_probability_temperature = max(
+            float(iterative_motif_probability_temperature), 1e-3
+        )
         self.endpoint_role_scale = float(endpoint_role_scale)
         self.edge_state_update_mode = str(edge_state_update_mode or "all").lower()
         if self.edge_state_update_mode not in {"all", "last"}:
@@ -592,6 +615,31 @@ class PyHGTDenoiser(nn.Module):
         else:
             self.endpoint_role_family_embedding = None
             self.endpoint_role_head = None
+        if self.use_iterative_motif_decoder:
+            motif_family_dim = max(int(iterative_motif_family_dim), 4)
+            motif_hidden = max(int(iterative_motif_hidden_dim), 8)
+            self.iterative_motif_family_embedding = nn.Embedding(
+                max(num_edge_families, 1), motif_family_dim
+            )
+            # score + total/typed support + four endpoint-degree channels.
+            motif_feature_dim = (
+                1 + 1 + self.num_node_types + 4 + motif_family_dim + dy
+            )
+            self.iterative_motif_heads = nn.ModuleList()
+            for _round_idx in range(self.iterative_motif_rounds):
+                head = nn.Sequential(
+                    nn.LayerNorm(motif_feature_dim),
+                    nn.Linear(motif_feature_dim, motif_hidden),
+                    nn.GELU(),
+                    nn.Dropout(dropout),
+                    nn.Linear(motif_hidden, 1),
+                )
+                nn.init.zeros_(head[-1].weight)
+                nn.init.zeros_(head[-1].bias)
+                self.iterative_motif_heads.append(head)
+        else:
+            self.iterative_motif_family_embedding = None
+            self.iterative_motif_heads = nn.ModuleList()
         self.last_two_hop_base_residual_mean = 0.0
         self.last_two_hop_effective_residual_mean = 0.0
         self.last_two_hop_effective_scale_mean = 0.0
@@ -601,6 +649,9 @@ class PyHGTDenoiser(nn.Module):
         self.last_endpoint_role_base_residual_mean = 0.0
         self.last_endpoint_role_effective_residual_mean = 0.0
         self.last_endpoint_role_effective_scale_mean = 0.0
+        self.last_iterative_motif_residual_mean = 0.0
+        self.last_iterative_motif_support_mean = 0.0
+        self.last_iterative_motif_shortlist_edges = 0
         self.y_head = nn.Linear(dy, output_dims.y) if output_y else None
 
     @staticmethod
@@ -1348,20 +1399,13 @@ class PyHGTDenoiser(nn.Module):
             two_hop_scale_factor=two_hop_scale_factor,
             endpoint_role_scale_factor=endpoint_role_scale_factor,
         )
-        src_h = encoded["h"][edge_index[0].long()]
-        dst_h = encoded["h"][edge_index[1].long()]
-        edge_logits = (
-            self._edge_head_logits(
-                torch.cat([src_h, dst_h, encoded["context_e"]], dim=-1),
-                query_edge_family_ids=edge_family_ids,
-            )
-            + self._two_hop_structure_residual(
-                encoded, edge_index, batch
-            )
-            + self._endpoint_role_residual(
-                encoded, edge_index, edge_family_ids, batch
-            )
-            + residual_scale * edge_attr[:, : self.out_dim_E]
+        edge_logits = self.decode_queries(
+            encoded=encoded,
+            query_edge_attr=edge_attr,
+            query_edge_index=edge_index,
+            batch=batch,
+            query_edge_family_ids=edge_family_ids,
+            edge_input_residual_scale=residual_scale,
         )
         return utils.SparsePlaceHolder(
             node=encoded["node_logits"],
@@ -1455,6 +1499,7 @@ class PyHGTDenoiser(nn.Module):
         return {
             "h": h,
             "y_h": y_h,
+            "node_type_ids": node_type_ids,
             "context_e": e,
             "node_logits": node_logits,
             "charge_logits": charge_logits,
@@ -1465,6 +1510,277 @@ class PyHGTDenoiser(nn.Module):
             "endpoint_role_scale_factor": endpoint_role_scale_factor,
             "context_edge_family_ids": edge_family_ids,
         }
+
+    @staticmethod
+    def _exist_scores_from_logits(logits: Tensor) -> Tensor:
+        if logits.shape[-1] <= 1:
+            return logits.new_zeros(logits.shape[0])
+        return torch.logsumexp(logits[:, 1:], dim=-1) - logits[:, 0]
+
+    def _family_exist_scores(
+        self,
+        logits: Tensor,
+        family: Tensor,
+    ) -> Tensor:
+        """Existence margins using only relation classes valid for each family."""
+        fallback = self._exist_scores_from_logits(logits)
+        if self.family_starts.numel() == 0 or family.numel() != logits.shape[0]:
+            return fallback
+        scores = fallback.clone()
+        starts = self.family_starts.long().to(logits.device)
+        for family_id in torch.unique(family).tolist():
+            family_id = int(family_id)
+            if family_id < 0 or family_id >= starts.numel():
+                continue
+            start = max(int(starts[family_id].item()), 1)
+            end = (
+                int(starts[family_id + 1].item())
+                if family_id + 1 < starts.numel()
+                else int(logits.shape[-1])
+            )
+            end = min(max(end, start + 1), int(logits.shape[-1]))
+            mask = family == family_id
+            scores[mask] = (
+                torch.logsumexp(logits[mask, start:end], dim=-1)
+                - logits[mask, 0]
+            )
+        return scores
+
+    @staticmethod
+    def _sparse_values_for_pairs(
+        matrix: Tensor,
+        row: Tensor,
+        col: Tensor,
+        num_nodes: int,
+    ) -> Tensor:
+        matrix = matrix.coalesce()
+        if row.numel() == 0 or matrix._nnz() == 0:
+            return matrix.values().new_zeros(row.numel())
+        matrix_keys = (
+            matrix.indices()[0].long() * int(num_nodes)
+            + matrix.indices()[1].long()
+        )
+        order = torch.argsort(matrix_keys)
+        matrix_keys = matrix_keys[order]
+        matrix_values = matrix.values()[order]
+        query_keys = row.long() * int(num_nodes) + col.long()
+        positions = torch.searchsorted(matrix_keys, query_keys)
+        valid = positions < matrix_keys.numel()
+        safe = positions.clamp(max=max(matrix_keys.numel() - 1, 0))
+        valid = valid & (matrix_keys[safe] == query_keys)
+        out = matrix_values.new_zeros(query_keys.numel())
+        out[valid] = matrix_values[safe[valid]]
+        return out
+
+    def _iterative_motif_shortlist(
+        self,
+        scores: Tensor,
+        query_edge_index: Tensor,
+        query_edge_family_ids: Optional[Tensor],
+        batch: Tensor,
+    ) -> Tensor:
+        if scores.numel() == 0:
+            return torch.empty(0, dtype=torch.long, device=scores.device)
+        family = (
+            query_edge_family_ids.long().to(scores.device).reshape(-1)
+            if query_edge_family_ids is not None
+            else torch.zeros(scores.numel(), dtype=torch.long, device=scores.device)
+        )
+        if family.numel() != scores.numel():
+            family = torch.zeros_like(scores, dtype=torch.long)
+        num_families = max(
+            int(self.iterative_motif_family_embedding.num_embeddings), 1
+        )
+        family = family.clamp(0, num_families - 1)
+        graph = batch[query_edge_index[0].long()].long().to(scores.device)
+        group = graph * num_families + family
+        selected = []
+        detached_scores = scores.detach()
+        for group_id in torch.unique(group).tolist():
+            group_idx = (group == int(group_id)).nonzero(as_tuple=False).reshape(-1)
+            count = int(group_idx.numel())
+            if count <= 0:
+                continue
+            take = int(math.ceil(count * self.iterative_motif_shortlist_ratio))
+            take = max(take, self.iterative_motif_shortlist_min)
+            take = min(take, self.iterative_motif_shortlist_max, count)
+            local = torch.topk(
+                detached_scores[group_idx], k=take, largest=True
+            ).indices
+            selected.append(group_idx[local])
+        if not selected:
+            return torch.empty(0, dtype=torch.long, device=scores.device)
+        return torch.cat(selected, dim=0)
+
+    def _predicted_motif_features(
+        self,
+        logits: Tensor,
+        encoded: dict,
+        query_edge_index: Tensor,
+        batch: Tensor,
+        query_edge_family_ids: Optional[Tensor],
+    ) -> tuple[Tensor, Tensor, int]:
+        """Build differentiable motif features from the model's own shortlist."""
+        num_queries = int(query_edge_index.shape[1])
+        device = logits.device
+        node_type = encoded.get("node_type_ids")
+        if node_type is None:
+            node_type = torch.zeros(
+                encoded["h"].shape[0], dtype=torch.long, device=device
+            )
+        else:
+            node_type = node_type.long().to(device).clamp(
+                0, self.num_node_types - 1
+            )
+        family = (
+            query_edge_family_ids.long().to(device).reshape(-1)
+            if query_edge_family_ids is not None
+            else torch.zeros(num_queries, dtype=torch.long, device=device)
+        )
+        num_families = max(
+            int(self.iterative_motif_family_embedding.num_embeddings), 1
+        )
+        if family.numel() != num_queries:
+            family = torch.zeros(num_queries, dtype=torch.long, device=device)
+        family = family.clamp(0, num_families - 1)
+
+        exist_scores = self._family_exist_scores(logits, family)
+        probabilities = torch.sigmoid(
+            exist_scores / self.iterative_motif_probability_temperature
+        )
+        selected = self._iterative_motif_shortlist(
+            exist_scores,
+            query_edge_index,
+            family,
+            batch,
+        )
+        num_nodes = int(encoded["h"].shape[0])
+        src = query_edge_index[0].long()
+        dst = query_edge_index[1].long()
+        if selected.numel() == 0 or num_nodes <= 0:
+            total_support = probabilities.new_zeros(num_queries)
+            typed_support = probabilities.new_zeros(
+                (num_queries, self.num_node_types)
+            )
+            degree = probabilities.new_zeros(num_nodes)
+        else:
+            shortlist_src = src[selected]
+            shortlist_dst = dst[selected]
+            shortlist_prob = probabilities[selected]
+            adjacency_index = torch.stack(
+                [
+                    torch.cat([shortlist_src, shortlist_dst]),
+                    torch.cat([shortlist_dst, shortlist_src]),
+                ],
+                dim=0,
+            )
+            adjacency_values = torch.cat(
+                [shortlist_prob, shortlist_prob], dim=0
+            )
+            adjacency = torch.sparse_coo_tensor(
+                adjacency_index,
+                adjacency_values,
+                (num_nodes, num_nodes),
+                device=device,
+            ).coalesce()
+            degree = probabilities.new_zeros(num_nodes).scatter_add(
+                0, adjacency.indices()[0], adjacency.values()
+            )
+            total_paths = torch.sparse.mm(adjacency, adjacency)
+            total_support = self._sparse_values_for_pairs(
+                total_paths, src, dst, num_nodes
+            )
+            typed_channels = []
+            middle_type = node_type[adjacency.indices()[1]]
+            for type_id in range(self.num_node_types):
+                typed_adjacency = torch.sparse_coo_tensor(
+                    adjacency.indices(),
+                    adjacency.values()
+                    * (middle_type == type_id).to(adjacency.values().dtype),
+                    (num_nodes, num_nodes),
+                    device=device,
+                ).coalesce()
+                typed_paths = torch.sparse.mm(typed_adjacency, adjacency)
+                typed_channels.append(
+                    self._sparse_values_for_pairs(
+                        typed_paths, src, dst, num_nodes
+                    )
+                )
+            typed_support = torch.stack(typed_channels, dim=-1)
+
+        src_degree = degree[src]
+        dst_degree = degree[dst]
+        family_embedding = self.iterative_motif_family_embedding(family)
+        y_h = encoded["y_h"]
+        if y_h.numel():
+            edge_y = y_h[batch[src].long()]
+        else:
+            edge_y = logits.new_zeros(
+                (num_queries, int(self.lin_in_y.out_features))
+            )
+        features = torch.cat(
+            [
+                torch.tanh(
+                    exist_scores / self.iterative_motif_probability_temperature
+                ).unsqueeze(-1),
+                torch.log1p(total_support.clamp(min=0.0)).unsqueeze(-1),
+                torch.log1p(typed_support.clamp(min=0.0)),
+                torch.stack(
+                    [
+                        torch.log1p(src_degree.clamp(min=0.0)),
+                        torch.log1p(dst_degree.clamp(min=0.0)),
+                        torch.log1p(torch.minimum(src_degree, dst_degree).clamp(min=0.0)),
+                        torch.log1p((src_degree - dst_degree).abs()),
+                    ],
+                    dim=-1,
+                ),
+                family_embedding,
+                edge_y,
+            ],
+            dim=-1,
+        )
+        return features, total_support, int(selected.numel())
+
+    def _iterative_motif_refinement(
+        self,
+        logits: Tensor,
+        encoded: dict,
+        query_edge_index: Tensor,
+        batch: Tensor,
+        query_edge_family_ids: Optional[Tensor],
+    ) -> Tensor:
+        if (
+            not self.use_iterative_motif_decoder
+            or logits.shape[-1] <= 1
+            or query_edge_index.numel() == 0
+        ):
+            return logits
+        refined = logits
+        residual_means = []
+        support_means = []
+        shortlist_edges = 0
+        for head in self.iterative_motif_heads:
+            features, support, shortlist_edges = self._predicted_motif_features(
+                refined,
+                encoded,
+                query_edge_index,
+                batch,
+                query_edge_family_ids,
+            )
+            delta = head(features)
+            refined = torch.cat(
+                [refined[:, :1], refined[:, 1:] + delta], dim=-1
+            )
+            residual_means.append(delta.detach().abs().mean())
+            support_means.append(support.detach().mean())
+        self.last_iterative_motif_residual_mean = float(
+            torch.stack(residual_means).mean().cpu()
+        )
+        self.last_iterative_motif_support_mean = float(
+            torch.stack(support_means).mean().cpu()
+        )
+        self.last_iterative_motif_shortlist_edges = int(shortlist_edges)
+        return refined
 
     def decode_queries(
         self,
@@ -1518,7 +1834,7 @@ class PyHGTDenoiser(nn.Module):
         # Low-rank bilinear score: captures structural similarity
         bilinear_feat = self.bilinear_proj_src(src_h) * self.bilinear_proj_dst(dst_h)
         bilinear_score = self.bilinear_out(bilinear_feat)  # (E, 1)
-        return (
+        logits = (
             self._edge_head_logits(
                 torch.cat([src_h, dst_h, e], dim=-1),
                 query_edge_stage_ids=query_edge_stage_ids,
@@ -1535,4 +1851,11 @@ class PyHGTDenoiser(nn.Module):
                 batch,
             )
             + residual_scale * query_edge_attr[:, : self.out_dim_E]
+        )
+        return self._iterative_motif_refinement(
+            logits,
+            encoded,
+            query_edge_index,
+            batch,
+            query_edge_family_ids,
         )

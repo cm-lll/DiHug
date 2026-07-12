@@ -308,6 +308,32 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 family_edge_adapter_hidden_dim=getattr(
                     cfg.model, "family_edge_adapter_hidden_dim", 64
                 ),
+                use_iterative_motif_decoder=getattr(
+                    cfg.model, "use_iterative_motif_decoder", False
+                ),
+                iterative_motif_rounds=getattr(
+                    cfg.model, "iterative_motif_rounds", 2
+                ),
+                iterative_motif_hidden_dim=getattr(
+                    cfg.model, "iterative_motif_hidden_dim", 64
+                ),
+                iterative_motif_family_dim=getattr(
+                    cfg.model, "iterative_motif_family_dim", 16
+                ),
+                iterative_motif_shortlist_ratio=getattr(
+                    cfg.model, "iterative_motif_shortlist_ratio", 0.05
+                ),
+                iterative_motif_shortlist_min=getattr(
+                    cfg.model, "iterative_motif_shortlist_min", 16
+                ),
+                iterative_motif_shortlist_max=getattr(
+                    cfg.model, "iterative_motif_shortlist_max", 2048
+                ),
+                iterative_motif_probability_temperature=getattr(
+                    cfg.model,
+                    "iterative_motif_probability_temperature",
+                    1.0,
+                ),
                 use_time_film=getattr(cfg.model, "use_time_film", False),
                 use_edge_state_update=getattr(cfg.model, "use_edge_state_update", False),
                 edge_state_update_mode=getattr(cfg.model, "edge_state_update_mode", "all"),
@@ -20994,6 +21020,44 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             epoch_loss[
                 "train_epoch/endpoint_role_effective_residual_mean"
             ] = role_effective_residual
+        if bool(
+            getattr(self.cfg.model, "use_iterative_motif_decoder", False)
+        ):
+            motif_residual = float(
+                getattr(
+                    self.model,
+                    "last_iterative_motif_residual_mean",
+                    0.0,
+                )
+            )
+            motif_support = float(
+                getattr(
+                    self.model,
+                    "last_iterative_motif_support_mean",
+                    0.0,
+                )
+            )
+            motif_shortlist = int(
+                getattr(
+                    self.model,
+                    "last_iterative_motif_shortlist_edges",
+                    0,
+                )
+            )
+            gate_str += (
+                f" -- iterative_motif_residual: {motif_residual:.6f}"
+                f" -- iterative_motif_support: {motif_support:.6f}"
+                f" -- iterative_motif_shortlist: {motif_shortlist}"
+            )
+            epoch_loss[
+                "train_epoch/iterative_motif_residual_mean"
+            ] = motif_residual
+            epoch_loss[
+                "train_epoch/iterative_motif_support_mean"
+            ] = motif_support
+            epoch_loss[
+                "train_epoch/iterative_motif_shortlist_edges"
+            ] = float(motif_shortlist)
 
         self.print(
             f"Epoch {self.current_epoch} finished: "

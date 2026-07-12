@@ -1,0 +1,25 @@
+# @package _global_
+defaults:
+  - imdb_movie_hgt_l3h4_gqer_v3_pyhgt
+
+general:
+  name: imdb_movie_l3h4_gqer_v4_motif
+
+model:
+  # Replace the detached current-G_t residual heads so this pilot isolates the
+  # recurrent predicted-graph decoder and leaves enough memory on a 32 GiB GPU.
+  use_two_hop_structure: false
+  use_typed_two_hop_structure: false
+  use_endpoint_role_residual: false
+  use_family_edge_adapters: false
+  # Train and sample with the same two refinement rounds over a shortlist from
+  # predicted edge probabilities. Middle-node type channels are learned rather
+  # than selecting dataset-specific metapaths.
+  use_iterative_motif_decoder: true
+  iterative_motif_rounds: 2
+  iterative_motif_hidden_dim: 64
+  iterative_motif_family_dim: 16
+  iterative_motif_shortlist_ratio: 0.05
+  iterative_motif_shortlist_min: 16
+  iterative_motif_shortlist_max: 1024
+  iterative_motif_probability_temperature: 1.0

@@ -144,6 +144,16 @@ family_role_loss_weight: 0.0
 family_role_loss_warmup_epochs: 0
 family_role_loss_min_reliability: 0.0
 family_role_loss_temperature: 1.0
+# Recurrently refine candidate logits from a family-balanced shortlist of the
+# model's own predictions. Disabled by default and never reads clean edges.
+use_iterative_motif_decoder: false
+iterative_motif_rounds: 2
+iterative_motif_hidden_dim: 64
+iterative_motif_family_dim: 16
+iterative_motif_shortlist_ratio: 0.05
+iterative_motif_shortlist_min: 16
+iterative_motif_shortlist_max: 2048
+iterative_motif_probability_temperature: 1.0
 subtype_dim: 32
 
 # The dimensions should satisfy dx % n_head == 0
