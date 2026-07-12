@@ -35,6 +35,8 @@ block_partition_mode: connected_bfs
 block_partition_rho: null
 # hetero_metis: relation family frequency normalization power. 0=no balance, 0.5=1/sqrt(freq), 1=1/freq.
 hetero_metis_relation_balance_power: 0.5
+# Fixed independently of train.seed so model-seed comparisons use one partition.
+hetero_metis_partition_seed: 0
 # After hetero_metis, swap same-type nodes between blocks to balance degree load/hub mass.
 hetero_metis_refine_degree_balance: false
 hetero_metis_refine_max_iter: 200

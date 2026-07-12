@@ -7,6 +7,7 @@ import json
 import traceback
 import sys
 import copy
+import hashlib
 
 import torch
 import wandb
@@ -407,6 +408,8 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             "structure_block_type_counts",
             "structure_block_intra_counts",
             "structure_block_inter_counts",
+            "structure_block_partition_seed",
+            "structure_block_partition_hash",
         )
         if self._checkpoint_only_structure_targets_requested():
             required = ("learned_structure_target_raw",) + bundle_names
@@ -458,17 +461,26 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         if self._checkpoint_only_structure_targets_requested():
             version = int(self.structure_target_bundle_version.item())
             num_nodes = int(self.structure_target_num_nodes.item())
-            if version != 1 or num_nodes <= 0 or self.structure_family_totals.numel() == 0:
+            partition_hash_size = int(self.structure_block_partition_hash.numel())
+            if (
+                version != 2
+                or num_nodes <= 0
+                or self.structure_family_totals.numel() == 0
+                or partition_hash_size != 32
+            ):
                 raise RuntimeError(
                     "Invalid checkpoint_only structure target bundle: "
                     f"version={version}, nodes={num_nodes}, "
-                    f"families={int(self.structure_family_totals.numel())}"
+                    f"families={int(self.structure_family_totals.numel())}, "
+                    f"partition_hash_bytes={partition_hash_size}"
                 )
             self._sampling_degree_pair_reference = None
             if getattr(self, "local_rank", 0) == 0:
                 print(
                     "[STRUCTURE-TARGET] source=checkpoint_only "
-                    f"version={version} nodes={num_nodes}"
+                    f"version={version} nodes={num_nodes} "
+                    f"partition_seed={int(self.structure_block_partition_seed.item())} "
+                    f"partition_hash={self._structure_block_partition_hash_hex()}"
                 )
         return result
 
@@ -627,7 +639,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         empty_float = torch.empty((0,), dtype=torch.float32)
         self.register_buffer(
             "structure_target_bundle_version",
-            torch.tensor(1, dtype=torch.long),
+            torch.tensor(2, dtype=torch.long),
             persistent=True,
         )
         self.register_buffer(
@@ -662,6 +674,19 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         self.register_buffer(
             "structure_block_inter_counts",
             torch.empty((0, 0, 0), dtype=torch.long),
+            persistent=True,
+        )
+        self.register_buffer(
+            "structure_block_partition_seed",
+            torch.tensor(
+                int(getattr(self.cfg.model, "hetero_metis_partition_seed", 0) or 0),
+                dtype=torch.long,
+            ),
+            persistent=True,
+        )
+        self.register_buffer(
+            "structure_block_partition_hash",
+            torch.empty((0,), dtype=torch.uint8),
             persistent=True,
         )
         if not from_training:
@@ -1654,6 +1679,26 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             )
 
 
+    @staticmethod
+    def _canonical_block_partition_digest(blocks, batch_nodes):
+        global_nodes = batch_nodes.detach().cpu().long().reshape(-1)
+        canonical = []
+        for block in blocks or []:
+            local = torch.as_tensor(block, dtype=torch.long).reshape(-1)
+            if local.numel() == 0:
+                continue
+            members = sorted(int(value) for value in global_nodes[local].tolist())
+            canonical.append(tuple(members))
+        canonical.sort()
+        payload = json.dumps(canonical, separators=(",", ":")).encode("ascii")
+        return hashlib.sha256(payload).digest()
+
+    def _structure_block_partition_hash_hex(self):
+        value = getattr(self, "structure_block_partition_hash", None)
+        if value is None or int(value.numel()) == 0:
+            return ""
+        return bytes(value.detach().cpu().to(torch.uint8).tolist()).hex()
+
     def _cache_hetero_block_templates(self, blocks, batch_nodes, node_t, type_offsets):
         """Store only block type-count templates; no true block members are used for sampling."""
         if not blocks or not type_offsets:
@@ -1679,8 +1724,17 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 self.structure_block_type_counts = torch.tensor(
                     templates, dtype=torch.long, device=self.device
                 )
+                digest = self._canonical_block_partition_digest(blocks, batch_nodes)
+                self.structure_block_partition_hash = torch.tensor(
+                    list(digest), dtype=torch.uint8, device=self.device
+                )
             if getattr(self, "local_rank", 0) == 0 and not getattr(self, "_logged_hetero_block_templates", False):
-                print(f"[BLOCK] cached type templates: {len(templates)} blocks, type_order={self._hetero_block_template_type_order}")
+                print(
+                    f"[BLOCK] cached type templates: {len(templates)} blocks, "
+                    f"type_order={self._hetero_block_template_type_order} "
+                    f"partition_seed={int(getattr(self.cfg.model, 'hetero_metis_partition_seed', 0) or 0)} "
+                    f"partition_hash={self._structure_block_partition_hash_hex()}"
+                )
                 self._logged_hetero_block_templates = True
 
     def _cache_hetero_block_edge_templates(self, blocks, local_edge_index, local_edge_family):
@@ -2533,7 +2587,9 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 print(
                     "[BLOCK-TARGET] source=checkpoint_only "
                     f"blocks={int(type_counts.shape[0])} "
-                    f"intra={sum(intra.values())} inter={sum(inter.values())}"
+                    f"intra={sum(intra.values())} inter={sum(inter.values())} "
+                    f"partition_seed={int(self.structure_block_partition_seed.item())} "
+                    f"partition_hash={self._structure_block_partition_hash_hex()}"
                 )
             return
         source = data
@@ -3580,7 +3636,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
     def _sampling_degree_reference_from_checkpoint(self):
         if not hasattr(self, "structure_target_bundle_version"):
             raise RuntimeError("checkpoint_only target bundle is not initialized")
-        if int(self.structure_target_bundle_version.item()) != 1:
+        if int(self.structure_target_bundle_version.item()) != 2:
             raise RuntimeError(
                 "Unsupported checkpoint structure target bundle version: "
                 f"{int(self.structure_target_bundle_version.item())}"
@@ -9542,6 +9598,9 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             )
             or 0.0
         )
+        partition_seed = int(
+            getattr(self.cfg.model, "hetero_metis_partition_seed", 0) or 0
+        )
         all_blocks = []
         graph_count = int(batch.max().item()) + 1 if batch.numel() else 1
         for graph_idx in range(graph_count):
@@ -9575,6 +9634,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 refine_preserve_high_high=refine_preserve_high_high,
                 refine_preserve_high_quantile=refine_preserve_high_quantile,
                 refine_preserve_penalty_weight=refine_preserve_penalty_weight,
+                partition_seed=partition_seed,
             )
             if not blocks:
                 blocks = [list(range(int(nodes.numel())))]
@@ -10576,6 +10636,9 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         refine_preserve_penalty_weight = float(
             getattr(self.cfg.model, "hetero_metis_refine_preserve_penalty_weight", 0.0) or 0.0
         )
+        partition_seed = int(
+            getattr(self.cfg.model, "hetero_metis_partition_seed", 0) or 0
+        )
         all_query_edge_index = []
         all_query_edge_batch = []
 
@@ -10624,6 +10687,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 bool(refine_preserve_high_high),
                 round(float(refine_preserve_high_quantile), 8),
                 round(float(refine_preserve_penalty_weight), 8),
+                int(partition_seed),
             )
             blocks = self._true_block_cache.get(cache_key)
             if blocks is not None and getattr(self, "_hetero_block_edge_templates", None) is None:
@@ -10641,6 +10705,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                     refine_preserve_high_high=refine_preserve_high_high,
                     refine_preserve_high_quantile=refine_preserve_high_quantile,
                     refine_preserve_penalty_weight=refine_preserve_penalty_weight,
+                    partition_seed=partition_seed,
                 )
                 if not blocks:
                     blocks = [list(range(int(batch_nodes.numel())))]

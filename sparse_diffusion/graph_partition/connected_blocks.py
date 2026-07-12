@@ -578,6 +578,7 @@ def hetero_metis_blocks_from_graph(
     refine_preserve_high_high: bool = False,
     refine_preserve_high_quantile: float = 0.8,
     refine_preserve_penalty_weight: float = 0.0,
+    partition_seed: int = 0,
 ) -> List[List[int]]:
     """Hard, disjoint blocks for heterogeneous graphs.
 
@@ -603,6 +604,9 @@ def hetero_metis_blocks_from_graph(
 
     try:
         import pymetis  # type: ignore
+    except ImportError:
+        blocks = _recursive_weighted_kl_blocks(adjacency, eweights, n, num_parts)
+    else:
         xadj = [0]
         adjncy: list[int] = []
         ewgt: list[int] = []
@@ -610,13 +614,18 @@ def hetero_metis_blocks_from_graph(
             adjncy.extend(nbrs)
             ewgt.extend(ws)
             xadj.append(len(adjncy))
-        _edgecuts, membership = pymetis.part_graph(num_parts, xadj=xadj, adjncy=adjncy, eweights=ewgt)
+        options = pymetis.Options(seed=int(partition_seed))
+        _edgecuts, membership = pymetis.part_graph(
+            num_parts,
+            xadj=xadj,
+            adjncy=adjncy,
+            eweights=ewgt,
+            options=options,
+        )
         buckets: list[list[int]] = [[] for _ in range(num_parts)]
         for node_idx, part_idx in enumerate(membership):
             buckets[int(part_idx)].append(node_idx)
         blocks = [sorted(block) for block in buckets if block]
-    except Exception:
-        blocks = _recursive_weighted_kl_blocks(adjacency, eweights, n, num_parts)
     blocks = blocks or [list(range(n))]
     if bool(refine_degree_balance):
         blocks = _refine_blocks_by_degree_load(

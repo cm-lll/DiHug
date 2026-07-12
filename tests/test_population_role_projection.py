@@ -3,6 +3,9 @@ from types import SimpleNamespace
 import torch
 
 from sparse_diffusion.diffusion_model_sparse import DiscreteDenoisingDiffusion
+from sparse_diffusion.graph_partition.connected_blocks import (
+    hetero_metis_blocks_from_graph,
+)
 
 
 class _Harness:
@@ -123,6 +126,9 @@ class _Harness:
         return DiscreteDenoisingDiffusion._ensure_hetero_block_templates_from_data(
             self, data=data
         )
+
+    def _structure_block_partition_hash_hex(self):
+        return DiscreteDenoisingDiffusion._structure_block_partition_hash_hex(self)
 
 
 def test_soft_projection_matches_mass_and_has_translation_invariant_gradient():
@@ -612,7 +618,7 @@ def test_checkpoint_only_degree_roles_use_current_generated_graph_without_datase
     harness.training = False
     harness.cfg.general.test_only = "/tmp/model.ckpt"
     harness.cfg.model.sampling_structure_target_source = "checkpoint_only"
-    harness.structure_target_bundle_version = torch.tensor(1)
+    harness.structure_target_bundle_version = torch.tensor(2)
     harness.structure_target_num_nodes = torch.tensor(4)
     harness.structure_degree_boundaries = torch.tensor([1.5])
     harness.structure_degree_hist = torch.tensor([0.75, 0.25])
@@ -673,6 +679,8 @@ def test_checkpoint_only_block_templates_ignore_sampling_reference_graph():
     harness.structure_block_intra_counts = torch.tensor([[3], [4]])
     harness.structure_block_inter_counts = torch.zeros((2, 2, 1), dtype=torch.long)
     harness.structure_block_inter_counts[0, 1, 0] = 5
+    harness.structure_block_partition_seed = torch.tensor(0)
+    harness.structure_block_partition_hash = torch.arange(32, dtype=torch.uint8)
     harness._hetero_block_templates = None
     harness._hetero_block_edge_templates = None
 
@@ -717,6 +725,46 @@ def test_checkpoint_only_family_quotas_override_dataset_sampling_statistics():
         ("B", "B"): {"link_B_B": 1.0},
     }
     assert harness.dataset_info.edge_family_avg_edge_counts["link_A_B"] == 9999
+
+
+def test_hetero_metis_partition_is_independent_of_global_torch_seed():
+    edges = torch.tensor(
+        [
+            [0, 0, 1, 1, 2, 3, 3, 4, 5, 5, 6, 7, 8, 8, 9, 10],
+            [1, 2, 2, 3, 3, 4, 5, 5, 6, 7, 7, 8, 9, 10, 10, 11],
+        ],
+        dtype=torch.long,
+    )
+    families = torch.tensor([0, 1] * 8, dtype=torch.long)
+    outputs = []
+    for global_seed in (0, 7, 1234):
+        torch.manual_seed(global_seed)
+        outputs.append(
+            hetero_metis_blocks_from_graph(
+                edges,
+                families,
+                n=12,
+                rho=0.25,
+                partition_seed=19,
+            )
+        )
+
+    assert outputs[0] == outputs[1] == outputs[2]
+
+
+def test_block_partition_digest_is_block_order_invariant():
+    nodes = torch.arange(8)
+    first = [[0, 2, 4], [1, 3], [5, 6, 7]]
+    reordered = [[7, 5, 6], [3, 1], [4, 0, 2]]
+    digest_a = DiscreteDenoisingDiffusion._canonical_block_partition_digest(
+        first, nodes
+    )
+    digest_b = DiscreteDenoisingDiffusion._canonical_block_partition_digest(
+        reordered, nodes
+    )
+
+    assert len(digest_a) == 32
+    assert digest_a == digest_b
 
 
 def test_family_inference_prefers_supported_canonical_over_zero_reverse():
