@@ -14284,6 +14284,232 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         logits = logits.reshape(-1, logits.shape[-1])
         return torch.logsumexp(logits[:, 1:], dim=-1) - logits[:, 0]
 
+    def _deduplicate_global_query_predictions(self, pred, true_data, clean_data):
+        """Merge repeated block views of the same canonical query edge."""
+        edge_index = pred.edge_index.long()
+        if edge_index.numel() == 0:
+            return pred, true_data
+        num_nodes = int(clean_data.x.shape[0])
+        batch = getattr(clean_data, "batch", None)
+        if batch is None or batch.numel() != num_nodes:
+            graph_id = torch.zeros(
+                edge_index.shape[1], dtype=torch.long, device=edge_index.device
+            )
+        else:
+            graph_id = batch.to(edge_index.device).long()[edge_index[0]]
+        u = torch.minimum(edge_index[0], edge_index[1])
+        v = torch.maximum(edge_index[0], edge_index[1])
+        key = graph_id * (num_nodes * num_nodes) + u * num_nodes + v
+        _, inverse = torch.unique(key, sorted=True, return_inverse=True)
+        unique_count = int(inverse.max().item()) + 1
+        counts = pred.edge_attr.new_zeros(unique_count)
+        counts.scatter_add_(0, inverse, torch.ones_like(inverse, dtype=counts.dtype))
+
+        pred_sum = pred.edge_attr.new_zeros((unique_count, pred.edge_attr.shape[-1]))
+        pred_sum.index_add_(0, inverse, pred.edge_attr)
+        pred_attr = pred_sum / counts.clamp(min=1.0).unsqueeze(-1)
+
+        target = true_data.edge_attr
+        target_labels = (
+            target.argmax(dim=-1).long() if target.dim() > 1 else target.long()
+        ).to(pred.edge_attr.device)
+        # A clean positive can be injected into several block views while
+        # another duplicate occurrence still carries the default no-edge
+        # label. Canonical target semantics are therefore union, not mean.
+        target_unique = torch.zeros(
+            unique_count, dtype=torch.long, device=pred.edge_attr.device
+        )
+        target_unique.scatter_reduce_(
+            0,
+            inverse,
+            target_labels.clamp(min=0, max=pred.edge_attr.shape[-1] - 1),
+            reduce="amax",
+            include_self=True,
+        )
+        target_attr = F.one_hot(
+            target_unique, num_classes=pred.edge_attr.shape[-1]
+        ).to(dtype=pred.edge_attr.dtype)
+
+        first = torch.full(
+            (unique_count,), edge_index.shape[1], dtype=torch.long, device=edge_index.device
+        )
+        order = torch.arange(edge_index.shape[1], device=edge_index.device)
+        if hasattr(first, "scatter_reduce_"):
+            first.scatter_reduce_(0, inverse, order, reduce="amin", include_self=True)
+        else:
+            for idx in range(edge_index.shape[1]):
+                group = int(inverse[idx].item())
+                first[group] = min(first[group], idx)
+        unique_edge_index = torch.stack([u[first], v[first]], dim=0)
+        pred_unique = utils.SparsePlaceHolder(
+            node=pred.node,
+            charge=pred.charge,
+            edge_attr=pred_attr,
+            edge_index=unique_edge_index,
+            y=pred.y,
+            batch=pred.batch,
+        )
+        true_unique = utils.SparsePlaceHolder(
+            node=true_data.node,
+            charge=true_data.charge,
+            edge_attr=target_attr,
+            edge_index=unique_edge_index,
+            y=true_data.y,
+            batch=true_data.batch,
+        )
+        return pred_unique, true_unique
+
+    def _compute_family_set_ranking_loss(
+        self, pred, true_data, clean_data, sparse_noisy_data
+    ):
+        """Sampled teacher-forced Plackett-Luce loss per graph and family."""
+        logits = pred.edge_attr.reshape(-1, pred.edge_attr.shape[-1])
+        if logits.numel() == 0:
+            return logits.sum() * 0.0, {"active_groups": 0.0}
+        _node_types, family = self._infer_query_family_from_clean_node_types(
+            pred.edge_index.long(), clean_data.x
+        )
+        if family is None:
+            return logits.sum() * 0.0, {"active_groups": 0.0}
+        family = family.to(logits.device).long().reshape(-1)
+        masked_logits = self._mask_edge_logits_by_query_family(logits, family)
+        scores = self._gqer_exist_scores(masked_logits)
+        target = true_data.edge_attr
+        if target.dim() > 1:
+            target = target.argmax(dim=-1)
+        positive = target.reshape(-1).to(logits.device).long() > 0
+
+        batch = getattr(clean_data, "batch", None)
+        if batch is None or batch.numel() != clean_data.x.shape[0]:
+            graph_id = torch.zeros_like(family)
+        else:
+            graph_id = batch.to(logits.device).long()[pred.edge_index[0].long()]
+        family_span = max(int(family.max().detach().item()) + 1, 1)
+        group_id = graph_id * family_span + family.clamp(min=0)
+        temperature = max(
+            float(getattr(self.cfg.model, "family_set_ranking_temperature", 1.0) or 1.0),
+            1.0e-4,
+        )
+        neg_per_pos = int(
+            getattr(self.cfg.model, "family_set_ranking_negatives_per_positive", 64)
+            or 0
+        )
+        min_neg = int(
+            getattr(self.cfg.model, "family_set_ranking_min_negatives", 256) or 0
+        )
+        max_neg = int(
+            getattr(self.cfg.model, "family_set_ranking_max_negatives", 8192) or 0
+        )
+        losses = []
+        margins = []
+        recalls = []
+        score_stds = []
+        support_gaps = []
+        sampled_negatives = 0
+        active_families = set()
+        family_metrics = {}
+
+        if (
+            getattr(self, "local_rank", 0) == 0
+            and not getattr(self, "_logged_family_set_input", False)
+        ):
+            valid = family >= 0
+            print(
+                "[FAMILY-SET-INPUT] "
+                f"queries={int(logits.shape[0])} "
+                f"valid_family={int(valid.sum().item())} "
+                f"positive={int(positive.sum().item())} "
+                f"valid_positive={int((valid & positive).sum().item())} "
+                f"families={torch.unique(family[valid]).detach().cpu().tolist()}"
+            )
+            self._logged_family_set_input = True
+
+        noisy_adj = None
+        noisy_edges = sparse_noisy_data.get("edge_index_t") if isinstance(sparse_noisy_data, dict) else None
+        if noisy_edges is not None and noisy_edges.numel() > 0:
+            with torch.no_grad():
+                n = int(clean_data.x.shape[0])
+                noisy_adj = torch.zeros((n, n), dtype=torch.bool, device=logits.device)
+                noisy_edges = noisy_edges.to(logits.device).long()
+                noisy_adj[noisy_edges[0], noisy_edges[1]] = True
+                noisy_adj[noisy_edges[1], noisy_edges[0]] = True
+
+        for group in torch.unique(group_id):
+            mask = (group_id == group) & (family >= 0)
+            pos_idx = torch.where(mask & positive)[0]
+            neg_idx = torch.where(mask & (~positive))[0]
+            if pos_idx.numel() == 0 or neg_idx.numel() == 0:
+                continue
+            requested = max(min_neg, int(pos_idx.numel()) * max(neg_per_pos, 0))
+            if max_neg > 0:
+                requested = min(requested, max_neg)
+            take = min(int(neg_idx.numel()), requested)
+            if take <= 0:
+                continue
+            if take < int(neg_idx.numel()):
+                neg_idx = neg_idx[
+                    torch.randperm(int(neg_idx.numel()), device=logits.device)[:take]
+                ]
+            pos_scores = scores[pos_idx] / temperature
+            neg_scores = scores[neg_idx] / temperature
+            pos_scores = pos_scores[
+                torch.randperm(int(pos_scores.numel()), device=logits.device)
+            ]
+            suffix_lse = torch.flip(
+                torch.logcumsumexp(torch.flip(pos_scores, dims=[0]), dim=0), dims=[0]
+            )
+            neg_lse = torch.logsumexp(neg_scores, dim=0)
+            denominators = torch.logaddexp(suffix_lse, neg_lse.expand_as(suffix_lse))
+            losses.append((denominators - pos_scores).mean())
+
+            with torch.no_grad():
+                raw_pos = scores[pos_idx]
+                raw_neg = scores[neg_idx]
+                margin_value = raw_pos.mean() - raw_neg.mean()
+                std_value = torch.cat([raw_pos, raw_neg]).std(unbiased=False)
+                margins.append(margin_value)
+                score_stds.append(std_value)
+                group_scores = scores[mask]
+                group_positive = positive[mask]
+                k = min(int(group_positive.sum().item()), int(group_scores.numel()))
+                top = torch.topk(group_scores, k=k, largest=True).indices
+                recall_value = group_positive[top].float().sum() / max(k, 1)
+                recalls.append(recall_value)
+                fam_id = int(family[pos_idx[0]].item())
+                family_metrics[fam_id] = {
+                    "margin": float(margin_value.cpu()),
+                    "topk_recall": float(recall_value.cpu()),
+                    "score_std": float(std_value.cpu()),
+                    "positives": float(pos_idx.numel()),
+                    "negatives": float(neg_idx.numel()),
+                }
+                if noisy_adj is not None:
+                    pos_edges = pred.edge_index[:, pos_idx].long()
+                    support = (
+                        noisy_adj[pos_edges[0]] & noisy_adj[pos_edges[1]]
+                    ).sum(dim=-1) > 0
+                    if support.any() and (~support).any():
+                        support_gaps.append(
+                            raw_pos[support].mean() - raw_pos[~support].mean()
+                        )
+            sampled_negatives += int(neg_idx.numel())
+            active_families.add(int(family[pos_idx[0]].item()))
+
+        if not losses:
+            return logits.sum() * 0.0, {"active_groups": 0.0}
+        return torch.stack(losses).mean(), {
+            "active_groups": float(len(losses)),
+            "active_families": float(len(active_families)),
+            "sampled_negatives": float(sampled_negatives),
+            "margin": float(torch.stack(margins).mean().cpu()),
+            "topk_recall": float(torch.stack(recalls).mean().cpu()),
+            "score_std": float(torch.stack(score_stds).mean().cpu()),
+            "support_gap": float(torch.stack(support_gaps).mean().cpu())
+            if support_gaps
+            else 0.0,
+            "family_metrics": family_metrics,
+        }
+
     @staticmethod
     def _gqer_matrix_from_selection(edge_index, selected, num_nodes, dtype):
         matrix = torch.zeros(
@@ -17049,6 +17275,57 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                     float(getattr(self.cfg.model, "gqer_loss_t_power", 0.0) or 0.0),
                 ),
             )
+            family_set_scope = str(
+                getattr(
+                    self.cfg.model,
+                    "family_set_ranking_scope",
+                    "block_cover",
+                )
+                or "block_cover"
+            ).lower()
+            family_set_weight = self._warmup_weight(
+                float(
+                    getattr(
+                        self.cfg.model,
+                        "family_set_ranking_loss_weight",
+                        0.0,
+                    )
+                    or 0.0
+                ),
+                int(
+                    getattr(
+                        self.cfg.model,
+                        "family_set_ranking_warmup_epochs",
+                        0,
+                    )
+                    or 0
+                ),
+                self._auxiliary_time_factor(
+                    sparse_noisy_data,
+                    float(
+                        getattr(
+                            self.cfg.model,
+                            "family_set_ranking_t_power",
+                            0.0,
+                        )
+                        or 0.0
+                    ),
+                ),
+            )
+            if family_set_scope not in {"block_cover", "global"}:
+                raise ValueError(
+                    "model.family_set_ranking_scope must be 'block_cover' or "
+                    f"'global', got {family_set_scope!r}"
+                )
+            if (
+                family_set_weight > 0
+                and family_set_scope == "global"
+                and step_mode != "accumulate_global"
+            ):
+                raise ValueError(
+                    "family_set_ranking_scope=global requires "
+                    "train_all_blocks_step_mode=accumulate_global"
+                )
             gqer_state = None
             if gqer_weight > 0:
                 candidate_parts = []
@@ -17233,11 +17510,77 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                     return_query_outputs=(
                         step_mode in {"accumulate_global", "accumulate_streaming_global"}
                         or gqer_state is not None
+                        or family_set_weight > 0
                     ),
                 )
                 if out is None:
                     continue
                 loss_piece = out["loss"]
+                if (
+                    family_set_weight > 0
+                    and family_set_scope == "block_cover"
+                    and "pred_edge_attr" in out
+                ):
+                    pred_set = utils.SparsePlaceHolder(
+                        node=data_one_hot.x,
+                        charge=data_one_hot.charge,
+                        edge_attr=out["pred_edge_attr"],
+                        edge_index=out["pred_edge_index"],
+                        y=data_one_hot.y,
+                        batch=data_one_hot.batch,
+                    )
+                    true_set = utils.SparsePlaceHolder(
+                        node=data_one_hot.x,
+                        charge=data_one_hot.charge,
+                        edge_attr=out["true_edge_attr"],
+                        edge_index=out["pred_edge_index"],
+                        y=data_one_hot.y,
+                        batch=data_one_hot.batch,
+                    )
+                    pred_set, true_set = self._deduplicate_global_query_predictions(
+                        pred_set, true_set, data_one_hot
+                    )
+                    loss_set_rank, set_rank_stats = (
+                        self._compute_family_set_ranking_loss(
+                            pred_set,
+                            true_set,
+                            data_one_hot,
+                            sparse_noisy_data,
+                        )
+                    )
+                    loss_piece = loss_piece + family_set_weight * loss_set_rank
+                    self._epoch_family_set_rank_count += 1
+                    self._epoch_family_set_rank_loss_sum += float(
+                        loss_set_rank.detach().cpu()
+                    )
+                    self._epoch_family_set_rank_weighted_sum += float(
+                        (family_set_weight * loss_set_rank).detach().cpu()
+                    )
+                    self._epoch_family_set_rank_group_sum += float(
+                        set_rank_stats.get("active_groups", 0.0)
+                    )
+                    self._epoch_family_set_rank_margin_sum += float(
+                        set_rank_stats.get("margin", 0.0)
+                    )
+                    self._epoch_family_set_rank_recall_sum += float(
+                        set_rank_stats.get("topk_recall", 0.0)
+                    )
+                    self._epoch_family_set_rank_std_sum += float(
+                        set_rank_stats.get("score_std", 0.0)
+                    )
+                    self._epoch_family_set_rank_support_gap_sum += float(
+                        set_rank_stats.get("support_gap", 0.0)
+                    )
+                    for fam_id, values in set_rank_stats.get(
+                        "family_metrics", {}
+                    ).items():
+                        slot = self._epoch_family_set_rank_by_family.setdefault(
+                            int(fam_id),
+                            {"count": 0.0, "margin": 0.0, "recall": 0.0},
+                        )
+                        slot["count"] += 1.0
+                        slot["margin"] += float(values.get("margin", 0.0))
+                        slot["recall"] += float(values.get("topk_recall", 0.0))
                 if gqer_state is not None and "pred_edge_attr" in out:
                     pred_gqer = utils.SparsePlaceHolder(
                         node=data_one_hot.x,
@@ -17393,6 +17736,103 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                         y=data_one_hot.y,
                         batch=data_one_hot.batch,
                     )
+
+                    pred_global, true_global = (
+                        self._deduplicate_global_query_predictions(
+                            pred_global, true_global, data_one_hot
+                        )
+                    )
+                    # Per-block losses above are detached in accumulate_global.
+                    # Recompute the ordinary edge objective once on the canonical
+                    # global query set so BCE/subtype CE remain differentiable.
+                    global_loss = self.train_loss(
+                        pred_global, true_global, log=False
+                    )
+
+                    set_rank_w = self._warmup_weight(
+                        float(
+                            getattr(
+                                self.cfg.model,
+                                "family_set_ranking_loss_weight",
+                                0.0,
+                            )
+                            or 0.0
+                        ),
+                        int(
+                            getattr(
+                                self.cfg.model,
+                                "family_set_ranking_warmup_epochs",
+                                0,
+                            )
+                            or 0
+                        ),
+                        self._auxiliary_time_factor(
+                            sparse_noisy_data,
+                            float(
+                                getattr(
+                                    self.cfg.model,
+                                    "family_set_ranking_t_power",
+                                    0.0,
+                                )
+                                or 0.0
+                            ),
+                        ),
+                    )
+                    if set_rank_w > 0 and family_set_scope == "global":
+                        loss_set_rank, set_rank_stats = (
+                            self._compute_family_set_ranking_loss(
+                                pred_global,
+                                true_global,
+                                data_one_hot,
+                                sparse_noisy_data,
+                            )
+                        )
+                        global_loss = global_loss + set_rank_w * loss_set_rank
+                        self._epoch_family_set_rank_count += 1
+                        self._epoch_family_set_rank_loss_sum += float(
+                            loss_set_rank.detach().cpu()
+                        )
+                        self._epoch_family_set_rank_weighted_sum += float(
+                            (set_rank_w * loss_set_rank).detach().cpu()
+                        )
+                        self._epoch_family_set_rank_group_sum += float(
+                            set_rank_stats.get("active_groups", 0.0)
+                        )
+                        self._epoch_family_set_rank_margin_sum += float(
+                            set_rank_stats.get("margin", 0.0)
+                        )
+                        self._epoch_family_set_rank_recall_sum += float(
+                            set_rank_stats.get("topk_recall", 0.0)
+                        )
+                        self._epoch_family_set_rank_std_sum += float(
+                            set_rank_stats.get("score_std", 0.0)
+                        )
+                        self._epoch_family_set_rank_support_gap_sum += float(
+                            set_rank_stats.get("support_gap", 0.0)
+                        )
+                        for fam_id, values in set_rank_stats.get(
+                            "family_metrics", {}
+                        ).items():
+                            slot = self._epoch_family_set_rank_by_family.setdefault(
+                                int(fam_id),
+                                {"count": 0.0, "margin": 0.0, "recall": 0.0},
+                            )
+                            slot["count"] += 1.0
+                            slot["margin"] += float(values.get("margin", 0.0))
+                            slot["recall"] += float(
+                                values.get("topk_recall", 0.0)
+                            )
+                        if getattr(self, "local_rank", 0) == 0:
+                            print(
+                                "[FAMILY-SET] "
+                                f"epoch={int(self.current_epoch)} "
+                                f"loss={float(loss_set_rank.detach().cpu()):.5f} "
+                                f"groups={set_rank_stats.get('active_groups', 0.0):.0f} "
+                                f"margin={set_rank_stats.get('margin', 0.0):.5f} "
+                                f"topk_recall={set_rank_stats.get('topk_recall', 0.0):.4f} "
+                                f"score_std={set_rank_stats.get('score_std', 0.0):.5f} "
+                                f"support_gap={set_rank_stats.get('support_gap', 0.0):.5f}"
+                            )
 
                     family_count_w = self._warmup_weight(
                         float(getattr(self.cfg.model, "family_count_loss_weight", 0.0) or 0.0),
@@ -18787,6 +19227,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         # pass sparse comp_graph to dense comp_graph for ease calculation
         sparse_noisy_data["comp_edge_index_t"] = comp_edge_index
         sparse_noisy_data["comp_edge_attr_t"] = comp_edge_attr
+        sparse_noisy_data["metadata_node_t"] = data.x
         sparse_pred = self.forward(sparse_noisy_data)
         forward_done = self._profile_time(profile_efficiency)
 
@@ -18842,82 +19283,13 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
 
         # 异质图：限制边预测只能在其所属关系族的子类型范围内（训练时也要限制，与节点预测一致）
         if self.heterogeneous and hasattr(self.dataset_info, "edge_family_offsets") and len(getattr(self.dataset_info, "edge_family_offsets", {})) > 0:
-            edge_family_offsets = self.dataset_info.edge_family_offsets
-            edge_family2id = getattr(self.dataset_info, "edge_family2id", {})
-            fam_endpoints = getattr(self.dataset_info, "fam_endpoints", {})
-            type_offsets = getattr(self.dataset_info, "type_offsets", {})
-
-            if edge_family_offsets and fam_endpoints and type_offsets and sparse_pred.edge_attr.numel() > 0:
-                # 获取查询边的节点类型（从 comp_edge_index 和节点子类别推断）
-                query_edge_index = sparse_pred.edge_index  # (2, E_query)
-                num_query_edges = query_edge_index.shape[1]
-
-                # 获取当前节点的子类别ID（从噪声图中）
-                current_node_subtype = sparse_noisy_data["node_t"]
-                if current_node_subtype.dim() > 1:
-                    current_node_subtype = current_node_subtype.argmax(dim=-1)  # (N,)
-                else:
-                    current_node_subtype = current_node_subtype.long()  # (N,)
-
-                # 推断每个节点的类型
-                node_type_ids = torch.zeros_like(current_node_subtype) - 1  # -1 表示未知
-                sorted_types = sorted(type_offsets.items(), key=lambda x: x[1])
-                for i, (t_name, off) in enumerate(sorted_types):
-                    if i + 1 < len(sorted_types):
-                        next_offset = sorted_types[i + 1][1]
-                        type_mask = (current_node_subtype >= off) & (current_node_subtype < next_offset)
-                    else:
-                        type_mask = current_node_subtype >= off
-                    node_type_ids[type_mask] = i
-
-                # 为每条查询边生成关系族 mask
-                edge_family_mask = torch.zeros((num_query_edges, self.out_dims.E), device=self.device)
-
-                for fam_name, endpoints in fam_endpoints.items():
-                    if fam_name not in edge_family_offsets:
-                        continue
-
-                    # 获取端点类型（fam_endpoints 的结构是 {fam_name: {"src_type": ..., "dst_type": ...}}）
-                    src_type = endpoints.get("src_type", None)
-                    dst_type = endpoints.get("dst_type", None)
-                    if src_type is None or dst_type is None:
-                        continue
-
-                    offset = edge_family_offsets[fam_name]
-                    next_offset = self.out_dims.E
-                    for other_fam_name, other_offset in edge_family_offsets.items():
-                        if other_offset > offset and other_offset < next_offset:
-                            next_offset = other_offset
-
-                    # 找到该关系族对应的节点类型索引
-                    src_type_idx = None
-                    dst_type_idx = None
-                    for idx, (t_name, _) in enumerate(sorted_types):
-                        if t_name == src_type:
-                            src_type_idx = idx
-                        if t_name == dst_type:
-                            dst_type_idx = idx
-
-                    if src_type_idx is None or dst_type_idx is None:
-                        continue
-
-                    # 找到属于该关系族的查询边
-                    src_nodes = query_edge_index[0]  # (E_query,)
-                    dst_nodes = query_edge_index[1]  # (E_query,)
-                    src_types = node_type_ids[src_nodes]  # (E_query,)
-                    dst_types = node_type_ids[dst_nodes]  # (E_query,)
-                    fam_edge_mask = (src_types == src_type_idx) & (dst_types == dst_type_idx)  # (E_query,)
-
-                    if fam_edge_mask.any():
-                        # 允许该关系族范围内的所有子类型（包括 no-edge）
-                        edge_family_mask[fam_edge_mask, 0] = 1.0  # no-edge 始终允许
-                        for gid in range(offset, next_offset):
-                            edge_family_mask[fam_edge_mask, gid] = 1.0
-
-                # 应用mask：将不属于当前边关系族的子类型的logits设为-inf
-                # 这样softmax后这些类别的概率为0，不会影响损失计算
-                edge_family_mask_inv = 1.0 - edge_family_mask  # (E_query, de)
-                sparse_pred.edge_attr = sparse_pred.edge_attr - edge_family_mask_inv * 1e10  # 将不允许的类别设为-inf
+            if sparse_pred.edge_attr.numel() > 0:
+                _, query_family = self._infer_query_family_from_clean_node_types(
+                    sparse_pred.edge_index.long(), data.x
+                )
+                sparse_pred.edge_attr = self._mask_edge_logits_by_query_family(
+                    sparse_pred.edge_attr, query_family
+                )
                 sparse_pred.edge_attr = torch.nan_to_num(
                     sparse_pred.edge_attr,
                     nan=0.0,
@@ -20265,9 +20637,50 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         self._epoch_rare_family_query_hard = 0
         self._epoch_rare_family_query_easy = 0
         self._epoch_rare_family_query_random = 0
+        self._epoch_family_set_rank_count = 0
+        self._epoch_family_set_rank_loss_sum = 0.0
+        self._epoch_family_set_rank_weighted_sum = 0.0
+        self._epoch_family_set_rank_group_sum = 0.0
+        self._epoch_family_set_rank_margin_sum = 0.0
+        self._epoch_family_set_rank_recall_sum = 0.0
+        self._epoch_family_set_rank_std_sum = 0.0
+        self._epoch_family_set_rank_support_gap_sum = 0.0
+        self._epoch_family_set_rank_by_family = {}
 
     def on_train_epoch_end(self) -> None:
         self._run_population_role_fixed_t_probe()
+        set_rank_count = int(getattr(self, "_epoch_family_set_rank_count", 0) or 0)
+        if set_rank_count > 0 and getattr(self, "local_rank", 0) == 0:
+            denom = float(set_rank_count)
+            print(
+                "[FAMILY-SET-EPOCH] "
+                f"epoch={int(self.current_epoch)} "
+                f"loss={self._epoch_family_set_rank_loss_sum / denom:.5f} "
+                f"wloss={self._epoch_family_set_rank_weighted_sum / denom:.5f} "
+                f"groups={self._epoch_family_set_rank_group_sum / denom:.1f} "
+                f"margin={self._epoch_family_set_rank_margin_sum / denom:.5f} "
+                f"topk_recall={self._epoch_family_set_rank_recall_sum / denom:.4f} "
+                f"score_std={self._epoch_family_set_rank_std_sum / denom:.5f} "
+                f"support_gap={self._epoch_family_set_rank_support_gap_sum / denom:.5f}"
+            )
+            family_text = []
+            id_to_name = {
+                int(value): str(name)
+                for name, value in (
+                    getattr(self.dataset_info, "edge_family2id", {}) or {}
+                ).items()
+            }
+            for fam_id, values in sorted(
+                self._epoch_family_set_rank_by_family.items()
+            ):
+                count = max(float(values.get("count", 0.0)), 1.0)
+                family_text.append(
+                    f"{id_to_name.get(fam_id, fam_id)}:"
+                    f"m={values.get('margin', 0.0) / count:.4f},"
+                    f"r={values.get('recall', 0.0) / count:.3f}"
+                )
+            if family_text:
+                print("[FAMILY-SET-FAMILY] " + " | ".join(family_text))
         # 只在 epoch 结束时统一从 TrainLossDiscrete 取出本 epoch 的所有训练指标，并一次性 log 到 wandb / Lightning
         epoch_loss = self.train_loss.log_epoch_metrics()
         exist_bce = epoch_loss.get("train_epoch/existence_BCE", -1)
@@ -22545,7 +22958,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             fam_endpoints = getattr(self.dataset_info, "fam_endpoints", None)
             num_node_types = len(node_type_names) if node_type_names else 0
             # node 可能已拼接 [node_t, charge, extraX, signnet]，metadata 提取只能使用真实节点状态维度。
-            node_for_metadata = node
+            node_for_metadata = sparse_noisy_data.get("metadata_node_t", node)
             if node.dim() > 1 and self.out_dims.X > 0 and node.size(-1) > self.out_dims.X:
                     node_for_metadata = node[:, : self.out_dims.X]
             
@@ -25734,6 +26147,26 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             and query_rounds[0][2] is not None
             and not use_autoregressive_context
         )
+        exact_k_final_only = bool(
+            getattr(self.cfg.model, "sampling_exact_k_final_only", False)
+        )
+        use_global_exact_k = use_global_exact_k and (
+            bool(is_final_sampling_step) or not exact_k_final_only
+        )
+        if exact_k_final_only and getattr(self, "local_rank", 0) == 0:
+            policy_flag = (
+                "_logged_exactk_final_policy"
+                if bool(is_final_sampling_step)
+                else "_logged_exactk_intermediate_policy"
+            )
+            if not getattr(self, policy_flag, False):
+                print(
+                    "[SAMPLING-EDGE-POLICY] "
+                    f"final_step={int(bool(is_final_sampling_step))} "
+                    f"global_exact_k={int(bool(use_global_exact_k))} "
+                    f"policy={'family_exact_k' if use_global_exact_k else 'reverse_posterior_bernoulli'}"
+                )
+                setattr(self, policy_flag, True)
         use_queryfree_global_exact_k = (
             use_global_exact_k
             and isinstance(self.model, PyHGTDenoiser)
@@ -26608,6 +27041,10 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 "batch": sparse_noisy_data["batch"],
                 "charge_t": sparse_noisy_data["charge_t"],
             }
+            if "metadata_node_t" in sparse_noisy_data:
+                prepared["metadata_node_t"] = sparse_noisy_data[
+                    "metadata_node_t"
+                ]
             if self.sparse_family_y_dim > 0:
                 prepared["family_y_t"] = self._compute_sparse_family_y(
                     sparse_noisy_data
@@ -26742,6 +27179,10 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             "batch": sparse_noisy_data["batch"],
             "charge_t": sparse_noisy_data["charge_t"],
         }
+        if "metadata_node_t" in sparse_noisy_data:
+            extra_sparse_noisy_data["metadata_node_t"] = sparse_noisy_data[
+                "metadata_node_t"
+            ]
         if self.sparse_family_y_dim > 0:
             extra_sparse_noisy_data["family_y_t"] = self._compute_sparse_family_y(
                 sparse_noisy_data

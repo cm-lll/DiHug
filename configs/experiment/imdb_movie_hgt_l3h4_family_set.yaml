@@ -1,0 +1,66 @@
+# @package _global_
+defaults:
+  - imdb_movie_hgt_l3h4_gqer_v3_pyhgt
+
+general:
+  name: imdb_movie_l3h4_family_set
+
+model:
+  # Fixed PyHGT-base network selected by the 20-epoch backbone ablation.
+  denoiser: hgt
+  use_two_hop_structure: false
+  use_typed_two_hop_structure: false
+  use_endpoint_role_residual: false
+  use_family_edge_adapters: false
+  iterative_motif_decoder_enabled: false
+
+  # Block-cover estimator of a graph/family fixed-set ranking objective.
+  # Every clean positive in the current block view is retained; negatives are
+  # sampled only for the PL denominator, not for constructing the clean target.
+  train_all_blocks_per_noise: true
+  train_all_blocks_step_mode: sequential
+  train_all_blocks_shuffle: true
+  train_all_blocks_strict_count: true
+  query_include_all_positive_edges: true
+  # The PL denominator is sampled, so decoding every negative candidate is
+  # unnecessary. This cap keeps the fixed PyHGT network runnable on 11 GB GPUs
+  # while shuffled blocks still expose a broad negative cover across epochs.
+  block_query_max_edges_per_family: 5000
+  family_set_ranking_loss_weight: 1.0
+  family_set_ranking_scope: block_cover
+  family_set_ranking_warmup_epochs: 5
+  family_set_ranking_t_power: 0.0
+  family_set_ranking_temperature: 1.0
+  family_set_ranking_negatives_per_positive: 64
+  family_set_ranking_min_negatives: 256
+  family_set_ranking_max_negatives: 8192
+
+  # BCE remains only as a stabilizer; subtype CE still trains on clean positives.
+  edge_exist_weight: 0.2
+  edge_subtype_weight: 1.2
+  gqer_loss_weight: 0.0
+  population_role_loss_weight: 0.0
+  family_count_loss_weight: 0.0
+  degree_pair_dist_loss_weight: 0.0
+
+  # Intermediate reverse steps are stochastic posterior samples. The exact
+  # learned family cardinalities are enforced only on the final graph.
+  sampling_use_reverse_posterior: true
+  sampling_reverse_posterior_stochastic_steps: true
+  sampling_edge_selection: gumbel_exact_k
+  sampling_exact_k_final_only: true
+  sampling_gumbel_temperature: 0.1
+
+  # Sampling targets are persisted in the checkpoint during training; test-only
+  # sampling must not consult a reference graph for family counts or structure.
+  use_learned_structure_targets: true
+  learned_structure_target_source: train_stats
+  learned_structure_target_load_from_ckpt: true
+  learned_structure_target_loss_weight: 0.0
+  sampling_structure_target_source: checkpoint_only
+
+  # Keep the causal test free of sampler-side structure controllers.
+  sampling_structure_swap_limiter: false
+  sampling_budget_controller_enabled: false
+  sampling_triangle_budget_enabled: false
+  sampling_structure_guidance: false

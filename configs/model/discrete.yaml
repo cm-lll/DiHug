@@ -211,6 +211,9 @@ sampling_ranking_intervention_diag: false
 # on intermediate steps as in SparseDiff for legacy local selection policies.
 # Global gumbel_exact_k/deterministic_exact_k remain global exact-K at every step.
 sampling_reverse_posterior_stochastic_steps: true
+# If true, global family exact-K is applied only at the explicit final reverse
+# step. Intermediate steps use the reverse-posterior Bernoulli path.
+sampling_exact_k_final_only: false
 # Sampling edge decision:
 # - bernoulli: sample each query edge independently from p_exist.
 # - bernoulli_expected_density: before Bernoulli sampling, solve one additive
@@ -962,6 +965,17 @@ train_all_blocks_per_noise: false
 # accumulate_global: 所有 blocks 的计算图保留到最后，拼接 query logits 后算严格全覆盖结构 loss；最贴近全图目标但最容易 OOM。
 # accumulate_streaming_global: 先无梯度扫全块估计全局结构统计，再逐块反传并释放计算图；近似 global，适合正式跑。
 train_all_blocks_step_mode: sequential
+# Sampled Plackett-Luce objective over canonical query edges grouped by graph
+# and relation family. global scope requires accumulate_global; block_cover is
+# the memory-bounded stochastic estimator used by the main experiment.
+family_set_ranking_loss_weight: 0.0
+family_set_ranking_scope: block_cover  # block_cover | global
+family_set_ranking_warmup_epochs: 0
+family_set_ranking_t_power: 0.0
+family_set_ranking_temperature: 1.0
+family_set_ranking_negatives_per_positive: 64
+family_set_ranking_min_negatives: 256
+family_set_ranking_max_negatives: 8192
 # true=每次加噪后随机打乱 block 顺序。
 train_all_blocks_shuffle: true
 # <=0 时使用 ceil(1 / edge_fraction) 作为 block 数。
