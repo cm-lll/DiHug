@@ -1,0 +1,30 @@
+# @package _global_
+defaults:
+  - imdb_movie_hgt_l3h4_gqer_v2
+
+general:
+  name: imdb_movie_l3h4_gqer_v3_pyhgt
+
+model:
+  # Network ablation: replace the X/E transformer with the existing context-
+  # encoder/query-decoder HGT and activate its zero-initialized structure heads.
+  denoiser: hgt
+  edge_only_model: true
+  use_edge_phi_fusion: true
+  use_dual_softmax: true
+  use_query_context_gate: true
+  query_context_gate_init: 0.2
+  use_two_hop_structure: true
+  use_typed_two_hop_structure: true
+  two_hop_structure_hidden_dim: 64
+  two_hop_structure_scale: 1.0
+  two_hop_structure_schedule: alpha_bar_squared
+  use_endpoint_role_residual: true
+  endpoint_role_hidden_dim: 64
+  endpoint_role_family_dim: 16
+  endpoint_role_scale: 1.0
+  use_family_edge_adapters: true
+  family_edge_adapter_hidden_dim: 64
+  use_time_film: true
+  use_edge_state_update: true
+  edge_state_update_mode: last

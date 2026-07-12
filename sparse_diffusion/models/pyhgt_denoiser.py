@@ -1325,6 +1325,9 @@ class PyHGTDenoiser(nn.Module):
         two_hop_scale_factor: Optional[Tensor] = None,
         endpoint_role_scale_factor: Optional[Tensor] = None,
         edge_input_residual_scale: Optional[float] = None,
+        family_y_table: Optional[Tensor] = None,
+        edge_struct_features: Optional[Tensor] = None,
+        **_,
     ) -> utils.SparsePlaceHolder:
         residual_scale = (
             self.edge_input_residual_scale
