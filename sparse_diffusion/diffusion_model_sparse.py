@@ -437,6 +437,10 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             "structure_block_partition_seed",
             "structure_block_partition_hash",
         )
+        optional_bundle_names = (
+            "structure_role_node_types",
+            "structure_role_family_degrees",
+        )
         if self._checkpoint_only_structure_targets_requested():
             required = ("learned_structure_target_raw",) + bundle_names
             missing = [name for name in required if name not in state_dict]
@@ -448,9 +452,13 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 )
         # Dynamic aggregate tensors are resized from checkpoint metadata before
         # the ordinary PyTorch loader performs its shape checks.
-        for name in bundle_names:
+        for name in bundle_names + optional_bundle_names:
             if name in state_dict and hasattr(self, name):
                 setattr(self, name, torch.empty_like(state_dict[name]))
+        if strict:
+            for name in optional_bundle_names:
+                if name not in state_dict and hasattr(self, name):
+                    state_dict[name] = getattr(self, name).detach().clone()
         if (
             bool(getattr(self.cfg.model, "use_learned_structure_targets", False))
             and not bool(getattr(self.cfg.model, "learned_structure_target_trainable", False))
@@ -715,6 +723,16 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             torch.empty((0,), dtype=torch.uint8),
             persistent=True,
         )
+        self.register_buffer(
+            "structure_role_node_types",
+            torch.empty((0,), dtype=torch.long),
+            persistent=True,
+        )
+        self.register_buffer(
+            "structure_role_family_degrees",
+            torch.empty((0, 0), dtype=torch.long),
+            persistent=True,
+        )
         if not from_training:
             return
         source = self._get_reference_graph_for_sampling_stats()
@@ -755,6 +773,61 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         self.structure_degree_hist = reference["degree_hist"].float().clone()
         self.structure_family_pair_counts = pair_tensor
         self.structure_family_totals = totals
+        source = self._get_reference_graph_for_sampling_stats()
+        if source is not None:
+            try:
+                source = source.clone()
+            except Exception:
+                pass
+            try:
+                source = self.dataset_info.to_one_hot(source)
+            except Exception:
+                pass
+            node_obj = getattr(source, "x", None)
+            edge_index = getattr(source, "edge_index", None)
+            edge_attr = getattr(source, "edge_attr", None)
+            if node_obj is not None and edge_index is not None and edge_attr is not None:
+                node_subtype = (
+                    node_obj.argmax(dim=-1).long()
+                    if node_obj.dim() > 1
+                    else node_obj.long().reshape(-1)
+                )
+                role_node_types = self._node_type_ids_from_subtype(
+                    node_subtype
+                ).detach().cpu().long()
+                labels = (
+                    edge_attr.argmax(dim=-1).long()
+                    if edge_attr.dim() > 1
+                    else edge_attr.long().reshape(-1)
+                )
+                family_ids = self._edge_family_ids_from_data(
+                    source,
+                    edge_index=edge_index,
+                    labels=labels,
+                    device=edge_index.device,
+                )
+                role_degrees = torch.zeros(
+                    (int(node_subtype.numel()), int(num_families)),
+                    dtype=torch.long,
+                    device=edge_index.device,
+                )
+                valid = (
+                    (labels > 0)
+                    & (family_ids >= 0)
+                    & (family_ids < int(num_families))
+                )
+                valid_idx = valid.nonzero(as_tuple=True)[0]
+                if valid_idx.numel() > 0:
+                    src = edge_index[0, valid_idx].long()
+                    dst = edge_index[1, valid_idx].long()
+                    fam = family_ids[valid_idx].long()
+                    ones = torch.ones_like(fam, dtype=torch.long)
+                    role_degrees.index_put_((src, fam), ones, accumulate=True)
+                    role_degrees.index_put_((dst, fam), ones, accumulate=True)
+                self.structure_role_node_types = role_node_types
+                self.structure_role_family_degrees = (
+                    role_degrees.detach().cpu().long()
+                )
 
     def _estimate_training_structure_target_stats(self):
         datamodule = getattr(self.dataset_info, "datamodule", None)
@@ -4262,6 +4335,355 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                     json.dumps(record, ensure_ascii=False) + "\n"
                 )
 
+    def _sampling_edgepp_role_targets(self, data, device):
+        """Assign checkpointed family-degree roles within each node type."""
+        saved_types = getattr(self, "structure_role_node_types", None)
+        saved_roles = getattr(self, "structure_role_family_degrees", None)
+        if (
+            saved_types is None
+            or saved_roles is None
+            or saved_types.numel() == 0
+            or saved_roles.numel() == 0
+        ):
+            raise RuntimeError(
+                "edgepp_active sampling requires a checkpoint trained with "
+                "typed family-degree role targets"
+            )
+        node_subtype = getattr(data, "anchor_node_subtype", None)
+        if node_subtype is None:
+            node_obj = getattr(data, "node", None)
+            if node_obj is None:
+                node_obj = getattr(data, "x", None)
+            node_subtype = (
+                node_obj.argmax(dim=-1).long()
+                if node_obj.dim() > 1
+                else node_obj.long().reshape(-1)
+            )
+        node_type = self._node_type_ids_from_subtype(
+            node_subtype.long().to(device)
+        )
+        saved_types = saved_types.detach().cpu().long()
+        saved_roles = saved_roles.detach().cpu().long()
+        if int(saved_types.numel()) != int(node_type.numel()):
+            raise RuntimeError(
+                "edgepp_active node-count mismatch: "
+                f"checkpoint={int(saved_types.numel())}, "
+                f"sampling={int(node_type.numel())}"
+            )
+        cache_key = (
+            int(self._current_sampling_seed()),
+            tuple(node_type.detach().cpu().tolist()),
+        )
+        cached = getattr(self, "_sampling_edgepp_role_cache", None)
+        if cached is not None and cached.get("key") == cache_key:
+            return cached["roles"].to(device)
+        assigned = torch.zeros_like(saved_roles)
+        generator = torch.Generator(device="cpu")
+        generator.manual_seed(int(self._current_sampling_seed()) + 88469)
+        current_types = node_type.detach().cpu()
+        for type_id in torch.unique(current_types, sorted=True).tolist():
+            current_idx = torch.where(current_types == int(type_id))[0]
+            role_idx = torch.where(saved_types == int(type_id))[0]
+            if int(current_idx.numel()) != int(role_idx.numel()):
+                raise RuntimeError(
+                    "edgepp_active node-type count mismatch for type "
+                    f"{type_id}: checkpoint={int(role_idx.numel())}, "
+                    f"sampling={int(current_idx.numel())}"
+                )
+            perm = torch.randperm(int(role_idx.numel()), generator=generator)
+            assigned[current_idx] = saved_roles[role_idx[perm]]
+        self._sampling_edgepp_role_cache = {
+            "key": cache_key,
+            "roles": assigned.clone(),
+        }
+        return assigned.to(device)
+
+    def _select_edgepp_active_exact_k(
+        self,
+        data,
+        edge_index,
+        selection_scores,
+        families,
+        edge_batch,
+        current_candidate_mask,
+        avg_counts,
+        id2edge_family,
+        target_fraction,
+        is_final_step,
+    ):
+        """EDGE++-style active-subgraph refinement with exact family volume."""
+        device = edge_index.device
+        total_nodes = int(data.node.shape[0])
+        roles = self._sampling_edgepp_role_targets(data, device)
+        num_families = int(roles.shape[1])
+        batch = data.batch.long().to(device)
+        node_subtype = getattr(data, "anchor_node_subtype", None)
+        if node_subtype is None:
+            node_obj = getattr(data, "node", None)
+            node_subtype = (
+                node_obj.argmax(dim=-1).long()
+                if node_obj.dim() > 1
+                else node_obj.long().reshape(-1)
+            )
+        node_type = self._node_type_ids_from_subtype(
+            node_subtype.long().to(device)
+        )
+        current_degree = torch.zeros_like(roles)
+        current_idx = current_candidate_mask.nonzero(as_tuple=True)[0]
+        if current_idx.numel() > 0:
+            cur_fam = families[current_idx].long()
+            valid = (cur_fam >= 0) & (cur_fam < num_families)
+            current_idx = current_idx[valid]
+            cur_fam = cur_fam[valid]
+            ones = torch.ones_like(cur_fam, dtype=current_degree.dtype)
+            current_degree.index_put_(
+                (edge_index[0, current_idx].long(), cur_fam),
+                ones,
+                accumulate=True,
+            )
+            current_degree.index_put_(
+                (edge_index[1, current_idx].long(), cur_fam),
+                ones,
+                accumulate=True,
+            )
+        desired_degree = torch.ceil(
+            roles.float() * float(target_fraction)
+        ).long()
+        mismatch = (desired_degree - current_degree).abs().sum(dim=1).float()
+        active = torch.zeros(total_nodes, dtype=torch.bool, device=device)
+        active_fraction = min(
+            1.0,
+            max(
+                0.0,
+                float(
+                    getattr(
+                        self.cfg.model,
+                        "sampling_absorbing_active_node_fraction",
+                        0.25,
+                    )
+                    or 0.0
+                ),
+            ),
+        )
+        final_all = bool(
+            getattr(
+                self.cfg.model,
+                "sampling_absorbing_active_final_all",
+                True,
+            )
+        )
+        for graph_idx_tensor in batch.unique(sorted=True):
+            graph_idx = int(graph_idx_tensor.item())
+            nodes = torch.where(batch == graph_idx)[0]
+            if nodes.numel() == 0:
+                continue
+            if bool(is_final_step) and final_all:
+                active[nodes] = True
+                continue
+            for type_id in torch.unique(node_type[nodes], sorted=True):
+                type_nodes = nodes[node_type[nodes] == type_id]
+                if type_nodes.numel() == 0:
+                    continue
+                take = max(
+                    1,
+                    int(
+                        math.ceil(active_fraction * int(type_nodes.numel()))
+                    ),
+                )
+                take = min(take, int(type_nodes.numel()))
+                tie = torch.arange(
+                    int(type_nodes.numel()),
+                    device=device,
+                    dtype=mismatch.dtype,
+                ) * 1.0e-9
+                top = torch.topk(
+                    mismatch[type_nodes] + tie, k=take
+                ).indices
+                active[type_nodes[top]] = True
+
+        fam_endpoints = getattr(self.dataset_info, "fam_endpoints", {}) or {}
+        type_offsets = getattr(self.dataset_info, "type_offsets", {}) or {}
+        sorted_types = sorted(type_offsets.items(), key=lambda item: item[1])
+        type_name_to_id = {
+            str(name): int(type_id)
+            for type_id, (name, _offset) in enumerate(sorted_types)
+        }
+
+        def _expand_for_capacity(nodes, fam_id, required):
+            if required <= 0 or nodes.numel() == 0:
+                return
+            capacity_now = int(
+                desired_degree[nodes[active[nodes]], int(fam_id)].sum().item()
+            )
+            if capacity_now >= int(required):
+                return
+            inactive = nodes[~active[nodes]]
+            if inactive.numel() == 0:
+                return
+            values = desired_degree[inactive, int(fam_id)]
+            order = torch.argsort(values, descending=True)
+            for node in inactive[order].detach().cpu().tolist():
+                gain = int(desired_degree[int(node), int(fam_id)].item())
+                if gain <= 0:
+                    break
+                active[int(node)] = True
+                capacity_now += gain
+                if capacity_now >= int(required):
+                    break
+
+        for graph_idx_tensor in batch.unique(sorted=True):
+            graph_idx = int(graph_idx_tensor.item())
+            graph_nodes = torch.where(batch == graph_idx)[0]
+            for fam_id, fam_name in id2edge_family.items():
+                if not (0 <= int(fam_id) < num_families):
+                    continue
+                target = max(
+                    0,
+                    int(
+                        round(
+                            float(avg_counts.get(fam_name, 0.0) or 0.0)
+                            * float(target_fraction)
+                        )
+                    ),
+                )
+                endpoint = fam_endpoints.get(fam_name, {}) or {}
+                src_type = type_name_to_id.get(str(endpoint.get("src_type", "")))
+                dst_type = type_name_to_id.get(str(endpoint.get("dst_type", "")))
+                if src_type is None or dst_type is None:
+                    continue
+                src_nodes = graph_nodes[node_type[graph_nodes] == int(src_type)]
+                dst_nodes = graph_nodes[node_type[graph_nodes] == int(dst_type)]
+                if int(src_type) == int(dst_type):
+                    _expand_for_capacity(src_nodes, int(fam_id), 2 * target)
+                else:
+                    _expand_for_capacity(src_nodes, int(fam_id), target)
+                    _expand_for_capacity(dst_nodes, int(fam_id), target)
+
+        active_edge = active[edge_index[0].long()] & active[
+            edge_index[1].long()
+        ]
+        frozen_current = current_candidate_mask & (~active_edge)
+        selected_parts = []
+        log_parts = []
+        unfilled = {}
+        overflow_total = 0
+        pool_multiplier = max(
+            1,
+            int(
+                getattr(
+                    self.cfg.model,
+                    "sampling_absorbing_degree_pool_multiplier",
+                    8,
+                )
+                or 8
+            ),
+        )
+        strict_budget = bool(
+            getattr(
+                self.cfg.model,
+                "sampling_absorbing_degree_budget_strict",
+                True,
+            )
+        )
+        for graph_idx_tensor in edge_batch.unique(sorted=True):
+            graph_idx = int(graph_idx_tensor.item())
+            for fam_id, fam_name in id2edge_family.items():
+                family_mask = (edge_batch == graph_idx) & (
+                    families == int(fam_id)
+                )
+                local_idx = family_mask.nonzero(as_tuple=True)[0]
+                target = max(
+                    0,
+                    int(
+                        round(
+                            float(avg_counts.get(fam_name, 0.0) or 0.0)
+                            * float(target_fraction)
+                        )
+                    ),
+                )
+                frozen = torch.where(family_mask & frozen_current)[0]
+                target = max(target, int(frozen.numel()))
+                need = max(0, target - int(frozen.numel()))
+                active_pool = torch.where(family_mask & active_edge)[0]
+                chosen_active = []
+                if need > 0 and active_pool.numel() > 0:
+                    shortlist_size = min(
+                        int(active_pool.numel()), max(need * pool_multiplier, need)
+                    )
+                    shortlist_pos = torch.topk(
+                        selection_scores[active_pool],
+                        k=shortlist_size,
+                        largest=True,
+                    ).indices
+                    shortlist = active_pool[shortlist_pos]
+                    if strict_budget and 0 <= int(fam_id) < num_families:
+                        frozen_degree = torch.zeros(
+                            total_nodes, dtype=torch.long, device=device
+                        )
+                        if frozen.numel() > 0:
+                            frozen_degree.scatter_add_(
+                                0,
+                                torch.cat(
+                                    [edge_index[0, frozen], edge_index[1, frozen]]
+                                ).long(),
+                                torch.ones(
+                                    2 * int(frozen.numel()),
+                                    dtype=torch.long,
+                                    device=device,
+                                ),
+                            )
+                        capacity = (
+                            desired_degree[:, int(fam_id)] - frozen_degree
+                        ).clamp(min=0)
+                        for candidate in shortlist.detach().cpu().tolist():
+                            left = int(edge_index[0, candidate].item())
+                            right = int(edge_index[1, candidate].item())
+                            if capacity[left] <= 0 or capacity[right] <= 0:
+                                continue
+                            chosen_active.append(int(candidate))
+                            capacity[left] -= 1
+                            capacity[right] -= 1
+                            if len(chosen_active) >= need:
+                                break
+                    else:
+                        chosen_active = shortlist[:need].detach().cpu().tolist()
+                    if len(chosen_active) < need:
+                        chosen_set = set(chosen_active)
+                        for candidate in shortlist.detach().cpu().tolist():
+                            if int(candidate) in chosen_set:
+                                continue
+                            chosen_active.append(int(candidate))
+                            chosen_set.add(int(candidate))
+                            overflow_total += 1
+                            if len(chosen_active) >= need:
+                                break
+                pieces = [frozen]
+                if chosen_active:
+                    pieces.append(
+                        torch.tensor(
+                            chosen_active, dtype=torch.long, device=device
+                        )
+                    )
+                selected_local = torch.cat(pieces) if pieces else local_idx[:0]
+                if selected_local.numel() > 0:
+                    selected_parts.append(selected_local)
+                if int(selected_local.numel()) != target:
+                    unfilled[(graph_idx, fam_name)] = (
+                        target,
+                        int(selected_local.numel()),
+                    )
+                if target > 0:
+                    log_parts.append(
+                        f"g{graph_idx}/{fam_name}:target={target},"
+                        f"frozen={int(frozen.numel())},active={len(chosen_active)}"
+                    )
+        stats = {
+            "active_nodes": int(active.sum().item()),
+            "frozen_edges": int(frozen_current.sum().item()),
+            "overflow": int(overflow_total),
+        }
+        return selected_parts, log_parts, unfilled, stats
+
     def _finalize_global_exact_k_candidates(
         self,
         data,
@@ -4270,6 +4692,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         sampling_step,
         target_fraction=1.0,
         protect_existing=False,
+        absorbing_final_step=False,
         apply_connectivity_repair=False,
         log_selection=True,
     ):
@@ -4357,7 +4780,15 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             int(data.node.shape[0]),
         )
         current_candidate_mask = current_edge_labels > 0
-        if protect_existing:
+        configured_refinement_mode = str(
+            getattr(
+                self.cfg.model,
+                "sampling_absorbing_refinement_mode",
+                "monotone",
+            )
+            or "monotone"
+        ).lower()
+        if protect_existing or configured_refinement_mode == "edgepp_active":
             expected_current = len(
                 self._canonical_edge_key_set(
                     getattr(data, "edge_index", None), int(data.node.shape[0])
@@ -4564,7 +4995,33 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         selected_parts = []
         log_parts = []
         unfilled = {}
-        if mode in ("gumbel_exact_k_degree_pair_quota", "deterministic_exact_k_degree_pair_quota"):
+        edgepp_stats = None
+        refinement_mode = configured_refinement_mode
+        edgepp_applied = refinement_mode == "edgepp_active"
+        if refinement_mode not in ("monotone", "edgepp_active"):
+            raise ValueError(
+                "model.sampling_absorbing_refinement_mode must be "
+                f"'monotone' or 'edgepp_active', got {refinement_mode!r}"
+            )
+        if edgepp_applied:
+            (
+                selected_parts,
+                log_parts,
+                unfilled,
+                edgepp_stats,
+            ) = self._select_edgepp_active_exact_k(
+                data=data,
+                edge_index=edge_index,
+                selection_scores=selection_scores,
+                families=families,
+                edge_batch=edge_batch,
+                current_candidate_mask=current_candidate_mask,
+                avg_counts=avg_counts,
+                id2edge_family=id2edge_family,
+                target_fraction=target_fraction,
+                is_final_step=absorbing_final_step,
+            )
+        elif mode in ("gumbel_exact_k_degree_pair_quota", "deterministic_exact_k_degree_pair_quota"):
             quota_result = self._select_exact_k_with_degree_pair_quotas(
                 selection_scores=selection_scores,
                 edge_index=edge_index,
@@ -4576,7 +5033,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             if quota_result[0] is not None:
                 selected_parts, log_parts, unfilled = quota_result
 
-        if not selected_parts:
+        if not selected_parts and not edgepp_applied:
             for graph_idx_tensor in graph_ids:
                 graph_idx = int(graph_idx_tensor.item())
                 for fam_id, fam_name in id2edge_family.items():
@@ -4630,7 +5087,10 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 f"selected={int(selected.numel())} "
                 f"target_fraction={float(target_fraction):.4f} "
                 f"protected={int(current_candidate_mask.sum().item()) if protect_existing else 0} "
-                f"unfilled={unfilled} "
+                + (
+                    f"edgepp={edgepp_stats} " if edgepp_stats is not None else ""
+                )
+                + f"unfilled={unfilled} "
                 + "; ".join(log_parts[:10])
             )
 
@@ -4784,7 +5244,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                     .to(edge_index.device)
                     + 1
                 )
-            if protect_existing:
+            if protect_existing or edgepp_applied:
                 selected_current = current_edge_labels[selected] > 0
                 if selected_current.any():
                     labels[selected_current] = current_edge_labels[selected][
@@ -27011,6 +27471,15 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                         True,
                     )
                 )
+                if str(
+                    getattr(
+                        self.cfg.model,
+                        "sampling_absorbing_refinement_mode",
+                        "monotone",
+                    )
+                    or "monotone"
+                ).lower() == "edgepp_active":
+                    protect_absorbing_edges = False
             selected_edges, selected_labels = (
                 self._finalize_global_exact_k_candidates(
                     data,
@@ -27019,6 +27488,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                     sampling_step,
                     target_fraction=absorbing_target_fraction,
                     protect_existing=protect_absorbing_edges,
+                    absorbing_final_step=bool(is_final_sampling_step),
                     apply_connectivity_repair=use_exact_k_connectivity_repair,
                 )
             )

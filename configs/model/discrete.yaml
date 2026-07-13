@@ -988,6 +988,14 @@ family_set_ranking_positive_scope: all  # all | missing
 edge_diffusion_mode: marginal  # marginal | absorbing_delete
 absorbing_survival_power: 1.0
 sampling_absorbing_protect_existing: true
+# monotone: every restored edge is permanent (absorbing v1).
+# edgepp_active: freeze edges touching inactive nodes, but regenerate the full
+# active-active induced subgraph under checkpoint family-degree role budgets.
+sampling_absorbing_refinement_mode: monotone  # monotone | edgepp_active
+sampling_absorbing_active_node_fraction: 0.25
+sampling_absorbing_active_final_all: true
+sampling_absorbing_degree_budget_strict: true
+sampling_absorbing_degree_pool_multiplier: 32
 # true=每次加噪后随机打乱 block 顺序。
 train_all_blocks_shuffle: true
 # <=0 时使用 ceil(1 / edge_fraction) 作为 block 数。
