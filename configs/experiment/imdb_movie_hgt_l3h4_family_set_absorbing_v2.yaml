@@ -12,7 +12,11 @@ model:
   sampling_absorbing_refinement_mode: edgepp_active
   sampling_absorbing_protect_existing: false
   sampling_absorbing_active_node_fraction: 0.25
-  sampling_absorbing_active_final_all: true
+  # Preserve the reverse trajectory at the last step. Forcing all nodes active,
+  # or expanding to full role capacity, redraws all 4079 edges and erases every
+  # motif accumulated by the preceding reverse steps.
+  sampling_absorbing_active_final_all: false
+  sampling_absorbing_expand_active_for_capacity: false
   sampling_absorbing_degree_budget_strict: true
 
   # A bounded score shortlist keeps the family-wise degree-constrained greedy

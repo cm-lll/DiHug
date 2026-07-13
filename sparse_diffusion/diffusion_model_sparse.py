@@ -4531,33 +4531,56 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 if capacity_now >= int(required):
                     break
 
-        for graph_idx_tensor in batch.unique(sorted=True):
-            graph_idx = int(graph_idx_tensor.item())
-            graph_nodes = torch.where(batch == graph_idx)[0]
-            for fam_id, fam_name in id2edge_family.items():
-                if not (0 <= int(fam_id) < num_families):
-                    continue
-                target = max(
-                    0,
-                    int(
-                        round(
-                            float(avg_counts.get(fam_name, 0.0) or 0.0)
-                            * float(target_fraction)
+        initial_active_count = int(active.sum().item())
+        expand_active = bool(
+            getattr(
+                self.cfg.model,
+                "sampling_absorbing_expand_active_for_capacity",
+                True,
+            )
+        )
+        if expand_active:
+            for graph_idx_tensor in batch.unique(sorted=True):
+                graph_idx = int(graph_idx_tensor.item())
+                graph_nodes = torch.where(batch == graph_idx)[0]
+                for fam_id, fam_name in id2edge_family.items():
+                    if not (0 <= int(fam_id) < num_families):
+                        continue
+                    target = max(
+                        0,
+                        int(
+                            round(
+                                float(avg_counts.get(fam_name, 0.0) or 0.0)
+                                * float(target_fraction)
+                            )
+                        ),
+                    )
+                    endpoint = fam_endpoints.get(fam_name, {}) or {}
+                    src_type = type_name_to_id.get(
+                        str(endpoint.get("src_type", ""))
+                    )
+                    dst_type = type_name_to_id.get(
+                        str(endpoint.get("dst_type", ""))
+                    )
+                    if src_type is None or dst_type is None:
+                        continue
+                    src_nodes = graph_nodes[
+                        node_type[graph_nodes] == int(src_type)
+                    ]
+                    dst_nodes = graph_nodes[
+                        node_type[graph_nodes] == int(dst_type)
+                    ]
+                    if int(src_type) == int(dst_type):
+                        _expand_for_capacity(
+                            src_nodes, int(fam_id), 2 * target
                         )
-                    ),
-                )
-                endpoint = fam_endpoints.get(fam_name, {}) or {}
-                src_type = type_name_to_id.get(str(endpoint.get("src_type", "")))
-                dst_type = type_name_to_id.get(str(endpoint.get("dst_type", "")))
-                if src_type is None or dst_type is None:
-                    continue
-                src_nodes = graph_nodes[node_type[graph_nodes] == int(src_type)]
-                dst_nodes = graph_nodes[node_type[graph_nodes] == int(dst_type)]
-                if int(src_type) == int(dst_type):
-                    _expand_for_capacity(src_nodes, int(fam_id), 2 * target)
-                else:
-                    _expand_for_capacity(src_nodes, int(fam_id), target)
-                    _expand_for_capacity(dst_nodes, int(fam_id), target)
+                    else:
+                        _expand_for_capacity(
+                            src_nodes, int(fam_id), target
+                        )
+                        _expand_for_capacity(
+                            dst_nodes, int(fam_id), target
+                        )
 
         active_edge = active[edge_index[0].long()] & active[
             edge_index[1].long()
@@ -4679,6 +4702,8 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                     )
         stats = {
             "active_nodes": int(active.sum().item()),
+            "initial_active_nodes": int(initial_active_count),
+            "expanded_nodes": int(active.sum().item()) - initial_active_count,
             "frozen_edges": int(frozen_current.sum().item()),
             "overflow": int(overflow_total),
         }

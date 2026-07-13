@@ -994,6 +994,10 @@ sampling_absorbing_protect_existing: true
 sampling_absorbing_refinement_mode: monotone  # monotone | edgepp_active
 sampling_absorbing_active_node_fraction: 0.25
 sampling_absorbing_active_final_all: true
+# Expand the initial active set until its role capacity can rebuild the full
+# family quota. This preserves the original v2 behavior, but can activate the
+# whole graph at the final step; structure-preserving experiments disable it.
+sampling_absorbing_expand_active_for_capacity: true
 sampling_absorbing_degree_budget_strict: true
 sampling_absorbing_degree_pool_multiplier: 32
 # true=每次加噪后随机打乱 block 顺序。
