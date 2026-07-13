@@ -4268,6 +4268,8 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         candidate_parts,
         selection_mode,
         sampling_step,
+        target_fraction=1.0,
+        protect_existing=False,
         apply_connectivity_repair=False,
         log_selection=True,
     ):
@@ -4339,6 +4341,35 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         edge_batch = edge_batch[chosen]
         logits = logits[chosen]
         candidate_count_after = int(raw_scores.numel())
+        data_edge_attr = getattr(data, "edge_attr", None)
+        if data_edge_attr is None:
+            data_edge_labels = torch.empty(
+                0, dtype=torch.long, device=edge_index.device
+            )
+        elif data_edge_attr.dim() > 1:
+            data_edge_labels = data_edge_attr.argmax(dim=-1).long()
+        else:
+            data_edge_labels = data_edge_attr.long()
+        current_edge_labels = self._lookup_query_edge_labels(
+            edge_index,
+            getattr(data, "edge_index", None),
+            data_edge_labels,
+            int(data.node.shape[0]),
+        )
+        current_candidate_mask = current_edge_labels > 0
+        if protect_existing:
+            expected_current = len(
+                self._canonical_edge_key_set(
+                    getattr(data, "edge_index", None), int(data.node.shape[0])
+                )
+            )
+            covered_current = int(current_candidate_mask.sum().item())
+            if covered_current != expected_current:
+                raise RuntimeError(
+                    "absorbing exact-K candidate cover omitted current edges: "
+                    f"covered={covered_current}, expected={expected_current}. "
+                    "Use a full block cover and disable sampling candidate caps."
+                )
 
         # In checkpoint-only mode endpoint roles are derived from the current
         # generated graph. The checkpoint contributes only aggregate bin
@@ -4518,6 +4549,14 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         else:
             raise ValueError(f"Unsupported global exact-K mode: {selection_mode}")
 
+        if protect_existing and current_candidate_mask.any():
+            # The absorbing reverse chain is monotone: an edge already restored
+            # must outrank every not-yet-restored candidate at later steps.
+            selection_scores = selection_scores.clone()
+            selection_scores[current_candidate_mask] = (
+                selection_scores[current_candidate_mask] + 1.0e12
+            )
+
         avg_counts = self._sampling_family_target_counts()
         edge_family2id = getattr(self.dataset_info, "edge_family2id", {}) or {}
         id2edge_family = {int(v): str(k) for k, v in edge_family2id.items()}
@@ -4545,8 +4584,18 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                     local_idx = mask.nonzero(as_tuple=True)[0]
                     target = max(
                         0,
-                        int(round(float(avg_counts.get(fam_name, 0.0) or 0.0))),
+                        int(
+                            round(
+                                float(avg_counts.get(fam_name, 0.0) or 0.0)
+                                * float(target_fraction)
+                            )
+                        ),
                     )
+                    if protect_existing and local_idx.numel() > 0:
+                        current_count = int(
+                            current_candidate_mask[local_idx].sum().item()
+                        )
+                        target = max(target, current_count)
                     take = min(target, int(local_idx.numel()))
                     if take > 0:
                         top_local = torch.topk(
@@ -4579,6 +4628,8 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 f"mode={mode} temperature={temp_text} "
                 f"candidates={candidate_count_before}->{candidate_count_after} "
                 f"selected={int(selected.numel())} "
+                f"target_fraction={float(target_fraction):.4f} "
+                f"protected={int(current_candidate_mask.sum().item()) if protect_existing else 0} "
                 f"unfilled={unfilled} "
                 + "; ".join(log_parts[:10])
             )
@@ -4652,6 +4703,15 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 log_selection=log_selection,
             )
 
+        if protect_existing and current_candidate_mask.any():
+            retained_current = int(current_candidate_mask[selected].sum().item())
+            expected_current = int(current_candidate_mask.sum().item())
+            if retained_current != expected_current:
+                raise RuntimeError(
+                    "absorbing exact-K violated monotone edge restoration: "
+                    f"retained={retained_current}, expected={expected_current}"
+                )
+
         if selected.numel() == 0:
             labels = torch.empty(
                 0, dtype=torch.long, device=edge_index.device
@@ -4724,6 +4784,12 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                     .to(edge_index.device)
                     + 1
                 )
+            if protect_existing:
+                selected_current = current_edge_labels[selected] > 0
+                if selected_current.any():
+                    labels[selected_current] = current_edge_labels[selected][
+                        selected_current
+                    ]
         return edge_index[:, selected], labels
 
     def _log_sampling_node_role_budget_bias_diag(
@@ -14378,6 +14444,28 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         if target.dim() > 1:
             target = target.argmax(dim=-1)
         positive = target.reshape(-1).to(logits.device).long() > 0
+        positive_scope = str(
+            getattr(
+                self.cfg.model,
+                "family_set_ranking_positive_scope",
+                "all",
+            )
+            or "all"
+        ).lower()
+        if positive_scope == "missing":
+            current_exist = self._current_query_exist_from_noisy_graph(
+                pred.edge_index.long(),
+                sparse_noisy_data,
+                int(clean_data.x.shape[0]),
+                dtype=logits.dtype,
+                device=logits.device,
+            )
+            positive = positive & (current_exist <= 0)
+        elif positive_scope != "all":
+            raise ValueError(
+                "model.family_set_ranking_positive_scope must be 'all' or "
+                f"'missing', got {positive_scope!r}"
+            )
 
         batch = getattr(clean_data, "batch", None)
         if batch is None or batch.numel() != clean_data.x.shape[0]:
@@ -14420,6 +14508,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 f"valid_family={int(valid.sum().item())} "
                 f"positive={int(positive.sum().item())} "
                 f"valid_positive={int((valid & positive).sum().item())} "
+                f"positive_scope={positive_scope} "
                 f"families={torch.unique(family[valid]).detach().cpu().tolist()}"
             )
             self._logged_family_set_input = True
@@ -22436,6 +22525,36 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             )
         return "\n".join(rows)
 
+    def _edge_diffusion_mode(self):
+        mode = str(
+            getattr(self.cfg.model, "edge_diffusion_mode", "marginal")
+            or "marginal"
+        ).lower()
+        if mode not in ("marginal", "absorbing_delete"):
+            raise ValueError(
+                "model.edge_diffusion_mode must be 'marginal' or "
+                f"'absorbing_delete', got {mode!r}"
+            )
+        return mode
+
+    def _uses_absorbing_edge_diffusion(self):
+        return self._edge_diffusion_mode() == "absorbing_delete"
+
+    def _empty_sampling_edge_state(self, sparse_sampled_data):
+        device = sparse_sampled_data.node.device
+        sparse_sampled_data.edge_index = torch.empty(
+            (2, 0), dtype=torch.long, device=device
+        )
+        sparse_sampled_data.edge_attr = torch.empty(
+            (0, self.out_dims.E), dtype=torch.float, device=device
+        )
+        if getattr(self, "local_rank", 0) == 0 and not getattr(
+            self, "_logged_absorbing_empty_start", False
+        ):
+            print("[ABSORBING-SAMPLING] initialized z_T with zero edges")
+            self._logged_absorbing_empty_start = True
+        return sparse_sampled_data
+
     def apply_sparse_noise(self, data, t_override=None):
         """Sparse forward noising for the simplified hetero edge-prediction path.
 
@@ -22456,6 +22575,80 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         alpha_s_bar = self.noise_schedule.get_alpha_bar(t_normalized=s_float)
         alpha_t_bar = self.noise_schedule.get_alpha_bar(t_normalized=t_float)
         Qtb = self.transition_model.get_Qt_bar(alpha_t_bar, device)
+
+        if self._uses_absorbing_edge_diffusion():
+            if self.heterogeneous:
+                dir_edge_index = data.edge_index.long()
+                edge_attr = (
+                    data.edge_attr.argmax(dim=-1).long()
+                    if data.edge_attr.dim() > 1
+                    else data.edge_attr.long()
+                )
+            else:
+                dir_edge_index, edge_attr = utils.undirected_to_directed(
+                    data.edge_index, data.edge_attr
+                )
+                edge_attr = (
+                    edge_attr.argmax(dim=-1).long()
+                    if edge_attr.dim() > 1
+                    else edge_attr.long()
+                )
+            if dir_edge_index.numel() > 0:
+                edge_batch = data.batch[dir_edge_index[0].long()]
+                survival = alpha_t_bar.reshape(-1)[edge_batch].clamp(0.0, 1.0)
+                survival_power = max(
+                    float(
+                        getattr(
+                            self.cfg.model, "absorbing_survival_power", 1.0
+                        )
+                        or 1.0
+                    ),
+                    1.0e-6,
+                )
+                survival = survival.pow(survival_power)
+                keep = torch.rand_like(survival) < survival
+                E_t_index = dir_edge_index[:, keep]
+                E_t_attr_ids = edge_attr[keep].clamp(0, self.out_dims.E - 1)
+            else:
+                E_t_index = torch.empty(
+                    (2, 0), dtype=torch.long, device=device
+                )
+                E_t_attr_ids = torch.empty((0,), dtype=torch.long, device=device)
+            if not self.heterogeneous and E_t_index.numel() > 0:
+                E_t_index, E_t_attr_ids = utils.to_undirected(
+                    E_t_index, E_t_attr_ids
+                )
+            E_t_attr = F.one_hot(
+                E_t_attr_ids, num_classes=self.out_dims.E
+            ).float()
+            if getattr(self, "local_rank", 0) == 0 and not getattr(
+                self, "_logged_absorbing_noise", False
+            ):
+                print(
+                    "[ABSORBING-NOISE] "
+                    f"t_norm={float(t_float.mean().detach().cpu()):.4f} "
+                    f"clean_edges={int(dir_edge_index.shape[1])} "
+                    f"retained_edges={int(E_t_index.shape[1])} "
+                    "emerged_edges=0"
+                )
+                self._logged_absorbing_noise = True
+            return {
+                "t_int": t_int,
+                "t_float": t_float,
+                "beta_t": beta_t,
+                "alpha_s_bar": alpha_s_bar,
+                "alpha_t_bar": alpha_t_bar,
+                "node_t": data.x,
+                "X_t": data.x,
+                "edge_index_t": E_t_index,
+                "edge_attr_t": E_t_attr,
+                "comp_edge_index_t": None,
+                "comp_edge_attr_t": None,
+                "y_t": data.y,
+                "batch": data.batch,
+                "ptr": data.ptr,
+                "charge_t": data.charge,
+            }
 
         if self.use_charge:
             prob_charge = data.charge.unsqueeze(1) @ Qtb.charge[data.batch]
@@ -24553,6 +24746,10 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             sparse_sampled_data = diffusion_utils.sample_sparse_discrete_feature_noise(
                     limit_dist=self.limit_dist, node_mask=node_mask
             )
+        if self._uses_absorbing_edge_diffusion():
+            sparse_sampled_data = self._empty_sampling_edge_state(
+                sparse_sampled_data
+            )
 
         # Anchor strategy for heterogeneous edge diffusion:
         # keep a fixed node-subtype snapshot from z_T to avoid recomputing per-step
@@ -24570,8 +24767,9 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                     sparse_sampled_data.batch.long().to(self.device),
                     getattr(self.dataset_info, "type_offsets", {}),
                     )
-                    sparse_sampled_data = self._apply_block_marginal_initial_edges(sparse_sampled_data)
-                    sparse_sampled_data = self._apply_block_template_initial_edges(sparse_sampled_data)
+                    if not self._uses_absorbing_edge_diffusion():
+                        sparse_sampled_data = self._apply_block_marginal_initial_edges(sparse_sampled_data)
+                        sparse_sampled_data = self._apply_block_template_initial_edges(sparse_sampled_data)
                     sparse_sampled_data = self._prepare_connectivity_candidates(sparse_sampled_data)
 
         assert number_chain_steps < self.T
@@ -25189,6 +25387,10 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             out_dims_E=self.out_dims.E,
             device=self.device,
         )
+        if self._uses_absorbing_edge_diffusion():
+            sparse_sampled_data = self._empty_sampling_edge_state(
+                sparse_sampled_data
+            )
         sparse_sampled_data.anchor_node_subtype = fixed_node_subtypes.to(self.device)
         population_role_trace_enabled = bool(
             getattr(self.cfg.general, "log_sampling_population_role_trace", False)
@@ -25355,8 +25557,9 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                         else None
                     ),
             )
-            sparse_sampled_data = self._apply_block_marginal_initial_edges(sparse_sampled_data)
-            sparse_sampled_data = self._apply_block_template_initial_edges(sparse_sampled_data)
+            if not self._uses_absorbing_edge_diffusion():
+                sparse_sampled_data = self._apply_block_marginal_initial_edges(sparse_sampled_data)
+                sparse_sampled_data = self._apply_block_template_initial_edges(sparse_sampled_data)
             sparse_sampled_data = self._prepare_connectivity_candidates(sparse_sampled_data)
 
         if population_role_trace_enabled:
@@ -26150,6 +26353,12 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         exact_k_final_only = bool(
             getattr(self.cfg.model, "sampling_exact_k_final_only", False)
         )
+        absorbing_edge_diffusion = self._uses_absorbing_edge_diffusion()
+        if absorbing_edge_diffusion and exact_k_final_only:
+            raise ValueError(
+                "absorbing_delete sampling requires "
+                "model.sampling_exact_k_final_only=false"
+            )
         use_global_exact_k = use_global_exact_k and (
             bool(is_final_sampling_step) or not exact_k_final_only
         )
@@ -26520,6 +26729,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 query_logits,
                 selected_query_family,
             )
+            clean_query_logits = query_logits
             if use_ranking_intervention_diag:
                 self._update_global_exact_k_candidates(
                     clean_exact_k_candidate_parts,
@@ -26567,15 +26777,16 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                     torch.logsumexp(calibrated_masked[:, 1:], dim=-1)
                     - calibrated_masked[:, 0]
                 )
-            query_logits = self._edge_reverse_posterior_logits(
-                query_logits,
-                selected_query_family,
-                selected_query_batch,
-                current_query_labels,
-                s_float,
-                t_float,
-            )
-            if use_exactk_equivariance_diag:
+            if not absorbing_edge_diffusion:
+                query_logits = self._edge_reverse_posterior_logits(
+                    query_logits,
+                    selected_query_family,
+                    selected_query_batch,
+                    current_query_labels,
+                    s_float,
+                    t_float,
+                )
+            if use_exactk_equivariance_diag and not absorbing_edge_diffusion:
                 paired_current_query_labels = self._lookup_query_edge_labels(
                     paired_selected_query_edge_index,
                     diag_old_to_new[fw_edge_index],
@@ -26639,9 +26850,29 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 )
                 continue
             if use_global_exact_k:
+                exact_k_logits = query_logits
+                use_clean_final_logits = bool(
+                    getattr(
+                        self.cfg.model,
+                        "sampling_final_exact_k_use_clean_logits",
+                        False,
+                    )
+                )
+                if absorbing_edge_diffusion or (
+                    bool(is_final_sampling_step) and use_clean_final_logits
+                ):
+                    exact_k_logits = clean_query_logits
+                    if getattr(self, "local_rank", 0) == 0 and not getattr(
+                        self, "_logged_clean_exact_k_policy", False
+                    ):
+                        print(
+                            "[SAMPLING-EXACT-K-LOGITS] source=clean_x0 "
+                            f"absorbing={int(absorbing_edge_diffusion)}"
+                        )
+                        self._logged_clean_exact_k_policy = True
                 self._update_global_exact_k_candidates(
                     global_exact_k_candidate_parts,
-                    query_logits,
+                    exact_k_logits,
                     selected_query_family,
                     selected_query_edge_index,
                     selected_query_batch,
@@ -26746,12 +26977,48 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                     * float(getattr(self.cfg.model, "diffusion_steps", 100))
                 )
             )
+            absorbing_target_fraction = 1.0
+            protect_absorbing_edges = False
+            if absorbing_edge_diffusion:
+                alpha_s_bar = self.noise_schedule.get_alpha_bar(
+                    t_normalized=s_float
+                )
+                survival_power = max(
+                    float(
+                        getattr(
+                            self.cfg.model, "absorbing_survival_power", 1.0
+                        )
+                        or 1.0
+                    ),
+                    1.0e-6,
+                )
+                absorbing_target_fraction = float(
+                    alpha_s_bar.mean()
+                    .clamp(0.0, 1.0)
+                    .pow(survival_power)
+                    .detach()
+                    .cpu()
+                )
+                if bool(is_final_sampling_step):
+                    # Some legacy schedules index alpha_bar at the first beta
+                    # even for normalized s=0. The terminal absorbing state is
+                    # defined explicitly: every learned family quota is full.
+                    absorbing_target_fraction = 1.0
+                protect_absorbing_edges = bool(
+                    getattr(
+                        self.cfg.model,
+                        "sampling_absorbing_protect_existing",
+                        True,
+                    )
+                )
             selected_edges, selected_labels = (
                 self._finalize_global_exact_k_candidates(
                     data,
                     global_exact_k_candidate_parts,
                     selection_mode,
                     sampling_step,
+                    target_fraction=absorbing_target_fraction,
+                    protect_existing=protect_absorbing_edges,
                     apply_connectivity_repair=use_exact_k_connectivity_repair,
                 )
             )
@@ -26814,6 +27081,14 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             cur_edge_attr_onehot = F.one_hot(
                 cur_edge_attr_ids, num_classes=self.out_dims.E
             ).float()
+            if absorbing_edge_diffusion and getattr(self, "local_rank", 0) == 0:
+                print(
+                    "[ABSORBING-REVERSE] "
+                    f"t={float(t_float.mean().detach().cpu()):.4f} "
+                    f"s={float(s_float.mean().detach().cpu()):.4f} "
+                    f"target_fraction={absorbing_target_fraction:.6f} "
+                    f"edges={int(edge_index.shape[1])}->{int(cur_edge_index.shape[1])}"
+                )
         elif use_connectivity_topk:
             selected_edges, selected_labels = self._finalize_connectivity_candidate_pools(
                 data, connectivity_pools, connectivity_stats

@@ -1,0 +1,30 @@
+# @package _global_
+defaults:
+  - imdb_movie_hgt_l3h4_family_set
+
+general:
+  name: imdb_movie_l3h4_family_set_absorbing
+
+model:
+  # Formal edge-only absorbing diffusion: training deletes clean edges without
+  # creating false ones; generation starts empty and monotonically restores
+  # checkpoint-learned family cardinalities over the finite reverse schedule.
+  edge_diffusion_mode: absorbing_delete
+  absorbing_survival_power: 1.0
+  family_set_ranking_positive_scope: missing
+
+  # Clean denoiser logits define the reverse add-edge ranking. Current restored
+  # edges are protected and each step raises a cumulative family quota, reaching
+  # exactly K_f at s=0 when the legal candidate cover is complete.
+  sampling_use_reverse_posterior: false
+  sampling_edge_selection: gumbel_exact_k
+  sampling_exact_k_final_only: false
+  sampling_final_exact_k_use_clean_logits: true
+  sampling_absorbing_protect_existing: true
+  sampling_gumbel_temperature: 0.1
+
+  # Sampling must see the complete legal block cover. This affects training
+  # memory only; RTX 5090 experiments should additionally set the cap to zero.
+  block_query_full_block: true
+  block_query_inter_fill: true
+
