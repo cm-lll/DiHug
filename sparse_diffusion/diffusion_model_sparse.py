@@ -427,6 +427,13 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         state_dict = dict(state_dict)
         if (
             bool(getattr(self.cfg.general, "test_only", None))
+            and bool(
+                getattr(
+                    self.cfg.model,
+                    "absorbing_probability_calibration",
+                    False,
+                )
+            )
             and str(
                 getattr(
                     self.cfg.model,

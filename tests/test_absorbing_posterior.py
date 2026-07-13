@@ -84,7 +84,8 @@ def test_test_only_absorbing_posterior_rejects_uncalibrated_checkpoint():
         SimpleNamespace(
             general=SimpleNamespace(test_only="old.ckpt"),
             model=SimpleNamespace(
-                sampling_edge_selection="absorbing_posterior_bernoulli"
+                sampling_edge_selection="absorbing_posterior_bernoulli",
+                absorbing_probability_calibration=True,
             ),
         ),
     )

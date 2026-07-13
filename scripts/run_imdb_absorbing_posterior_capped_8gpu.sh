@@ -32,11 +32,13 @@ COMMON_SAMPLE=(
 
 sample_from_ckpt() {
   local gpu="$1" ckpt="$2" name="$3"
+  shift 3
   echo "[$(date '+%F %T')] SAMPLE GPU=$gpu $name" | tee -a "$LOG_DIR/launcher.log"
   CUDA_VISIBLE_DEVICES="$gpu" python -m dihug.main \
     "${COMMON_SAMPLE[@]}" \
     general.test_only="$ckpt" \
     general.name="$name" \
+    "$@" \
     >"$LOG_DIR/${name}.log" 2>&1
 }
 
@@ -60,7 +62,7 @@ train_and_sample() {
       | tee -a "$LOG_DIR/launcher.log"
     return 1
   fi
-  sample_from_ckpt "$gpu" "$ckpt" "${name}_full100"
+  sample_from_ckpt "$gpu" "$ckpt" "${name}_full100" "$@"
 }
 
 # ── GPU 0-2: posterior main, cap=5000, seeds 0/1/2 ──
