@@ -1,0 +1,14 @@
+# @package _global_
+defaults:
+  - imdb_movie_hgt_l3h4_absorbing_joint_bundle
+
+general:
+  name: imdb_movie_l3h4_absorbing_joint_bundle_capped
+
+model:
+  # Mechanism pilot for 11 GB cards. This is not the formal calibrated-
+  # population configuration; the formal experiment above requires cap=0.
+  block_query_max_edges_per_family: 5000
+  absorbing_probability_require_full_candidates: false
+  query_include_all_positive_edges: true
+

@@ -1003,6 +1003,21 @@ family_set_ranking_max_negatives: 8192
 # all: rank every clean positive; missing: in absorbing diffusion, rank only
 # clean positives absent from the current partially deleted graph.
 family_set_ranking_positive_scope: all  # all | missing
+
+# Generic connected-edge bundle learning. Positive bundles are discovered from
+# edges jointly removed by forward noise; no dataset motif schema is required.
+use_joint_edge_bundle: false
+joint_edge_bundle_hidden_dim: 128
+joint_edge_bundle_family_dim: 16
+joint_edge_bundle_loss_weight: 0.0
+joint_edge_bundle_warmup_epochs: 5
+joint_edge_bundle_t_power: 1.0
+joint_edge_bundle_max_positive_pairs: 2048
+joint_edge_bundle_negatives_per_positive: 2
+joint_edge_bundle_sampling_scale: 0.0
+joint_edge_bundle_sampling_candidates_per_node: 32
+joint_edge_bundle_sampling_context_per_node: 8
+absorbing_joint_refresh_rounds: 1
 # marginal preserves the existing categorical edge diffusion. absorbing_delete
 # keeps a random subset of clean edges during training and starts sampling from
 # an empty edge graph, after which reverse steps can only add edges.

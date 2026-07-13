@@ -418,6 +418,9 @@ class PyHGTDenoiser(nn.Module):
         iterative_motif_shortlist_min: int = 16,
         iterative_motif_shortlist_max: int = 2048,
         iterative_motif_probability_temperature: float = 1.0,
+        use_joint_edge_bundle: bool = False,
+        joint_edge_bundle_hidden_dim: int = 128,
+        joint_edge_bundle_family_dim: int = 16,
         use_time_film: bool = False,
         use_edge_state_update: bool = False,
         edge_state_update_mode: str = "all",
@@ -446,6 +449,7 @@ class PyHGTDenoiser(nn.Module):
         )
         self.use_family_edge_adapters = bool(use_family_edge_adapters)
         self.use_iterative_motif_decoder = bool(use_iterative_motif_decoder)
+        self.use_joint_edge_bundle = bool(use_joint_edge_bundle)
         self.iterative_motif_rounds = max(int(iterative_motif_rounds), 1)
         self.iterative_motif_shortlist_ratio = min(
             max(float(iterative_motif_shortlist_ratio), 0.0), 1.0
@@ -548,6 +552,33 @@ class PyHGTDenoiser(nn.Module):
             dropout=dropout,
             out_dim=output_dims.E,
         )
+        self.query_edge_repr_dim = 2 * dx + de
+        if self.use_joint_edge_bundle:
+            bundle_family_dim = max(int(joint_edge_bundle_family_dim), 4)
+            bundle_hidden = max(int(joint_edge_bundle_hidden_dim), 16)
+            self.joint_edge_bundle_family_embedding = nn.Embedding(
+                max(num_edge_families, 1), bundle_family_dim
+            )
+            # A bundle is represented by its shared endpoint, the symmetric
+            # outer-endpoint pair, the symmetric query pair, and its two
+            # relation-family embeddings. No motif or meta-path is hard-coded.
+            bundle_input_dim = (
+                3 * dx
+                + 2 * self.query_edge_repr_dim
+                + 2 * bundle_family_dim
+            )
+            self.joint_edge_bundle_head = nn.Sequential(
+                nn.LayerNorm(bundle_input_dim),
+                nn.Linear(bundle_input_dim, bundle_hidden),
+                nn.GELU(),
+                nn.Dropout(dropout),
+                nn.Linear(bundle_hidden, bundle_hidden),
+                nn.GELU(),
+                nn.Linear(bundle_hidden, 1),
+            )
+        else:
+            self.joint_edge_bundle_family_embedding = None
+            self.joint_edge_bundle_head = None
         # Low-rank bilinear: project src/dst to rank-16, elementwise product, MLP → scalar
         self.bilinear_rank = 16
         self.bilinear_proj_src = nn.Linear(dx, self.bilinear_rank, bias=False)
@@ -1407,7 +1438,7 @@ class PyHGTDenoiser(nn.Module):
             query_edge_family_ids=edge_family_ids,
             edge_input_residual_scale=residual_scale,
         )
-        return utils.SparsePlaceHolder(
+        output = utils.SparsePlaceHolder(
             node=encoded["node_logits"],
             edge_attr=edge_logits,
             edge_index=edge_index,
@@ -1415,6 +1446,9 @@ class PyHGTDenoiser(nn.Module):
             batch=batch,
             charge=encoded["charge_logits"],
         )
+        output.query_edge_repr = self.last_query_edge_repr
+        output.node_hidden = encoded["h"]
+        return output
 
     def encode_context(
         self,
@@ -1834,9 +1868,10 @@ class PyHGTDenoiser(nn.Module):
         # Low-rank bilinear score: captures structural similarity
         bilinear_feat = self.bilinear_proj_src(src_h) * self.bilinear_proj_dst(dst_h)
         bilinear_score = self.bilinear_out(bilinear_feat)  # (E, 1)
+        query_edge_repr = torch.cat([src_h, dst_h, e], dim=-1)
         logits = (
             self._edge_head_logits(
-                torch.cat([src_h, dst_h, e], dim=-1),
+                query_edge_repr,
                 query_edge_stage_ids=query_edge_stage_ids,
                 query_edge_family_ids=query_edge_family_ids,
             )
@@ -1852,6 +1887,8 @@ class PyHGTDenoiser(nn.Module):
             )
             + residual_scale * query_edge_attr[:, : self.out_dim_E]
         )
+        self.last_query_edge_repr = query_edge_repr
+        self.last_query_node_hidden = h
         return self._iterative_motif_refinement(
             logits,
             encoded,
@@ -1859,3 +1896,86 @@ class PyHGTDenoiser(nn.Module):
             batch,
             query_edge_family_ids,
         )
+
+    def score_joint_edge_bundles(
+        self,
+        query_edge_repr: Tensor,
+        node_hidden: Tensor,
+        query_edge_index: Tensor,
+        pair_index: Tensor,
+        query_edge_family_ids: Tensor,
+    ) -> Tensor:
+        """Score two incident query edges as one permutation-symmetric action."""
+        if not self.use_joint_edge_bundle or self.joint_edge_bundle_head is None:
+            return query_edge_repr.new_zeros(pair_index.shape[1])
+        if pair_index.numel() == 0:
+            return query_edge_repr.new_zeros(0)
+
+        first = pair_index[0].long()
+        second = pair_index[1].long()
+        edge_a = query_edge_index[:, first].long()
+        edge_b = query_edge_index[:, second].long()
+        a_u, a_v = edge_a[0], edge_a[1]
+        b_u, b_v = edge_b[0], edge_b[1]
+
+        shared = torch.where(
+            a_u == b_u,
+            a_u,
+            torch.where(
+                a_u == b_v,
+                a_u,
+                torch.where(a_v == b_u, a_v, a_v),
+            ),
+        )
+        valid = (
+            (a_u == b_u) | (a_u == b_v) | (a_v == b_u) | (a_v == b_v)
+        )
+        if not bool(valid.all()):
+            raise ValueError("joint edge bundles must share exactly one endpoint")
+        outer_a = torch.where(a_u == shared, a_v, a_u)
+        outer_b = torch.where(b_u == shared, b_v, b_u)
+
+        query_a = query_edge_repr[first]
+        query_b = query_edge_repr[second]
+        dx = (self.query_edge_repr_dim - self.lin_in_E.out_features) // 2
+        a_src_h, a_dst_h = query_a[:, :dx], query_a[:, dx : 2 * dx]
+        b_src_h, b_dst_h = query_b[:, :dx], query_b[:, dx : 2 * dx]
+        symmetric_query_a = torch.cat(
+            [
+                a_src_h + a_dst_h,
+                (a_src_h - a_dst_h).abs(),
+                query_a[:, 2 * dx :],
+            ],
+            dim=-1,
+        )
+        symmetric_query_b = torch.cat(
+            [
+                b_src_h + b_dst_h,
+                (b_src_h - b_dst_h).abs(),
+                query_b[:, 2 * dx :],
+            ],
+            dim=-1,
+        )
+        a_shared_h = torch.where((a_u == shared).unsqueeze(-1), a_src_h, a_dst_h)
+        b_shared_h = torch.where((b_u == shared).unsqueeze(-1), b_src_h, b_dst_h)
+        shared_h = 0.5 * (a_shared_h + b_shared_h)
+        outer_a_h = torch.where((a_u == shared).unsqueeze(-1), a_dst_h, a_src_h)
+        outer_b_h = torch.where((b_u == shared).unsqueeze(-1), b_dst_h, b_src_h)
+        family = query_edge_family_ids.long().clamp(
+            0, self.joint_edge_bundle_family_embedding.num_embeddings - 1
+        )
+        family_a = self.joint_edge_bundle_family_embedding(family[first])
+        family_b = self.joint_edge_bundle_family_embedding(family[second])
+        features = torch.cat(
+            [
+                shared_h,
+                outer_a_h + outer_b_h,
+                (outer_a_h - outer_b_h).abs(),
+                symmetric_query_a + symmetric_query_b,
+                (symmetric_query_a - symmetric_query_b).abs(),
+                family_a + family_b,
+                (family_a - family_b).abs(),
+            ],
+            dim=-1,
+        )
+        return self.joint_edge_bundle_head(features).squeeze(-1)

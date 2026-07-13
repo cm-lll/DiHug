@@ -1,8 +1,10 @@
 from types import SimpleNamespace
 
 import torch
+from torch import nn
 
 from sparse_diffusion.diffusion_model_sparse import DiscreteDenoisingDiffusion
+from sparse_diffusion.models.pyhgt_denoiser import PyHGTDenoiser
 
 
 def test_absorbing_reverse_add_probability_uses_conditional_x0_probability():
@@ -96,3 +98,86 @@ def test_test_only_absorbing_posterior_rejects_uncalibrated_checkpoint():
         assert "probability calibration" in str(exc)
     else:
         raise AssertionError("uncalibrated checkpoint was accepted")
+
+
+def test_absorbing_micro_intervals_are_contiguous_and_reach_endpoint():
+    t = torch.tensor([[0.8]])
+    s = torch.tensor([[0.6]])
+
+    intervals = DiscreteDenoisingDiffusion._absorbing_micro_intervals(
+        s, t, rounds=4
+    )
+
+    assert len(intervals) == 4
+    torch.testing.assert_close(intervals[0][1], t)
+    torch.testing.assert_close(intervals[-1][0], s)
+    for previous, current in zip(intervals, intervals[1:]):
+        torch.testing.assert_close(previous[0], current[1])
+
+
+def _joint_bundle_head_harness():
+    model = object.__new__(PyHGTDenoiser)
+    nn.Module.__init__(model)
+    model.use_joint_edge_bundle = True
+    model.query_edge_repr_dim = 5  # dx=2, de=1
+    model.lin_in_E = nn.Linear(1, 1)
+    model.joint_edge_bundle_family_embedding = nn.Embedding(3, 2)
+    model.joint_edge_bundle_head = nn.Sequential(
+        nn.LayerNorm(20),
+        nn.Linear(20, 8),
+        nn.GELU(),
+        nn.Linear(8, 1),
+    )
+    return model
+
+
+def test_joint_edge_bundle_score_is_pair_permutation_invariant():
+    torch.manual_seed(7)
+    model = _joint_bundle_head_harness().eval()
+    query_repr = torch.randn(2, 5, requires_grad=True)
+    node_hidden = torch.randn(3, 2)
+    edge_index = torch.tensor([[0, 0], [1, 2]])
+    family = torch.tensor([0, 1])
+
+    forward = model.score_joint_edge_bundles(
+        query_repr,
+        node_hidden,
+        edge_index,
+        torch.tensor([[0], [1]]),
+        family,
+    )
+    reversed_pair = model.score_joint_edge_bundles(
+        query_repr,
+        node_hidden,
+        edge_index,
+        torch.tensor([[1], [0]]),
+        family,
+    )
+
+    torch.testing.assert_close(forward, reversed_pair)
+    forward.sum().backward()
+    assert query_repr.grad is not None
+    assert torch.isfinite(query_repr.grad).all()
+
+
+def test_joint_edge_bundle_score_is_edge_orientation_invariant():
+    torch.manual_seed(11)
+    model = _joint_bundle_head_harness().eval()
+    query_repr = torch.randn(2, 5)
+    node_hidden = torch.randn(3, 2)
+    edge_index = torch.tensor([[0, 0], [1, 2]])
+    family = torch.tensor([0, 1])
+    pair = torch.tensor([[0], [1]])
+
+    forward = model.score_joint_edge_bundles(
+        query_repr, node_hidden, edge_index, pair, family
+    )
+    reversed_repr = query_repr.clone()
+    reversed_repr[:, :2] = query_repr[:, 2:4]
+    reversed_repr[:, 2:4] = query_repr[:, :2]
+    reversed_edges = edge_index.flip(0)
+    reversed_score = model.score_joint_edge_bundles(
+        reversed_repr, node_hidden, reversed_edges, pair, family
+    )
+
+    torch.testing.assert_close(forward, reversed_score)

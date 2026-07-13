@@ -334,6 +334,15 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                     "iterative_motif_probability_temperature",
                     1.0,
                 ),
+                use_joint_edge_bundle=getattr(
+                    cfg.model, "use_joint_edge_bundle", False
+                ),
+                joint_edge_bundle_hidden_dim=getattr(
+                    cfg.model, "joint_edge_bundle_hidden_dim", 128
+                ),
+                joint_edge_bundle_family_dim=getattr(
+                    cfg.model, "joint_edge_bundle_family_dim", 16
+                ),
                 use_time_film=getattr(cfg.model, "use_time_film", False),
                 use_edge_state_update=getattr(cfg.model, "use_edge_state_update", False),
                 edge_state_update_mode=getattr(cfg.model, "edge_state_update_mode", "all"),
@@ -3278,6 +3287,19 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             clean_exist_probability * interval / denom
         ).clamp(min=0.0, max=1.0)
 
+    @staticmethod
+    def _absorbing_micro_intervals(s_norm, t_norm, rounds):
+        """Partition [t, s] into contiguous reverse-time intervals."""
+        rounds = max(int(rounds), 1)
+        intervals = []
+        for idx in range(rounds):
+            start = float(idx) / float(rounds)
+            end = float(idx + 1) / float(rounds)
+            micro_t = t_norm + (s_norm - t_norm) * start
+            micro_s = t_norm + (s_norm - t_norm) * end
+            intervals.append((micro_s, micro_t))
+        return intervals
+
     def _lookup_query_edge_labels(
         self,
         query_edge_index,
@@ -4314,6 +4336,8 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         query_edge_batch,
         total_nodes,
         owner_id,
+        query_repr=None,
+        node_hidden=None,
     ):
         """Cache one block view for a single global posterior decision."""
         logits = self._mask_edge_logits_by_query_family(
@@ -4326,8 +4350,20 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         edge_index = query_edge_index[:, idx].long()
         u = torch.minimum(edge_index[0], edge_index[1])
         v = torch.maximum(edge_index[0], edge_index[1])
-        candidate_parts.append(
-            {
+        canonical_query_repr = None
+        if query_repr is not None:
+            canonical_query_repr = query_repr[idx]
+            reverse = edge_index[0] > edge_index[1]
+            if bool(reverse.any()):
+                dx = (
+                    int(self.model.query_edge_repr_dim)
+                    - int(self.model.lin_in_E.out_features)
+                ) // 2
+                swapped = canonical_query_repr.clone()
+                swapped[reverse, :dx] = canonical_query_repr[reverse, dx : 2 * dx]
+                swapped[reverse, dx : 2 * dx] = canonical_query_repr[reverse, :dx]
+                canonical_query_repr = swapped
+        part = {
                 "edge_index": torch.stack([u, v], dim=0),
                 "edge_keys": u * int(total_nodes) + v,
                 "family": query_edge_family[idx].long(),
@@ -4340,7 +4376,11 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                     device=logits.device,
                 ),
             }
-        )
+        if canonical_query_repr is not None:
+            part["query_repr"] = canonical_query_repr
+        if node_hidden is not None:
+            part["node_hidden"] = node_hidden
+        candidate_parts.append(part)
 
     @staticmethod
     def _shift_binary_logits_to_expected_count(logits, target):
@@ -4362,6 +4402,120 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             hi = torch.where(expected < target_tensor, hi, mid)
         return 0.5 * (lo + hi)
 
+    def _joint_edge_bundle_sampling_residual(
+        self,
+        query_repr,
+        node_hidden,
+        edge_index,
+        families,
+        exist_logits,
+        current_exist,
+    ):
+        """Aggregate learned compatibility with already restored incident edges."""
+        residual = exist_logits.new_zeros(exist_logits.shape)
+        if (
+            not isinstance(self.model, PyHGTDenoiser)
+            or not bool(getattr(self.model, "use_joint_edge_bundle", False))
+            or not bool(current_exist.any())
+        ):
+            return residual
+
+        candidate_cap = max(
+            int(
+                getattr(
+                    self.cfg.model,
+                    "joint_edge_bundle_sampling_candidates_per_node",
+                    32,
+                )
+                or 1
+            ),
+            1,
+        )
+        context_cap = max(
+            int(
+                getattr(
+                    self.cfg.model,
+                    "joint_edge_bundle_sampling_context_per_node",
+                    8,
+                )
+                or 1
+            ),
+            1,
+        )
+        edge_count = int(edge_index.shape[1])
+        incident_nodes = torch.cat([edge_index[0], edge_index[1]]).long()
+        incident_edges = torch.arange(
+            edge_count, device=edge_index.device, dtype=torch.long
+        ).repeat(2)
+        order = torch.argsort(incident_nodes)
+        sorted_nodes = incident_nodes[order]
+        sorted_edges = incident_edges[order]
+        unique_nodes, counts = torch.unique_consecutive(
+            sorted_nodes, return_counts=True
+        )
+        offsets = torch.cat(
+            [
+                counts.new_zeros(1),
+                counts.cumsum(dim=0),
+            ]
+        )
+        pair_candidates = []
+        pair_context = []
+        for node_pos in range(int(unique_nodes.numel())):
+            start = int(offsets[node_pos].item())
+            end = int(offsets[node_pos + 1].item())
+            local = torch.unique(sorted_edges[start:end])
+            context = local[current_exist[local]]
+            missing = local[~current_exist[local]]
+            if context.numel() == 0 or missing.numel() == 0:
+                continue
+            if missing.numel() > candidate_cap:
+                missing = missing[
+                    torch.topk(
+                        exist_logits[missing], k=candidate_cap, largest=True
+                    ).indices
+                ]
+            if context.numel() > context_cap:
+                context = context[
+                    torch.topk(
+                        exist_logits[context], k=context_cap, largest=True
+                    ).indices
+                ]
+            pair_candidates.append(
+                missing.repeat_interleave(int(context.numel()))
+            )
+            pair_context.append(context.repeat(int(missing.numel())))
+        if not pair_candidates:
+            return residual
+
+        candidate_ids = torch.cat(pair_candidates)
+        context_ids = torch.cat(pair_context)
+        pair_index = torch.stack([candidate_ids, context_ids], dim=0)
+        pair_scores = []
+        chunk_size = 65536
+        for start in range(0, int(pair_index.shape[1]), chunk_size):
+            pair_scores.append(
+                self.model.score_joint_edge_bundles(
+                    query_repr,
+                    node_hidden,
+                    edge_index,
+                    pair_index[:, start : start + chunk_size],
+                    families,
+                )
+            )
+        pair_scores = torch.cat(pair_scores)
+        best = exist_logits.new_full(exist_logits.shape, -torch.inf)
+        best.scatter_reduce_(
+            0,
+            candidate_ids,
+            pair_scores,
+            reduce="amax",
+            include_self=True,
+        )
+        valid = torch.isfinite(best)
+        residual[valid] = best[valid]
+        return residual
+
     def _finalize_global_absorbing_posterior_candidates(
         self,
         data,
@@ -4381,6 +4535,13 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         edge_batch = torch.cat([part["batch"] for part in candidate_parts])
         logits = torch.cat([part["logits"] for part in candidate_parts], dim=0)
         owners = torch.cat([part["owner"] for part in candidate_parts])
+        query_repr = None
+        node_hidden = None
+        if all("query_repr" in part for part in candidate_parts):
+            query_repr = torch.cat(
+                [part["query_repr"] for part in candidate_parts], dim=0
+            )
+            node_hidden = candidate_parts[0].get("node_hidden")
         total_nodes = int(data.node.shape[0])
         composite_key = (
             edge_batch.long() * int(total_nodes * total_nodes)
@@ -4399,6 +4560,8 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         edge_batch = edge_batch[stable_order]
         logits = logits[stable_order]
         owners = owners[stable_order]
+        if query_repr is not None:
+            query_repr = query_repr[stable_order]
         keep = torch.ones(
             composite_key.numel(), dtype=torch.bool, device=logits.device
         )
@@ -4409,6 +4572,8 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         edge_batch = edge_batch[keep]
         logits = logits[keep]
         owners = owners[keep]
+        if query_repr is not None:
+            query_repr = query_repr[keep]
 
         masked = self._mask_edge_logits_by_query_family(logits, families)
         exist_logits = (
@@ -4430,6 +4595,30 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             total_nodes,
         )
         current_exist = current_labels > 0
+
+        bundle_residual = None
+        if (
+            query_repr is not None
+            and node_hidden is not None
+            and bool(getattr(self.cfg.model, "use_joint_edge_bundle", False))
+        ):
+            bundle_residual = self._joint_edge_bundle_sampling_residual(
+                query_repr=query_repr,
+                node_hidden=node_hidden,
+                edge_index=edge_index,
+                families=families,
+                exist_logits=exist_logits,
+                current_exist=current_exist,
+            )
+            scale = float(
+                getattr(
+                    self.cfg.model,
+                    "joint_edge_bundle_sampling_scale",
+                    0.0,
+                )
+                or 0.0
+            )
+            exist_logits = exist_logits + scale * bundle_residual
 
         family_bias_records = []
         if bool(
@@ -4544,6 +4733,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 f"expected_add={float(add_probability[~current_exist].sum().detach().cpu()):.2f} "
                 f"sampled_add={int(add.sum().item())} "
                 f"edges={int(selected.sum().item())} "
+                f"bundle_residual={float(bundle_residual.abs().mean().detach().cpu()) if bundle_residual is not None and bundle_residual.numel() else 0.0:.4f} "
                 f"family_bias=[{bias_text}]"
             )
         return edge_index[:, selected], sampled_labels[selected]
@@ -16516,6 +16706,161 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             "family_metrics": family_metrics,
         }
 
+    def _compute_joint_edge_bundle_loss(
+        self, pred, true_data, clean_data, sparse_noisy_data
+    ):
+        """Rank connected missing-edge bundles without a motif schema."""
+        query_repr = getattr(pred, "query_edge_repr", None)
+        node_hidden = getattr(pred, "node_hidden", None)
+        if (
+            not isinstance(self.model, PyHGTDenoiser)
+            or not bool(getattr(self.model, "use_joint_edge_bundle", False))
+            or query_repr is None
+            or node_hidden is None
+            or pred.edge_index.numel() == 0
+        ):
+            return pred.edge_attr.sum() * 0.0, {"positive_pairs": 0.0}
+
+        target = true_data.edge_attr
+        if target.dim() > 1:
+            target = target.argmax(dim=-1)
+        positive = target.reshape(-1).to(pred.edge_index.device).long() > 0
+        current_exist = self._current_query_exist_from_noisy_graph(
+            pred.edge_index.long(),
+            sparse_noisy_data,
+            int(clean_data.x.shape[0]),
+            dtype=pred.edge_attr.dtype,
+            device=pred.edge_attr.device,
+        )
+        missing_positive = positive & (current_exist <= 0)
+        if int(missing_positive.sum().item()) < 2:
+            return pred.edge_attr.sum() * 0.0, {"positive_pairs": 0.0}
+
+        _, family = self._infer_query_family_from_clean_node_types(
+            pred.edge_index.long(), clean_data.x
+        )
+        if family is None:
+            return pred.edge_attr.sum() * 0.0, {"positive_pairs": 0.0}
+        family = family.to(pred.edge_attr.device).long()
+
+        # Build edge-pair indices only. Scores retain their autograd graph.
+        edge_cpu = pred.edge_index.detach().cpu().long()
+        missing_ids = torch.where(missing_positive)[0].detach().cpu().tolist()
+        positive_by_node = {}
+        for edge_id in missing_ids:
+            u = int(edge_cpu[0, edge_id])
+            v = int(edge_cpu[1, edge_id])
+            positive_by_node.setdefault(u, []).append(edge_id)
+            positive_by_node.setdefault(v, []).append(edge_id)
+
+        max_pairs = max(
+            int(
+                getattr(
+                    self.cfg.model,
+                    "joint_edge_bundle_max_positive_pairs",
+                    2048,
+                )
+                or 0
+            ),
+            1,
+        )
+        positive_pairs = []
+        pair_shared_nodes = []
+        for node_id, incident in positive_by_node.items():
+            if len(incident) < 2:
+                continue
+            # Randomize locally so repeated single-graph epochs expose different
+            # connected bundles rather than a fixed lexicographic subset.
+            order = torch.randperm(len(incident)).tolist()
+            incident = [incident[idx] for idx in order]
+            local_cap = min(len(incident) * (len(incident) - 1) // 2, 32)
+            used = 0
+            for left in range(len(incident)):
+                for right in range(left + 1, len(incident)):
+                    positive_pairs.append((incident[left], incident[right]))
+                    pair_shared_nodes.append(int(node_id))
+                    used += 1
+                    if used >= local_cap:
+                        break
+                if used >= local_cap:
+                    break
+        if not positive_pairs:
+            return pred.edge_attr.sum() * 0.0, {"positive_pairs": 0.0}
+        if len(positive_pairs) > max_pairs:
+            keep = torch.randperm(len(positive_pairs))[:max_pairs].tolist()
+            positive_pairs = [positive_pairs[idx] for idx in keep]
+            pair_shared_nodes = [pair_shared_nodes[idx] for idx in keep]
+
+        relevant_nodes = set(pair_shared_nodes)
+        negative_by_node = {node_id: [] for node_id in relevant_nodes}
+        positive_cpu = positive.detach().cpu()
+        for edge_id in range(int(edge_cpu.shape[1])):
+            if bool(positive_cpu[edge_id]):
+                continue
+            u = int(edge_cpu[0, edge_id])
+            v = int(edge_cpu[1, edge_id])
+            if u in negative_by_node:
+                negative_by_node[u].append(edge_id)
+            if v in negative_by_node and v != u:
+                negative_by_node[v].append(edge_id)
+
+        negatives_per_positive = max(
+            int(
+                getattr(
+                    self.cfg.model,
+                    "joint_edge_bundle_negatives_per_positive",
+                    2,
+                )
+                or 1
+            ),
+            1,
+        )
+        kept_positive = []
+        negative_pairs = []
+        for pair, shared_node in zip(positive_pairs, pair_shared_nodes):
+            pool = negative_by_node.get(shared_node, [])
+            if not pool:
+                continue
+            draw = torch.randint(
+                len(pool), (negatives_per_positive,)
+            ).tolist()
+            kept_positive.append(pair)
+            anchor = pair[torch.randint(2, (1,)).item()]
+            negative_pairs.extend((anchor, pool[idx]) for idx in draw)
+        if not kept_positive or not negative_pairs:
+            return pred.edge_attr.sum() * 0.0, {"positive_pairs": 0.0}
+
+        positive_pair_index = torch.tensor(
+            kept_positive, dtype=torch.long, device=pred.edge_attr.device
+        ).t().contiguous()
+        negative_pair_index = torch.tensor(
+            negative_pairs, dtype=torch.long, device=pred.edge_attr.device
+        ).t().contiguous()
+        positive_scores = self.model.score_joint_edge_bundles(
+            query_repr,
+            node_hidden,
+            pred.edge_index.long(),
+            positive_pair_index,
+            family,
+        )
+        negative_scores = self.model.score_joint_edge_bundles(
+            query_repr,
+            node_hidden,
+            pred.edge_index.long(),
+            negative_pair_index,
+            family,
+        ).reshape(len(kept_positive), negatives_per_positive)
+        loss = F.softplus(negative_scores - positive_scores.unsqueeze(-1)).mean()
+        with torch.no_grad():
+            hardest_negative = negative_scores.max(dim=-1).values
+            margin = positive_scores - hardest_negative
+            return loss, {
+                "positive_pairs": float(positive_scores.numel()),
+                "negative_pairs": float(negative_scores.numel()),
+                "margin": float(margin.mean().cpu()),
+                "pair_accuracy": float((margin > 0).float().mean().cpu()),
+            }
+
     @staticmethod
     def _gqer_matrix_from_selection(edge_index, selected, num_nodes, dtype):
         matrix = torch.zeros(
@@ -21296,8 +21641,10 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 node_type_mask_inv = 1.0 - node_type_mask  # (N, dx)
                 sparse_pred.node = sparse_pred.node - node_type_mask_inv * 1e10  # 将不允许的类别设为-inf
         # Compute the loss on the query edges only
-        sparse_pred.edge_attr = sparse_pred.edge_attr[query_mask]
+        if hasattr(sparse_pred, "query_edge_repr"):
+            sparse_pred.query_edge_repr = sparse_pred.query_edge_repr[query_mask]
         sparse_pred.edge_index = comp_edge_index[:, query_mask]
+        sparse_pred.edge_attr = sparse_pred.edge_attr[query_mask]
 
         # 异质图：限制边预测只能在其所属关系族的子类型范围内（训练时也要限制，与节点预测一致）
         if self.heterogeneous and hasattr(self.dataset_info, "edge_family_offsets") and len(getattr(self.dataset_info, "edge_family_offsets", {})) > 0:
@@ -21398,6 +21745,72 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         self._record_train_exist_diagnostics(
             loss_pred, true_data, sparse_noisy_data
         )
+
+        bundle_weight = self._warmup_weight(
+            float(
+                getattr(
+                    self.cfg.model, "joint_edge_bundle_loss_weight", 0.0
+                )
+                or 0.0
+            ),
+            int(
+                getattr(
+                    self.cfg.model, "joint_edge_bundle_warmup_epochs", 0
+                )
+                or 0
+            ),
+            self._auxiliary_time_factor(
+                sparse_noisy_data,
+                float(
+                    getattr(
+                        self.cfg.model, "joint_edge_bundle_t_power", 1.0
+                    )
+                    or 0.0
+                ),
+            ),
+        )
+        if bundle_weight > 0 and not skip_auxiliary_structure_losses:
+            bundle_loss, bundle_stats = self._compute_joint_edge_bundle_loss(
+                sparse_pred, true_data, data, sparse_noisy_data
+            )
+            loss = loss + bundle_weight * bundle_loss
+            self._epoch_joint_bundle_count = (
+                getattr(self, "_epoch_joint_bundle_count", 0) + 1
+            )
+            self._epoch_joint_bundle_loss_sum = (
+                getattr(self, "_epoch_joint_bundle_loss_sum", 0.0)
+                + float(bundle_loss.detach().cpu())
+            )
+            self._epoch_joint_bundle_pair_sum = (
+                getattr(self, "_epoch_joint_bundle_pair_sum", 0.0)
+                + float(bundle_stats.get("positive_pairs", 0.0))
+            )
+            self._epoch_joint_bundle_margin_sum = (
+                getattr(self, "_epoch_joint_bundle_margin_sum", 0.0)
+                + float(bundle_stats.get("margin", 0.0))
+            )
+            self._epoch_joint_bundle_accuracy_sum = (
+                getattr(self, "_epoch_joint_bundle_accuracy_sum", 0.0)
+                + float(bundle_stats.get("pair_accuracy", 0.0))
+            )
+            if step_idx % self.log_every_steps == 0:
+                self.log(
+                    "train/joint_bundle_loss",
+                    bundle_loss.detach(),
+                    on_step=True,
+                    prog_bar=False,
+                    sync_dist=True,
+                )
+                self.log(
+                    "train/joint_bundle_margin",
+                    torch.as_tensor(
+                        float(bundle_stats.get("margin", 0.0)),
+                        device=self.device,
+                    ),
+                    on_step=True,
+                    prog_bar=False,
+                    sync_dist=True,
+                )
 
         family_role_w_base = float(
             getattr(self.cfg.model, "family_role_loss_weight", 0.0) or 0.0
@@ -22434,6 +22847,9 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             out["pred_edge_attr"] = sparse_pred.edge_attr
             out["pred_edge_index"] = sparse_pred.edge_index
             out["true_edge_attr"] = true_data.edge_attr
+            if hasattr(sparse_pred, "query_edge_repr"):
+                out["query_edge_repr"] = sparse_pred.query_edge_repr
+                out["node_hidden"] = sparse_pred.node_hidden
         return out
 
     def on_after_backward(self) -> None:
@@ -22754,9 +23170,25 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         self._epoch_family_set_rank_std_sum = 0.0
         self._epoch_family_set_rank_support_gap_sum = 0.0
         self._epoch_family_set_rank_by_family = {}
+        self._epoch_joint_bundle_count = 0
+        self._epoch_joint_bundle_loss_sum = 0.0
+        self._epoch_joint_bundle_pair_sum = 0.0
+        self._epoch_joint_bundle_margin_sum = 0.0
+        self._epoch_joint_bundle_accuracy_sum = 0.0
 
     def on_train_epoch_end(self) -> None:
         self._run_population_role_fixed_t_probe()
+        bundle_count = int(getattr(self, "_epoch_joint_bundle_count", 0) or 0)
+        if bundle_count > 0 and getattr(self, "local_rank", 0) == 0:
+            denom = float(bundle_count)
+            print(
+                "[JOINT-BUNDLE-EPOCH] "
+                f"epoch={int(self.current_epoch)} "
+                f"loss={self._epoch_joint_bundle_loss_sum / denom:.5f} "
+                f"pairs={self._epoch_joint_bundle_pair_sum / denom:.1f} "
+                f"margin={self._epoch_joint_bundle_margin_sum / denom:.5f} "
+                f"accuracy={self._epoch_joint_bundle_accuracy_sum / denom:.4f}"
+            )
         set_rank_count = int(getattr(self, "_epoch_family_set_rank_count", 0) or 0)
         if set_rank_count > 0 and getattr(self, "local_rank", 0) == 0:
             denom = float(set_rank_count)
@@ -26975,13 +27407,47 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             t_norm = t_array / self.T
             # print(s_norm, t_norm)
 
-            # Sample z_s
-            sparse_sampled_data = self.sample_p_zs_given_zt(
-                    s_norm,
-                    t_norm,
-                    sparse_sampled_data,
-                    is_final_sampling_step=(step_index == n_steps - 1),
+            refresh_rounds = 1
+            if self._uses_absorbing_edge_diffusion():
+                refresh_rounds = max(
+                    int(
+                        getattr(
+                            self.cfg.model,
+                            "absorbing_joint_refresh_rounds",
+                            1,
+                        )
+                        or 1
+                    ),
+                    1,
+                )
+            if (
+                refresh_rounds > 1
+                and getattr(self, "local_rank", 0) == 0
+                and not getattr(self, "_logged_absorbing_joint_refresh", False)
+            ):
+                print(
+                    "[ABSORBING-JOINT-REFRESH] "
+                    f"rounds_per_transition={refresh_rounds} "
+                    "new edges become context before the next micro-round"
+                )
+                self._logged_absorbing_joint_refresh = True
+
+            # Subdivide one analytic transition. Each micro-round is still an
+            # exact absorbing posterior interval, but it re-encodes the newly
+            # restored graph before predicting the next additions.
+            micro_intervals = self._absorbing_micro_intervals(
+                s_norm, t_norm, refresh_rounds
             )
+            for refresh_idx, (micro_s, micro_t) in enumerate(micro_intervals):
+                sparse_sampled_data = self.sample_p_zs_given_zt(
+                    micro_s,
+                    micro_t,
+                    sparse_sampled_data,
+                    is_final_sampling_step=(
+                        step_index == n_steps - 1
+                        and refresh_idx == refresh_rounds - 1
+                    ),
+                )
             
             # 记录采样过程：每一步的状态
             if getattr(self, "local_rank", 0) == 0:
@@ -27752,12 +28218,43 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             t_array = (t_int * torch.ones((batch_size, 1))).to(self.device)
             s_norm = s_array / self.T
             t_norm = t_array / self.T
-            sparse_sampled_data = self.sample_p_zs_given_zt(
-                s_norm,
-                t_norm,
-                sparse_sampled_data,
-                is_final_sampling_step=(step_index == n_steps - 1),
+            refresh_rounds = 1
+            if self._uses_absorbing_edge_diffusion():
+                refresh_rounds = max(
+                    int(
+                        getattr(
+                            self.cfg.model,
+                            "absorbing_joint_refresh_rounds",
+                            1,
+                        )
+                        or 1
+                    ),
+                    1,
+                )
+            if (
+                refresh_rounds > 1
+                and getattr(self, "local_rank", 0) == 0
+                and not getattr(self, "_logged_absorbing_joint_refresh", False)
+            ):
+                print(
+                    "[ABSORBING-JOINT-REFRESH] "
+                    f"rounds_per_transition={refresh_rounds} "
+                    "new edges become context before the next micro-round"
+                )
+                self._logged_absorbing_joint_refresh = True
+            micro_intervals = self._absorbing_micro_intervals(
+                s_norm, t_norm, refresh_rounds
             )
+            for refresh_idx, (micro_s, micro_t) in enumerate(micro_intervals):
+                sparse_sampled_data = self.sample_p_zs_given_zt(
+                    micro_s,
+                    micro_t,
+                    sparse_sampled_data,
+                    is_final_sampling_step=(
+                        step_index == n_steps - 1
+                        and refresh_idx == refresh_rounds - 1
+                    ),
+                )
             if verbose_sampling and hasattr(self, "local_rank") and self.local_rank == 0:
                     self._verbose_step_index = None
                     self._verbose_total_steps = None
@@ -28610,6 +29107,8 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             selected_query_batch = None
             current_query_labels = None
             query_logits = None
+            selected_query_repr = None
+            selected_node_hidden = None
             paired_comp_query_logits = None
             paired_query_logits = None
             if use_queryfree_global_exact_k:
@@ -28638,6 +29137,10 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                     selected_query_family,
                     edge_input_residual_scale=sampling_residual_scale,
                 )
+                selected_query_repr = getattr(
+                    self.model, "last_query_edge_repr", None
+                )
+                selected_node_hidden = queryfree_encoded.get("h")
             else:
                 query_mask, comp_edge_index, comp_edge_attr = get_computational_graph(
                     triu_query_edge_index=query_edge_index,
@@ -28670,6 +29173,11 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                     )
                 pred = self.forward(sparse_noisy_data)
                 comp_query_logits = pred.edge_attr[query_mask]
+                comp_query_repr = (
+                    pred.query_edge_repr[query_mask]
+                    if hasattr(pred, "query_edge_repr")
+                    else None
+                )
                 comp_query_edge_index = comp_edge_index[:, query_mask]
                 if use_forward_equivariance_diag:
                     diag_charge = getattr(data, "charge", None)
@@ -28778,6 +29286,24 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 selected_query_edge_index, selected_query_family, query_logits = self._select_original_query_outputs(
                     query_edge_index, query_edge_family, comp_query_edge_index, comp_query_logits
                 )
+                if comp_query_repr is not None:
+                    (
+                        repr_edge_index,
+                        _repr_family,
+                        selected_query_repr,
+                    ) = self._select_original_query_outputs(
+                        query_edge_index,
+                        query_edge_family,
+                        comp_query_edge_index,
+                        comp_query_repr,
+                    )
+                    if not torch.equal(
+                        repr_edge_index, selected_query_edge_index
+                    ):
+                        raise RuntimeError(
+                            "joint bundle query representation lost edge alignment"
+                        )
+                    selected_node_hidden = pred.node_hidden
                 if use_forward_equivariance_diag:
                     (
                         paired_selected_query_edge_index,
@@ -28881,6 +29407,8 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                     selected_query_batch,
                     total_nodes,
                     owner_id,
+                    query_repr=selected_query_repr,
+                    node_hidden=selected_node_hidden,
                 )
                 continue
             if verbose_sampling:
