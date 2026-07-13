@@ -344,6 +344,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         self.model = denoiser_cls(**model_kwargs)
         self._init_learned_structure_controller()
         self._init_learned_structure_targets()
+        self._init_absorbing_probability_calibrator()
 
         # whether to use sign net
         if self.sign_net and cfg.model.extra_features == "all":
@@ -424,6 +425,33 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
 
     def load_state_dict(self, state_dict, strict: bool = True):
         state_dict = dict(state_dict)
+        if (
+            bool(getattr(self.cfg.general, "test_only", None))
+            and str(
+                getattr(
+                    self.cfg.model,
+                    "sampling_edge_selection",
+                    "bernoulli",
+                )
+                or "bernoulli"
+            ).lower()
+            == "absorbing_posterior_bernoulli"
+        ):
+            required_calibration = (
+                "absorbing_probability_log_temperature",
+                "absorbing_probability_family_bias",
+                "absorbing_probability_time_bias",
+            )
+            missing_calibration = [
+                name for name in required_calibration if name not in state_dict
+            ]
+            if missing_calibration:
+                raise RuntimeError(
+                    "absorbing_posterior_bernoulli test-only sampling requires "
+                    "a checkpoint trained with probability calibration; "
+                    f"checkpoint is missing {missing_calibration}. Train a new "
+                    "checkpoint with model.absorbing_probability_calibration=true."
+                )
         bundle_names = (
             "structure_target_bundle_version",
             "structure_target_num_nodes",
@@ -547,6 +575,64 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         )
         self.learned_structure_degree_pair_bias = nn.Parameter(
             torch.full((num_families, num_degree_pairs), init)
+        )
+
+    def _init_absorbing_probability_calibrator(self):
+        """Initialize the checkpointed calibrator for p(E_0 | G_t, t)."""
+        self.absorbing_probability_num_families = 0
+        self.absorbing_probability_num_time_bins = 0
+        if not bool(
+            getattr(
+                self.cfg.model,
+                "absorbing_probability_calibration",
+                False,
+            )
+        ):
+            return
+        if not bool(getattr(self.dataset_info, "heterogeneous", False)):
+            return
+        num_families = len(
+            getattr(self.dataset_info, "edge_family2id", {}) or {}
+        )
+        if num_families <= 0:
+            return
+        num_time_bins = max(
+            2,
+            int(
+                getattr(
+                    self.cfg.model,
+                    "absorbing_probability_time_bins",
+                    8,
+                )
+                or 8
+            ),
+        )
+        self.absorbing_probability_num_families = int(num_families)
+        self.absorbing_probability_num_time_bins = int(num_time_bins)
+        self.absorbing_probability_log_temperature = nn.Parameter(
+            torch.zeros(())
+        )
+        self.absorbing_probability_family_bias = nn.Parameter(
+            torch.zeros(num_families)
+        )
+        self.absorbing_probability_time_bias = nn.Parameter(
+            torch.zeros(num_time_bins)
+        )
+
+    def _absorbing_probability_calibrator_enabled(self):
+        return (
+            bool(
+                getattr(
+                    self.cfg.model,
+                    "absorbing_probability_calibration",
+                    False,
+                )
+            )
+            and hasattr(self, "absorbing_probability_log_temperature")
+            and int(
+                getattr(self, "absorbing_probability_num_families", 0)
+            )
+            > 0
         )
 
     def _learned_structure_controller_enabled(self):
@@ -3047,6 +3133,144 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             self._logged_sampling_pos_weight_calibration = True
         return calibrated
 
+    def _apply_absorbing_probability_calibrator(
+        self,
+        logits,
+        query_edge_family,
+        query_edge_batch,
+        t_float,
+    ):
+        """Map denoiser logits to calibrated p(E_0 | G_t, t) logits.
+
+        A common additive shift is applied to all positive subtypes of an edge,
+        preserving their conditional distribution while calibrating existence.
+        """
+        logits = self._mask_edge_logits_by_query_family(
+            logits, query_edge_family
+        )
+        if (
+            logits is None
+            or logits.numel() == 0
+            or not self._absorbing_probability_calibrator_enabled()
+        ):
+            return logits
+        family = query_edge_family.long().to(logits.device).reshape(-1)
+        edge_batch = query_edge_batch.long().to(logits.device).reshape(-1)
+        if (
+            family.numel() != logits.shape[0]
+            or edge_batch.numel() != logits.shape[0]
+        ):
+            raise ValueError(
+                "absorbing probability calibration requires one family and "
+                "batch id per query edge"
+            )
+        t_values = t_float.to(logits.device).float().reshape(-1)
+        if t_values.numel() == 1:
+            edge_t = t_values.expand(logits.shape[0])
+        else:
+            safe_batch = edge_batch.clamp(0, t_values.numel() - 1)
+            edge_t = t_values[safe_batch]
+        num_bins = int(self.absorbing_probability_num_time_bins)
+        time_bin = torch.round(
+            edge_t.clamp(0.0, 1.0) * float(num_bins - 1)
+        ).long()
+        safe_family = family.clamp(
+            0, int(self.absorbing_probability_num_families) - 1
+        )
+        raw_exist = (
+            torch.logsumexp(logits[:, 1:], dim=-1) - logits[:, 0]
+        )
+        temperature = torch.exp(
+            self.absorbing_probability_log_temperature.clamp(-3.0, 3.0)
+        )
+        calibrated_exist = (
+            raw_exist / temperature
+            + self.absorbing_probability_family_bias[safe_family]
+            + self.absorbing_probability_time_bias[time_bin]
+        )
+        delta = calibrated_exist - raw_exist
+        calibrated = logits.clone()
+        calibrated[:, 1:] = calibrated[:, 1:] + delta.unsqueeze(-1)
+        return calibrated
+
+    def _absorbing_probability_calibration_penalty(self):
+        if not self._absorbing_probability_calibrator_enabled():
+            return None
+        weight = max(
+            0.0,
+            float(
+                getattr(
+                    self.cfg.model,
+                    "absorbing_probability_calibration_l2",
+                    1.0e-4,
+                )
+                or 0.0
+            ),
+        )
+        if weight <= 0.0:
+            return self.absorbing_probability_log_temperature.sum() * 0.0
+        penalty = (
+            self.absorbing_probability_log_temperature.square()
+            + self.absorbing_probability_family_bias.square().mean()
+            + self.absorbing_probability_time_bias.square().mean()
+        )
+        return weight * penalty
+
+    def _pred_with_absorbing_probability_calibration(
+        self,
+        pred,
+        clean_data,
+        sparse_noisy_data,
+    ):
+        if not self._absorbing_probability_calibrator_enabled():
+            return pred
+        if not self._uses_absorbing_edge_diffusion():
+            raise ValueError(
+                "absorbing_probability_calibration requires "
+                "model.edge_diffusion_mode=absorbing_delete"
+            )
+        if pred.edge_index.numel() == 0:
+            return pred
+        _, family = self._infer_query_family_from_clean_node_types(
+            pred.edge_index.long(), clean_data.x
+        )
+        if family is None:
+            return pred
+        edge_batch = clean_data.batch[pred.edge_index[0].long()].long()
+        calibrated_edge_attr = self._apply_absorbing_probability_calibrator(
+            pred.edge_attr,
+            family,
+            edge_batch,
+            sparse_noisy_data["t_float"],
+        )
+        return utils.SparsePlaceHolder(
+            node=pred.node,
+            edge_index=pred.edge_index,
+            edge_attr=calibrated_edge_attr,
+            y=pred.y,
+            ptr=getattr(pred, "ptr", None),
+            batch=pred.batch,
+            charge=pred.charge,
+        )
+
+    @staticmethod
+    def _absorbing_reverse_add_probability(
+        clean_exist_probability,
+        alpha_s_bar,
+        alpha_t_bar,
+    ):
+        """Analytic q(E_s=1 | E_t=0) for p_theta(E_0 | E_t).
+
+        clean_exist_probability is already conditioned on E_t. Therefore the
+        D3PM x0-parameterization mixes q(E_s | E_t, E_0) directly and must not
+        apply a second Bayes denominator involving p_theta.
+        """
+        denom = (1.0 - alpha_t_bar).clamp(min=1.0e-12)
+        interval = (alpha_s_bar - alpha_t_bar).clamp(min=0.0)
+        return (
+            clean_exist_probability * interval / denom
+        ).clamp(min=0.0, max=1.0)
+
     def _lookup_query_edge_labels(
         self,
         query_edge_index,
@@ -4073,6 +4297,249 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 "logits": local_logits,
             }
         )
+
+    def _update_global_absorbing_posterior_candidates(
+        self,
+        candidate_parts,
+        logits,
+        query_edge_family,
+        query_edge_index,
+        query_edge_batch,
+        total_nodes,
+        owner_id,
+    ):
+        """Cache one block view for a single global posterior decision."""
+        logits = self._mask_edge_logits_by_query_family(
+            logits, query_edge_family
+        )
+        valid = torch.isfinite(logits[:, 1:]).any(dim=-1)
+        if not valid.any():
+            return
+        idx = valid.nonzero(as_tuple=True)[0]
+        edge_index = query_edge_index[:, idx].long()
+        u = torch.minimum(edge_index[0], edge_index[1])
+        v = torch.maximum(edge_index[0], edge_index[1])
+        candidate_parts.append(
+            {
+                "edge_index": torch.stack([u, v], dim=0),
+                "edge_keys": u * int(total_nodes) + v,
+                "family": query_edge_family[idx].long(),
+                "batch": query_edge_batch[idx].long(),
+                "logits": logits[idx],
+                "owner": torch.full(
+                    (int(idx.numel()),),
+                    int(owner_id),
+                    dtype=torch.long,
+                    device=logits.device,
+                ),
+            }
+        )
+
+    @staticmethod
+    def _shift_binary_logits_to_expected_count(logits, target):
+        """Return an additive intercept with sum(sigmoid(logits+b))=target."""
+        if logits.numel() == 0:
+            return logits.new_tensor(0.0)
+        target = float(max(0.0, min(float(logits.numel()), float(target))))
+        if target <= 0.0:
+            return logits.new_tensor(-80.0)
+        if target >= float(logits.numel()):
+            return logits.new_tensor(80.0)
+        lo = -80.0 - logits.max()
+        hi = 80.0 - logits.min()
+        target_tensor = logits.new_tensor(target)
+        for _ in range(48):
+            mid = 0.5 * (lo + hi)
+            expected = torch.sigmoid(logits + mid).sum()
+            lo = torch.where(expected < target_tensor, mid, lo)
+            hi = torch.where(expected < target_tensor, hi, mid)
+        return 0.5 * (lo + hi)
+
+    def _finalize_global_absorbing_posterior_candidates(
+        self,
+        data,
+        candidate_parts,
+        s_float,
+        t_float,
+        is_final_sampling_step,
+    ):
+        """Sample the analytic absorbing reverse posterior once per edge."""
+        if not candidate_parts:
+            return None, None
+        edge_index = torch.cat(
+            [part["edge_index"] for part in candidate_parts], dim=1
+        )
+        edge_keys = torch.cat([part["edge_keys"] for part in candidate_parts])
+        families = torch.cat([part["family"] for part in candidate_parts])
+        edge_batch = torch.cat([part["batch"] for part in candidate_parts])
+        logits = torch.cat([part["logits"] for part in candidate_parts], dim=0)
+        owners = torch.cat([part["owner"] for part in candidate_parts])
+        total_nodes = int(data.node.shape[0])
+        composite_key = (
+            edge_batch.long() * int(total_nodes * total_nodes)
+            + edge_keys.long()
+        )
+
+        # Stable owner semantics: context blocks may overlap, but the smallest
+        # persistent block id owns the edge and exactly one Bernoulli is drawn.
+        stable_order = torch.argsort(
+            composite_key * max(int(owners.max().item()) + 2, 2)
+            + owners.clamp(min=0)
+        )
+        composite_key = composite_key[stable_order]
+        edge_index = edge_index[:, stable_order]
+        families = families[stable_order]
+        edge_batch = edge_batch[stable_order]
+        logits = logits[stable_order]
+        owners = owners[stable_order]
+        keep = torch.ones(
+            composite_key.numel(), dtype=torch.bool, device=logits.device
+        )
+        if composite_key.numel() > 1:
+            keep[1:] = composite_key[1:] != composite_key[:-1]
+        edge_index = edge_index[:, keep]
+        families = families[keep]
+        edge_batch = edge_batch[keep]
+        logits = logits[keep]
+        owners = owners[keep]
+
+        masked = self._mask_edge_logits_by_query_family(logits, families)
+        exist_logits = (
+            torch.logsumexp(masked[:, 1:], dim=-1) - masked[:, 0]
+        )
+        current_attr = getattr(data, "edge_attr", None)
+        if current_attr is None or current_attr.numel() == 0:
+            current_labels_source = torch.empty(
+                (0,), dtype=torch.long, device=logits.device
+            )
+        elif current_attr.dim() > 1:
+            current_labels_source = current_attr.argmax(dim=-1).long()
+        else:
+            current_labels_source = current_attr.long()
+        current_labels = self._lookup_query_edge_labels(
+            edge_index,
+            getattr(data, "edge_index", None),
+            current_labels_source,
+            total_nodes,
+        )
+        current_exist = current_labels > 0
+
+        family_bias_records = []
+        if bool(
+            getattr(
+                self.cfg.model,
+                "absorbing_probability_match_checkpoint_family_count",
+                False,
+            )
+        ):
+            target_counts = self._sampling_family_target_counts()
+            id_to_family = {
+                int(value): str(name)
+                for name, value in (
+                    getattr(self.dataset_info, "edge_family2id", {}) or {}
+                ).items()
+            }
+            for graph_idx in torch.unique(edge_batch).detach().cpu().tolist():
+                for family_id in torch.unique(
+                    families[edge_batch == int(graph_idx)]
+                ).detach().cpu().tolist():
+                    family_group = (edge_batch == int(graph_idx)) & (
+                        families == int(family_id)
+                    )
+                    family_name = id_to_family.get(int(family_id))
+                    if family_name is None:
+                        continue
+                    target = float(target_counts.get(family_name, 0.0))
+                    current_count = int(
+                        (family_group & current_exist).sum().item()
+                    )
+                    missing_group = family_group & (~current_exist)
+                    remaining_target = max(target - float(current_count), 0.0)
+                    if remaining_target > float(missing_group.sum().item()) + 1.0e-6:
+                        raise RuntimeError(
+                            "absorbing posterior candidate cover is incomplete: "
+                            f"family={family_name}, target={target}, "
+                            f"current={current_count}, "
+                            f"missing_candidates={int(missing_group.sum().item())}"
+                        )
+                    if not missing_group.any():
+                        continue
+                    shift = self._shift_binary_logits_to_expected_count(
+                        exist_logits[missing_group], remaining_target
+                    )
+                    exist_logits[missing_group] = (
+                        exist_logits[missing_group] + shift
+                    )
+                    family_bias_records.append(
+                        (family_name, float(shift.detach().cpu()))
+                    )
+
+        clean_exist_probability = torch.where(
+            current_exist,
+            torch.ones_like(exist_logits),
+            torch.sigmoid(exist_logits),
+        )
+
+        survival_power = max(
+            float(
+                getattr(
+                    self.cfg.model, "absorbing_survival_power", 1.0
+                )
+                or 1.0
+            ),
+            1.0e-6,
+        )
+        alpha_s = self.noise_schedule.get_alpha_bar(
+            t_normalized=s_float
+        ).reshape(-1).clamp(0.0, 1.0).pow(survival_power)
+        alpha_t = self.noise_schedule.get_alpha_bar(
+            t_normalized=t_float
+        ).reshape(-1).clamp(0.0, 1.0).pow(survival_power)
+        if bool(is_final_sampling_step):
+            alpha_s = torch.ones_like(alpha_s)
+        if alpha_s.numel() == 1:
+            edge_alpha_s = alpha_s.expand(logits.shape[0])
+            edge_alpha_t = alpha_t.expand(logits.shape[0])
+        else:
+            safe_batch = edge_batch.clamp(0, alpha_s.numel() - 1)
+            edge_alpha_s = alpha_s[safe_batch]
+            edge_alpha_t = alpha_t[safe_batch]
+        add_probability = self._absorbing_reverse_add_probability(
+            clean_exist_probability,
+            edge_alpha_s,
+            edge_alpha_t,
+        )
+        sampled_exist = current_exist | (
+            torch.rand_like(add_probability) < add_probability
+        )
+        sampled_labels = current_labels.clone()
+        add = sampled_exist & (~current_exist)
+        add_idx = add.nonzero(as_tuple=True)[0]
+        if add_idx.numel() > 0:
+            subtype_prob = torch.softmax(masked[add_idx, 1:], dim=-1)
+            sampled_labels[add_idx] = (
+                subtype_prob.multinomial(1).flatten() + 1
+            )
+        selected = sampled_labels > 0
+
+        if getattr(self, "local_rank", 0) == 0:
+            bias_text = ",".join(
+                f"{name}:{value:.3f}"
+                for name, value in family_bias_records
+            )
+            print(
+                "[ABSORBING-POSTERIOR] "
+                f"t={float(t_float.mean().detach().cpu()):.4f} "
+                f"s={float(s_float.mean().detach().cpu()):.4f} "
+                f"candidates={int(logits.shape[0])} "
+                f"owners={int(torch.unique(owners).numel())} "
+                f"current={int(current_exist.sum().item())} "
+                f"expected_add={float(add_probability[~current_exist].sum().detach().cpu()):.2f} "
+                f"sampled_add={int(add.sum().item())} "
+                f"edges={int(selected.sum().item())} "
+                f"family_bias=[{bias_text}]"
+            )
+        return edge_index[:, selected], sampled_labels[selected]
 
     @staticmethod
     def _canonical_edge_key_set(edge_index, total_nodes):
@@ -5188,6 +5655,20 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 log_selection=log_selection,
             )
 
+        if selected.numel() > 0:
+            selected = self._apply_checkpoint_structural_realizer(
+                data=data,
+                edge_index=edge_index,
+                edge_keys=edge_keys,
+                raw_scores=raw_scores,
+                families=families,
+                edge_batch=edge_batch,
+                selected=selected,
+                sampling_step=sampling_step,
+                absorbing_final_step=absorbing_final_step,
+                log_selection=log_selection,
+            )
+
         if protect_existing and current_candidate_mask.any():
             retained_current = int(current_candidate_mask[selected].sum().item())
             expected_current = int(current_candidate_mask.sum().item())
@@ -5814,6 +6295,950 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 f"considered={total_considered}{msg}"
             )
         return new_selected.to(device=device)
+
+    def _apply_checkpoint_structural_realizer(
+        self,
+        data,
+        edge_index,
+        edge_keys,
+        raw_scores,
+        families,
+        edge_batch,
+        selected,
+        sampling_step,
+        absorbing_final_step=False,
+        log_selection=True,
+    ):
+        """Realize checkpoint structure with degree-preserving 2-switches.
+
+        This final projection never reads a reference graph. It consumes only
+        graph-level targets persisted in the checkpoint and the current sampled
+        graph. Pairing two edges from the same family and rewiring their four
+        endpoints preserves exact family volume and every endpoint's family
+        degree while allowing cross-family motifs to emerge in the union graph.
+        """
+        if not bool(
+            getattr(
+                self.cfg.model,
+                "sampling_checkpoint_structural_realizer",
+                False,
+            )
+        ):
+            return selected
+        if bool(
+            getattr(
+                self.cfg.model,
+                "sampling_checkpoint_structural_realizer_final_only",
+                True,
+            )
+        ) and not bool(absorbing_final_step):
+            return selected
+        source = str(
+            getattr(self.cfg.model, "sampling_structure_target_source", "config")
+            or "config"
+        ).lower()
+        if source != "checkpoint_only":
+            raise RuntimeError(
+                "checkpoint structural realization requires "
+                "model.sampling_structure_target_source=checkpoint_only"
+            )
+
+        target_tri = self._sampling_structure_target_value(
+            "triangles", ("sampling_structure_limiter_target_triangles",)
+        )
+        target_clust = self._sampling_structure_target_value(
+            "clustering", ("sampling_structure_limiter_target_clustering",)
+        )
+        target_lcc = self._sampling_structure_target_value(
+            "lcc_size", ("sampling_structure_limiter_target_lcc",)
+        )
+        target_assort = self._sampling_structure_target_value(
+            "assortativity", ("sampling_structure_limiter_target_assortativity",)
+        )
+        if target_tri is None or target_clust is None or target_lcc is None:
+            raise RuntimeError(
+                "checkpoint structural realization requires triangle, "
+                "clustering, and LCC targets in the checkpoint"
+            )
+
+        max_swaps = max(
+            0,
+            int(
+                getattr(
+                    self.cfg.model,
+                    "sampling_checkpoint_structural_realizer_max_swaps",
+                    4096,
+                )
+                or 0
+            ),
+        )
+        max_proposals = max(
+            0,
+            int(
+                getattr(
+                    self.cfg.model,
+                    "sampling_checkpoint_structural_realizer_max_proposals",
+                    250000,
+                )
+                or 0
+            ),
+        )
+        if max_swaps <= 0 or max_proposals <= 0:
+            return selected
+
+        cfg_prefix = "sampling_checkpoint_structural_realizer_"
+        weights = {
+            "triangles": max(
+                0.0,
+                float(getattr(self.cfg.model, cfg_prefix + "triangle_weight", 1.0) or 0.0),
+            ),
+            "clustering": max(
+                0.0,
+                float(getattr(self.cfg.model, cfg_prefix + "clustering_weight", 4.0) or 0.0),
+            ),
+            "lcc_size": max(
+                0.0,
+                float(getattr(self.cfg.model, cfg_prefix + "lcc_weight", 2.0) or 0.0),
+            ),
+            "assortativity": max(
+                0.0,
+                float(getattr(self.cfg.model, cfg_prefix + "assort_weight", 0.1) or 0.0),
+            ),
+        }
+        tolerances = {
+            "triangles": max(
+                0.0,
+                float(getattr(self.cfg.model, cfg_prefix + "triangle_tolerance", 0.10) or 0.0),
+            ),
+            "clustering": max(
+                0.0,
+                float(getattr(self.cfg.model, cfg_prefix + "clustering_tolerance", 0.10) or 0.0),
+            ),
+            "lcc_size": max(
+                0.0,
+                float(getattr(self.cfg.model, cfg_prefix + "lcc_tolerance", 0.05) or 0.0),
+            ),
+            "assortativity": max(
+                0.0,
+                float(getattr(self.cfg.model, cfg_prefix + "assort_tolerance", 0.20) or 0.0),
+            ),
+        }
+        targeted_probability = min(
+            1.0,
+            max(
+                0.0,
+                float(getattr(self.cfg.model, cfg_prefix + "targeted_probability", 0.85) or 0.0),
+            ),
+        )
+        model_score_weight = max(
+            0.0,
+            float(getattr(self.cfg.model, cfg_prefix + "model_score_weight", 0.0) or 0.0),
+        )
+        min_gain = max(
+            0.0,
+            float(getattr(self.cfg.model, cfg_prefix + "min_objective_gain", 1.0e-9) or 0.0),
+        )
+        log_every = max(
+            1,
+            int(getattr(self.cfg.model, cfg_prefix + "log_every", 100) or 100),
+        )
+
+        num_nodes = int(data.node.shape[0])
+        edge_index_np = edge_index.detach().cpu().long().numpy()
+        edge_keys_np = edge_keys.detach().cpu().long().numpy()
+        families_np = families.detach().cpu().long().numpy()
+        edge_batch_np = edge_batch.detach().cpu().long().numpy()
+        scores_np = raw_scores.detach().cpu().float().numpy()
+        selected_np = selected.detach().cpu().long().numpy()
+        selected_mask = np.zeros((int(edge_keys_np.shape[0]),), dtype=np.bool_)
+        selected_mask[selected_np] = True
+        node_batch_obj = getattr(data, "batch", None)
+        if node_batch_obj is None:
+            node_batch_np = np.zeros((num_nodes,), dtype=np.int64)
+        else:
+            node_batch_np = node_batch_obj.detach().cpu().long().numpy()
+
+        initialize_family_degrees = bool(
+            getattr(
+                self.cfg.model,
+                "sampling_checkpoint_structural_realizer_initialize_family_degrees",
+                True,
+            )
+        )
+        assigned_roles_np = None
+        if initialize_family_degrees:
+            if int(np.unique(node_batch_np).size) != 1:
+                raise RuntimeError(
+                    "checkpoint family-degree realization currently requires "
+                    "one generated graph per sampling batch"
+                )
+            try:
+                import networkx as nx
+            except ImportError as exc:
+                raise RuntimeError(
+                    "checkpoint family-degree realization requires networkx"
+                ) from exc
+
+            assigned_roles_np = (
+                self._sampling_edgepp_role_targets(data, edge_index.device)
+                .detach()
+                .cpu()
+                .long()
+                .numpy()
+            )
+            node_subtype = getattr(data, "anchor_node_subtype", None)
+            if node_subtype is None:
+                node_obj = getattr(data, "node", None)
+                node_subtype = (
+                    node_obj.argmax(dim=-1).long()
+                    if node_obj.dim() > 1
+                    else node_obj.long().reshape(-1)
+                )
+            node_type_np = (
+                self._node_type_ids_from_subtype(node_subtype.long())
+                .detach()
+                .cpu()
+                .long()
+                .numpy()
+            )
+            original_quota = {}
+            for pos in selected_np.tolist():
+                key = (int(edge_batch_np[pos]), int(families_np[pos]))
+                original_quota[key] = original_quota.get(key, 0) + 1
+
+            role_positions = []
+            for (graph_idx, fam), expected_count in sorted(original_quota.items()):
+                if fam < 0 or fam >= int(assigned_roles_np.shape[1]):
+                    raise RuntimeError(
+                        f"checkpoint role bundle has no family column {fam}"
+                    )
+                candidate_mask = (
+                    (edge_batch_np == int(graph_idx))
+                    & (families_np == int(fam))
+                )
+                candidate_positions = np.flatnonzero(candidate_mask)
+                if candidate_positions.size == 0 and expected_count > 0:
+                    raise RuntimeError(
+                        f"family-degree realization has no candidates for family {fam}"
+                    )
+                endpoint_pairs = {
+                    tuple(
+                        sorted(
+                            (
+                                int(node_type_np[int(edge_index_np[0, pos])]),
+                                int(node_type_np[int(edge_index_np[1, pos])]),
+                            )
+                        )
+                    )
+                    for pos in candidate_positions.tolist()
+                }
+                if len(endpoint_pairs) != 1:
+                    raise RuntimeError(
+                        "family-degree realization requires one endpoint-type "
+                        f"pair per family, got family={fam}, pairs={endpoint_pairs}"
+                    )
+                left_type, right_type = next(iter(endpoint_pairs))
+                graph_nodes = np.flatnonzero(node_batch_np == int(graph_idx))
+
+                realized_edges = []
+                if left_type == right_type:
+                    family_nodes = [
+                        int(node)
+                        for node in graph_nodes.tolist()
+                        if int(node_type_np[node]) == int(left_type)
+                    ]
+                    sequence = [
+                        int(assigned_roles_np[node, fam]) for node in family_nodes
+                    ]
+                    if sum(sequence) != 2 * int(expected_count):
+                        raise RuntimeError(
+                            "same-type checkpoint degree sum disagrees with family quota: "
+                            f"family={fam}, degrees={sum(sequence)}, edges={expected_count}"
+                        )
+                    try:
+                        graph = nx.havel_hakimi_graph(sequence)
+                    except nx.NetworkXError as exc:
+                        raise RuntimeError(
+                            f"checkpoint degree sequence is not graphical for family {fam}"
+                        ) from exc
+                    nodes_by_degree = {}
+                    for node, target_degree in zip(family_nodes, sequence):
+                        nodes_by_degree.setdefault(int(target_degree), []).append(
+                            int(node)
+                        )
+                    graph_to_role = {}
+                    for graph_node in graph.nodes():
+                        graph_degree = int(graph.degree(graph_node))
+                        bucket = nodes_by_degree.get(graph_degree, [])
+                        if not bucket:
+                            raise RuntimeError(
+                                "Havel-Hakimi degree relabeling could not be "
+                                f"matched for family {fam}, degree={graph_degree}"
+                            )
+                        graph_to_role[int(graph_node)] = bucket.pop()
+                    realized_edges = [
+                        (
+                            graph_to_role[int(left)],
+                            graph_to_role[int(right)],
+                        )
+                        for left, right in graph.edges()
+                    ]
+                else:
+                    left_nodes = [
+                        int(node)
+                        for node in graph_nodes.tolist()
+                        if int(node_type_np[node]) == int(left_type)
+                    ]
+                    right_nodes = [
+                        int(node)
+                        for node in graph_nodes.tolist()
+                        if int(node_type_np[node]) == int(right_type)
+                    ]
+                    left_sequence = [
+                        int(assigned_roles_np[node, fam]) for node in left_nodes
+                    ]
+                    right_sequence = [
+                        int(assigned_roles_np[node, fam]) for node in right_nodes
+                    ]
+                    if (
+                        sum(left_sequence) != int(expected_count)
+                        or sum(right_sequence) != int(expected_count)
+                    ):
+                        raise RuntimeError(
+                            "cross-type checkpoint degree sums disagree with family quota: "
+                            f"family={fam}, left={sum(left_sequence)}, "
+                            f"right={sum(right_sequence)}, edges={expected_count}"
+                        )
+                    try:
+                        graph = nx.algorithms.bipartite.havel_hakimi_graph(
+                            left_sequence, right_sequence
+                        )
+                    except nx.NetworkXError as exc:
+                        raise RuntimeError(
+                            f"checkpoint bipartite degree sequence is not graphical "
+                            f"for family {fam}"
+                        ) from exc
+                    graph_to_role = {}
+                    left_by_degree = {}
+                    right_by_degree = {}
+                    for node, target_degree in zip(left_nodes, left_sequence):
+                        left_by_degree.setdefault(int(target_degree), []).append(
+                            int(node)
+                        )
+                    for node, target_degree in zip(right_nodes, right_sequence):
+                        right_by_degree.setdefault(int(target_degree), []).append(
+                            int(node)
+                        )
+                    for graph_node, attrs in graph.nodes(data=True):
+                        graph_degree = int(graph.degree(graph_node))
+                        buckets = (
+                            left_by_degree
+                            if int(attrs.get("bipartite", 0)) == 0
+                            else right_by_degree
+                        )
+                        bucket = buckets.get(graph_degree, [])
+                        if not bucket:
+                            raise RuntimeError(
+                                "bipartite Havel-Hakimi degree relabeling could "
+                                f"not be matched for family {fam}, "
+                                f"degree={graph_degree}"
+                            )
+                        graph_to_role[int(graph_node)] = bucket.pop()
+                    realized_edges = []
+                    for left, right in graph.edges():
+                        realized_edges.append(
+                            (
+                                graph_to_role[int(left)],
+                                graph_to_role[int(right)],
+                            )
+                        )
+
+                if len(realized_edges) != int(expected_count):
+                    raise RuntimeError(
+                        "checkpoint family-degree realization produced the wrong "
+                        f"edge count for family {fam}: "
+                        f"expected={expected_count}, got={len(realized_edges)}"
+                    )
+                for left, right in realized_edges:
+                    a, b = (left, right) if left < right else (right, left)
+                    key = int(a) * int(num_nodes) + int(b)
+                    pos = int(np.searchsorted(edge_keys_np, key, side="left"))
+                    if (
+                        pos >= int(edge_keys_np.shape[0])
+                        or int(edge_keys_np[pos]) != key
+                        or int(families_np[pos]) != int(fam)
+                        or int(edge_batch_np[pos]) != int(graph_idx)
+                    ):
+                        raise RuntimeError(
+                            "checkpoint family-degree realization produced an "
+                            f"illegal candidate edge ({left}, {right}) for family {fam}"
+                        )
+                    role_positions.append(pos)
+
+            selected_mask[:] = False
+            if role_positions:
+                selected_mask[np.asarray(role_positions, dtype=np.int64)] = True
+            selected_np = np.flatnonzero(selected_mask).astype(np.int64)
+
+        initial_selected = selected_np.copy()
+        initial_family_degrees = np.zeros(
+            (num_nodes, max(int(families_np.max()) + 1, 1)), dtype=np.int64
+        )
+        for pos in initial_selected.tolist():
+            fam = int(families_np[pos])
+            u, v = int(edge_index_np[0, pos]), int(edge_index_np[1, pos])
+            initial_family_degrees[u, fam] += 1
+            initial_family_degrees[v, fam] += 1
+        if assigned_roles_np is not None:
+            role_width = min(
+                int(initial_family_degrees.shape[1]),
+                int(assigned_roles_np.shape[1]),
+            )
+            if not np.array_equal(
+                initial_family_degrees[:, :role_width],
+                assigned_roles_np[:, :role_width],
+            ):
+                mismatch = int(
+                    np.abs(
+                        initial_family_degrees[:, :role_width]
+                        - assigned_roles_np[:, :role_width]
+                    ).sum()
+                )
+                mismatch_by_family = np.abs(
+                    initial_family_degrees[:, :role_width]
+                    - assigned_roles_np[:, :role_width]
+                ).sum(axis=0)
+                raise RuntimeError(
+                    "checkpoint family-degree realization failed its exact role "
+                    f"invariant (absolute mismatch={mismatch}, "
+                    f"by_family={mismatch_by_family.tolist()})"
+                )
+
+        def candidate_position(u, v, expected_family, graph_idx):
+            if u == v:
+                return -1
+            a, b = (u, v) if u < v else (v, u)
+            key = int(a) * int(num_nodes) + int(b)
+            pos = int(np.searchsorted(edge_keys_np, key, side="left"))
+            if pos >= int(edge_keys_np.shape[0]) or int(edge_keys_np[pos]) != key:
+                return -1
+            if (
+                int(families_np[pos]) != int(expected_family)
+                or int(edge_batch_np[pos]) != int(graph_idx)
+            ):
+                return -1
+            return pos
+
+        targets = {
+            "triangles": float(target_tri),
+            "clustering": float(target_clust),
+            "lcc_size": float(target_lcc),
+            "assortativity": None if target_assort is None else float(target_assort),
+        }
+
+        rng = np.random.default_rng(
+            int(self._current_sampling_seed())
+            + 1000003 * int(sampling_step)
+            + 73471
+        )
+        total_accepted = 0
+        total_proposed = 0
+        graph_logs = []
+
+        for graph_idx_raw in np.unique(edge_batch_np[initial_selected]).tolist():
+            graph_idx = int(graph_idx_raw)
+            graph_nodes = np.flatnonzero(node_batch_np == graph_idx).astype(np.int64)
+            graph_selected = {
+                int(pos)
+                for pos in np.flatnonzero(
+                    selected_mask & (edge_batch_np == graph_idx)
+                ).tolist()
+            }
+            if len(graph_selected) < 2 or graph_nodes.size == 0:
+                continue
+
+            adjacency = {int(node): set() for node in graph_nodes.tolist()}
+            family_selected = {}
+            incident = {}
+
+            def add_selected_position(pos):
+                pos = int(pos)
+                u = int(edge_index_np[0, pos])
+                v = int(edge_index_np[1, pos])
+                fam = int(families_np[pos])
+                graph_selected.add(pos)
+                family_selected.setdefault(fam, set()).add(pos)
+                incident.setdefault((fam, u), set()).add(pos)
+                incident.setdefault((fam, v), set()).add(pos)
+                adjacency[u].add(v)
+                adjacency[v].add(u)
+
+            def remove_selected_position(pos):
+                pos = int(pos)
+                u = int(edge_index_np[0, pos])
+                v = int(edge_index_np[1, pos])
+                fam = int(families_np[pos])
+                graph_selected.remove(pos)
+                family_selected[fam].remove(pos)
+                incident[(fam, u)].remove(pos)
+                incident[(fam, v)].remove(pos)
+                adjacency[u].remove(v)
+                adjacency[v].remove(u)
+
+            for pos in sorted(graph_selected):
+                add_selected_position(pos)
+
+            degree = {node: len(adjacency[node]) for node in adjacency}
+            cluster_unit = {
+                node: (
+                    2.0 / float(degree[node] * (degree[node] - 1) * max(graph_nodes.size, 1))
+                    if degree[node] >= 2
+                    else 0.0
+                )
+                for node in adjacency
+            }
+            wedge_counts = np.asarray(
+                [degree[int(node)] * max(degree[int(node)] - 1, 0) // 2 for node in graph_nodes],
+                dtype=np.int64,
+            )
+            wedge_cumulative = np.cumsum(wedge_counts)
+            wedge_total = int(wedge_cumulative[-1]) if wedge_cumulative.size else 0
+
+            def exact_lcc_and_components():
+                components = {}
+                lcc = 0
+                component_id = 0
+                for start in graph_nodes.tolist():
+                    start = int(start)
+                    if start in components:
+                        continue
+                    stack = [start]
+                    components[start] = component_id
+                    size = 0
+                    while stack:
+                        node = stack.pop()
+                        size += 1
+                        for neighbor in adjacency[node]:
+                            if neighbor not in components:
+                                components[neighbor] = component_id
+                                stack.append(neighbor)
+                    lcc = max(lcc, size)
+                    component_id += 1
+                return float(lcc), components
+
+            triangle_count = 0.0
+            triangle_per_node = {int(node): 0 for node in graph_nodes.tolist()}
+            for u in graph_nodes.tolist():
+                u = int(u)
+                for v in adjacency[u]:
+                    if v <= u:
+                        continue
+                    common = adjacency[u].intersection(adjacency[v])
+                    for w in common:
+                        if w <= v:
+                            continue
+                        triangle_count += 1.0
+                        triangle_per_node[u] += 1
+                        triangle_per_node[v] += 1
+                        triangle_per_node[w] += 1
+            clustering = sum(
+                cluster_unit[node] * float(triangle_per_node[node])
+                for node in triangle_per_node
+            )
+            lcc_size, components = exact_lcc_and_components()
+            degree_product_sum = sum(
+                float(degree[int(edge_index_np[0, pos])])
+                * float(degree[int(edge_index_np[1, pos])])
+                for pos in graph_selected
+            )
+            endpoint_mean = sum(float(value * value) for value in degree.values()) / max(
+                2.0 * float(len(graph_selected)), 1.0
+            )
+            endpoint_second = sum(float(value * value * value) for value in degree.values()) / max(
+                2.0 * float(len(graph_selected)), 1.0
+            )
+            endpoint_var = max(endpoint_second - endpoint_mean * endpoint_mean, 0.0)
+
+            def assortativity(product_sum):
+                if endpoint_var <= 1.0e-12 or not graph_selected:
+                    return 0.0
+                return (
+                    float(product_sum) / float(len(graph_selected))
+                    - endpoint_mean * endpoint_mean
+                ) / endpoint_var
+
+            def metric_errors(tri, clust, lcc, assort):
+                values = {
+                    "triangles": float(tri),
+                    "clustering": float(clust),
+                    "lcc_size": float(lcc),
+                    "assortativity": float(assort),
+                }
+                errors = {}
+                for name, value in values.items():
+                    target = targets[name]
+                    if target is None or weights[name] <= 0.0:
+                        errors[name] = 0.0
+                        continue
+                    if name == "lcc_size":
+                        rel = max(float(target) - value, 0.0) / max(float(target), 1.0)
+                    elif name == "assortativity":
+                        rel = abs(value - float(target)) / max(abs(float(target)), 0.25)
+                    else:
+                        rel = abs(value - float(target)) / max(abs(float(target)), 1.0e-6)
+                    errors[name] = max(rel - tolerances[name], 0.0)
+                return errors
+
+            def objective(errors):
+                return sum(weights[name] * errors[name] for name in errors)
+
+            current_assort = assortativity(degree_product_sum)
+            current_errors = metric_errors(
+                triangle_count, clustering, lcc_size, current_assort
+            )
+            current_objective = objective(current_errors)
+            initial_metrics = (
+                triangle_count,
+                clustering,
+                lcc_size,
+                current_assort,
+                current_objective,
+            )
+            graph_accepted = 0
+            graph_proposed = 0
+
+            def endpoint_other(pos, node):
+                left = int(edge_index_np[0, pos])
+                right = int(edge_index_np[1, pos])
+                return right if left == int(node) else left
+
+            def random_choice(values):
+                values = tuple(values)
+                if not values:
+                    return None
+                return int(values[int(rng.integers(0, len(values)))])
+
+            while (
+                total_accepted < max_swaps
+                and total_proposed < max_proposals
+                and current_objective > 0.0
+            ):
+                total_proposed += 1
+                graph_proposed += 1
+                proposal = None
+                needs_closure = (
+                    triangle_count < float(target_tri) * (1.0 - tolerances["triangles"])
+                    or clustering < float(target_clust) * (1.0 - tolerances["clustering"])
+                )
+
+                if needs_closure and wedge_total > 0 and rng.random() < targeted_probability:
+                    wedge_draw = int(rng.integers(0, wedge_total))
+                    center_offset = int(np.searchsorted(wedge_cumulative, wedge_draw, side="right"))
+                    center = int(graph_nodes[center_offset])
+                    neighbors = tuple(adjacency[center])
+                    if len(neighbors) >= 2:
+                        pair = rng.choice(len(neighbors), size=2, replace=False)
+                        u, v = int(neighbors[int(pair[0])]), int(neighbors[int(pair[1])])
+                        if v not in adjacency[u]:
+                            a, b = (u, v) if u < v else (v, u)
+                            closure_key = int(a) * int(num_nodes) + int(b)
+                            closure_pos = int(np.searchsorted(edge_keys_np, closure_key, side="left"))
+                            if (
+                                closure_pos < int(edge_keys_np.shape[0])
+                                and int(edge_keys_np[closure_pos]) == closure_key
+                                and int(edge_batch_np[closure_pos]) == graph_idx
+                                and not selected_mask[closure_pos]
+                            ):
+                                fam = int(families_np[closure_pos])
+                                first_drop = random_choice(incident.get((fam, u), ()))
+                                second_drop = random_choice(incident.get((fam, v), ()))
+                                if (
+                                    first_drop is not None
+                                    and second_drop is not None
+                                    and first_drop != second_drop
+                                ):
+                                    other_u = endpoint_other(first_drop, u)
+                                    other_v = endpoint_other(second_drop, v)
+                                    partner_pos = candidate_position(
+                                        other_u, other_v, fam, graph_idx
+                                    )
+                                    if (
+                                        partner_pos >= 0
+                                        and not selected_mask[partner_pos]
+                                        and partner_pos != closure_pos
+                                    ):
+                                        proposal = (
+                                            first_drop,
+                                            second_drop,
+                                            closure_pos,
+                                            partner_pos,
+                                        )
+
+                if proposal is None:
+                    usable_families = [
+                        fam for fam, positions in family_selected.items() if len(positions) >= 2
+                    ]
+                    if not usable_families:
+                        break
+                    fam = int(usable_families[int(rng.integers(0, len(usable_families)))])
+                    positions = tuple(family_selected[fam])
+                    pair = rng.choice(len(positions), size=2, replace=False)
+                    first_drop = int(positions[int(pair[0])])
+                    second_drop = int(positions[int(pair[1])])
+                    a = int(edge_index_np[0, first_drop])
+                    b = int(edge_index_np[1, first_drop])
+                    c = int(edge_index_np[0, second_drop])
+                    d = int(edge_index_np[1, second_drop])
+                    alternatives = (((a, c), (b, d)), ((a, d), (b, c)))
+                    if rng.random() < 0.5:
+                        alternatives = alternatives[::-1]
+                    for first_edge, second_edge in alternatives:
+                        first_add = candidate_position(*first_edge, fam, graph_idx)
+                        second_add = candidate_position(*second_edge, fam, graph_idx)
+                        if (
+                            first_add >= 0
+                            and second_add >= 0
+                            and first_add != second_add
+                            and not selected_mask[first_add]
+                            and not selected_mask[second_add]
+                        ):
+                            proposal = (
+                                first_drop,
+                                second_drop,
+                                first_add,
+                                second_add,
+                            )
+                            break
+
+                if proposal is None:
+                    continue
+                first_drop, second_drop, first_add, second_add = proposal
+                if len({first_drop, second_drop, first_add, second_add}) != 4:
+                    continue
+
+                old_tri = triangle_count
+                old_clust = clustering
+                old_product_sum = degree_product_sum
+
+                def mutate_edge(pos, adding):
+                    nonlocal triangle_count, clustering, degree_product_sum
+                    u = int(edge_index_np[0, pos])
+                    v = int(edge_index_np[1, pos])
+                    common = adjacency[u].intersection(adjacency[v])
+                    sign = 1.0 if adding else -1.0
+                    triangle_count += sign * float(len(common))
+                    clustering += sign * (
+                        float(len(common))
+                        * (cluster_unit[u] + cluster_unit[v])
+                        + sum(cluster_unit[node] for node in common)
+                    )
+                    degree_product_sum += sign * float(degree[u] * degree[v])
+                    if adding:
+                        add_selected_position(pos)
+                        selected_mask[pos] = True
+                    else:
+                        remove_selected_position(pos)
+                        selected_mask[pos] = False
+
+                mutate_edge(first_drop, False)
+                mutate_edge(second_drop, False)
+                mutate_edge(first_add, True)
+                mutate_edge(second_add, True)
+
+                trial_assort = assortativity(degree_product_sum)
+                trial_errors_without_lcc = metric_errors(
+                    triangle_count, clustering, lcc_size, trial_assort
+                )
+                trial_objective_without_lcc = objective(trial_errors_without_lcc)
+                additions_cross_components = (
+                    components.get(int(edge_index_np[0, first_add]))
+                    != components.get(int(edge_index_np[1, first_add]))
+                    or components.get(int(edge_index_np[0, second_add]))
+                    != components.get(int(edge_index_np[1, second_add]))
+                )
+                promising = trial_objective_without_lcc < current_objective - min_gain
+                if additions_cross_components and current_errors["lcc_size"] > 0.0:
+                    promising = True
+
+                trial_lcc = lcc_size
+                trial_components = components
+                if promising:
+                    trial_lcc, trial_components = exact_lcc_and_components()
+                    trial_errors = metric_errors(
+                        triangle_count, clustering, trial_lcc, trial_assort
+                    )
+                    trial_objective = objective(trial_errors)
+                    model_delta = (
+                        float(scores_np[first_add])
+                        + float(scores_np[second_add])
+                        - float(scores_np[first_drop])
+                        - float(scores_np[second_drop])
+                    )
+                    score_scale = max(
+                        abs(float(scores_np[first_drop]))
+                        + abs(float(scores_np[second_drop])),
+                        1.0,
+                    )
+                    effective_trial = trial_objective - model_score_weight * model_delta / score_scale
+                    effective_current = current_objective
+                    lcc_floor = float(target_lcc) * (1.0 - tolerances["lcc_size"])
+                    lcc_ok = (
+                        trial_lcc >= lcc_floor
+                        if lcc_size >= lcc_floor
+                        else trial_lcc >= lcc_size
+                    )
+                    accept = lcc_ok and effective_trial < effective_current - min_gain
+                else:
+                    trial_errors = None
+                    trial_objective = float("inf")
+                    accept = False
+
+                if not accept:
+                    mutate_edge(second_add, False)
+                    mutate_edge(first_add, False)
+                    mutate_edge(second_drop, True)
+                    mutate_edge(first_drop, True)
+                    triangle_count = old_tri
+                    clustering = old_clust
+                    degree_product_sum = old_product_sum
+                    continue
+
+                graph_accepted += 1
+                total_accepted += 1
+                lcc_size = float(trial_lcc)
+                components = trial_components
+                current_assort = float(trial_assort)
+                current_errors = trial_errors
+                current_objective = float(trial_objective)
+                if (
+                    log_selection
+                    and getattr(self, "local_rank", 0) == 0
+                    and graph_accepted % log_every == 0
+                ):
+                    print(
+                        "[采样-CHECKPOINT-REALIZER-PROGRESS] "
+                        f"g={graph_idx} accepted={graph_accepted} "
+                        f"proposed={graph_proposed} tri={triangle_count:.0f} "
+                        f"clust={clustering:.4f} lcc={lcc_size:.0f} "
+                        f"objective={current_objective:.5g}"
+                    )
+
+            exact_triangles = 0.0
+            exact_triangle_per_node = {
+                int(node): 0 for node in graph_nodes.tolist()
+            }
+            for u in graph_nodes.tolist():
+                u = int(u)
+                for v in adjacency[u]:
+                    if v <= u:
+                        continue
+                    for w in adjacency[u].intersection(adjacency[v]):
+                        if w <= v:
+                            continue
+                        exact_triangles += 1.0
+                        exact_triangle_per_node[u] += 1
+                        exact_triangle_per_node[v] += 1
+                        exact_triangle_per_node[w] += 1
+            exact_clustering = sum(
+                cluster_unit[node] * float(exact_triangle_per_node[node])
+                for node in exact_triangle_per_node
+            )
+            exact_lcc, exact_components = exact_lcc_and_components()
+            exact_assort = assortativity(degree_product_sum)
+            if (
+                abs(exact_triangles - triangle_count) > 1.0e-8
+                or abs(exact_clustering - clustering) > 1.0e-8
+                or abs(exact_lcc - lcc_size) > 1.0e-8
+                or abs(exact_assort - current_assort) > 1.0e-8
+            ):
+                raise RuntimeError(
+                    "checkpoint structural realizer incremental statistics "
+                    "drifted from exact recomputation: "
+                    f"tri={triangle_count}/{exact_triangles}, "
+                    f"clust={clustering}/{exact_clustering}, "
+                    f"lcc={lcc_size}/{exact_lcc}, "
+                    f"assort={current_assort}/{exact_assort}"
+                )
+            triangle_count = exact_triangles
+            clustering = exact_clustering
+            lcc_size = exact_lcc
+            components = exact_components
+            current_assort = exact_assort
+            current_errors = metric_errors(
+                triangle_count, clustering, lcc_size, current_assort
+            )
+            current_objective = objective(current_errors)
+
+            graph_logs.append(
+                {
+                    "graph": graph_idx,
+                    "accepted": graph_accepted,
+                    "proposed": graph_proposed,
+                    "initial": initial_metrics,
+                    "final": (
+                        triangle_count,
+                        clustering,
+                        lcc_size,
+                        current_assort,
+                        current_objective,
+                    ),
+                    "errors": dict(current_errors),
+                }
+            )
+            if total_accepted >= max_swaps or total_proposed >= max_proposals:
+                break
+
+        new_selected_np = np.flatnonzero(selected_mask).astype(np.int64)
+        if int(new_selected_np.size) != int(initial_selected.size):
+            raise RuntimeError(
+                "checkpoint structural realizer changed total selected edge count"
+            )
+        final_family_degrees = np.zeros_like(initial_family_degrees)
+        for pos in new_selected_np.tolist():
+            fam = int(families_np[pos])
+            u, v = int(edge_index_np[0, pos]), int(edge_index_np[1, pos])
+            final_family_degrees[u, fam] += 1
+            final_family_degrees[v, fam] += 1
+        if not np.array_equal(initial_family_degrees, final_family_degrees):
+            raise RuntimeError(
+                "checkpoint structural realizer violated node family-degree invariants"
+            )
+        before_quota = {}
+        after_quota = {}
+        for pos in initial_selected.tolist():
+            key = (int(edge_batch_np[pos]), int(families_np[pos]))
+            before_quota[key] = before_quota.get(key, 0) + 1
+        for pos in new_selected_np.tolist():
+            key = (int(edge_batch_np[pos]), int(families_np[pos]))
+            after_quota[key] = after_quota.get(key, 0) + 1
+        if before_quota != after_quota:
+            raise RuntimeError(
+                "checkpoint structural realizer violated exact graph/family quotas"
+            )
+
+        if log_selection and getattr(self, "local_rank", 0) == 0:
+            for record in graph_logs:
+                initial = record["initial"]
+                final = record["final"]
+                print(
+                    "[采样-CHECKPOINT-REALIZER] "
+                    f"step={int(sampling_step)} g={record['graph']} "
+                    f"accepted={record['accepted']} proposed={record['proposed']} "
+                    f"tri={initial[0]:.0f}->{final[0]:.0f}/{target_tri:.0f} "
+                    f"clust={initial[1]:.4f}->{final[1]:.4f}/{target_clust:.4f} "
+                    f"lcc={initial[2]:.0f}->{final[2]:.0f}/{target_lcc:.0f} "
+                    f"assort={initial[3]:+.4f}->{final[3]:+.4f} "
+                    f"objective={initial[4]:.5g}->{final[4]:.5g} "
+                    f"within_tolerance={int(final[4] <= 0.0)}"
+                )
+
+        new_selected = torch.from_numpy(new_selected_np).to(
+            device=selected.device, dtype=torch.long
+        )
+        new_selected = new_selected[
+            torch.argsort(edge_keys[new_selected])
+        ]
+        return new_selected
 
     def _apply_global_exact_k_structure_swap_limiter(
         self,
@@ -18319,9 +19744,21 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                     # Per-block losses above are detached in accumulate_global.
                     # Recompute the ordinary edge objective once on the canonical
                     # global query set so BCE/subtype CE remain differentiable.
-                    global_loss = self.train_loss(
-                        pred_global, true_global, log=False
+                    global_loss_pred = (
+                        self._pred_with_absorbing_probability_calibration(
+                            pred_global,
+                            data_one_hot,
+                            sparse_noisy_data,
+                        )
                     )
+                    global_loss = self.train_loss(
+                        global_loss_pred, true_global, log=False
+                    )
+                    calibration_penalty = (
+                        self._absorbing_probability_calibration_penalty()
+                    )
+                    if calibration_penalty is not None:
+                        global_loss = global_loss + calibration_penalty
 
                     set_rank_w = self._warmup_weight(
                         float(
@@ -19936,14 +21373,24 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 "Use model.structure_only_global=false."
             )
 
+        loss_pred = self._pred_with_absorbing_probability_calibration(
+            sparse_pred,
+            data,
+            sparse_noisy_data,
+        )
         loss = self.train_loss.forward(
-            pred=sparse_pred,
+            pred=loss_pred,
             true_data=true_data,
             log=step_idx % self.log_every_steps == 0,
         )
+        calibration_penalty = self._absorbing_probability_calibration_penalty()
+        if calibration_penalty is not None:
+            loss = loss + calibration_penalty
         loss = loss + learned_structure_l2
         loss = loss + self._compute_learned_structure_target_loss(data, step_idx)
-        self._record_train_exist_diagnostics(sparse_pred, true_data, sparse_noisy_data)
+        self._record_train_exist_diagnostics(
+            loss_pred, true_data, sparse_noisy_data
+        )
 
         family_role_w_base = float(
             getattr(self.cfg.model, "family_role_loss_weight", 0.0) or 0.0
@@ -20999,6 +22446,58 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         self.log("train/grad_norm", total_norm, on_step=True, prog_bar=False, sync_dist=True)
 
     def on_fit_start(self) -> None:
+        if (
+            self._absorbing_probability_calibrator_enabled()
+            and bool(
+                getattr(
+                    self.cfg.model,
+                    "absorbing_probability_require_full_candidates",
+                    True,
+                )
+            )
+        ):
+            candidate_cap = int(
+                getattr(
+                    self.cfg.model,
+                    "block_query_max_edges_per_family",
+                    0,
+                )
+                or 0
+            )
+            if candidate_cap > 0:
+                raise RuntimeError(
+                    "calibrated absorbing probability training requires the "
+                    "uncapped block candidate population; set "
+                    "model.block_query_max_edges_per_family=0"
+                )
+            if bool(
+                getattr(
+                    self.cfg.model,
+                    "query_include_all_positive_edges",
+                    False,
+                )
+            ):
+                raise RuntimeError(
+                    "calibrated absorbing probabilities must not repeat all "
+                    "positive edges in every block; set "
+                    "model.query_include_all_positive_edges=false"
+                )
+            raw_pos_weight = getattr(
+                self.cfg.model, "exist_pos_weight", 1.0
+            )
+            try:
+                pos_weight = float(raw_pos_weight)
+            except (TypeError, ValueError) as exc:
+                raise RuntimeError(
+                    "calibrated absorbing probabilities require numeric "
+                    "model.exist_pos_weight=1"
+                ) from exc
+            if not math.isclose(pos_weight, 1.0, rel_tol=0.0, abs_tol=1.0e-8):
+                raise RuntimeError(
+                    "calibrated absorbing probabilities require "
+                    "model.exist_pos_weight=1; class weighting changes the "
+                    "probability optimum"
+                )
         if self.local_rank == 0:
             # 训练时 main 已创建 WandbLogger 并 setup_wandb，此处仅 test_only 等无 logger 时初始化
             if wandb.run is None:
@@ -21057,10 +22556,35 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                     self._epoch_diag_pos_p_exist_count = 0
                     self._epoch_diag_neg_p_exist_sum = 0.0
                     self._epoch_diag_neg_p_exist_count = 0
+                    self._epoch_diag_brier_sum = 0.0
+                    self._epoch_diag_nll_sum = 0.0
+                    self._epoch_diag_ece_sum = 0.0
             self._epoch_diag_count += 1
             self._epoch_diag_t_sum += t_mean
             self._epoch_diag_query_pos_ratio_sum += float(pos_count) / n
             self._epoch_diag_pred_pos_rate_sum += float(pred_exist.float().mean().detach().cpu())
+            labels_float = true_exist.float()
+            self._epoch_diag_brier_sum += float(
+                (p_exist - labels_float).square().mean().detach().cpu()
+            )
+            self._epoch_diag_nll_sum += float(
+                F.binary_cross_entropy(
+                    p_exist.clamp(1.0e-7, 1.0 - 1.0e-7),
+                    labels_float,
+                ).detach().cpu()
+            )
+            ece = p_exist.new_tensor(0.0)
+            for bin_idx in range(10):
+                lo = float(bin_idx) / 10.0
+                hi = float(bin_idx + 1) / 10.0
+                in_bin = (p_exist >= lo) & (
+                    p_exist <= hi if bin_idx == 9 else p_exist < hi
+                )
+                if in_bin.any():
+                    ece = ece + in_bin.float().mean() * (
+                        p_exist[in_bin].mean() - labels_float[in_bin].mean()
+                    ).abs()
+            self._epoch_diag_ece_sum += float(ece.detach().cpu())
             if pos_count > 0:
                     self._epoch_diag_pos_p_exist_sum += float(p_exist[true_exist].mean().detach().cpu())
                     self._epoch_diag_pos_p_exist_count += 1
@@ -21196,6 +22720,9 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         self._epoch_diag_pos_p_exist_count = 0
         self._epoch_diag_neg_p_exist_sum = 0.0
         self._epoch_diag_neg_p_exist_count = 0
+        self._epoch_diag_brier_sum = 0.0
+        self._epoch_diag_nll_sum = 0.0
+        self._epoch_diag_ece_sum = 0.0
         self._epoch_struct_probe_count = 0
         self._epoch_struct_probe_topk_precision_sum = 0.0
         self._epoch_struct_probe_topk_recall_sum = 0.0
@@ -21633,8 +23160,23 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             epoch_loss["train_epoch/pred_pos_rate"] = diag_pred_pos
             epoch_loss["train_epoch/pos_p_exist_mean"] = diag_pos_p
             epoch_loss["train_epoch/neg_p_exist_mean"] = diag_neg_p
+            diag_brier = float(
+                getattr(self, "_epoch_diag_brier_sum", 0.0)
+            ) / float(diag_count)
+            diag_calibrated_nll = float(
+                getattr(self, "_epoch_diag_nll_sum", 0.0)
+            ) / float(diag_count)
+            diag_ece10 = float(
+                getattr(self, "_epoch_diag_ece_sum", 0.0)
+            ) / float(diag_count)
+            epoch_loss["train_epoch/exist_brier"] = diag_brier
+            epoch_loss[
+                "train_epoch/exist_calibrated_nll"
+            ] = diag_calibrated_nll
+            epoch_loss["train_epoch/exist_ece10"] = diag_ece10
         else:
             diag_t = diag_qpos = diag_pred_pos = diag_pos_p = diag_neg_p = -1.0
+            diag_brier = diag_calibrated_nll = diag_ece10 = -1.0
         rare_pos = int(getattr(self, "_epoch_rare_family_query_pos", 0) or 0)
         rare_hard = int(getattr(self, "_epoch_rare_family_query_hard", 0) or 0)
         rare_easy = int(getattr(self, "_epoch_rare_family_query_easy", 0) or 0)
@@ -21916,12 +23458,50 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         total_str = f" -- total_train: {total_train:.4f}" if any_aux and total_train >= 0 else ""
         diag_str = (
             f" -- t_norm: {diag_t:.3f} -- q_pos: {diag_qpos:.4f} -- pred_pos: {diag_pred_pos:.4f} "
-            f"-- pos_p: {diag_pos_p:.4f} -- neg_p: {diag_neg_p:.4f}"
+            f"-- pos_p: {diag_pos_p:.4f} -- neg_p: {diag_neg_p:.4f} "
+            f"-- brier: {diag_brier:.6f} -- cal_nll: {diag_calibrated_nll:.6f} "
+            f"-- ece10: {diag_ece10:.6f}"
         ) if diag_count > 0 else ""
         rare_query_str = (
             f" -- rare_query[pos={rare_pos},hard={rare_hard},easy={rare_easy},random={rare_random}]"
         ) if (rare_pos or rare_hard or rare_easy or rare_random) else ""
         gate_str = ""
+        if self._absorbing_probability_calibrator_enabled():
+            probability_temperature = float(
+                torch.exp(
+                    self.absorbing_probability_log_temperature.clamp(
+                        -3.0, 3.0
+                    )
+                )
+                .detach()
+                .cpu()
+            )
+            family_bias_abs = float(
+                self.absorbing_probability_family_bias.detach()
+                .abs()
+                .mean()
+                .cpu()
+            )
+            time_bias_abs = float(
+                self.absorbing_probability_time_bias.detach()
+                .abs()
+                .mean()
+                .cpu()
+            )
+            gate_str += (
+                f" -- absorb_cal[temp={probability_temperature:.4f}"
+                f",family_abs={family_bias_abs:.4f}"
+                f",time_abs={time_bias_abs:.4f}]"
+            )
+            epoch_loss[
+                "train_epoch/absorbing_probability_temperature"
+            ] = probability_temperature
+            epoch_loss[
+                "train_epoch/absorbing_probability_family_bias_abs_mean"
+            ] = family_bias_abs
+            epoch_loss[
+                "train_epoch/absorbing_probability_time_bias_abs_mean"
+            ] = time_bias_abs
         if bool(getattr(self.cfg.model, "use_query_context_gate", False)):
             gate_values = [
                 float(torch.sigmoid(layer.query_context_gate_logit).mean().detach().cpu())
@@ -21929,7 +23509,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 if hasattr(layer, "query_context_gate_logit")
             ]
             if gate_values:
-                gate_str = " -- query_gate: " + "/".join(
+                gate_str += " -- query_gate: " + "/".join(
                     f"{value:.3f}" for value in gate_values
                 )
                 for layer_idx, value in enumerate(gate_values):
@@ -26692,6 +28272,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         pseudo_blocks = getattr(data, "pseudo_blocks", None)
 
         query_rounds = []
+        query_round_owner_ids = []
         use_template_blocks = (
             not query_rounds
             and str(getattr(self.cfg.model, "sampling_block_mode", "uniform")).lower() == "type_template"
@@ -26715,6 +28296,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 query_edge_index, query_edge_batch, query_edge_family = tpl
                 if query_edge_index is not None and query_edge_index.numel() > 0:
                     query_rounds.append((query_edge_index, query_edge_batch, query_edge_family))
+                    query_round_owner_ids.append(int(block_idx))
             if query_rounds:
                 self._log_block_query_coverage(inter_state)
 
@@ -26724,6 +28306,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             )
             if query_edge_index is not None and query_edge_index.numel() > 0:
                 query_rounds.append((query_edge_index, query_edge_batch, None))
+                query_round_owner_ids.append(0)
 
         if not query_rounds:
             out = data.clone() if hasattr(data, "clone") else data
@@ -26839,6 +28422,17 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             getattr(self.cfg.model, "sampling_exact_k_final_only", False)
         )
         absorbing_edge_diffusion = self._uses_absorbing_edge_diffusion()
+        use_global_absorbing_posterior = (
+            selection_mode == "absorbing_posterior_bernoulli"
+            and query_rounds
+            and query_rounds[0][2] is not None
+            and not use_autoregressive_context
+        )
+        if selection_mode == "absorbing_posterior_bernoulli" and not absorbing_edge_diffusion:
+            raise ValueError(
+                "absorbing_posterior_bernoulli requires "
+                "model.edge_diffusion_mode=absorbing_delete"
+            )
         if absorbing_edge_diffusion and exact_k_final_only:
             raise ValueError(
                 "absorbing_delete sampling requires "
@@ -26862,7 +28456,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 )
                 setattr(self, policy_flag, True)
         use_queryfree_global_exact_k = (
-            use_global_exact_k
+            (use_global_exact_k or use_global_absorbing_posterior)
             and isinstance(self.model, PyHGTDenoiser)
             and bool(getattr(self.cfg.model, "sampling_queryfree_decode", False))
         )
@@ -26891,6 +28485,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         connectivity_stats = {}
         repair_candidate_parts = []
         global_exact_k_candidate_parts = []
+        global_absorbing_posterior_candidate_parts = []
         clean_exact_k_candidate_parts = []
         use_ranking_intervention_diag = (
             use_global_exact_k
@@ -26986,7 +28581,11 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 )
                 self._logged_sampling_queryfree_decode = True
 
-        for query_edge_index, _query_edge_batch, query_edge_family in query_rounds:
+        for query_round_idx, (
+            query_edge_index,
+            _query_edge_batch,
+            query_edge_family,
+        ) in enumerate(query_rounds):
             if query_edge_index is None or query_edge_index.numel() == 0:
                 continue
             if use_autoregressive_context:
@@ -27214,6 +28813,13 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 query_logits,
                 selected_query_family,
             )
+            if absorbing_edge_diffusion:
+                query_logits = self._apply_absorbing_probability_calibrator(
+                    query_logits,
+                    selected_query_family,
+                    selected_query_batch,
+                    t_float,
+                )
             clean_query_logits = query_logits
             if use_ranking_intervention_diag:
                 self._update_global_exact_k_candidates(
@@ -27254,6 +28860,22 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                         "family": selected_query_family.detach(),
                     }
                 )
+            if use_global_absorbing_posterior:
+                owner_id = (
+                    query_round_owner_ids[query_round_idx]
+                    if query_round_idx < len(query_round_owner_ids)
+                    else query_round_idx
+                )
+                self._update_global_absorbing_posterior_candidates(
+                    global_absorbing_posterior_candidate_parts,
+                    clean_query_logits,
+                    selected_query_family,
+                    selected_query_edge_index,
+                    selected_query_batch,
+                    total_nodes,
+                    owner_id,
+                )
+                continue
             if verbose_sampling:
                 calibrated_masked = self._mask_edge_logits_by_query_family(
                     query_logits, selected_query_family
@@ -27455,7 +29077,32 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 s_float,
             )
 
-        if use_global_exact_k:
+        if use_global_absorbing_posterior:
+            selected_edges, selected_labels = (
+                self._finalize_global_absorbing_posterior_candidates(
+                    data,
+                    global_absorbing_posterior_candidate_parts,
+                    s_float,
+                    t_float,
+                    bool(is_final_sampling_step),
+                )
+            )
+            if selected_edges is not None and selected_labels is not None:
+                cur_edge_index, cur_edge_attr_ids = self._replace_edges_with_labels(
+                    cur_edge_index,
+                    cur_edge_attr_ids,
+                    selected_edges,
+                    selected_labels,
+                )
+            keep = cur_edge_attr_ids != 0
+            cur_edge_index = cur_edge_index[:, keep]
+            cur_edge_attr_ids = cur_edge_attr_ids[keep].clamp(
+                0, self.out_dims.E - 1
+            )
+            cur_edge_attr_onehot = F.one_hot(
+                cur_edge_attr_ids, num_classes=self.out_dims.E
+            ).float()
+        elif use_global_exact_k:
             sampling_step = int(
                 round(
                     float(t_float.mean().detach().cpu().item())

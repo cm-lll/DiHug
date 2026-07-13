@@ -1,0 +1,32 @@
+# @package _global_
+defaults:
+  - pubmed_hetero_xey_hgt_gqer_v2_pw20
+
+general:
+  name: pubmed_checkpoint_structural_realizer
+
+model:
+  # The realizer consumes the checkpoint bundle and supersedes the older
+  # boundary limiter. No sampling-time reference graph is permitted.
+  sampling_structure_target_source: checkpoint_only
+  sampling_structure_swap_limiter: false
+  sampling_checkpoint_structural_realizer: true
+  sampling_checkpoint_structural_realizer_final_only: true
+  sampling_checkpoint_structural_realizer_initialize_family_degrees: true
+  sampling_checkpoint_structural_realizer_max_swaps: 16384
+  sampling_checkpoint_structural_realizer_max_proposals: 2000000
+  sampling_checkpoint_structural_realizer_targeted_probability: 0.90
+  sampling_checkpoint_structural_realizer_triangle_weight: 1.0
+  sampling_checkpoint_structural_realizer_clustering_weight: 5.0
+  sampling_checkpoint_structural_realizer_lcc_weight: 2.0
+  sampling_checkpoint_structural_realizer_assort_weight: 0.1
+  sampling_checkpoint_structural_realizer_model_score_weight: 0.0
+  sampling_checkpoint_structural_realizer_triangle_tolerance: 0.05
+  sampling_checkpoint_structural_realizer_clustering_tolerance: 0.05
+  sampling_checkpoint_structural_realizer_lcc_tolerance: 0.05
+  sampling_checkpoint_structural_realizer_assort_tolerance: 0.20
+  sampling_checkpoint_structural_realizer_log_every: 200
+
+  sampling_budget_controller_enabled: false
+  sampling_triangle_budget_enabled: false
+  sampling_structure_guidance: false

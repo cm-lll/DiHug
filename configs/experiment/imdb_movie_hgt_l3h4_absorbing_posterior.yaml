@@ -1,0 +1,59 @@
+# @package _global_
+defaults:
+  - imdb_movie_hgt_l3h4_family_set_absorbing
+
+general:
+  name: imdb_movie_l3h4_absorbing_posterior
+
+model:
+  # A short finite absorbing chain is revisited many times during single-graph
+  # training. Forward noise only deletes clean edges.
+  diffusion_steps: 20
+  edge_diffusion_mode: absorbing_delete
+  absorbing_survival_power: 1.0
+
+  # Existence is a calibrated probability objective. PL remains a weak ranking
+  # auxiliary; it is never interpreted as a Bernoulli probability.
+  exist_loss_type: bce
+  exist_pos_weight: 1
+  edge_exist_weight: 1.0
+  edge_subtype_weight: 1.2
+  family_set_ranking_loss_weight: 0.2
+  family_set_ranking_positive_scope: missing
+  family_set_ranking_warmup_epochs: 5
+
+  # Exact probability training requires the complete legal population inside
+  # every block view. This is the 5090 formal configuration.
+  block_query_max_edges_per_family: 0
+  # Full block coverage already contains every clean positive through its
+  # owning block. Repeating all positives in every block corrupts calibration.
+  query_include_all_positive_edges: false
+  train_all_blocks_per_noise: true
+  train_all_blocks_step_mode: sequential
+  train_all_blocks_shuffle: true
+  train_all_blocks_strict_count: true
+
+  # Checkpointed shared-temperature + family/time calibration.
+  absorbing_probability_calibration: true
+  absorbing_probability_time_bins: 8
+  absorbing_probability_calibration_l2: 1.0e-4
+  absorbing_probability_require_full_candidates: true
+
+  # The reverse process uses the analytic absorbing posterior. Family counts
+  # are learned during training and stored in the checkpoint; no reference
+  # graph is consulted during generation.
+  sampling_edge_selection: absorbing_posterior_bernoulli
+  sampling_use_reverse_posterior: false
+  sampling_exact_k_final_only: false
+  sampling_absorbing_protect_existing: true
+  sampling_absorbing_refinement_mode: monotone
+  absorbing_probability_match_checkpoint_family_count: true
+
+  # No post-hoc structure target optimizer/controller in the main method.
+  sampling_checkpoint_structural_realizer: false
+  sampling_structure_swap_limiter: false
+  sampling_structure_limiter: false
+  sampling_structure_guidance: false
+  sampling_structure_budget_controller: false
+  sampling_node_role_budget_controller: false
+  sampling_typed_flat_closure_controller: false

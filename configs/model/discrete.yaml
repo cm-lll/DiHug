@@ -476,6 +476,27 @@ sampling_structure_swap_limiter_log_every: 1
 # structural component against another. This is slower and intended for the
 # final reverse steps, where it acts as a feasibility projection.
 sampling_structure_swap_limiter_exact_sequential: false
+# Final checkpoint-conditioned structural realization. This pass runs after
+# exact-K selection and uses only targets persisted in the checkpoint. Every
+# accepted move is a same-family undirected 2-switch, so graph/family counts and
+# every node's family-degree vector remain exactly unchanged.
+sampling_checkpoint_structural_realizer: false
+sampling_checkpoint_structural_realizer_final_only: true
+sampling_checkpoint_structural_realizer_initialize_family_degrees: true
+sampling_checkpoint_structural_realizer_max_swaps: 4096
+sampling_checkpoint_structural_realizer_max_proposals: 250000
+sampling_checkpoint_structural_realizer_targeted_probability: 0.85
+sampling_checkpoint_structural_realizer_triangle_weight: 1.0
+sampling_checkpoint_structural_realizer_clustering_weight: 4.0
+sampling_checkpoint_structural_realizer_lcc_weight: 2.0
+sampling_checkpoint_structural_realizer_assort_weight: 0.1
+sampling_checkpoint_structural_realizer_model_score_weight: 0.0
+sampling_checkpoint_structural_realizer_triangle_tolerance: 0.10
+sampling_checkpoint_structural_realizer_clustering_tolerance: 0.10
+sampling_checkpoint_structural_realizer_lcc_tolerance: 0.05
+sampling_checkpoint_structural_realizer_assort_tolerance: 0.20
+sampling_checkpoint_structural_realizer_min_objective_gain: 1.0e-9
+sampling_checkpoint_structural_realizer_log_every: 100
 # Full-step sampling can stop once a training-prior structure budget is reached.
 # This is a sampling-only diagnostic/controller: it does not use true edge
 # membership, but it can use training-graph structural priors such as triangle
@@ -987,6 +1008,21 @@ family_set_ranking_positive_scope: all  # all | missing
 # an empty edge graph, after which reverse steps can only add edges.
 edge_diffusion_mode: marginal  # marginal | absorbing_delete
 absorbing_survival_power: 1.0
+# Calibrated x0 existence probabilities for the analytic absorbing reverse
+# kernel. The calibrator is deliberately small: one shared temperature plus
+# additive family/time-bin biases, all persisted in the checkpoint.
+absorbing_probability_calibration: false
+absorbing_probability_time_bins: 8
+absorbing_probability_calibration_l2: 1.0e-4
+# During sampling, optionally shift each family of clean x0 logits so its
+# expected clean cardinality matches the count learned and stored in the
+# checkpoint. This calibrates probabilities; it does not select real edges.
+absorbing_probability_match_checkpoint_family_count: false
+# Global analytic absorbing posterior. Block views remain the computation
+# units, but every canonical edge is owned by one stable block and sampled once.
+# This mode is valid only with edge_diffusion_mode=absorbing_delete.
+# Set sampling_edge_selection=absorbing_posterior_bernoulli to activate it.
+absorbing_probability_require_full_candidates: true
 sampling_absorbing_protect_existing: true
 # monotone: every restored edge is permanent (absorbing v1).
 # edgepp_active: freeze edges touching inactive nodes, but regenerate the full
