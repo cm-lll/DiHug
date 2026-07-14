@@ -173,3 +173,64 @@ python scripts/run_switch_diffusion.py \
   --trajectories 8 --forward-steps 2000 --record-every 20 \
   --train-candidates 32 --sample-steps 2000 --sample-candidates 64
 ```
+
+### Target-Free Reverse Kernel
+
+`--conditioning-mode state_only` removes the clean graphlet target from both
+the scorer input and saved denoiser checkpoint. The scorer sees only the
+current anonymous graph state, the candidate switch delta, relation family,
+and diffusion time. The structure checkpoint still supplies the explicitly
+declared anonymous relation-degree condition; this mode is therefore
+target-free for motif statistics, not unconditional over degree sequences.
+
+At high noise, the exact switch that happened in the forward trajectory is not
+identifiable: many legal reverse switches can make equivalent structural
+progress. `--training-objective utility_kl` distills a soft distribution over
+all candidates from their training-only reduction in graphlet error. The
+recommended `scheduled_hybrid` objective uses utility-equivalent moves at high
+noise and continuously returns to exact inverse-switch CE near the clean
+endpoint. Candidate utilities are dataset labels only and are absent from the
+sampling checkpoint.
+
+With `--learned-condition`, the anonymous graphlet condition is estimated from
+those training utilities by convex ridge regression. The identity
+`utility(d,z)=2 d·(tau-z)-||d||²` makes `tau` identifiable whenever the
+candidate-delta design has full rank. The learned `tau` is stored as a model
+parameter; no clean target vector is supplied through the sampling interface.
+This is the learned-condition variant. Plain `state_only` relies on the neural
+scorer to learn the same mapping implicitly.
+
+```bash
+python scripts/run_switch_diffusion.py \
+  --dataset-dir data/PubMed_baseline_subgraphs/subgraph_000 \
+  --structure-checkpoint results/pubmed_switch_structure_seed0/structure_checkpoint.json \
+  --output-dir results/pubmed_switch_target_free_seed0 \
+  --conditioning-mode state_only --training-objective scheduled_hybrid \
+  --inverse-loss-weight 1.0 --utility-loss-weight 1.0 \
+  --utility-temperature 1.0 --utility-schedule-power 2.0 \
+  --forward-steps 20000 --record-every 100 --sample-steps 20000
+```
+
+Use `--training-objective utility_kl --learned-condition` for the explicit
+learned-condition variant.
+
+`--learned-condition-noop` adds the legal self-transition and commits a switch
+only when its utility under the learned condition is positive. With greedy
+decoding, the learned squared graphlet error is therefore monotonically
+non-increasing; degree and family invariants remain exact because both a
+2-switch and a no-op stay in the same feasible state space.
+`--learned-condition-noop-patience` can terminate after a fixed run of
+self-transitions, using only the learned condition rather than evaluation
+metrics.
+
+### Exact Tensor Switch Kernel
+
+`switch_accelerator.py` evaluates all affected typed triangle and rooted
+closure deltas for a candidate batch in one tensor program. Candidate
+generation and the committed 2-switch are unchanged, and unsupported feature
+families are rejected rather than approximated. Consequently the tensor and
+Python kernels produce the same transition for the same random seed. Use
+`scripts/benchmark_switch_kernel.py` to report exactness and kernel
+speedup. A single Markov chain still has a sequential dependency across steps;
+larger candidate batches and independent-chain batching provide the available
+GPU parallelism without changing the reverse kernel.

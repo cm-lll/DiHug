@@ -43,11 +43,20 @@ from sparse_diffusion.structure_energy.switch_diffusion import (
     SwitchDenoiserMLP,
     apply_switch,
     build_switch_diffusion_dataset,
+    fit_learned_switch_condition,
     inverse_switch,
+    load_switch_checkpoint,
     randomize_role_realization,
+    proposal_delta,
     sample_switch_diffusion,
+    sample_switch_candidates,
     sample_valid_switch,
+    save_switch_checkpoint,
+    switch_diffusion_time_fraction,
     train_switch_denoiser,
+)
+from sparse_diffusion.structure_energy.switch_accelerator import (
+    BatchedClosedTriangleKernel,
 )
 
 
@@ -161,6 +170,54 @@ def test_closed_triangle_delta_fast_path_matches_full_recomputation():
     graph.validate()
 
 
+def test_batched_triangle_kernel_matches_exact_python_deltas():
+    graph = _toy_graph()
+    all_values = GraphletFeatureExtractor(graph).extract(graph)
+    keys = tuple(
+        sorted(
+            key
+            for key in all_values
+            if key.startswith(
+                ("triangle/", "root_triangle/", "root_triangle_total/")
+            )
+        )
+    )
+    selection = FeatureSelection(
+        keys=keys,
+        null_mean=np.zeros(len(keys), dtype=np.float64),
+        scale=np.asarray(
+            [1.0 + index / 10.0 for index in range(len(keys))],
+            dtype=np.float64,
+        ),
+    )
+    extractor = GraphletFeatureExtractor(graph, tracked_keys=selection.keys)
+    kernel = BatchedClosedTriangleKernel(graph, selection, "cpu")
+    rng = np.random.default_rng(402)
+    candidates, _ = sample_switch_candidates(graph, rng, 8)
+
+    expected = np.stack(
+        [
+            selection.delta_vector(proposal_delta(graph, extractor, proposal))
+            for proposal in candidates
+        ]
+    )
+    actual = kernel.delta_matrix(candidates).cpu().numpy()
+    np.testing.assert_allclose(actual, expected, rtol=0.0, atol=1.0e-12)
+
+    apply_switch(graph, candidates[0])
+    kernel.commit(candidates[0])
+    extractor = GraphletFeatureExtractor(graph, tracked_keys=selection.keys)
+    candidates, _ = sample_switch_candidates(graph, rng, 8)
+    expected = np.stack(
+        [
+            selection.delta_vector(proposal_delta(graph, extractor, proposal))
+            for proposal in candidates
+        ]
+    )
+    actual = kernel.delta_matrix(candidates).cpu().numpy()
+    np.testing.assert_allclose(actual, expected, rtol=0.0, atol=1.0e-12)
+
+
 def test_hierarchical_feature_selection_reserves_global_closure_groups():
     real = {
         "triangle/a": 10,
@@ -265,6 +322,38 @@ def test_switch_diffusion_forward_action_has_exact_legal_inverse():
     validate_role_realization(graph, plan)
 
 
+def test_switch_diffusion_macro_schedule_has_exact_discrete_time_layers():
+    assert switch_diffusion_time_fraction(1, 4, 2, 2) == 0.5
+    assert switch_diffusion_time_fraction(2, 4, 2, 2) == 0.5
+    assert switch_diffusion_time_fraction(3, 4, 2, 2) == 1.0
+    assert switch_diffusion_time_fraction(4, 4, 2, 2) == 1.0
+
+    source = _toy_graph()
+    values = GraphletFeatureExtractor(source).extract(source)
+    keys = tuple(sorted(values)[: min(8, len(values))])
+    selection = FeatureSelection(
+        keys=keys,
+        null_mean=np.zeros(len(keys), dtype=np.float64),
+        scale=np.ones(len(keys), dtype=np.float64),
+    )
+    dataset, _ = build_switch_diffusion_dataset(
+        source,
+        selection,
+        trajectories=1,
+        forward_steps=4,
+        record_every=1,
+        candidates_per_example=4,
+        seed=808,
+        conditioning_mode="state_only",
+        diffusion_steps=2,
+        switches_per_diffusion_step=2,
+    )
+    np.testing.assert_allclose(
+        dataset.candidate_features[:, 0, -3],
+        np.asarray([0.5, 0.5, 1.0, 1.0]),
+    )
+
+
 def test_switch_diffusion_tiny_end_to_end_preserves_role_degrees():
     source = _toy_graph()
     values = GraphletFeatureExtractor(source).extract(source)
@@ -326,6 +415,173 @@ def test_switch_diffusion_tiny_end_to_end_preserves_role_degrees():
     assert result.selection_mode == "model"
     assert 0.0 <= result.oracle_agreement <= 1.0
     assert all(sample["edges"] == source.num_edges for sample in result.trace)
+
+
+def test_target_free_switch_checkpoint_contains_no_clean_target():
+    source = _toy_graph()
+    values = GraphletFeatureExtractor(source).extract(source)
+    keys = tuple(sorted(key for key in values if key.startswith("triangle/")))
+    selection = FeatureSelection(
+        keys=keys,
+        null_mean=np.zeros(len(keys), dtype=np.float64),
+        scale=np.ones(len(keys), dtype=np.float64),
+    )
+    structure = StructureEnergyCheckpoint.from_training_graph(
+        source,
+        LinearGraphletEnergy(selection, np.zeros(len(keys), dtype=np.float64)),
+    )
+    dataset, _ = build_switch_diffusion_dataset(
+        source,
+        selection,
+        trajectories=2,
+        forward_steps=20,
+        record_every=2,
+        candidates_per_example=4,
+        seed=71,
+        conditioning_mode="state_only",
+    )
+    model, report = train_switch_denoiser(
+        dataset,
+        hidden_dim=16,
+        layers=1,
+        dropout=0.0,
+        epochs=1,
+        batch_size=4,
+        training_objective="scheduled_hybrid",
+        inverse_loss_weight=1.0,
+        utility_loss_weight=1.0,
+        utility_temperature=0.5,
+        utility_schedule_power=2.0,
+        device="cpu",
+        seed=72,
+    )
+    assert report.training_objective == "scheduled_hybrid"
+    assert report.utility_schedule_power == 2.0
+    assert np.isfinite(report.validation_utility_cross_entropy)
+    assert 0.0 <= report.validation_model_oracle_top1 <= 1.0
+    with TemporaryDirectory() as directory:
+        path = Path(directory) / "target_free.pt"
+        save_switch_checkpoint(
+            path,
+            model,
+            structure,
+            None,
+            hidden_dim=16,
+            layers=1,
+            dropout=0.0,
+            report=report,
+            conditioning_mode="state_only",
+        )
+        import torch
+
+        payload = torch.load(path, map_location="cpu", weights_only=False)
+        assert "target_vector" not in payload
+        assert "candidate_improvements" not in payload
+        assert payload["inference_contract"] == {
+            "clean_graphlet_target": False,
+            "training_adjacency": False,
+            "anonymous_relation_degree_rows": True,
+            "node_type_counts": True,
+            "family_schema": True,
+            "learned_graphlet_condition": False,
+        }
+        _, restored, target, _, mode = load_switch_checkpoint(path, "cpu")
+
+    assert target is None
+    assert mode == "state_only"
+    assert restored.selection.keys == selection.keys
+
+
+def test_learned_switch_condition_recovers_training_utility_without_target_input():
+    source = _toy_graph()
+    values = GraphletFeatureExtractor(source).extract(source)
+    keys = tuple(sorted(key for key in values if key.startswith("triangle/")))
+    selection = FeatureSelection(
+        keys=keys,
+        null_mean=np.zeros(len(keys), dtype=np.float64),
+        scale=np.ones(len(keys), dtype=np.float64),
+    )
+    dataset, _ = build_switch_diffusion_dataset(
+        source,
+        selection,
+        trajectories=3,
+        forward_steps=20,
+        record_every=2,
+        candidates_per_example=4,
+        seed=73,
+        conditioning_mode="state_only",
+    )
+    estimate, rank, rmse = fit_learned_switch_condition(
+        dataset.candidate_features,
+        dataset.candidate_improvements,
+        len(keys),
+    )
+    assert estimate.shape == (len(keys),)
+    assert rank > 0
+    assert rmse < 1.0e-5
+
+    model, report = train_switch_denoiser(
+        dataset,
+        hidden_dim=16,
+        layers=1,
+        dropout=0.0,
+        epochs=1,
+        batch_size=8,
+        training_objective="utility_kl",
+        utility_temperature=1.0,
+        learned_condition_feature_count=len(keys),
+        device="cpu",
+        seed=74,
+    )
+    assert model.learned_target is not None
+    assert report.learned_condition_rank > 0
+    assert report.learned_condition_rmse < 1.0e-5
+
+
+def test_learned_condition_noop_is_an_exact_self_transition():
+    graph = _toy_graph()
+    values = GraphletFeatureExtractor(graph).extract(graph)
+    keys = tuple(sorted(key for key in values if key.startswith("triangle/")))
+    selection = FeatureSelection(
+        keys=keys,
+        null_mean=np.zeros(len(keys), dtype=np.float64),
+        scale=np.ones(len(keys), dtype=np.float64),
+    )
+    family_count = len(graph.family_specs)
+    input_dim = 3 * len(keys) + family_count + 3
+    model = SwitchDenoiserMLP(
+        input_dim=input_dim,
+        hidden_dim=8,
+        layers=1,
+        dropout=0.0,
+        learned_condition_feature_count=len(keys),
+    )
+    model.set_learned_target(selection.vector(values))
+    before = {
+        family: tuple(edges) for family, edges in graph.family_edges.items()
+    }
+    result = sample_switch_diffusion(
+        graph,
+        model,
+        selection,
+        None,
+        steps=5,
+        candidates_per_step=4,
+        seed=75,
+        device="cpu",
+        temperature=0.0,
+        metrics_every=1,
+        selection_mode="model",
+        conditioning_mode="state_only",
+        switch_kernel="python",
+        learned_condition_noop=True,
+        learned_condition_noop_patience=2,
+    )
+    assert result.applied == 0
+    assert result.proposed == 8
+    assert before == {
+        family: tuple(edges) for family, edges in result.graph.family_edges.items()
+    }
 
 
 def test_parallel_tempering_preserves_roles_and_exact_exchange_kernel():
