@@ -9,6 +9,7 @@ from .checkpoint import StructureEnergyCheckpoint
 from .features import GraphletFeatureExtractor
 from .graph import FamilySpec, TypedGraph, load_typed_graph
 from .roles import RolePlan, realize_role_plan, sample_role_plan
+from .switch_diffusion import SwitchDenoiserMLP
 
 __all__ = [
     "FamilySpec",
@@ -16,6 +17,7 @@ __all__ = [
     "RolePlan",
     "StructureEnergyCheckpoint",
     "TypedGraph",
+    "SwitchDenoiserMLP",
     "load_typed_graph",
     "realize_role_plan",
     "sample_role_plan",

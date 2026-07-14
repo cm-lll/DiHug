@@ -39,6 +39,16 @@ from sparse_diffusion.structure_energy.switch_chain import (
     run_parallel_tempering,
     run_switch_chain,
 )
+from sparse_diffusion.structure_energy.switch_diffusion import (
+    SwitchDenoiserMLP,
+    apply_switch,
+    build_switch_diffusion_dataset,
+    inverse_switch,
+    randomize_role_realization,
+    sample_switch_diffusion,
+    sample_valid_switch,
+    train_switch_denoiser,
+)
 
 
 def _toy_graph() -> TypedGraph:
@@ -165,6 +175,89 @@ def test_uniform_switch_chain_preserves_every_family_degree():
     assert result.valid > 0
     assert result.accepted == result.valid
     assert all(sample.metrics["edges"] == source.num_edges for sample in result.samples)
+
+
+def test_switch_diffusion_forward_action_has_exact_legal_inverse():
+    source = _toy_graph()
+    plan = sample_role_plan(source, seed=301)
+    graph = permuted_witness(source, plan)
+    before = {
+        family: tuple(edges) for family, edges in graph.family_edges.items()
+    }
+    rng = np.random.default_rng(302)
+    proposal = sample_valid_switch(graph, rng)
+
+    assert proposal is not None
+    apply_switch(graph, proposal)
+    apply_switch(graph, inverse_switch(proposal))
+
+    assert before == {
+        family: tuple(edges) for family, edges in graph.family_edges.items()
+    }
+    validate_role_realization(graph, plan)
+
+
+def test_switch_diffusion_tiny_end_to_end_preserves_role_degrees():
+    source = _toy_graph()
+    values = GraphletFeatureExtractor(source).extract(source)
+    keys = tuple(sorted(values)[: min(8, len(values))])
+    selection = FeatureSelection(
+        keys=keys,
+        null_mean=np.zeros(len(keys), dtype=np.float64),
+        scale=np.ones(len(keys), dtype=np.float64),
+    )
+    dataset, target = build_switch_diffusion_dataset(
+        source,
+        selection,
+        trajectories=3,
+        forward_steps=20,
+        record_every=5,
+        candidates_per_example=4,
+        seed=303,
+    )
+
+    assert dataset.candidate_features.shape[:2] == (12, 4)
+    assert dataset.candidate_improvements.shape == (12, 4)
+    assert np.isfinite(dataset.candidate_features).all()
+    model, report = train_switch_denoiser(
+        dataset,
+        hidden_dim=16,
+        layers=1,
+        dropout=0.0,
+        epochs=3,
+        batch_size=4,
+        learning_rate=1.0e-2,
+        device="cpu",
+        seed=304,
+    )
+    assert isinstance(model, SwitchDenoiserMLP)
+    assert np.isfinite(report.validation_loss)
+
+    plan = sample_role_plan(source, seed=305)
+    initial = realize_role_plan(source, plan)
+    initial = randomize_role_realization(initial, steps=20, seed=306)
+    expected = initial.all_family_degrees()
+    result = sample_switch_diffusion(
+        initial,
+        model,
+        selection,
+        target,
+        steps=10,
+        candidates_per_step=4,
+        seed=307,
+        device="cpu",
+        temperature=0.0,
+        metrics_every=5,
+        selection_mode="model",
+    )
+
+    assert result.applied == 10
+    for family, degree in expected.items():
+        np.testing.assert_array_equal(result.graph.family_degrees(family), degree)
+    assert result.proposed == 40
+    assert result.selection_mode == "model"
+    assert 0.0 <= result.oracle_agreement <= 1.0
+    assert all(sample["edges"] == source.num_edges for sample in result.trace)
 
 
 def test_parallel_tempering_preserves_roles_and_exact_exchange_kernel():

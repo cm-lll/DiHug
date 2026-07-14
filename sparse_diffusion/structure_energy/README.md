@@ -135,3 +135,41 @@ python scripts/sample_structure_energy_tempered.py \
 The diffusion model may later provide only an initializer. A learned
 state-dependent proposal is excluded from this version because it would need
 an explicit Hastings correction to preserve the same target distribution.
+
+## Switch-Space Diffusion
+
+`switch_diffusion.py` implements a separate learned reverse process directly
+on the degree-conditioned state space. Its forward kernel applies uniformly
+sampled legal family-preserving 2-switches. Training records an exact inverse
+switch together with negatives drawn from the same legal proposal kernel, and
+fits a listwise classifier. This is sampled reverse-kernel estimation, not
+independent edge classification.
+
+Every forward and reverse action preserves graph simplicity, every family edge
+count, and every node's degree in every relation family. Training uses
+type-preserving permutations of the clean witness to avoid binding anonymous
+roles to node IDs. A sampling checkpoint contains only anonymous role rows,
+the automatically selected typed graphlet statistics, and learned scorer
+parameters; sampling does not load the training adjacency.
+
+Three sampling modes isolate failure causes:
+
+- `random` measures the degree-conditioned switch null;
+- `oracle` selects the candidate with the largest immediate reduction in the
+  checkpoint statistic error and tests candidate-proposal coverage;
+- `model` uses the learned reverse-kernel score.
+
+The hard guarantee is membership in the feasible role state space after every
+step. Finite-step graphlet recovery remains an optimization result, so reports
+include validation top-k reverse accuracy, model-oracle agreement, graphlet
+target error, and graph metrics along the trajectory.
+
+Run the causal gate:
+
+```bash
+python scripts/run_switch_diffusion.py \
+  --structure-checkpoint results/imdb_structure_energy_seed0/structure_energy_checkpoint.json \
+  --output-dir results/imdb_switch_diffusion_seed0 \
+  --trajectories 8 --forward-steps 2000 --record-every 20 \
+  --train-candidates 32 --sample-steps 2000 --sample-candidates 64
+```
