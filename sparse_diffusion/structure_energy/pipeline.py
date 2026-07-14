@@ -14,7 +14,7 @@ from .features import GraphletFeatureExtractor, select_features
 from .fit import fit_moment_matching_energy, fit_pairwise_nce
 from .graph import TypedGraph, load_typed_graph
 from .roles import realize_role_plan, sample_role_plan, validate_role_realization
-from .switch_chain import ChainResult, graph_metrics, run_switch_chain
+from .switch_chain import ChainResult, ChainSample, graph_metrics, run_switch_chain
 
 
 def _json_safe(value):
@@ -72,11 +72,16 @@ def _edge_jaccard(left: TypedGraph, right: TypedGraph) -> float:
 def _mixing_pass(summary: Mapping[str, Mapping[str, float]], config) -> bool:
     for name in ("triangles", "clustering"):
         values = summary.get(name, {})
-        rhat = float(values.get("r_hat", float("nan")))
+        rhat = float(values.get("split_r_hat", float("nan")))
         ess = float(values.get("ess_min", 0.0))
+        drift_z = float(values.get("half_drift_z", float("inf")))
         if not math.isfinite(rhat) or rhat > float(config.rhat_threshold):
             return False
         if ess < float(config.min_ess_per_chain):
+            return False
+        if not math.isfinite(drift_z) or drift_z > float(
+            config.chain_drift_z_threshold
+        ):
             return False
     return True
 
@@ -108,6 +113,98 @@ class GateConfig:
     rhat_threshold: float = 1.10
     min_ess_per_chain: float = 20.0
     curveball_probability: float = 0.0
+    chain_drift_z_threshold: float = 2.0
+    chain_max_extensions: int = 4
+    chain_extension_steps: int = 100_000
+    diagnostic_window: int = 64
+    moment_max_batches_per_round: int = 16
+    moment_min_samples_per_chain: int = 16
+    moment_min_ess_per_chain: float = 8.0
+    moment_rhat_threshold: float = 1.10
+    moment_drift_z_threshold: float = 2.0
+    moment_warmup_steps_per_round: int = 0
+    moment_step_decay: float = 0.60
+    moment_update_norm_clip: float = 5.0
+    moment_diagnostic_quantile: float = 0.90
+
+
+def _tail_metric_chains(
+    results: List[ChainResult], window: int
+) -> List[List[Mapping[str, float]]]:
+    return [
+        [sample.metrics for sample in result.samples[-max(int(window), 1) :]]
+        for result in results
+    ]
+
+
+def _merge_chain_results(previous: ChainResult, continuation: ChainResult) -> ChainResult:
+    offset = int(previous.attempted)
+    continued_samples = [
+        ChainSample(
+            step=offset + int(sample.step),
+            energy=float(sample.energy),
+            features=dict(sample.features),
+            metrics=dict(sample.metrics),
+        )
+        for sample in continuation.samples
+    ]
+    return ChainResult(
+        graph=continuation.graph,
+        samples=list(previous.samples) + continued_samples,
+        attempted=int(previous.attempted) + int(continuation.attempted),
+        valid=int(previous.valid) + int(continuation.valid),
+        accepted=int(previous.accepted) + int(continuation.accepted),
+    )
+
+
+def _extend_until_mixed(
+    results: List[ChainResult],
+    config,
+    seed: int,
+    reference: Mapping[str, float] | None,
+    energy=None,
+) -> tuple[List[ChainResult], dict, int]:
+    """Continue frozen-kernel chains until diagnostics pass or budget expires."""
+
+    extensions = 0
+    while True:
+        summary = summarize_chain_metrics(
+            _tail_metric_chains(results, config.diagnostic_window),
+            reference=reference,
+        )
+        if _mixing_pass(summary, config):
+            return results, summary, extensions
+        if extensions >= int(config.chain_max_extensions):
+            return results, summary, extensions
+
+        updated = []
+        for chain_id, result in enumerate(results):
+            continuation = run_switch_chain(
+                result.graph,
+                GraphletFeatureExtractor(
+                    result.graph,
+                    tracked_keys=None if energy is None else energy.selection.keys,
+                ),
+                steps=int(config.chain_extension_steps),
+                burn_in=max(int(config.thin), 1),
+                thin=max(int(config.thin), 1),
+                seed=(
+                    int(seed)
+                    + 10_000_019 * (extensions + 1)
+                    + 1009 * chain_id
+                ),
+                energy=energy,
+                verify_every=int(config.verify_every),
+                curveball_probability=float(config.curveball_probability),
+            )
+            updated.append(_merge_chain_results(result, continuation))
+        results = updated
+        extensions += 1
+        print(
+            f"[STRUCTURE-ENERGY] adaptive_extension={extensions} "
+            f"samples_per_chain={min(len(item.samples) for item in results)}",
+            flush=True,
+        )
 
 
 def _run_chains(
@@ -237,8 +334,19 @@ def run_gates(config: GateConfig) -> dict:
         curveball_probability=config.curveball_probability,
         energy=None,
     )
+    null_results, null_summary, null_extensions = _extend_until_mixed(
+        null_results,
+        config,
+        seed=config.seed + 11_000,
+        reference=None,
+        energy=None,
+    )
     null_samples_by_chain = [
-        [sample.features for sample in result.samples] for result in null_results
+        [
+            sample.features
+            for sample in result.samples[-max(int(config.diagnostic_window), 1) :]
+        ]
+        for result in null_results
     ]
     null_samples = [sample for chain in null_samples_by_chain for sample in chain]
     if len(null_samples) < 4:
@@ -301,6 +409,15 @@ def run_gates(config: GateConfig) -> dict:
         initial_weights=nce_energy.weights,
         verify_every=config.verify_every,
         curveball_probability=config.curveball_probability,
+        max_batches_per_round=config.moment_max_batches_per_round,
+        min_samples_per_chain=config.moment_min_samples_per_chain,
+        min_ess_per_chain=config.moment_min_ess_per_chain,
+        rhat_threshold=config.moment_rhat_threshold,
+        drift_z_threshold=config.moment_drift_z_threshold,
+        warmup_steps_per_round=config.moment_warmup_steps_per_round,
+        step_decay=config.moment_step_decay,
+        update_norm_clip=config.moment_update_norm_clip,
+        diagnostic_quantile=config.moment_diagnostic_quantile,
     )
     _write_json(config.output_dir / "gate3_energy_model.json", energy.to_json_dict())
     _write_json(
@@ -320,6 +437,13 @@ def run_gates(config: GateConfig) -> dict:
         verify_every=config.verify_every,
         curveball_probability=config.curveball_probability,
     )
+    energy_results, energy_summary, energy_extensions = _extend_until_mixed(
+        energy_results,
+        config,
+        seed=config.seed + 21_000,
+        reference=real_metrics,
+        energy=energy,
+    )
     for chain_id, result in enumerate(energy_results):
         _write_json(
             config.output_dir / f"gate3_energy_chain_{chain_id}.json",
@@ -330,14 +454,6 @@ def run_gates(config: GateConfig) -> dict:
             result.graph.to_json_dict(),
         )
 
-    null_metric_chains = [
-        [sample.metrics for sample in result.samples] for result in null_results
-    ]
-    energy_metric_chains = [
-        [sample.metrics for sample in result.samples] for result in energy_results
-    ]
-    null_summary = summarize_chain_metrics(null_metric_chains)
-    energy_summary = summarize_chain_metrics(energy_metric_chains)
     generated_pairwise_jaccard = [
         _edge_jaccard(energy_results[left].graph, energy_results[right].graph)
         for left in range(len(energy_results))
@@ -375,6 +491,7 @@ def run_gates(config: GateConfig) -> dict:
             "summary": null_summary,
             "valid_rates": [result.valid_rate for result in null_results],
             "acceptance_rates": [result.acceptance_rate for result in null_results],
+            "adaptive_extensions": int(null_extensions),
         },
         "gate2": {
             "passed": bool(fit_report.success and fit_report.heldout_pair_accuracy > 0.5),
@@ -393,6 +510,7 @@ def run_gates(config: GateConfig) -> dict:
             "clustering_relative_error": clustering_error,
             "valid_rates": [result.valid_rate for result in energy_results],
             "acceptance_rates": [result.acceptance_rate for result in energy_results],
+            "adaptive_extensions": int(energy_extensions),
             "pairwise_edge_jaccard_mean": float(np.mean(generated_pairwise_jaccard))
             if generated_pairwise_jaccard
             else 0.0,

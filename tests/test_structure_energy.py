@@ -5,11 +5,20 @@ from tempfile import TemporaryDirectory
 import numpy as np
 
 from sparse_diffusion.structure_energy.checkpoint import StructureEnergyCheckpoint
+from sparse_diffusion.structure_energy.diagnostics import (
+    half_drift_z_score,
+    r_hat,
+    relative_half_drift,
+    split_r_hat,
+)
 from sparse_diffusion.structure_energy.features import (
     FeatureSelection,
     GraphletFeatureExtractor,
 )
-from sparse_diffusion.structure_energy.fit import fit_pairwise_nce
+from sparse_diffusion.structure_energy.fit import (
+    fit_moment_matching_energy,
+    fit_pairwise_nce,
+)
 from sparse_diffusion.structure_energy.graph import FamilySpec, TypedGraph
 from sparse_diffusion.structure_energy.roles import (
     permuted_witness,
@@ -205,6 +214,83 @@ def test_pairwise_nce_recovers_graphlet_enrichment_direction():
     assert energy.value({"triangle/AAB": 8}) > energy.value(
         {"triangle/AAB": 1}
     )
+
+
+def test_split_rhat_detects_shared_drift_hidden_from_ordinary_rhat():
+    chains = [
+        np.linspace(0.0, 10.0, 40) + offset
+        for offset in (0.0, 0.02, -0.02, 0.01)
+    ]
+
+    assert r_hat(chains) < 1.05
+    assert split_r_hat(chains) > 1.10
+    assert relative_half_drift(chains, reference=10.0) > 0.40
+    assert half_drift_z_score(chains) > 2.0
+
+
+def test_rhat_rejects_zero_variance_chains_with_different_means():
+    chains = [[value] * 8 for value in (0.0, 0.0, 1.0, 1.0)]
+
+    assert np.isinf(r_hat(chains))
+    assert np.isinf(split_r_hat(chains))
+
+
+def test_moment_fit_skips_update_when_expectation_diagnostics_are_impossible():
+    source = _toy_graph()
+    values = GraphletFeatureExtractor(source).extract(source)
+    key = next(key for key in values if key.startswith("triangle/"))
+    selection = FeatureSelection(
+        keys=(key,),
+        null_mean=np.asarray([0.0]),
+        scale=np.asarray([1.0]),
+    )
+
+    energy, report, _ = fit_moment_matching_energy(
+        values,
+        selection,
+        [source, source],
+        rounds=2,
+        steps_per_round=20,
+        samples_per_round=4,
+        max_batches_per_round=1,
+        min_samples_per_chain=8,
+        seed=7,
+    )
+
+    assert report.successful_updates == 0
+    assert not any(item.expectation_converged for item in report.trajectory)
+    np.testing.assert_allclose(energy.weights, np.zeros(1))
+
+
+def test_moment_fit_updates_only_after_frozen_expectation_passes():
+    source = _toy_graph()
+    values = GraphletFeatureExtractor(source).extract(source)
+    key = next(key for key in values if key.startswith("triangle/"))
+    selection = FeatureSelection(
+        keys=(key,),
+        null_mean=np.asarray([0.0]),
+        scale=np.asarray([1.0]),
+    )
+
+    energy, report, _ = fit_moment_matching_energy(
+        values,
+        selection,
+        [source, source, source, source],
+        rounds=2,
+        steps_per_round=40,
+        samples_per_round=4,
+        max_batches_per_round=4,
+        min_samples_per_chain=8,
+        min_ess_per_chain=1.0,
+        rhat_threshold=10.0,
+        drift_z_threshold=10.0,
+        learning_rate=1.0,
+        seed=8,
+    )
+
+    assert report.successful_updates == 1
+    assert all(item.expectation_converged for item in report.trajectory)
+    assert not np.allclose(energy.weights, np.zeros(1))
 
 
 def test_graph_metrics_count_typed_triangles_without_changing_degree_scope():

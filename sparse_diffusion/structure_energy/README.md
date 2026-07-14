@@ -36,9 +36,17 @@ its classifier weights are not treated as final ERGM parameters.
 
 Gate 3 fits the fixed-degree maximum-entropy model with persistent MCMC. For a
 frozen parameter vector, the negative log likelihood is convex and its
-gradient is the model expected statistic minus the real statistic. The code
-estimates this expectation with switch chains and freezes the fitted energy
-before final validation.
+gradient is the model expected statistic minus the real statistic. Each
+parameter round now keeps the energy frozen and extends the persistent chains
+until at least 90% of selected statistics pass ESS, split-Rhat, and
+Monte-Carlo drift tests. A diagonally preconditioned Robbins-Monro update uses
+a diminishing step size; a failed expectation diagnostic skips the update
+instead of pushing noisy gradients into the weight boundary.
+
+Fresh null and energy chains are also extended adaptively. Gate summaries use
+only the latest diagnostic window, and report ordinary Rhat, split-Rhat, ESS,
+and early-to-late drift. In particular, ordinary Rhat near one is not accepted
+as convergence when all chains share the same trend.
 
 ## Sampler Guarantee
 

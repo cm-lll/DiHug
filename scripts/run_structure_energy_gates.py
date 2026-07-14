@@ -46,6 +46,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--rhat-threshold", type=float, default=1.10)
     parser.add_argument("--min-ess-per-chain", type=float, default=20.0)
     parser.add_argument("--curveball-probability", type=float, default=0.0)
+    parser.add_argument("--chain-drift-z-threshold", type=float, default=2.0)
+    parser.add_argument("--chain-max-extensions", type=int, default=4)
+    parser.add_argument("--chain-extension-steps", type=int, default=100_000)
+    parser.add_argument("--diagnostic-window", type=int, default=64)
+    parser.add_argument("--moment-max-batches-per-round", type=int, default=16)
+    parser.add_argument("--moment-min-samples-per-chain", type=int, default=16)
+    parser.add_argument("--moment-min-ess-per-chain", type=float, default=8.0)
+    parser.add_argument("--moment-rhat-threshold", type=float, default=1.10)
+    parser.add_argument("--moment-drift-z-threshold", type=float, default=2.0)
+    parser.add_argument("--moment-warmup-steps-per-round", type=int, default=0)
+    parser.add_argument("--moment-step-decay", type=float, default=0.60)
+    parser.add_argument("--moment-update-norm-clip", type=float, default=5.0)
+    parser.add_argument("--moment-diagnostic-quantile", type=float, default=0.90)
     return parser.parse_args()
 
 
@@ -78,6 +91,19 @@ def main() -> None:
             rhat_threshold=args.rhat_threshold,
             min_ess_per_chain=args.min_ess_per_chain,
             curveball_probability=args.curveball_probability,
+            chain_drift_z_threshold=args.chain_drift_z_threshold,
+            chain_max_extensions=args.chain_max_extensions,
+            chain_extension_steps=args.chain_extension_steps,
+            diagnostic_window=args.diagnostic_window,
+            moment_max_batches_per_round=args.moment_max_batches_per_round,
+            moment_min_samples_per_chain=args.moment_min_samples_per_chain,
+            moment_min_ess_per_chain=args.moment_min_ess_per_chain,
+            moment_rhat_threshold=args.moment_rhat_threshold,
+            moment_drift_z_threshold=args.moment_drift_z_threshold,
+            moment_warmup_steps_per_round=args.moment_warmup_steps_per_round,
+            moment_step_decay=args.moment_step_decay,
+            moment_update_norm_clip=args.moment_update_norm_clip,
+            moment_diagnostic_quantile=args.moment_diagnostic_quantile,
         )
     )
 
