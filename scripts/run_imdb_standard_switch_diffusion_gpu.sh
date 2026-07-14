@@ -7,7 +7,7 @@ SEED="${SEED:-0}"
 DATASET_DIR="${DATASET_DIR:-$ROOT/data/IMDB_movie_subgraphs/subgraph_000}"
 OUT_ROOT="${OUT_ROOT:-$ROOT/results/imdb_standard_switch_diffusion_gpu${GPU}}"
 LOG_ROOT="${LOG_ROOT:-$ROOT/logs/imdb_standard_switch_diffusion_gpu${GPU}}"
-STRUCTURE_CKPT="${STRUCTURE_CKPT:-$OUT_ROOT/structure_checkpoint.json}"
+STRUCTURE_CKPT="${STANDARD_STRUCTURE_CKPT:-$OUT_ROOT/structure_checkpoint.json}"
 
 source /data2/lyh/miniconda3/etc/profile.d/conda.sh
 conda activate sparse_block
