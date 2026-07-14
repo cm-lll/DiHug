@@ -161,6 +161,40 @@ def test_closed_triangle_delta_fast_path_matches_full_recomputation():
     graph.validate()
 
 
+def test_hierarchical_feature_selection_reserves_global_closure_groups():
+    real = {
+        "triangle/a": 10,
+        "triangle/b": 8,
+        "root_triangle_total/type=A/degree=2": 18,
+        "root_triangle/detail/high_z": 100,
+        "root_triangle/detail/next": 90,
+    }
+    null_samples = [
+        {
+            "triangle/a": 2 + offset,
+            "triangle/b": 2,
+            "root_triangle_total/type=A/degree=2": 4 + offset,
+            "root_triangle/detail/high_z": 0,
+            "root_triangle/detail/next": 0,
+        }
+        for offset in (0, 1, 0, 1)
+    ]
+    selection = select_features(
+        real,
+        null_samples,
+        max_features=4,
+        reserve_prefix_counts={
+            "triangle/": -1,
+            "root_triangle_total/": -1,
+        },
+    )
+
+    assert "triangle/a" in selection.keys
+    assert "triangle/b" in selection.keys
+    assert "root_triangle_total/type=A/degree=2" in selection.keys
+    assert len(selection.keys) == 4
+
+
 def test_curveball_trade_is_exact_and_preserves_bipartite_degrees():
     graph = _toy_graph()
     extractor = GraphletFeatureExtractor(graph)

@@ -17,8 +17,12 @@ if [[ ! -f "$STRUCTURE_CKPT" ]]; then
   python scripts/build_switch_structure_checkpoint.py \
     --dataset-dir "$DATASET_DIR" --output "$STRUCTURE_CKPT" \
     --seed 0 --null-chains 4 --null-steps 5000 --null-thin 500 \
-    --max-features 48 \
-    --feature-prefix triangle/ --feature-prefix root_triangle/ \
+    --max-features 64 \
+    --feature-prefix triangle/ \
+    --feature-prefix root_triangle/ \
+    --feature-prefix root_triangle_total/ \
+    --reserve-prefix triangle/=-1 \
+    --reserve-prefix root_triangle_total/=-1 \
     >"$LOG_ROOT/structure_checkpoint.log" 2>&1
 fi
 

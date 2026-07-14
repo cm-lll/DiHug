@@ -172,6 +172,9 @@ class GraphletFeatureExtractor:
             root_type = self._type_name(root)
             bucket = _degree_bucket(self.fixed_total_degree[root])
             result[
+                f"root_triangle_total/type={root_type}/degree={bucket}"
+            ] += 1
+            result[
                 f"root_triangle/{signature}/root={root_type}/degree={bucket}"
             ] += 1
         return result
@@ -412,6 +415,7 @@ def select_features(
     max_features: int = 64,
     min_support: float = 2.0,
     drop_fixed_degree_wedges: bool = True,
+    reserve_prefix_counts: Optional[Mapping[str, int]] = None,
 ) -> FeatureSelection:
     if not null_samples:
         raise ValueError("at least one null sample is required")
@@ -436,8 +440,33 @@ def select_features(
         )
     if candidates.size == 0:
         raise ValueError("no graphlet features passed the support threshold")
+    budget = max(int(max_features), 1)
     order = candidates[np.argsort(score[candidates])[::-1]]
-    keep = order[: max(int(max_features), 1)]
+    selected: list[int] = []
+    selected_set: set[int] = set()
+    for prefix, raw_count in (reserve_prefix_counts or {}).items():
+        prefix_order = [
+            int(index)
+            for index in order
+            if keys[int(index)].startswith(str(prefix))
+            and int(index) not in selected_set
+        ]
+        count = int(raw_count)
+        if count >= 0:
+            prefix_order = prefix_order[:count]
+        for index in prefix_order:
+            if len(selected) >= budget:
+                break
+            selected.append(index)
+            selected_set.add(index)
+    for raw_index in order:
+        index = int(raw_index)
+        if len(selected) >= budget:
+            break
+        if index not in selected_set:
+            selected.append(index)
+            selected_set.add(index)
+    keep = np.asarray(selected, dtype=np.int64)
     selected_keys = tuple(keys[index] for index in keep)
     return FeatureSelection(
         keys=selected_keys,

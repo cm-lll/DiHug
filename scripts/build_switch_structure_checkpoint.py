@@ -43,6 +43,16 @@ def parse_args() -> argparse.Namespace:
         default=[],
         help="Keep only automatically discovered keys with one of these prefixes.",
     )
+    parser.add_argument(
+        "--reserve-prefix",
+        action="append",
+        default=[],
+        metavar="PREFIX=COUNT",
+        help=(
+            "Reserve slots for a feature prefix before global ranking. "
+            "COUNT=-1 keeps every supported feature with that prefix."
+        ),
+    )
     parser.add_argument("--verify-every", type=int, default=0)
     return parser.parse_args()
 
@@ -90,11 +100,21 @@ def main() -> None:
             for sample in null_samples
         ]
 
+    reserve_prefix_counts = {}
+    for value in args.reserve_prefix:
+        prefix, separator, count = str(value).rpartition("=")
+        if not separator or not prefix:
+            raise ValueError(
+                f"invalid --reserve-prefix {value!r}; expected PREFIX=COUNT"
+            )
+        reserve_prefix_counts[prefix] = int(count)
+
     selection = select_features(
         real_features,
         null_samples,
         max_features=args.max_features,
         min_support=args.min_support,
+        reserve_prefix_counts=reserve_prefix_counts,
     )
     # Switch diffusion consumes the selected moments and anonymous roles. The
     # failed linear-energy fit is deliberately not part of this checkpoint.
@@ -112,6 +132,7 @@ def main() -> None:
         "null_samples": len(null_samples),
         "selected_features": list(selection.keys),
         "feature_prefixes": list(args.feature_prefix),
+        "reserve_prefix_counts": reserve_prefix_counts,
     }
     report_path = args.output.with_suffix(".report.json")
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
