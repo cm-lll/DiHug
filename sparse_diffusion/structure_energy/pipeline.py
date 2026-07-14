@@ -129,6 +129,10 @@ class GateConfig:
     moment_max_retained_samples_per_chain: int = 256
     moment_min_successful_updates: int = 1
     moment_pilot_only: bool = False
+    moment_update_method: str = "diagonal"
+    moment_natural_gradient_damping: float = 0.05
+    moment_covariance_shrinkage: float = 0.10
+    moment_kl_trust_radius: float = 0.0
 
 
 def _tail_metric_chains(
@@ -424,6 +428,10 @@ def run_gates(config: GateConfig) -> dict:
         max_retained_samples_per_chain=(
             config.moment_max_retained_samples_per_chain
         ),
+        update_method=config.moment_update_method,
+        natural_gradient_damping=config.moment_natural_gradient_damping,
+        covariance_shrinkage=config.moment_covariance_shrinkage,
+        kl_trust_radius=config.moment_kl_trust_radius,
     )
     _write_json(config.output_dir / "gate3_energy_model.json", energy.to_json_dict())
     _write_json(

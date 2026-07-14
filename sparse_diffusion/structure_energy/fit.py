@@ -60,8 +60,13 @@ class MomentFitRound:
     feature_drift_z_max: float
     feature_drift_z_q90: float
     expectation_converged: bool
+    update_method: str
     step_size: float
     update_direction_norm: float
+    actual_update_norm: float
+    approximate_kl: float
+    fisher_condition: float
+    covariance_rank: int
     weight_at_bound_fraction: float
 
     def to_json_dict(self) -> dict:
@@ -88,8 +93,13 @@ class MomentFitRound:
             "feature_drift_z_max": float(self.feature_drift_z_max),
             "feature_drift_z_q90": float(self.feature_drift_z_q90),
             "expectation_converged": bool(self.expectation_converged),
+            "update_method": self.update_method,
             "step_size": float(self.step_size),
             "update_direction_norm": float(self.update_direction_norm),
+            "actual_update_norm": float(self.actual_update_norm),
+            "approximate_kl": float(self.approximate_kl),
+            "fisher_condition": float(self.fisher_condition),
+            "covariance_rank": int(self.covariance_rank),
             "weight_at_bound_fraction": float(self.weight_at_bound_fraction),
         }
 
@@ -198,6 +208,76 @@ def _feature_chain_diagnostics(
     }
 
 
+def _feature_covariance(
+    samples: np.ndarray, shrinkage: float
+) -> tuple[np.ndarray, int]:
+    """Estimate a stable Fisher matrix from normalized sufficient statistics."""
+
+    matrix = np.asarray(samples, dtype=np.float64)
+    if matrix.ndim != 2:
+        raise ValueError("feature samples must be a two-dimensional matrix")
+    width = int(matrix.shape[1])
+    if matrix.shape[0] < 2:
+        return np.zeros((width, width), dtype=np.float64), 0
+    covariance = np.atleast_2d(np.cov(matrix, rowvar=False, ddof=1)).astype(
+        np.float64, copy=False
+    )
+    if covariance.shape != (width, width):
+        covariance = covariance.reshape(width, width)
+    covariance = 0.5 * (covariance + covariance.T)
+    diagonal = np.diag(np.diag(covariance))
+    covariance = (1.0 - float(shrinkage)) * covariance + float(
+        shrinkage
+    ) * diagonal
+    covariance = np.nan_to_num(covariance, nan=0.0, posinf=0.0, neginf=0.0)
+    return covariance, int(np.linalg.matrix_rank(covariance, tol=1.0e-10))
+
+
+def _natural_gradient_direction(
+    gradient: np.ndarray,
+    covariance: np.ndarray,
+    damping: float,
+    l2: float,
+) -> tuple[np.ndarray, float]:
+    """Solve the damped Fisher system for an exponential-family ascent step."""
+
+    width = int(gradient.size)
+    system = np.asarray(covariance, dtype=np.float64) + (
+        float(damping) + float(l2)
+    ) * np.eye(width, dtype=np.float64)
+    condition = float(np.linalg.cond(system))
+    try:
+        direction = np.linalg.solve(system, gradient)
+    except np.linalg.LinAlgError:
+        direction = np.linalg.pinv(system, rcond=1.0e-10) @ gradient
+    return np.asarray(direction, dtype=np.float64), condition
+
+
+def _trust_region_update(
+    direction: np.ndarray,
+    step_size: float,
+    covariance: np.ndarray,
+    max_norm: float,
+    kl_radius: float,
+) -> tuple[np.ndarray, float]:
+    """Scale an update to satisfy Euclidean and local-KL trust regions."""
+
+    update = float(step_size) * np.asarray(direction, dtype=np.float64)
+    norm = float(np.linalg.norm(update))
+    if float(max_norm) > 0.0 and norm > float(max_norm):
+        update *= float(max_norm) / norm
+    approximate_kl = max(
+        0.0, float(0.5 * update @ np.asarray(covariance) @ update)
+    )
+    if float(kl_radius) > 0.0 and approximate_kl > float(kl_radius):
+        scale = np.sqrt(float(kl_radius) / max(approximate_kl, 1.0e-300))
+        update *= scale
+        approximate_kl = max(
+            0.0, float(0.5 * update @ np.asarray(covariance) @ update)
+        )
+    return update, approximate_kl
+
+
 def _pair_metrics(delta: np.ndarray, weights: np.ndarray) -> tuple[float, float]:
     if delta.shape[0] == 0:
         return 0.0, 0.0
@@ -297,6 +377,10 @@ def fit_moment_matching_energy(
     update_norm_clip: float = 0.5,
     diagnostic_quantile: float = 0.90,
     max_retained_samples_per_chain: int = 256,
+    update_method: str = "diagonal",
+    natural_gradient_damping: float = 0.05,
+    covariance_shrinkage: float = 0.10,
+    kl_trust_radius: float = 0.0,
 ) -> tuple[LinearGraphletEnergy, MomentFitReport, List[TypedGraph]]:
     """Fit a fixed-degree maximum-entropy model by persistent MCMC.
 
@@ -328,6 +412,15 @@ def fit_moment_matching_energy(
             "max_retained_samples_per_chain must be at least "
             "min_samples_per_chain"
         )
+    update_method = str(update_method).strip().lower()
+    if update_method not in {"diagonal", "natural"}:
+        raise ValueError("update_method must be 'diagonal' or 'natural'")
+    if float(natural_gradient_damping) <= 0.0:
+        raise ValueError("natural_gradient_damping must be positive")
+    if not 0.0 <= float(covariance_shrinkage) <= 1.0:
+        raise ValueError("covariance_shrinkage must be in [0, 1]")
+    if float(kl_trust_radius) < 0.0:
+        raise ValueError("kl_trust_radius must be nonnegative")
 
     target_vector = selection.vector(target)
     if initial_weights is None:
@@ -469,20 +562,41 @@ def fit_moment_matching_energy(
         moment_max_error = float(relative.max(initial=0.0))
         gradient = residual - float(l2) * weights
         gradient_norm = float(np.linalg.norm(gradient))
-        preconditioner = 1.0 / np.maximum(np.abs(target_vector), 1.0)
-        update_direction = preconditioner * gradient
+        sample_matrix = np.stack(sampled_vectors)
+        covariance, covariance_rank = _feature_covariance(
+            sample_matrix, covariance_shrinkage
+        )
+        if update_method == "natural":
+            update_direction, fisher_condition = _natural_gradient_direction(
+                gradient,
+                covariance,
+                damping=natural_gradient_damping,
+                l2=l2,
+            )
+        else:
+            preconditioner = 1.0 / np.maximum(np.abs(target_vector), 1.0)
+            update_direction = preconditioner * gradient
+            fisher_condition = 1.0
         update_direction_norm = float(np.linalg.norm(update_direction))
-        if float(update_norm_clip) > 0.0 and update_direction_norm > float(
-            update_norm_clip
-        ):
-            update_direction *= float(update_norm_clip) / update_direction_norm
-            update_direction_norm = float(update_norm_clip)
         next_update = successful_updates + 1
+        can_update = bool(
+            expectation_converged
+            and moment_mae > float(tolerance)
+            and round_id + 1 < int(rounds)
+        )
         step_size = (
             float(learning_rate) / float(next_update) ** float(step_decay)
-            if expectation_converged
+            if can_update
             else 0.0
         )
+        actual_update, approximate_kl = _trust_region_update(
+            update_direction,
+            step_size=step_size,
+            covariance=covariance,
+            max_norm=update_norm_clip,
+            kl_radius=kl_trust_radius,
+        )
+        actual_update_norm = float(np.linalg.norm(actual_update))
         bound_fraction = float(
             np.mean(np.isclose(np.abs(weights), float(max_weight), atol=1.0e-8))
         )
@@ -514,8 +628,13 @@ def fit_moment_matching_energy(
                 feature_drift_z_max=feature_drift_z,
                 feature_drift_z_q90=feature_drift_z_q90,
                 expectation_converged=expectation_converged,
+                update_method=update_method,
                 step_size=step_size,
                 update_direction_norm=update_direction_norm,
+                actual_update_norm=actual_update_norm,
+                approximate_kl=approximate_kl,
+                fisher_condition=fisher_condition,
+                covariance_rank=covariance_rank,
                 weight_at_bound_fraction=bound_fraction,
             )
         )
@@ -535,14 +654,18 @@ def fit_moment_matching_energy(
             f"worst=({feature_ess:.2f},{feature_rhat:.3f},"
             f"{feature_drift:.4f},{feature_drift_z:.3f}) "
             f"expectation_ok={int(expectation_converged)} "
-            f"step_size={step_size:.5f} bound={bound_fraction:.3f}",
+            f"method={update_method} step_size={step_size:.5f} "
+            f"direction_norm={update_direction_norm:.3f} "
+            f"update_norm={actual_update_norm:.3f} kl={approximate_kl:.4f} "
+            f"fisher_cond={fisher_condition:.2e} cov_rank={covariance_rank} "
+            f"bound={bound_fraction:.3f}",
             flush=True,
         )
         if expectation_converged and moment_mae <= float(tolerance):
             converged = True
             break
-        if expectation_converged and round_id + 1 < int(rounds):
-            weights += step_size * update_direction
+        if can_update:
+            weights += actual_update
             weights = np.clip(weights, -float(max_weight), float(max_weight))
             successful_updates += 1
             vector_chains = [[] for _ in graphs]

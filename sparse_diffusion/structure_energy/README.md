@@ -45,6 +45,13 @@ weights remain frozen and the next round accumulates more samples from the same
 target distribution. Samples are cleared and warm-up is repeated only after a
 successful parameter update.
 
+The IMDB adaptive scripts use a damped natural-gradient update. For an
+exponential-family graphlet energy, the Fisher matrix is the covariance of the
+normalized sufficient statistics. The update solves this covariance system and
+is scaled to satisfy a local KL trust region, with an Euclidean cap retained as
+a fallback for covariance-null directions. The older diagonal update remains
+available as an explicit ablation.
+
 Fresh null and energy chains are also extended adaptively. Gate summaries use
 only the latest diagnostic window, and report ordinary Rhat, split-Rhat, ESS,
 and early-to-late drift. In particular, ordinary Rhat near one is not accepted

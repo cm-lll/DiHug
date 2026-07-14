@@ -64,6 +64,16 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--moment-min-successful-updates", type=int, default=1)
     parser.add_argument("--moment-pilot-only", action="store_true")
+    parser.add_argument(
+        "--moment-update-method",
+        choices=("diagonal", "natural"),
+        default="diagonal",
+    )
+    parser.add_argument(
+        "--moment-natural-gradient-damping", type=float, default=0.05
+    )
+    parser.add_argument("--moment-covariance-shrinkage", type=float, default=0.10)
+    parser.add_argument("--moment-kl-trust-radius", type=float, default=0.0)
     return parser.parse_args()
 
 
@@ -114,6 +124,12 @@ def main() -> None:
             ),
             moment_min_successful_updates=args.moment_min_successful_updates,
             moment_pilot_only=args.moment_pilot_only,
+            moment_update_method=args.moment_update_method,
+            moment_natural_gradient_damping=(
+                args.moment_natural_gradient_damping
+            ),
+            moment_covariance_shrinkage=args.moment_covariance_shrinkage,
+            moment_kl_trust_radius=args.moment_kl_trust_radius,
         )
     )
 

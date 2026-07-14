@@ -6,7 +6,7 @@ cd "${ROOT_DIR}"
 export PYTHONPATH="${ROOT_DIR}${PYTHONPATH:+:${PYTHONPATH}}"
 
 SEED="${SEED:-0}"
-OUT_DIR="${OUT_DIR:-results/imdb_structure_energy_adaptive_f48_pilot_seed${SEED}}"
+OUT_DIR="${OUT_DIR:-results/imdb_structure_energy_natural_f48_pilot_seed${SEED}}"
 mkdir -p "${OUT_DIR}"
 
 python scripts/run_structure_energy_gates.py \
@@ -31,8 +31,12 @@ python scripts/run_structure_energy_gates.py \
   --moment-rhat-threshold 1.10 \
   --moment-drift-z-threshold 2.0 \
   --moment-warmup-steps-per-round 4000 \
-  --moment-step-decay 0.60 \
-  --moment-update-norm-clip 0.5 \
+  --moment-step-decay 0.51 \
+  --moment-update-norm-clip 2.0 \
+  --moment-update-method natural \
+  --moment-natural-gradient-damping 0.05 \
+  --moment-covariance-shrinkage 0.10 \
+  --moment-kl-trust-radius 0.25 \
   --moment-diagnostic-quantile 0.90 \
   --moment-max-retained-samples-per-chain 256 \
   --moment-min-successful-updates 10 \

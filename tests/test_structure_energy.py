@@ -16,6 +16,9 @@ from sparse_diffusion.structure_energy.features import (
     GraphletFeatureExtractor,
 )
 from sparse_diffusion.structure_energy.fit import (
+    _feature_covariance,
+    _natural_gradient_direction,
+    _trust_region_update,
     fit_moment_matching_energy,
     fit_pairwise_nce,
 )
@@ -292,6 +295,79 @@ def test_moment_fit_accumulates_samples_while_weights_are_frozen():
     assert first.weight_version == second.weight_version == 0
 
 
+def test_natural_gradient_update_respects_local_kl_and_ascent_direction():
+    samples = np.asarray(
+        [
+            [-2.0, -1.8],
+            [-1.0, -0.9],
+            [0.0, 0.0],
+            [1.0, 0.9],
+            [2.0, 1.8],
+            [0.2, -0.2],
+        ],
+        dtype=np.float64,
+    )
+    gradient = np.asarray([1.0, -1.0], dtype=np.float64)
+    covariance, rank = _feature_covariance(samples, shrinkage=0.1)
+    direction, condition = _natural_gradient_direction(
+        gradient, covariance, damping=0.05, l2=0.01
+    )
+    update, approximate_kl = _trust_region_update(
+        direction,
+        step_size=1.0,
+        covariance=covariance,
+        max_norm=2.0,
+        kl_radius=0.05,
+    )
+
+    assert rank == 2
+    assert np.isfinite(condition)
+    assert float(update @ gradient) > 0.0
+    assert np.linalg.norm(update) <= 2.0 + 1.0e-12
+    assert approximate_kl <= 0.05 + 1.0e-12
+
+
+def test_moment_fit_natural_update_reports_bounded_kl():
+    source = _toy_graph()
+    values = GraphletFeatureExtractor(source).extract(source)
+    key = next(key for key in values if key.startswith("triangle/"))
+    selection = FeatureSelection(
+        keys=(key,),
+        null_mean=np.asarray([0.0]),
+        scale=np.asarray([1.0]),
+    )
+
+    energy, report, _ = fit_moment_matching_energy(
+        values,
+        selection,
+        [source, source, source, source],
+        rounds=2,
+        steps_per_round=40,
+        samples_per_round=4,
+        max_batches_per_round=4,
+        min_samples_per_chain=8,
+        min_ess_per_chain=1.0,
+        rhat_threshold=10.0,
+        drift_z_threshold=10.0,
+        learning_rate=1.0,
+        update_norm_clip=2.0,
+        update_method="natural",
+        natural_gradient_damping=0.05,
+        covariance_shrinkage=0.1,
+        kl_trust_radius=0.01,
+        seed=81,
+    )
+
+    first = report.trajectory[0]
+    assert report.successful_updates == 1
+    assert first.update_method == "natural"
+    assert first.actual_update_norm > 0.0
+    assert first.approximate_kl <= 0.01 + 1.0e-12
+    assert np.isfinite(first.fisher_condition)
+    assert first.covariance_rank >= 0
+    assert not np.allclose(energy.weights, np.zeros(1))
+
+
 def test_moment_fit_updates_only_after_frozen_expectation_passes():
     source = _toy_graph()
     values = GraphletFeatureExtractor(source).extract(source)
@@ -322,7 +398,7 @@ def test_moment_fit_updates_only_after_frozen_expectation_passes():
     assert report.successful_updates == 1
     assert all(item.expectation_converged for item in report.trajectory)
     assert all(item.samples_carried_in == 0 for item in report.trajectory)
-    assert all(item.update_direction_norm <= 0.25 for item in report.trajectory)
+    assert all(item.actual_update_norm <= 0.25 for item in report.trajectory)
     assert np.linalg.norm(energy.weights) <= 0.25 + 1.0e-12
     assert not np.allclose(energy.weights, np.zeros(1))
 
