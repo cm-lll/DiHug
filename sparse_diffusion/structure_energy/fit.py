@@ -68,6 +68,10 @@ class MomentFitRound:
     fisher_condition: float
     covariance_rank: int
     weight_at_bound_fraction: float
+    continuation_stage: int
+    continuation_stages: int
+    continuation_fraction: float
+    stage_moment_mae: float
 
     def to_json_dict(self) -> dict:
         return {
@@ -101,6 +105,10 @@ class MomentFitRound:
             "fisher_condition": float(self.fisher_condition),
             "covariance_rank": int(self.covariance_rank),
             "weight_at_bound_fraction": float(self.weight_at_bound_fraction),
+            "continuation_stage": int(self.continuation_stage),
+            "continuation_stages": int(self.continuation_stages),
+            "continuation_fraction": float(self.continuation_fraction),
+            "stage_moment_mae": float(self.stage_moment_mae),
         }
 
 
@@ -112,6 +120,7 @@ class MomentFitReport:
     final_model_vector: np.ndarray
     trajectory: Sequence[MomentFitRound]
     successful_updates: int
+    reached_continuation_fraction: float
 
     def to_json_dict(self) -> dict:
         return {
@@ -121,7 +130,34 @@ class MomentFitReport:
             "final_model_vector": self.final_model_vector.tolist(),
             "trajectory": [item.to_json_dict() for item in self.trajectory],
             "successful_updates": int(self.successful_updates),
+            "reached_continuation_fraction": float(
+                self.reached_continuation_fraction
+            ),
         }
+
+
+def _continuation_schedule(stages: int, start_fraction: float) -> np.ndarray:
+    """Return monotone moment targets from the null model to the real graph."""
+
+    stages = int(stages)
+    if stages <= 1:
+        return np.asarray([1.0], dtype=np.float64)
+    if not 0.0 < float(start_fraction) < 1.0:
+        raise ValueError("continuation_start_fraction must be in (0, 1)")
+    levels = np.geomspace(float(start_fraction), 1.0, stages)
+    levels[-1] = 1.0
+    return levels
+
+
+def _relative_moment_error(
+    model: np.ndarray, target: np.ndarray, anchor: np.ndarray
+) -> tuple[float, float]:
+    """Measure error relative to the structural displacement from the null."""
+
+    residual = np.asarray(target) - np.asarray(model)
+    scale = np.maximum(np.abs(np.asarray(target) - np.asarray(anchor)), 1.0)
+    relative = np.abs(residual) / scale
+    return float(relative.mean()), float(relative.max(initial=0.0))
 
 
 def _empirical_quantile(
@@ -381,6 +417,10 @@ def fit_moment_matching_energy(
     natural_gradient_damping: float = 0.05,
     covariance_shrinkage: float = 0.10,
     kl_trust_radius: float = 0.0,
+    target_anchor_vector: Optional[np.ndarray] = None,
+    continuation_stages: int = 0,
+    continuation_start_fraction: float = 0.05,
+    continuation_stage_tolerance: float = 0.25,
 ) -> tuple[LinearGraphletEnergy, MomentFitReport, List[TypedGraph]]:
     """Fit a fixed-degree maximum-entropy model by persistent MCMC.
 
@@ -423,6 +463,20 @@ def fit_moment_matching_energy(
         raise ValueError("kl_trust_radius must be nonnegative")
 
     target_vector = selection.vector(target)
+    if target_anchor_vector is None:
+        target_anchor = np.zeros_like(target_vector)
+    else:
+        target_anchor = np.asarray(target_anchor_vector, dtype=np.float64).copy()
+        if target_anchor.shape != target_vector.shape:
+            raise ValueError("target_anchor_vector has the wrong shape")
+    if not np.all(np.isfinite(target_anchor)):
+        raise ValueError("target_anchor_vector must be finite")
+    if float(continuation_stage_tolerance) <= 0.0:
+        raise ValueError("continuation_stage_tolerance must be positive")
+    continuation_levels = _continuation_schedule(
+        continuation_stages, continuation_start_fraction
+    )
+    continuation_stage = 0
     if initial_weights is None:
         weights = np.zeros(len(selection.keys), dtype=np.float64)
     else:
@@ -443,6 +497,10 @@ def fit_moment_matching_energy(
     thin = max(int(steps_per_round) // int(samples_per_round), 1)
     burn_in = thin
     for round_id in range(int(rounds)):
+        continuation_fraction = float(continuation_levels[continuation_stage])
+        stage_target_vector = target_anchor + continuation_fraction * (
+            target_vector - target_anchor
+        )
         energy = LinearGraphletEnergy(selection, weights)
         samples_carried_in = min((len(chain) for chain in vector_chains), default=0)
         acceptance_rates = []
@@ -478,13 +536,13 @@ def fit_moment_matching_energy(
         for batch_id in range(int(max_batches_per_round)):
             updated_graphs = []
             for chain_id, graph in enumerate(graphs):
-                continuation = len(vector_chains[chain_id]) > 0
+                is_continuation = len(vector_chains[chain_id]) > 0
                 result = run_switch_chain(
                     graph,
                     GraphletFeatureExtractor(graph, tracked_keys=selection.keys),
                     steps=int(steps_per_round),
                     burn_in=0
-                    if continuation or int(warmup_steps_per_round) > 0
+                    if is_continuation or int(warmup_steps_per_round) > 0
                     else burn_in,
                     thin=thin,
                     seed=(
@@ -516,7 +574,7 @@ def fit_moment_matching_energy(
             if samples_ready < int(min_samples_per_chain):
                 continue
             diagnostics = _feature_chain_diagnostics(
-                vector_chains, target_vector, diagnostic_quantile
+                vector_chains, stage_target_vector, diagnostic_quantile
             )
             feature_ess = diagnostics["ess_min"]
             feature_ess_q10 = diagnostics["ess_q10"]
@@ -556,10 +614,28 @@ def fit_moment_matching_energy(
             ]
         final_model_vector = np.mean(np.stack(sampled_vectors), axis=0)
 
-        residual = target_vector - final_model_vector
-        relative = np.abs(residual) / np.maximum(np.abs(target_vector), 1.0)
-        moment_mae = float(relative.mean())
-        moment_max_error = float(relative.max(initial=0.0))
+        moment_mae, moment_max_error = _relative_moment_error(
+            final_model_vector, target_vector, target_anchor
+        )
+        stage_moment_mae, _ = _relative_moment_error(
+            final_model_vector, stage_target_vector, target_anchor
+        )
+        if expectation_converged:
+            while (
+                stage_moment_mae <= float(continuation_stage_tolerance)
+                and continuation_stage + 1 < len(continuation_levels)
+            ):
+                continuation_stage += 1
+                continuation_fraction = float(
+                    continuation_levels[continuation_stage]
+                )
+                stage_target_vector = target_anchor + continuation_fraction * (
+                    target_vector - target_anchor
+                )
+                stage_moment_mae, _ = _relative_moment_error(
+                    final_model_vector, stage_target_vector, target_anchor
+                )
+        residual = stage_target_vector - final_model_vector
         gradient = residual - float(l2) * weights
         gradient_norm = float(np.linalg.norm(gradient))
         sample_matrix = np.stack(sampled_vectors)
@@ -579,9 +655,15 @@ def fit_moment_matching_energy(
             fisher_condition = 1.0
         update_direction_norm = float(np.linalg.norm(update_direction))
         next_update = successful_updates + 1
+        at_final_stage = continuation_stage + 1 == len(continuation_levels)
+        active_tolerance = (
+            float(tolerance)
+            if at_final_stage
+            else float(continuation_stage_tolerance)
+        )
         can_update = bool(
             expectation_converged
-            and moment_mae > float(tolerance)
+            and stage_moment_mae > active_tolerance
             and round_id + 1 < int(rounds)
         )
         step_size = (
@@ -589,12 +671,17 @@ def fit_moment_matching_energy(
             if can_update
             else 0.0
         )
+        effective_kl_radius = float(kl_trust_radius)
+        if len(continuation_levels) > 1 and effective_kl_radius > 0.0:
+            effective_kl_radius *= max(
+                continuation_fraction, 1.0 / float(len(continuation_levels))
+            )
         actual_update, approximate_kl = _trust_region_update(
             update_direction,
             step_size=step_size,
             covariance=covariance,
             max_norm=update_norm_clip,
-            kl_radius=kl_trust_radius,
+            kl_radius=effective_kl_radius,
         )
         actual_update_norm = float(np.linalg.norm(actual_update))
         bound_fraction = float(
@@ -636,11 +723,18 @@ def fit_moment_matching_energy(
                 fisher_condition=fisher_condition,
                 covariance_rank=covariance_rank,
                 weight_at_bound_fraction=bound_fraction,
+                continuation_stage=continuation_stage,
+                continuation_stages=len(continuation_levels),
+                continuation_fraction=continuation_fraction,
+                stage_moment_mae=stage_moment_mae,
             )
         )
         print(
             "[MOMENT-FIT] "
             f"round={round_id} mae={moment_mae:.4f} "
+            f"stage_mae={stage_moment_mae:.4f} "
+            f"stage={continuation_stage + 1}/{len(continuation_levels)} "
+            f"rho={continuation_fraction:.4f} "
             f"max={moment_max_error:.4f} grad={gradient_norm:.3f} "
             f"accept={float(np.mean(acceptance_rates)):.3f} "
             f"tri={float(np.mean(sampled_triangles)) if sampled_triangles else 0.0:.1f} "
@@ -661,7 +755,11 @@ def fit_moment_matching_energy(
             f"bound={bound_fraction:.3f}",
             flush=True,
         )
-        if expectation_converged and moment_mae <= float(tolerance):
+        if (
+            expectation_converged
+            and at_final_stage
+            and moment_mae <= float(tolerance)
+        ):
             converged = True
             break
         if can_update:
@@ -685,5 +783,8 @@ def fit_moment_matching_energy(
         final_model_vector=final_model_vector,
         trajectory=tuple(trajectory),
         successful_updates=successful_updates,
+        reached_continuation_fraction=float(
+            continuation_levels[continuation_stage]
+        ),
     )
     return LinearGraphletEnergy(selection, weights), report, graphs

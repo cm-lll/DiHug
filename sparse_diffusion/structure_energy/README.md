@@ -28,7 +28,20 @@ patterns rather than a hand-written metapath list:
 - open typed wedges;
 - typed triangles, including repeated node types;
 - typed rooted triangles stratified by anonymous degree bucket;
+- typed geometrically weighted edgewise shared partners (GWESP), stratified by
+  relation family, endpoint degree roles, and shared-neighbor type;
 - family-specific endpoint degree mixing.
+
+GWESP is a curved-ERGM closure statistic: the first shared partner on an edge
+has full weight and additional shared partners have geometrically diminishing
+returns. It therefore represents typed distance-two support while discouraging
+all triangles from collapsing onto a few hub edges.
+
+Open-wedge counters are still computed for diagnostics, but are excluded from
+the fitted energy by default. Under a fixed per-node relation-degree plan, the
+number of typed neighbor pairs at each center is fixed, so open wedges are an
+affine restatement of the corresponding closed-triangle statistics rather than
+an independent constraint.
 
 Gate 2 asks only whether these statistics distinguish the real graph from a
 degree- and family-preserving null. Pairwise NCE is used for that diagnostic;
@@ -51,6 +64,14 @@ normalized sufficient statistics. The update solves this covariance system and
 is scaled to satisfy a local KL trust region, with an Euclidean cap retained as
 a fallback for covariance-null directions. The older diagonal update remains
 available as an explicit ablation.
+
+The formal adaptive scripts also use moment continuation. Instead of jumping
+directly from the degree-preserving null expectation to a real-graph statistic
+that can be hundreds of null standard deviations away, they track a geometric
+sequence of intermediate moment targets. A stage advances only after the
+frozen-chain expectation is both diagnostically valid and close to its current
+target. The KL radius is reduced in early stages, so continuation changes the
+distribution gradually rather than merely rescaling the same gradient.
 
 Fresh null and energy chains are also extended adaptively. Gate summaries use
 only the latest diagnostic window, and report ordinary Rhat, split-Rhat, ESS,

@@ -6,7 +6,7 @@ cd "${ROOT_DIR}"
 export PYTHONPATH="${ROOT_DIR}${PYTHONPATH:+:${PYTHONPATH}}"
 
 SEED="${SEED:-0}"
-OUT_DIR="${OUT_DIR:-results/imdb_structure_energy_natural_f48_seed${SEED}}"
+OUT_DIR="${OUT_DIR:-results/imdb_structure_energy_continuation_f48_seed${SEED}}"
 mkdir -p "${OUT_DIR}"
 
 python scripts/run_structure_energy_gates.py \
@@ -40,6 +40,9 @@ python scripts/run_structure_energy_gates.py \
   --moment-natural-gradient-damping 0.05 \
   --moment-covariance-shrinkage 0.10 \
   --moment-kl-trust-radius 0.25 \
+  --moment-continuation-stages 6 \
+  --moment-continuation-start-fraction 0.05 \
+  --moment-continuation-stage-tolerance 0.25 \
   --moment-diagnostic-quantile 0.90 \
   --moment-max-retained-samples-per-chain 256 \
   --moment-min-successful-updates 10 \

@@ -14,8 +14,10 @@ from sparse_diffusion.structure_energy.diagnostics import (
 from sparse_diffusion.structure_energy.features import (
     FeatureSelection,
     GraphletFeatureExtractor,
+    select_features,
 )
 from sparse_diffusion.structure_energy.fit import (
+    _continuation_schedule,
     _feature_covariance,
     _natural_gradient_direction,
     _trust_region_update,
@@ -219,6 +221,18 @@ def test_pairwise_nce_recovers_graphlet_enrichment_direction():
     )
 
 
+def test_fixed_degree_feature_selection_drops_redundant_open_wedges():
+    real = {"triangle/AAB": 8, "wedge/center=A/ends=A::B": 2}
+    null = [
+        {"triangle/AAB": value, "wedge/center=A/ends=A::B": 10 - value}
+        for value in (0, 1, 2, 1, 0, 2, 1, 0)
+    ]
+
+    selection = select_features(real, null, max_features=2, min_support=1)
+
+    assert selection.keys == ("triangle/AAB",)
+
+
 def test_split_rhat_detects_shared_drift_hidden_from_ordinary_rhat():
     chains = [
         np.linspace(0.0, 10.0, 40) + offset
@@ -325,6 +339,56 @@ def test_natural_gradient_update_respects_local_kl_and_ascent_direction():
     assert float(update @ gradient) > 0.0
     assert np.linalg.norm(update) <= 2.0 + 1.0e-12
     assert approximate_kl <= 0.05 + 1.0e-12
+
+
+def test_continuation_schedule_is_geometric_and_reaches_real_target():
+    levels = _continuation_schedule(6, 0.05)
+
+    assert levels.shape == (6,)
+    assert levels[0] == 0.05
+    assert levels[-1] == 1.0
+    assert np.all(np.diff(levels) > 0.0)
+    np.testing.assert_allclose(levels[1:] / levels[:-1], levels[1] / levels[0])
+
+
+def test_moment_continuation_scales_the_initial_kl_radius():
+    source = _toy_graph()
+    values = GraphletFeatureExtractor(source).extract(source)
+    key = next(key for key in values if key.startswith("triangle/"))
+    selection = FeatureSelection(
+        keys=(key,),
+        null_mean=np.asarray([0.0]),
+        scale=np.asarray([1.0]),
+    )
+
+    _, report, _ = fit_moment_matching_energy(
+        values,
+        selection,
+        [source, source, source, source],
+        rounds=2,
+        steps_per_round=40,
+        samples_per_round=4,
+        max_batches_per_round=4,
+        min_samples_per_chain=8,
+        min_ess_per_chain=1.0,
+        rhat_threshold=10.0,
+        drift_z_threshold=10.0,
+        learning_rate=1.0,
+        update_norm_clip=2.0,
+        update_method="natural",
+        kl_trust_radius=0.12,
+        continuation_stages=6,
+        continuation_start_fraction=0.05,
+        continuation_stage_tolerance=0.01,
+        seed=82,
+    )
+
+    first = report.trajectory[0]
+    assert first.continuation_stage == 0
+    assert first.continuation_stages == 6
+    assert first.continuation_fraction == 0.05
+    assert first.approximate_kl <= 0.02 + 1.0e-12
+    assert report.reached_continuation_fraction == 0.05
 
 
 def test_moment_fit_natural_update_reports_bounded_kl():

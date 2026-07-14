@@ -12,6 +12,7 @@ from .graph import Edge, TypedGraph
 
 FeatureCounter = Counter[str]
 Triple = Tuple[int, int, int]
+GWESP_DECAY = 0.5
 
 
 def _degree_bucket(value: int) -> str:
@@ -169,11 +170,49 @@ class GraphletFeatureExtractor:
             left_bucket, right_bucket = right_bucket, left_bucket
         return Counter({f"mix/{family}/{left_bucket}:{right_bucket}": 1})
 
+    def edgewise_shared_partner_contribution(
+        self, graph: TypedGraph, edge: Edge
+    ) -> FeatureCounter:
+        """Typed curved-ERGM closure statistic for one existing edge.
+
+        The first shared partner contributes one unit and later partners have
+        geometrically diminishing returns. This distinguishes distributed
+        closure from piling many triangles onto the same hub edge.
+        """
+
+        u, v = sorted((int(edge[0]), int(edge[1])))
+        if not graph.has_edge(u, v):
+            return Counter()
+        family = graph.family_of(u, v)
+        if family is None:
+            return Counter()
+        left, right = graph.orient_edge(family, (u, v))
+        left_bucket = _degree_bucket(self.fixed_total_degree[left])
+        right_bucket = _degree_bucket(self.fixed_total_degree[right])
+        spec = graph.family_specs[family]
+        if not spec.bipartite and right_bucket < left_bucket:
+            left_bucket, right_bucket = right_bucket, left_bucket
+        shared_by_type = Counter(
+            self._type_name(node) for node in graph.adjacency[u] & graph.adjacency[v]
+        )
+        result: FeatureCounter = Counter()
+        for shared_type, count in shared_by_type.items():
+            if count <= 0:
+                continue
+            value = (1.0 - GWESP_DECAY ** int(count)) / (1.0 - GWESP_DECAY)
+            key = (
+                f"gwesp/family={family}/degree={left_bucket}:{right_bucket}/"
+                f"shared={shared_type}"
+            )
+            result[key] += float(value)
+        return result
+
     def extract(self, graph: TypedGraph) -> FeatureCounter:
         values: FeatureCounter = Counter()
         for family, edges in graph.family_edges.items():
             for edge in edges:
                 values.update(self.edge_mixing_contribution(graph, family, edge))
+                values.update(self.edgewise_shared_partner_contribution(graph, edge))
 
         # Count all typed neighbor pairs combinatorially, then subtract the
         # three closed wedges contributed by every triangle. This avoids
@@ -239,6 +278,20 @@ class GraphletFeatureExtractor:
                 affected.add(tuple(sorted((u, v, int(third)))))
         return affected
 
+    @staticmethod
+    def _gwesp_affected_edges(
+        graph: TypedGraph, changed_edges: Sequence[Edge]
+    ) -> Set[Edge]:
+        affected: Set[Edge] = set()
+        for u_raw, v_raw in changed_edges:
+            u, v = int(u_raw), int(v_raw)
+            affected.add(tuple(sorted((u, v))))
+            for other in graph.adjacency[u]:
+                affected.add(tuple(sorted((u, int(other)))))
+            for other in graph.adjacency[v]:
+                affected.add(tuple(sorted((v, int(other)))))
+        return affected
+
     def switch_delta(
         self,
         graph: TypedGraph,
@@ -247,8 +300,13 @@ class GraphletFeatureExtractor:
         old_edges: Sequence[Edge],
         new_edges: Sequence[Edge],
     ) -> FeatureCounter:
-        if self.tracked_keys is not None and not any(
-            family in key for key in self.tracked_keys
+        tracks_global_closure = self.tracked_keys is None or any(
+            key.startswith("gwesp/") for key in self.tracked_keys
+        )
+        if (
+            self.tracked_keys is not None
+            and not tracks_global_closure
+            and not any(family in key for key in self.tracked_keys)
         ):
             graph.replace_edges(family, indices, old_edges, new_edges)
             return Counter()
@@ -261,6 +319,9 @@ class GraphletFeatureExtractor:
                 before.update(self.triple_contribution(graph, triple))
         for edge in old_edges:
             before.update(self.edge_mixing_contribution(graph, family, edge))
+        if tracks_global_closure:
+            for edge in self._gwesp_affected_edges(graph, old_edges + new_edges):
+                before.update(self.edgewise_shared_partner_contribution(graph, edge))
 
         graph.replace_edges(family, indices, old_edges, new_edges)
         after: FeatureCounter = Counter()
@@ -268,6 +329,9 @@ class GraphletFeatureExtractor:
             after.update(self.triple_contribution(graph, triple))
         for edge in new_edges:
             after.update(self.edge_mixing_contribution(graph, family, edge))
+        if tracks_global_closure:
+            for edge in self._gwesp_affected_edges(graph, old_edges + new_edges):
+                after.update(self.edgewise_shared_partner_contribution(graph, edge))
 
         delta = after.copy()
         delta.subtract(before)
@@ -276,10 +340,13 @@ class GraphletFeatureExtractor:
         )
 
     @staticmethod
-    def apply_delta(target: MutableMapping[str, int], delta: Mapping[str, int]) -> None:
+    def apply_delta(
+        target: MutableMapping[str, int | float],
+        delta: Mapping[str, int | float],
+    ) -> None:
         for key, value in delta.items():
-            updated = int(target.get(key, 0)) + int(value)
-            if updated:
+            updated = float(target.get(key, 0.0)) + float(value)
+            if abs(updated) > 1.0e-12:
                 target[key] = updated
             elif key in target:
                 del target[key]
@@ -290,6 +357,7 @@ def select_features(
     null_samples: Sequence[Mapping[str, int | float]],
     max_features: int = 64,
     min_support: float = 2.0,
+    drop_fixed_degree_wedges: bool = True,
 ) -> FeatureSelection:
     if not null_samples:
         raise ValueError("at least one null sample is required")
@@ -307,6 +375,11 @@ def select_features(
     score = np.abs(real_vector - mean) / scale
     supported = np.maximum(real_vector, mean) >= float(min_support)
     candidates = np.flatnonzero(supported)
+    if drop_fixed_degree_wedges:
+        candidates = np.asarray(
+            [index for index in candidates if not keys[index].startswith("wedge/")],
+            dtype=np.int64,
+        )
     if candidates.size == 0:
         raise ValueError("no graphlet features passed the support threshold")
     order = candidates[np.argsort(score[candidates])[::-1]]

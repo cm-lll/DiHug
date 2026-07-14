@@ -74,6 +74,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--moment-covariance-shrinkage", type=float, default=0.10)
     parser.add_argument("--moment-kl-trust-radius", type=float, default=0.0)
+    parser.add_argument("--moment-continuation-stages", type=int, default=0)
+    parser.add_argument(
+        "--moment-continuation-start-fraction", type=float, default=0.05
+    )
+    parser.add_argument(
+        "--moment-continuation-stage-tolerance", type=float, default=0.25
+    )
     return parser.parse_args()
 
 
@@ -130,6 +137,13 @@ def main() -> None:
             ),
             moment_covariance_shrinkage=args.moment_covariance_shrinkage,
             moment_kl_trust_radius=args.moment_kl_trust_radius,
+            moment_continuation_stages=args.moment_continuation_stages,
+            moment_continuation_start_fraction=(
+                args.moment_continuation_start_fraction
+            ),
+            moment_continuation_stage_tolerance=(
+                args.moment_continuation_stage_tolerance
+            ),
         )
     )
 

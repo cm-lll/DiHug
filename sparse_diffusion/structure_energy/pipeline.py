@@ -133,6 +133,9 @@ class GateConfig:
     moment_natural_gradient_damping: float = 0.05
     moment_covariance_shrinkage: float = 0.10
     moment_kl_trust_radius: float = 0.0
+    moment_continuation_stages: int = 0
+    moment_continuation_start_fraction: float = 0.05
+    moment_continuation_stage_tolerance: float = 0.25
 
 
 def _tail_metric_chains(
@@ -432,6 +435,14 @@ def run_gates(config: GateConfig) -> dict:
         natural_gradient_damping=config.moment_natural_gradient_damping,
         covariance_shrinkage=config.moment_covariance_shrinkage,
         kl_trust_radius=config.moment_kl_trust_radius,
+        target_anchor_vector=np.mean(
+            np.stack([selection.vector(sample) for sample in null_samples]), axis=0
+        ),
+        continuation_stages=config.moment_continuation_stages,
+        continuation_start_fraction=config.moment_continuation_start_fraction,
+        continuation_stage_tolerance=(
+            config.moment_continuation_stage_tolerance
+        ),
     )
     _write_json(config.output_dir / "gate3_energy_model.json", energy.to_json_dict())
     _write_json(
