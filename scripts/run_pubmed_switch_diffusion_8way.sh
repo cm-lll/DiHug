@@ -10,6 +10,8 @@ LOG_ROOT="${LOG_ROOT:-logs/pubmed_switch_diffusion_8way}"
 STRUCTURE_CKPT="${STRUCTURE_CKPT:-$OUT_ROOT/structure_checkpoint.json}"
 SEED_OFFSET="${SEED_OFFSET:-0}"
 DEVICE="${DEVICE:-cpu}"
+MAIN_STEPS="${MAIN_STEPS:-20000}"
+MAIN_CANDIDATES="${MAIN_CANDIDATES:-64}"
 mkdir -p "$OUT_ROOT" "$LOG_ROOT"
 
 if [[ ! -f "$STRUCTURE_CKPT" ]]; then
@@ -79,11 +81,11 @@ if len(ratios) != 8 or statistics.mean(ratios) >= 0.95:
 print(f"[PUBMED-SWITCH] causal gate passed: mean_error_ratio={statistics.mean(ratios):.4f}")
 PY
 
-echo "[PUBMED-SWITCH] stage C: eight-seed 20k x 16 main evaluation"
+echo "[PUBMED-SWITCH] stage C: eight-seed ${MAIN_STEPS} x ${MAIN_CANDIDATES} main evaluation"
 for worker in $(seq 0 7); do
   seed=$((SEED_OFFSET + worker))
   sample_job "$worker" "$OUT_ROOT/train_s${seed}/switch_diffusion.pt" \
-    "main_s${seed}" "$seed" model 20000 16 &
+    "main_s${seed}" "$seed" model "$MAIN_STEPS" "$MAIN_CANDIDATES" &
 done
 wait
 
