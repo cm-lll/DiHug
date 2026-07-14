@@ -282,13 +282,20 @@ class GraphletFeatureExtractor:
     def _gwesp_affected_edges(
         graph: TypedGraph, changed_edges: Sequence[Edge]
     ) -> Set[Edge]:
+        """Edges whose shared-partner count can change under ``changed_edges``.
+
+        Toggling ``(u, v)`` can only alter its own GWESP contribution and the
+        contributions of ``(u, w)``/``(v, w)`` for a common neighbor ``w``.
+        Scanning every edge incident to either endpoint is exact but needlessly
+        expensive around IMDB hubs.
+        """
+
         affected: Set[Edge] = set()
         for u_raw, v_raw in changed_edges:
             u, v = int(u_raw), int(v_raw)
             affected.add(tuple(sorted((u, v))))
-            for other in graph.adjacency[u]:
+            for other in graph.adjacency[u] & graph.adjacency[v]:
                 affected.add(tuple(sorted((u, int(other)))))
-            for other in graph.adjacency[v]:
                 affected.add(tuple(sorted((v, int(other)))))
         return affected
 
