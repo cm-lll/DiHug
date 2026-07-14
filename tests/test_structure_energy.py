@@ -127,6 +127,40 @@ def test_incremental_graphlet_delta_matches_full_recomputation():
     graph.validate()
 
 
+def test_closed_triangle_delta_fast_path_matches_full_recomputation():
+    source = _toy_graph()
+    graph = source.clone()
+    full_extractor = GraphletFeatureExtractor(graph)
+    all_values = full_extractor.extract(graph)
+    tracked = tuple(
+        key
+        for key in all_values
+        if key.startswith("triangle/") or key.startswith("root_triangle/")
+    )
+    extractor = GraphletFeatureExtractor(graph, tracked_keys=tracked)
+    before = extractor.extract(graph)
+    rng = np.random.default_rng(401)
+    proposal = None
+    for _ in range(100):
+        proposal = sample_valid_switch(graph, rng)
+        if proposal is not None:
+            break
+    assert proposal is not None
+
+    delta = extractor.switch_delta(
+        graph,
+        proposal.family,
+        proposal.indices,
+        proposal.old_edges,
+        proposal.new_edges,
+    )
+    incremental = Counter(before)
+    extractor.apply_delta(incremental, delta)
+
+    assert incremental == extractor.extract(graph)
+    graph.validate()
+
+
 def test_curveball_trade_is_exact_and_preserves_bipartite_degrees():
     graph = _toy_graph()
     extractor = GraphletFeatureExtractor(graph)

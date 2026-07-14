@@ -3,6 +3,7 @@ from __future__ import annotations
 import itertools
 from collections import Counter
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Mapping, MutableMapping, Optional, Sequence, Set, Tuple
 
 import numpy as np
@@ -13,6 +14,27 @@ from .graph import Edge, TypedGraph
 FeatureCounter = Counter[str]
 Triple = Tuple[int, int, int]
 GWESP_DECAY = 0.5
+
+
+@lru_cache(maxsize=4096)
+def _canonical_graphlet_signature(
+    types: Tuple[str, str, str],
+    families: Tuple[str, str, str],
+) -> str:
+    pair_family = {
+        (0, 1): families[0],
+        (0, 2): families[1],
+        (1, 2): families[2],
+    }
+    encodings = []
+    for order in itertools.permutations(range(3)):
+        ordered_types = tuple(types[index] for index in order)
+        ordered_families = tuple(
+            pair_family[tuple(sorted((order[left], order[right])))]
+            for left, right in ((0, 1), (0, 2), (1, 2))
+        )
+        encodings.append(ordered_types + ordered_families)
+    return "|".join(min(encodings))
 
 
 def _degree_bucket(value: int) -> str:
@@ -101,17 +123,12 @@ class GraphletFeatureExtractor:
 
     def _graphlet_signature(self, graph: TypedGraph, nodes: Triple) -> str:
         nodes = tuple(int(node) for node in nodes)
-        encodings = []
-        for order in itertools.permutations(range(3)):
-            ordered = tuple(nodes[index] for index in order)
-            types = tuple(self._type_name(node) for node in ordered)
-            families = tuple(
-                graph.family_of(ordered[left], ordered[right]) or "-"
-                for left, right in ((0, 1), (0, 2), (1, 2))
-            )
-            encodings.append(types + families)
-        best = min(encodings)
-        return "|".join(best)
+        types = tuple(self._type_name(node) for node in nodes)
+        families = tuple(
+            graph.family_of(nodes[left], nodes[right]) or "-"
+            for left, right in ((0, 1), (0, 2), (1, 2))
+        )
+        return _canonical_graphlet_signature(types, families)
 
     def _wedge_key(
         self, graph: TypedGraph, center: int, left: int, right: int
@@ -279,6 +296,29 @@ class GraphletFeatureExtractor:
         return affected
 
     @staticmethod
+    def _affected_closed_triples(
+        graph: TypedGraph, changed_edges: Sequence[Edge]
+    ) -> Set[Triple]:
+        """Triangles affected by an atomic multi-edge replacement.
+
+        Away from the changed endpoints, toggling ``(u, v)`` can only change
+        triples whose third node is already adjacent to both endpoints. New
+        interactions among changed edges are confined to triples formed by the
+        changed endpoints themselves. This avoids scanning hub-neighbor unions
+        when no open-wedge feature is tracked.
+        """
+
+        endpoints = {int(node) for edge in changed_edges for node in edge}
+        affected: Set[Triple] = set()
+        for u_raw, v_raw in changed_edges:
+            u, v = int(u_raw), int(v_raw)
+            for third in graph.adjacency[u] & graph.adjacency[v]:
+                affected.add(tuple(sorted((u, v, int(third)))))
+        for triple in itertools.combinations(sorted(endpoints), 3):
+            affected.add(tuple(int(node) for node in triple))
+        return affected
+
+    @staticmethod
     def _gwesp_affected_edges(
         graph: TypedGraph, changed_edges: Sequence[Edge]
     ) -> Set[Edge]:
@@ -310,6 +350,9 @@ class GraphletFeatureExtractor:
         tracks_global_closure = self.tracked_keys is None or any(
             key.startswith("gwesp/") for key in self.tracked_keys
         )
+        tracks_open_wedges = self.tracked_keys is None or any(
+            key.startswith("wedge/") for key in self.tracked_keys
+        )
         if (
             self.tracked_keys is not None
             and not tracks_global_closure
@@ -321,7 +364,11 @@ class GraphletFeatureExtractor:
         affected: Set[Triple] = set()
         if self.family_can_change_triangle[family]:
             changed = old_edges + new_edges
-            affected = self._affected_triples(graph, changed)
+            affected = (
+                self._affected_triples(graph, changed)
+                if tracks_open_wedges
+                else self._affected_closed_triples(graph, changed)
+            )
             for triple in affected:
                 before.update(self.triple_contribution(graph, triple))
         for edge in old_edges:
