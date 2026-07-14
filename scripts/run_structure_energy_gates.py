@@ -57,8 +57,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--moment-drift-z-threshold", type=float, default=2.0)
     parser.add_argument("--moment-warmup-steps-per-round", type=int, default=0)
     parser.add_argument("--moment-step-decay", type=float, default=0.60)
-    parser.add_argument("--moment-update-norm-clip", type=float, default=5.0)
+    parser.add_argument("--moment-update-norm-clip", type=float, default=0.5)
     parser.add_argument("--moment-diagnostic-quantile", type=float, default=0.90)
+    parser.add_argument(
+        "--moment-max-retained-samples-per-chain", type=int, default=256
+    )
+    parser.add_argument("--moment-min-successful-updates", type=int, default=1)
+    parser.add_argument("--moment-pilot-only", action="store_true")
     return parser.parse_args()
 
 
@@ -104,6 +109,11 @@ def main() -> None:
             moment_step_decay=args.moment_step_decay,
             moment_update_norm_clip=args.moment_update_norm_clip,
             moment_diagnostic_quantile=args.moment_diagnostic_quantile,
+            moment_max_retained_samples_per_chain=(
+                args.moment_max_retained_samples_per_chain
+            ),
+            moment_min_successful_updates=args.moment_min_successful_updates,
+            moment_pilot_only=args.moment_pilot_only,
         )
     )
 

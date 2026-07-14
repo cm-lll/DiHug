@@ -262,6 +262,36 @@ def test_moment_fit_skips_update_when_expectation_diagnostics_are_impossible():
     np.testing.assert_allclose(energy.weights, np.zeros(1))
 
 
+def test_moment_fit_accumulates_samples_while_weights_are_frozen():
+    source = _toy_graph()
+    values = GraphletFeatureExtractor(source).extract(source)
+    key = next(key for key in values if key.startswith("triangle/"))
+    selection = FeatureSelection(
+        keys=(key,),
+        null_mean=np.asarray([0.0]),
+        scale=np.asarray([1.0]),
+    )
+
+    _, report, _ = fit_moment_matching_energy(
+        values,
+        selection,
+        [source, source],
+        rounds=2,
+        steps_per_round=20,
+        samples_per_round=4,
+        max_batches_per_round=1,
+        min_samples_per_chain=7,
+        max_retained_samples_per_chain=16,
+        seed=71,
+    )
+
+    first, second = report.trajectory
+    assert first.samples_per_chain < 7
+    assert second.samples_carried_in == first.samples_per_chain
+    assert second.samples_per_chain > first.samples_per_chain
+    assert first.weight_version == second.weight_version == 0
+
+
 def test_moment_fit_updates_only_after_frozen_expectation_passes():
     source = _toy_graph()
     values = GraphletFeatureExtractor(source).extract(source)
@@ -285,11 +315,15 @@ def test_moment_fit_updates_only_after_frozen_expectation_passes():
         rhat_threshold=10.0,
         drift_z_threshold=10.0,
         learning_rate=1.0,
+        update_norm_clip=0.25,
         seed=8,
     )
 
     assert report.successful_updates == 1
     assert all(item.expectation_converged for item in report.trajectory)
+    assert all(item.samples_carried_in == 0 for item in report.trajectory)
+    assert all(item.update_direction_norm <= 0.25 for item in report.trajectory)
+    assert np.linalg.norm(energy.weights) <= 0.25 + 1.0e-12
     assert not np.allclose(energy.weights, np.zeros(1))
 
 

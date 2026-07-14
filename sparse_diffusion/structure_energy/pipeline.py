@@ -124,8 +124,11 @@ class GateConfig:
     moment_drift_z_threshold: float = 2.0
     moment_warmup_steps_per_round: int = 0
     moment_step_decay: float = 0.60
-    moment_update_norm_clip: float = 5.0
+    moment_update_norm_clip: float = 0.5
     moment_diagnostic_quantile: float = 0.90
+    moment_max_retained_samples_per_chain: int = 256
+    moment_min_successful_updates: int = 1
+    moment_pilot_only: bool = False
 
 
 def _tail_metric_chains(
@@ -418,6 +421,9 @@ def run_gates(config: GateConfig) -> dict:
         step_decay=config.moment_step_decay,
         update_norm_clip=config.moment_update_norm_clip,
         diagnostic_quantile=config.moment_diagnostic_quantile,
+        max_retained_samples_per_chain=(
+            config.moment_max_retained_samples_per_chain
+        ),
     )
     _write_json(config.output_dir / "gate3_energy_model.json", energy.to_json_dict())
     _write_json(
@@ -426,6 +432,76 @@ def run_gates(config: GateConfig) -> dict:
     )
     checkpoint = StructureEnergyCheckpoint.from_training_graph(source, energy)
     checkpoint.save(config.output_dir / "structure_energy_checkpoint.json")
+
+    serialized_config = {
+        key: str(value) if isinstance(value, Path) else value
+        for key, value in config.__dict__.items()
+    }
+    graph_report = {
+        "nodes": source.num_nodes,
+        "active_families": active_families,
+        "real_metrics": real_metrics,
+        "role_realization_metrics": role_metrics,
+    }
+    gate0_report = {
+        "passed": True,
+        "degree_realization_exact": True,
+    }
+    gate1_report = {
+        "passed": bool(
+            all(result.samples for result in null_results)
+            and _mixing_pass(null_summary, config)
+        ),
+        "summary": null_summary,
+        "valid_rates": [result.valid_rate for result in null_results],
+        "acceptance_rates": [result.acceptance_rate for result in null_results],
+        "adaptive_extensions": int(null_extensions),
+    }
+    gate2_report = {
+        "passed": bool(fit_report.success and fit_report.heldout_pair_accuracy > 0.5),
+        "selected_features": list(selection.keys),
+        "fit": fit_report.to_json_dict(),
+    }
+    optimizer_ready = bool(
+        moment_report.converged
+        or moment_report.successful_updates
+        >= int(config.moment_min_successful_updates)
+    )
+    if config.moment_pilot_only or not optimizer_ready:
+        reason = (
+            "moment_pilot_only"
+            if config.moment_pilot_only
+            else "insufficient_successful_moment_updates"
+        )
+        gate_report = {
+            "config": serialized_config,
+            "graph": graph_report,
+            "gate0": gate0_report,
+            "gate1": gate1_report,
+            "gate2": gate2_report,
+            "gate3": {
+                "passed": False,
+                "skipped": True,
+                "skip_reason": reason,
+                "optimizer_ready": optimizer_ready,
+                "required_successful_updates": int(
+                    config.moment_min_successful_updates
+                ),
+                "moment_fit": moment_report.to_json_dict(),
+            },
+        }
+        _write_json(config.output_dir / "gate_report.json", gate_report)
+        print(
+            "[GATE-REPORT] "
+            f"gate0={int(gate0_report['passed'])} "
+            f"gate1={int(gate1_report['passed'])} "
+            f"gate2={int(gate2_report['passed'])} "
+            "gate3=0 "
+            f"skipped={reason} "
+            f"successful_updates={moment_report.successful_updates}",
+            flush=True,
+        )
+        return gate_report
 
     energy_results = _run_checkpoint_chains(
         checkpoint,
@@ -469,35 +545,11 @@ def run_gates(config: GateConfig) -> dict:
         energy_summary["clustering"]["mean"], real_metrics["clustering"]
     )
     gate_report = {
-        "config": {
-            key: str(value) if isinstance(value, Path) else value
-            for key, value in config.__dict__.items()
-        },
-        "graph": {
-            "nodes": source.num_nodes,
-            "active_families": active_families,
-            "real_metrics": real_metrics,
-            "role_realization_metrics": role_metrics,
-        },
-        "gate0": {
-            "passed": True,
-            "degree_realization_exact": True,
-        },
-        "gate1": {
-            "passed": bool(
-                all(result.samples for result in null_results)
-                and _mixing_pass(null_summary, config)
-            ),
-            "summary": null_summary,
-            "valid_rates": [result.valid_rate for result in null_results],
-            "acceptance_rates": [result.acceptance_rate for result in null_results],
-            "adaptive_extensions": int(null_extensions),
-        },
-        "gate2": {
-            "passed": bool(fit_report.success and fit_report.heldout_pair_accuracy > 0.5),
-            "selected_features": list(selection.keys),
-            "fit": fit_report.to_json_dict(),
-        },
+        "config": serialized_config,
+        "graph": graph_report,
+        "gate0": gate0_report,
+        "gate1": gate1_report,
+        "gate2": gate2_report,
         "gate3": {
             "passed": bool(
                 triangle_error <= config.structure_tolerance
@@ -505,6 +557,8 @@ def run_gates(config: GateConfig) -> dict:
                 and _mixing_pass(energy_summary, config)
             ),
             "summary": energy_summary,
+            "skipped": False,
+            "optimizer_ready": optimizer_ready,
             "moment_fit": moment_report.to_json_dict(),
             "triangle_relative_error": triangle_error,
             "clustering_relative_error": clustering_error,

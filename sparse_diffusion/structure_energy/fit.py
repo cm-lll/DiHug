@@ -47,6 +47,8 @@ class MomentFitRound:
     weight_norm: float
     mean_triangles: float
     mean_clustering: float
+    weight_version: int
+    samples_carried_in: int
     sample_batches: int
     samples_per_chain: int
     feature_ess_min: float
@@ -73,6 +75,8 @@ class MomentFitRound:
             "weight_norm": float(self.weight_norm),
             "mean_triangles": float(self.mean_triangles),
             "mean_clustering": float(self.mean_clustering),
+            "weight_version": int(self.weight_version),
+            "samples_carried_in": int(self.samples_carried_in),
             "sample_batches": int(self.sample_batches),
             "samples_per_chain": int(self.samples_per_chain),
             "feature_ess_min": float(self.feature_ess_min),
@@ -108,6 +112,19 @@ class MomentFitReport:
             "trajectory": [item.to_json_dict() for item in self.trajectory],
             "successful_updates": int(self.successful_updates),
         }
+
+
+def _empirical_quantile(
+    values: np.ndarray, quantile: float, *, conservative_upper: bool
+) -> float:
+    """Return a finite-sample quantile without interpolating through infinity."""
+
+    ordered = np.sort(np.asarray(values, dtype=np.float64))
+    if ordered.size == 0:
+        return float("nan")
+    position = float(quantile) * float(ordered.size - 1)
+    index = int(np.ceil(position) if conservative_upper else np.floor(position))
+    return float(ordered[min(max(index, 0), ordered.size - 1)])
 
 
 def _feature_chain_diagnostics(
@@ -163,13 +180,21 @@ def _feature_chain_diagnostics(
     lower = 1.0 - upper
     return {
         "ess_min": float(np.min(ess_array)),
-        "ess_q10": float(np.quantile(ess_array, lower)),
+        "ess_q10": _empirical_quantile(
+            ess_array, lower, conservative_upper=False
+        ),
         "split_rhat_max": float(np.max(rhat_array, initial=0.0)),
-        "split_rhat_q90": float(np.quantile(rhat_array, upper)),
+        "split_rhat_q90": _empirical_quantile(
+            rhat_array, upper, conservative_upper=True
+        ),
         "drift_max": float(np.max(drift_array, initial=0.0)),
-        "drift_q90": float(np.quantile(drift_array, upper)),
+        "drift_q90": _empirical_quantile(
+            drift_array, upper, conservative_upper=True
+        ),
         "drift_z_max": float(np.max(drift_z_array, initial=0.0)),
-        "drift_z_q90": float(np.quantile(drift_z_array, upper)),
+        "drift_z_q90": _empirical_quantile(
+            drift_z_array, upper, conservative_upper=True
+        ),
     }
 
 
@@ -269,17 +294,19 @@ def fit_moment_matching_energy(
     drift_z_threshold: float = 2.0,
     warmup_steps_per_round: int = 0,
     step_decay: float = 0.60,
-    update_norm_clip: float = 5.0,
+    update_norm_clip: float = 0.5,
     diagnostic_quantile: float = 0.90,
+    max_retained_samples_per_chain: int = 256,
 ) -> tuple[LinearGraphletEnergy, MomentFitReport, List[TypedGraph]]:
     """Fit a fixed-degree maximum-entropy model by persistent MCMC.
 
     For frozen ``w``, the population negative log likelihood is convex and has
-    gradient ``E_w[z(G)] - z(G_real)``. The chains below estimate that
-    expectation. A diagonally preconditioned Robbins-Monro update uses a
-    diminishing step size only after the frozen-weight chains pass ESS,
-    split-Rhat, and drift checks. The returned energy is frozen and must be
-    validated with fresh chains.
+    gradient ``E_w[z(G)] - z(G_real)``. The implementation performs the
+    equivalent log-likelihood ascent update ``z(G_real) - E_w[z(G)]``. Samples
+    are retained while ``w`` is unchanged and cleared only after an accepted
+    update, so every diagnostic is computed from one frozen target
+    distribution. The returned energy is frozen and must be validated with
+    fresh chains.
     """
 
     if not initial_graphs:
@@ -296,6 +323,11 @@ def fit_moment_matching_energy(
         raise ValueError("step_decay must be in (0.5, 1]")
     if not 0.5 <= float(diagnostic_quantile) < 1.0:
         raise ValueError("diagnostic_quantile must be in [0.5, 1)")
+    if int(max_retained_samples_per_chain) < int(min_samples_per_chain):
+        raise ValueError(
+            "max_retained_samples_per_chain must be at least "
+            "min_samples_per_chain"
+        )
 
     target_vector = selection.vector(target)
     if initial_weights is None:
@@ -311,16 +343,18 @@ def fit_moment_matching_energy(
     final_model_vector = np.zeros_like(target_vector)
     converged = False
     successful_updates = 0
+    vector_chains: List[List[np.ndarray]] = [[] for _ in graphs]
+    metric_chains: List[List[Mapping[str, float]]] = [[] for _ in graphs]
+    weights_need_warmup = True
 
     thin = max(int(steps_per_round) // int(samples_per_round), 1)
     burn_in = thin
     for round_id in range(int(rounds)):
         energy = LinearGraphletEnergy(selection, weights)
-        vector_chains: List[List[np.ndarray]] = [[] for _ in graphs]
-        metric_chains: List[List[Mapping[str, float]]] = [[] for _ in graphs]
+        samples_carried_in = min((len(chain) for chain in vector_chains), default=0)
         acceptance_rates = []
         valid_rates = []
-        if int(warmup_steps_per_round) > 0:
+        if weights_need_warmup and int(warmup_steps_per_round) > 0:
             warmed = []
             for chain_id, graph in enumerate(graphs):
                 result = run_switch_chain(
@@ -336,6 +370,7 @@ def fit_moment_matching_energy(
                 )
                 warmed.append(result.graph)
             graphs = warmed
+        weights_need_warmup = False
 
         expectation_converged = False
         feature_ess = 0.0
@@ -350,11 +385,14 @@ def fit_moment_matching_energy(
         for batch_id in range(int(max_batches_per_round)):
             updated_graphs = []
             for chain_id, graph in enumerate(graphs):
+                continuation = len(vector_chains[chain_id]) > 0
                 result = run_switch_chain(
                     graph,
                     GraphletFeatureExtractor(graph, tracked_keys=selection.keys),
                     steps=int(steps_per_round),
-                    burn_in=burn_in,
+                    burn_in=0
+                    if continuation or int(warmup_steps_per_round) > 0
+                    else burn_in,
                     thin=thin,
                     seed=(
                         int(seed)
@@ -375,6 +413,10 @@ def fit_moment_matching_energy(
                 metric_chains[chain_id].extend(
                     sample.metrics for sample in result.samples
                 )
+                retained = int(max_retained_samples_per_chain)
+                if len(vector_chains[chain_id]) > retained:
+                    del vector_chains[chain_id][:-retained]
+                    del metric_chains[chain_id][:-retained]
             graphs = updated_graphs
             batches_used = batch_id + 1
             samples_ready = min(len(chain) for chain in vector_chains)
@@ -459,6 +501,8 @@ def fit_moment_matching_energy(
                 mean_clustering=float(np.mean(sampled_clustering))
                 if sampled_clustering
                 else 0.0,
+                weight_version=successful_updates,
+                samples_carried_in=samples_carried_in,
                 sample_batches=batches_used,
                 samples_per_chain=min((len(chain) for chain in vector_chains), default=0),
                 feature_ess_min=feature_ess,
@@ -483,6 +527,7 @@ def fit_moment_matching_energy(
             f"tri={float(np.mean(sampled_triangles)) if sampled_triangles else 0.0:.1f} "
             f"cluster={float(np.mean(sampled_clustering)) if sampled_clustering else 0.0:.4f} "
             f"weight_norm={float(np.linalg.norm(weights)):.3f} "
+            f"weight_version={successful_updates} carried={samples_carried_in} "
             f"batches={batches_used} samples={min((len(chain) for chain in vector_chains), default=0)} "
             f"ess_q10={feature_ess_q10:.2f} split_rhat_q90={feature_rhat_q90:.3f} "
             f"drift_q90={feature_drift_q90:.4f} "
@@ -500,6 +545,9 @@ def fit_moment_matching_energy(
             weights += step_size * update_direction
             weights = np.clip(weights, -float(max_weight), float(max_weight))
             successful_updates += 1
+            vector_chains = [[] for _ in graphs]
+            metric_chains = [[] for _ in graphs]
+            weights_need_warmup = True
         elif not expectation_converged:
             print(
                 "[MOMENT-FIT] update skipped: frozen-weight expectation "

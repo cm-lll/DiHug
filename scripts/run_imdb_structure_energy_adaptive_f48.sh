@@ -35,8 +35,10 @@ python scripts/run_structure_energy_gates.py \
   --moment-drift-z-threshold 2.0 \
   --moment-warmup-steps-per-round 4000 \
   --moment-step-decay 0.60 \
-  --moment-update-norm-clip 5.0 \
+  --moment-update-norm-clip 0.5 \
   --moment-diagnostic-quantile 0.90 \
+  --moment-max-retained-samples-per-chain 256 \
+  --moment-min-successful-updates 10 \
   --structure-tolerance 0.10 \
   --rhat-threshold 1.10 \
   --min-ess-per-chain 20 \

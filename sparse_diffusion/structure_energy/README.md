@@ -40,8 +40,10 @@ gradient is the model expected statistic minus the real statistic. Each
 parameter round now keeps the energy frozen and extends the persistent chains
 until at least 90% of selected statistics pass ESS, split-Rhat, and
 Monte-Carlo drift tests. A diagonally preconditioned Robbins-Monro update uses
-a diminishing step size; a failed expectation diagnostic skips the update
-instead of pushing noisy gradients into the weight boundary.
+a diminishing step size and a small trust radius. If a diagnostic fails, the
+weights remain frozen and the next round accumulates more samples from the same
+target distribution. Samples are cleared and warm-up is repeated only after a
+successful parameter update.
 
 Fresh null and energy chains are also extended adaptively. Gate summaries use
 only the latest diagnostic window, and report ordinary Rhat, split-Rhat, ESS,
@@ -74,6 +76,14 @@ Run the training-time gates:
 python scripts/run_structure_energy_gates.py \
   --output-dir results/imdb_structure_energy_seed0 \
   --seed 0
+```
+
+Before the expensive fresh-chain validation, run the moment-fitting pilot. It
+stops after optimization and reports whether enough diagnostic-approved updates
+were made:
+
+```bash
+SEED=0 bash scripts/run_imdb_structure_energy_adaptive_f48_pilot.sh
 ```
 
 Generate from the saved checkpoint without a dataset argument:
