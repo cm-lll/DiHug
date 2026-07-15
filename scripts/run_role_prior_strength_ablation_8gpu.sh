@@ -12,6 +12,8 @@ PUBMED_DATA="${PUBMED_DATA:-data/PubMed_baseline_subgraphs/subgraph_000}"
 IMDB_CKPT="${IMDB_CKPT:-results/imdb_exchangeable_compact_s0_3/model/mixed_edit_diffusion.pt}"
 PUBMED_CKPT="${PUBMED_CKPT:-results/pubmed_exchangeable_compact_switch_gate_0716/model/mixed_edit_diffusion.pt}"
 MIXING_STEPS_PER_EDGE="${MIXING_STEPS_PER_EDGE:-20}"
+SCREEN_SEED="${SCREEN_SEED:-0}"
+MIXING_SEED="${MIXING_SEED:-$((SCREEN_SEED + 100))}"
 export OMP_NUM_THREADS="${OMP_NUM_THREADS:-2}"
 export MKL_NUM_THREADS="${MKL_NUM_THREADS:-2}"
 
@@ -35,13 +37,13 @@ run_strength() {
     --components "$components" --role-model categorical \
     --role-component-sampling systematic --role-correlation-strength "$rho" \
     --randomization-steps-per-edge "$MIXING_STEPS_PER_EDGE" \
-    --prior-samples 2 --seed 0 \
+    --prior-samples 2 --seed "$SCREEN_SEED" \
     > "$log" 2>&1
 
   CUDA_VISIBLE_DEVICES="$gpu" "$PYTHON" scripts/run_exchangeable_role_prior_gate.py \
     --mode sample --output-dir "$out/sample" \
     --prior "$out/prior/exchangeable_role_prior.json" \
-    --checkpoint "$checkpoint" --device cuda --seed 0 \
+    --checkpoint "$checkpoint" --device cuda --seed "$SCREEN_SEED" \
     --sample-steps "$steps" --sample-candidates 64 \
     --sample-actions relocation_switch --motif-refinement-stage \
     --metrics-every "$((steps / 10))" \
@@ -93,7 +95,8 @@ for dataset_name in imdb pubmed; do
         --mode fit-gate --dataset-dir "$dataset" --output-dir "$out" \
         --components "$components" --role-model categorical \
         --role-component-sampling systematic --role-correlation-strength 1.0 \
-        --randomization-steps-per-edge "$mixing" --prior-samples 8 --seed 100 \
+        --randomization-steps-per-edge "$mixing" --prior-samples 8 \
+        --seed "$MIXING_SEED" \
         > "$log" 2>&1
     ) &
     pids+=("$!")
@@ -129,6 +132,7 @@ for prior_report_path in sorted((root / "strength").glob("*/prior/prior_gate_rep
     final = sample["final"]
     strength_rows.append({
         "dataset": dataset_name,
+        "seed": sample["sampling_config"]["seed"],
         "rho": prior_payload["role_correlation_strength"],
         "randomization_steps_per_edge": prior_payload["randomization_steps_per_edge"],
         "initial": initial,
