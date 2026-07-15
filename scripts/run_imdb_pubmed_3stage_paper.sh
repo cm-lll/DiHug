@@ -61,7 +61,7 @@ run_stage_a() {
 
   # Select best (T,K) by max(tri_err, clust_err)
   python3 - "$STAGE_A_DIR" <<'PY'
-import json, pathlib, sys
+import json, math, pathlib, sys
 root = pathlib.Path(sys.argv[1])
 best_score = float("inf")
 best_name = None
@@ -90,7 +90,16 @@ for report_path in sorted(root.glob("ablation_T*/sampling_report.json")):
             f"expected={expected} actual={actual}"
         )
     print(f"{name}: T={T_val} K={K_val} tri={tri:.0f} clust={clust:.4f} tri_err={tri_err:.4f} clust_err={clust_err:.4f} score={score:.4f}")
-    if score < best_score:
+    is_better = score < best_score - 1.0e-12
+    is_canonical_tie = (
+        abs(score - best_score) <= 1.0e-12
+        and (
+            best_T is None
+            or abs(math.log2(int(T_val) / 100.0))
+            < abs(math.log2(int(best_T) / 100.0))
+        )
+    )
+    if is_better or is_canonical_tie:
         best_score = score
         best_name = name
         best_T = T_val
@@ -156,9 +165,13 @@ run_stage_b() {
   wait
 
   # Aggregate 10-seed summary
-  python3 - "$STAGE_B_DIR" "$STAGE_A_DIR/best_config.txt" <<'PY'
+  python3 - "$STAGE_B_DIR" "$STAGE_A_DIR/best_config.txt" "$IMDB_DATASET" <<'PY'
 import json, pathlib, sys, statistics, math
+from sparse_diffusion.structure_energy.graph import load_typed_graph
+from sparse_diffusion.structure_energy.switch_chain import graph_metrics
+
 root = pathlib.Path(sys.argv[1])
+real = graph_metrics(load_typed_graph(sys.argv[3], active_only=True))
 best = dict(
     line.strip().split("=", 1)
     for line in pathlib.Path(sys.argv[2]).read_text().splitlines()
@@ -195,11 +208,11 @@ def stats(vals, target):
             "min": min(vals), "max": max(vals),
             "rel_err": abs(statistics.mean(vals)-target)/max(abs(target), 1.0e-12)}
 report = {
-    "triangles": stats(triangles, 655.0),
-    "clustering": stats(clustering, 0.4689355333),
-    "transitivity": stats(transitivity, 0.008432985415082602),
-    "assortativity": stats(assort, -0.16497348176967325),
-    "lcc": stats(lcc, 1653.0),
+    "triangles": stats(triangles, real["triangles"]),
+    "clustering": stats(clustering, real["clustering"]),
+    "transitivity": stats(transitivity, real["transitivity"]),
+    "assortativity": stats(assort, real["assortativity"]),
+    "lcc": stats(lcc, real["lcc"]),
     "n": len(triangles)
 }
 with open(root / "aggregate_10graph.json", "w") as fh:
@@ -284,9 +297,11 @@ run_stage_c() {
       --switches-per-diffusion-step "$K_val" \
       --randomization-steps 20000 \
       --sample-candidates 64 \
-      --sample-temperature 1.0 \
+      --sample-temperature 0 \
       --sampling-mode model \
       --switch-kernel tensor \
+      --learned-condition-noop \
+      --learned-condition-noop-patience 1000 \
       --metrics-every 2000 \
       > "$LOG_DIR/stage_c_seed${seed}.log" 2>&1 &
   done
@@ -303,21 +318,25 @@ run_stage_c() {
       --switches-per-diffusion-step "$K_val" \
       --randomization-steps 20000 \
       --sample-candidates 64 \
-      --sample-temperature 1.0 \
+      --sample-temperature 0 \
       --sampling-mode model \
       --switch-kernel tensor \
+      --learned-condition-noop \
+      --learned-condition-noop-patience 1000 \
       --metrics-every 2000 \
       > "$LOG_DIR/stage_c_seed${seed}.log" 2>&1 &
   done
   wait
 
   # Aggregate PubMed 10-seed
-  python3 - "$STAGE_C_DIR" 61137.0 0.335 <<'PY'
+  python3 - "$STAGE_C_DIR" "$PUBMED_DATASET" <<'PY'
 import json, pathlib, sys, statistics
+from sparse_diffusion.structure_energy.graph import load_typed_graph
+from sparse_diffusion.structure_energy.switch_chain import graph_metrics
+
 root = pathlib.Path(sys.argv[1])
-tri_target = float(sys.argv[2])
-clust_target = float(sys.argv[3])
-triangles = []; clustering = []; transitivity = []; lcc = []
+real = graph_metrics(load_typed_graph(sys.argv[2], active_only=True))
+triangles = []; clustering = []; transitivity = []; assortativity = []; lcc = []
 for report_path in sorted(root.glob("seed*/sampling_report.json")):
     payload = json.loads(report_path.read_text(encoding="utf-8"))
     config = payload["sampling_config"]
@@ -333,6 +352,15 @@ for report_path in sorted(root.glob("seed*/sampling_report.json")):
             f"PubMed macro diffusion contract failed: {report_path}: "
             f"expected={expected} actual={actual}"
         )
+    if float(config["temperature"]) != 0.0:
+        raise RuntimeError(
+            f"PubMed sampling must use deterministic learned utility: {report_path}: "
+            f"temperature={config['temperature']}"
+        )
+    if not bool(config["learned_condition_noop"]):
+        raise RuntimeError(
+            f"PubMed sampling must reject non-positive learned utility: {report_path}"
+        )
     contract = payload["inference_contract"]
     if contract.get("clean_graphlet_target") or not contract.get("learned_graphlet_condition"):
         raise RuntimeError(
@@ -342,6 +370,7 @@ for report_path in sorted(root.glob("seed*/sampling_report.json")):
     triangles.append(m["triangles"])
     clustering.append(m["clustering"])
     transitivity.append(m["transitivity"])
+    assortativity.append(m["assortativity"])
     lcc.append(m["lcc"])
 def stats(vals, target):
     vals = [float(v) for v in vals]
@@ -349,8 +378,11 @@ def stats(vals, target):
             "min": min(vals), "max": max(vals),
             "rel_err": abs(statistics.mean(vals)-target)/max(abs(target), 1.0e-12)}
 report = {
-    "triangles": stats(triangles, tri_target),
-    "clustering": stats(clustering, clust_target),
+    "triangles": stats(triangles, real["triangles"]),
+    "clustering": stats(clustering, real["clustering"]),
+    "transitivity": stats(transitivity, real["transitivity"]),
+    "assortativity": stats(assortativity, real["assortativity"]),
+    "lcc": stats(lcc, real["lcc"]),
     "n": len(triangles)
 }
 with open(root / "aggregate_10graph.json", "w") as fh:

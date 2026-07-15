@@ -1,4 +1,5 @@
 from collections import Counter
+import math
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -30,6 +31,28 @@ from sparse_diffusion.structure_energy.roles import (
     realize_role_plan,
     sample_role_plan,
     validate_role_realization,
+)
+from sparse_diffusion.structure_energy.relocation_diffusion import (
+    EdgeCountCondition,
+    build_relocation_diffusion_dataset,
+    load_relocation_checkpoint,
+    sample_relocation_diffusion,
+    sample_valid_relocation,
+    save_relocation_checkpoint,
+)
+from sparse_diffusion.structure_energy.mixed_edit_diffusion import (
+    EditProposal,
+    MarginalGraphPrior,
+    MixedKernelSchedule,
+    apply_edit,
+    build_mixed_edit_diffusion_dataset,
+    edge_edit_distance,
+    inverse_edit,
+    marginal_log_probability,
+    mixed_transition_probability,
+    run_edit_distance_oracle,
+    sample_mixed_forward_transition,
+    sample_valid_edit,
 )
 from sparse_diffusion.structure_energy.switch_chain import (
     LinearGraphletEnergy,
@@ -320,6 +343,199 @@ def test_switch_diffusion_forward_action_has_exact_legal_inverse():
         family: tuple(edges) for family, edges in graph.family_edges.items()
     }
     validate_role_realization(graph, plan)
+
+
+def test_edge_count_condition_contains_no_role_or_motif_targets():
+    source = _toy_graph()
+    condition = EdgeCountCondition.from_training_graph(source)
+    payload = condition.to_json_dict()
+
+    assert payload["family_edge_counts"] == {"AA": 3, "AB": 12}
+    assert "role_rows_by_type" not in payload
+    assert "selection" not in payload
+    assert "target_vector" not in payload
+    initial = condition.sample_uniform(seed=901)
+    assert initial.num_edges == source.num_edges
+    for family in source.family_specs:
+        assert len(initial.family_edges[family]) == len(source.family_edges[family])
+
+
+def test_relocation_has_exact_inverse_and_can_change_degrees():
+    graph = _toy_graph()
+    before_edges = {
+        family: tuple(edges) for family, edges in graph.family_edges.items()
+    }
+    before_degree = graph.degrees().copy()
+    rng = np.random.default_rng(902)
+    proposal = sample_valid_relocation(graph, rng)
+
+    assert proposal is not None
+    apply_switch(graph, proposal)
+    assert not np.array_equal(graph.degrees(), before_degree)
+    apply_switch(graph, inverse_switch(proposal))
+    assert before_edges == {
+        family: tuple(edges) for family, edges in graph.family_edges.items()
+    }
+    np.testing.assert_array_equal(graph.degrees(), before_degree)
+    graph.validate()
+
+
+def test_relocation_diffusion_tiny_end_to_end_preserves_only_family_counts():
+    source = _toy_graph()
+    dataset = build_relocation_diffusion_dataset(
+        source,
+        trajectories=3,
+        forward_steps=20,
+        record_every=5,
+        candidates_per_example=4,
+        seed=903,
+    )
+    assert dataset.candidate_features.shape[:2] == (12, 4)
+    assert np.isfinite(dataset.candidate_features).all()
+    model, report = train_switch_denoiser(
+        dataset,
+        hidden_dim=16,
+        layers=1,
+        dropout=0.0,
+        epochs=2,
+        batch_size=4,
+        learning_rate=1.0e-2,
+        training_objective="inverse_ce",
+        inverse_loss_weight=1.0,
+        utility_loss_weight=0.0,
+        device="cpu",
+        seed=904,
+    )
+    condition = EdgeCountCondition.from_training_graph(source)
+    result = sample_relocation_diffusion(
+        condition,
+        model,
+        steps=10,
+        candidates_per_step=4,
+        seed=905,
+        device="cpu",
+        temperature=0.0,
+        metrics_every=5,
+    )
+    assert result.applied == 10
+    for family in source.family_specs:
+        assert len(result.graph.family_edges[family]) == len(source.family_edges[family])
+    result.graph.validate()
+
+    with TemporaryDirectory() as directory:
+        checkpoint = Path(directory) / "relocation.pt"
+        save_relocation_checkpoint(
+            checkpoint,
+            model,
+            condition,
+            hidden_dim=16,
+            layers=1,
+            dropout=0.0,
+            report=report,
+        )
+        loaded_model, loaded_condition, _ = load_relocation_checkpoint(checkpoint)
+        assert isinstance(loaded_model, SwitchDenoiserMLP)
+        assert loaded_condition.family_edge_counts == condition.family_edge_counts
+
+
+def test_marginal_prior_samples_edge_counts_instead_of_copying_them():
+    source = _toy_graph()
+    prior = MarginalGraphPrior.from_training_graph(source)
+    payload = prior.to_json_dict()
+
+    assert "family_edge_counts" not in payload
+    assert payload["inference_contract"]["exact_family_edge_counts"] is False
+    assert payload["inference_contract"]["relation_degree_rows"] is False
+    counts = {
+        tuple(len(prior.sample(seed).family_edges[name]) for name in prior.family_names)
+        for seed in range(16)
+    }
+    assert len(counts) > 1
+
+
+def test_mixed_kernel_birth_death_satisfies_detailed_balance():
+    graph = _toy_graph()
+    prior = MarginalGraphPrior.from_training_graph(graph)
+    schedule = MixedKernelSchedule()
+    family = "AA"
+    missing = next(
+        (u, v)
+        for u in graph.family_specs[family].src_nodes
+        for v in graph.family_specs[family].src_nodes
+        if u < v and not graph.has_edge(u, v)
+    )
+    birth = EditProposal("birth", family, (), (missing,))
+    left = math.exp(marginal_log_probability(graph, prior))
+    left *= mixed_transition_probability(graph, prior, birth, 0.7, schedule)
+
+    changed = graph.clone()
+    apply_edit(changed, birth)
+    death = inverse_edit(birth)
+    right = math.exp(marginal_log_probability(changed, prior))
+    right *= mixed_transition_probability(changed, prior, death, 0.7, schedule)
+    np.testing.assert_allclose(left, right, rtol=1.0e-12, atol=0.0)
+
+
+def test_every_mixed_edit_has_a_legal_exact_inverse():
+    source = _toy_graph()
+    prior = MarginalGraphPrior.from_training_graph(source)
+    rng = np.random.default_rng(906)
+    schedule = MixedKernelSchedule()
+    seen = set()
+    for step in range(500):
+        proposal = sample_mixed_forward_transition(
+            source, prior, rng, (step + 1) / 500.0, schedule
+        )
+        if proposal is None:
+            continue
+        before = {
+            family: set(edges) for family, edges in source.family_edge_sets.items()
+        }
+        apply_edit(source, proposal)
+        apply_edit(source, inverse_edit(proposal))
+        assert before == {
+            family: set(edges) for family, edges in source.family_edge_sets.items()
+        }
+        source.validate()
+        seen.add(proposal.action)
+    assert seen == {"noop", "birth", "death", "relocation", "switch"}
+
+
+def test_edit_distance_oracle_uses_marginal_prior_and_improves_coverage():
+    clean = _toy_graph()
+    prior = MarginalGraphPrior.from_training_graph(clean)
+    initial = prior.sample(seed=978)
+    initial_distance = edge_edit_distance(initial, clean)
+    result = run_edit_distance_oracle(
+        prior,
+        clean,
+        steps=300,
+        candidates_per_step=32,
+        seed=907,
+        actions=("birth", "death", "relocation", "switch"),
+        metrics_every=100,
+    )
+    assert result.trace[0]["edge_edit_distance"] == initial_distance
+    assert edge_edit_distance(result.graph, clean) < initial_distance
+    result.graph.validate()
+
+
+def test_mixed_edit_dataset_contains_known_inverse_without_target_metrics():
+    source = _toy_graph()
+    dataset = build_mixed_edit_diffusion_dataset(
+        source,
+        trajectories=3,
+        forward_steps=40,
+        record_every=4,
+        candidates_per_example=8,
+        seed=908,
+    )
+    assert dataset.candidate_features.ndim == 3
+    assert dataset.candidate_features.shape[1] == 8
+    assert np.isfinite(dataset.candidate_features).all()
+    assert np.all(dataset.candidate_improvements == 0.0)
+    assert np.all(dataset.targets >= 0)
+    assert np.all(dataset.targets < 8)
 
 
 def test_switch_diffusion_macro_schedule_has_exact_discrete_time_layers():
