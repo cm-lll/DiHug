@@ -173,6 +173,33 @@ def _sample_type_propensities(
     return values if mixture.discrete else values + 0.05
 
 
+def _temper_role_correlations(
+    values: np.ndarray,
+    strength: float,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    """Weaken cross-family role dependence without changing any marginal column."""
+    strength = float(strength)
+    if not 0.0 <= strength <= 1.0:
+        raise ValueError("role correlation strength must be in [0, 1]")
+    values = np.asarray(values)
+    if strength == 1.0 or values.shape[0] < 2 or values.shape[1] < 2:
+        return values.copy()
+
+    tempered = values.copy()
+    shuffled_count = int(round((1.0 - strength) * values.shape[0]))
+    if shuffled_count < 2:
+        return tempered
+    for column in range(values.shape[1]):
+        selected = (
+            np.arange(values.shape[0], dtype=np.int64)
+            if shuffled_count == values.shape[0]
+            else rng.choice(values.shape[0], size=shuffled_count, replace=False)
+        )
+        tempered[selected, column] = tempered[rng.permutation(selected), column]
+    return tempered
+
+
 def _project_bounded_stub_sum(
     propensities: np.ndarray,
     total: int,
@@ -217,6 +244,7 @@ class ExchangeableJointRolePrior:
     components: int
     role_model: str = "categorical"
     role_component_sampling: str = "systematic"
+    role_correlation_strength: float = 1.0
     randomization_steps_per_edge: float = 2.0
 
     @classmethod
@@ -228,10 +256,13 @@ class ExchangeableJointRolePrior:
         randomization_steps_per_edge: float = 2.0,
         role_model: str = "categorical",
         role_component_sampling: str = "systematic",
+        role_correlation_strength: float = 1.0,
     ) -> "ExchangeableJointRolePrior":
         role_component_sampling = str(role_component_sampling).strip().lower()
         if role_component_sampling not in {"iid", "systematic"}:
             raise ValueError("role component sampling must be iid or systematic")
+        if not 0.0 <= float(role_correlation_strength) <= 1.0:
+            raise ValueError("role correlation strength must be in [0, 1]")
         marginal = MarginalGraphPrior.from_training_graph(graph)
         family_degrees = graph.all_family_degrees()
         mixtures = {}
@@ -269,6 +300,7 @@ class ExchangeableJointRolePrior:
             components=int(components),
             role_model=str(role_model),
             role_component_sampling=role_component_sampling,
+            role_correlation_strength=float(role_correlation_strength),
             randomization_steps_per_edge=float(randomization_steps_per_edge),
         )
 
@@ -293,6 +325,11 @@ class ExchangeableJointRolePrior:
                     len(nodes),
                     rng,
                     sampling=self.role_component_sampling,
+                )
+                sampled = _temper_role_correlations(
+                    sampled,
+                    strength=self.role_correlation_strength,
+                    rng=rng,
                 )
                 propensities[type_id] = {
                     family: sampled[:, index]
@@ -345,6 +382,7 @@ class ExchangeableJointRolePrior:
             "components": int(self.components),
             "role_model": self.role_model,
             "role_component_sampling": self.role_component_sampling,
+            "role_correlation_strength": float(self.role_correlation_strength),
             "randomization_steps_per_edge": float(self.randomization_steps_per_edge),
             "type_mixtures": {
                 str(type_id): mixture.to_json_dict()
@@ -356,6 +394,7 @@ class ExchangeableJointRolePrior:
                 "samples_family_edge_counts": True,
                 "type_exchangeable": True,
                 "role_component_sampling": self.role_component_sampling,
+                "role_correlation_strength": float(self.role_correlation_strength),
             },
         }
 
@@ -380,6 +419,9 @@ class ExchangeableJointRolePrior:
             role_model=str(payload.get("role_model", "log_gaussian")),
             role_component_sampling=str(
                 payload.get("role_component_sampling", "iid")
+            ),
+            role_correlation_strength=float(
+                payload.get("role_correlation_strength", 1.0)
             ),
             randomization_steps_per_edge=float(payload["randomization_steps_per_edge"]),
         )

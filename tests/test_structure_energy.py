@@ -1514,6 +1514,49 @@ def test_systematic_role_sampling_is_unbiased_and_variance_reduced():
         )
 
 
+def test_role_correlation_tempering_preserves_every_family_marginal():
+    from sparse_diffusion.structure_energy.exchangeable_role_prior import (
+        _temper_role_correlations,
+    )
+
+    values = np.stack(
+        (
+            np.arange(32, dtype=np.float64),
+            np.arange(32, dtype=np.float64),
+            np.arange(32, dtype=np.float64) % 5,
+        ),
+        axis=1,
+    )
+    unchanged = _temper_role_correlations(values, 1.0, np.random.default_rng(3))
+    independent = _temper_role_correlations(values, 0.0, np.random.default_rng(3))
+
+    np.testing.assert_array_equal(unchanged, values)
+    for column in range(values.shape[1]):
+        np.testing.assert_array_equal(
+            np.sort(independent[:, column]), np.sort(values[:, column])
+        )
+    assert abs(np.corrcoef(independent[:, 0], independent[:, 1])[0, 1]) < 0.5
+
+
+def test_role_correlation_strength_round_trips_in_prior_checkpoint():
+    from sparse_diffusion.structure_energy.exchangeable_role_prior import (
+        ExchangeableJointRolePrior,
+    )
+
+    prior = ExchangeableJointRolePrior.from_training_graph(
+        _toy_graph(),
+        components=2,
+        seed=23,
+        role_correlation_strength=0.25,
+    )
+    payload = prior.to_json_dict()
+    restored = ExchangeableJointRolePrior.from_json_dict(payload)
+
+    assert payload["role_correlation_strength"] == 0.25
+    assert payload["inference_contract"]["role_correlation_strength"] == 0.25
+    assert restored.role_correlation_strength == 0.25
+
+
 def test_unbounded_categorical_role_codebook_keeps_all_anonymous_roles():
     from sparse_diffusion.structure_energy.exchangeable_role_prior import (
         _fit_categorical_role_codebook,

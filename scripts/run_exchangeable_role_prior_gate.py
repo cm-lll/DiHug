@@ -59,6 +59,16 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--prior-samples", type=int, default=16)
     parser.add_argument("--randomization-steps-per-edge", type=float, default=2.0)
+    parser.add_argument(
+        "--role-correlation-strength",
+        type=float,
+        default=1.0,
+        help=(
+            "Retain this fraction of learned cross-family relation-degree coupling. "
+            "One keeps the joint role prior; zero independently permutes every "
+            "family-degree marginal within node type."
+        ),
+    )
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--sample-steps", type=int, default=2000)
     parser.add_argument("--sample-candidates", type=int, default=16)
@@ -116,6 +126,35 @@ def histogram_tv(left: np.ndarray, right: np.ndarray) -> float:
     return float(0.5 * np.abs(left_hist - right_hist).sum())
 
 
+def relation_degree_correlation_error(clean: TypedGraph, graph: TypedGraph) -> float:
+    """Mean pairwise correlation error across incident families within node type."""
+    errors = []
+    for type_id in range(len(clean.type_names)):
+        nodes = np.flatnonzero(clean.node_types == type_id)
+        incident = [
+            family
+            for family, spec in clean.family_specs.items()
+            if type_id in (spec.src_type, spec.dst_type)
+        ]
+        for left_index, left_family in enumerate(incident):
+            for right_family in incident[left_index + 1 :]:
+                clean_left = np.log1p(clean.family_degrees(left_family)[nodes])
+                clean_right = np.log1p(clean.family_degrees(right_family)[nodes])
+                graph_left = np.log1p(graph.family_degrees(left_family)[nodes])
+                graph_right = np.log1p(graph.family_degrees(right_family)[nodes])
+                if min(
+                    np.std(clean_left),
+                    np.std(clean_right),
+                    np.std(graph_left),
+                    np.std(graph_right),
+                ) <= 1e-12:
+                    continue
+                clean_corr = float(np.corrcoef(clean_left, clean_right)[0, 1])
+                graph_corr = float(np.corrcoef(graph_left, graph_right)[0, 1])
+                errors.append(abs(clean_corr - graph_corr))
+    return float(np.mean(errors)) if errors else 0.0
+
+
 def degree_distances(clean: TypedGraph, graph: TypedGraph) -> dict:
     report = {"total_degree_tv": histogram_tv(clean.degrees(), graph.degrees())}
     family = {}
@@ -126,6 +165,9 @@ def degree_distances(clean: TypedGraph, graph: TypedGraph) -> dict:
         family[name] = histogram_tv(clean_degree[nodes], generated_degree[nodes])
     report["family_degree_tv_mean"] = float(np.mean(list(family.values())))
     report["family_degree_tv"] = family
+    report["relation_degree_correlation_error"] = relation_degree_correlation_error(
+        clean, graph
+    )
     return report
 
 
@@ -139,6 +181,9 @@ def summarize_samples(clean: TypedGraph, samples: list[TypedGraph]) -> dict:
         "metrics_std": {key: float(np.std([row[key] for row in metrics])) for key in keys},
         "total_degree_tv_mean": float(np.mean([row["total_degree_tv"] for row in distances])),
         "family_degree_tv_mean": float(np.mean([row["family_degree_tv_mean"] for row in distances])),
+        "relation_degree_correlation_error_mean": float(
+            np.mean([row["relation_degree_correlation_error"] for row in distances])
+        ),
         "edge_count_unique": len({int(row["edges"]) for row in metrics}),
     }
 
@@ -155,6 +200,7 @@ def main() -> None:
             randomization_steps_per_edge=args.randomization_steps_per_edge,
             role_model=args.role_model,
             role_component_sampling=args.role_component_sampling,
+            role_correlation_strength=args.role_correlation_strength,
         )
         marginal = MarginalGraphPrior.from_training_graph(clean)
         role_samples = [role_prior.sample(args.seed + index) for index in range(args.prior_samples)]
@@ -182,6 +228,7 @@ def main() -> None:
             f"{role_report['total_degree_tv_mean']:.4f} "
             f"family_tv={marginal_report['family_degree_tv_mean']:.4f}->"
             f"{role_report['family_degree_tv_mean']:.4f} "
+            f"role_corr_err={role_report['relation_degree_correlation_error_mean']:.4f} "
             f"tri={marginal_report['metrics_mean']['triangles']:.1f}->"
             f"{role_report['metrics_mean']['triangles']:.1f}",
             flush=True,
