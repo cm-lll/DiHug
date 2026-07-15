@@ -1,236 +1,92 @@
-# Typed Degree-Conditioned Graphlet Energy
+# Exchangeable Typed Edit Diffusion
 
-This package is a clean feasibility path beside the legacy diffusion system.
-It deliberately does not call the old block sampler, controllers, GQER, or
-post-hoc target-metric realizer.
+This package contains the graph-generation method used by the final IMDB and
+PubMed experiments. It is independent of the legacy block sampler, GQER,
+family-set loss, and sampler-side target-metric controllers.
 
-## State Space
+## Generative Model
 
-Training extracts each node's complete relation-degree vector and permutes
-those vectors only within node type. For every relation family, the degree
-multiset is therefore unchanged. A permuted copy of the training graph is a
-constructive witness that the resulting state space is nonempty.
+Generation has two learned stages:
 
-Generation never receives the training graph. The checkpoint contains only:
+1. An exchangeable joint relation-degree prior samples anonymous node roles
+   within each node type. The prior stores mixture parameters and type/family
+   schema, not training node IDs or a training edge list.
+2. A learned edit-space reverse process scores legal typed graph edits. The
+   complete training kernel contains birth, death, relocation, and 2-switch
+   transitions. Each candidate is represented by its action, relation family,
+   anonymous endpoint roles, diffusion time, and typed closure deltas.
 
-- node type counts and relation-family endpoint types;
-- the multiset of relation-degree vectors within each node type;
-- an automatically selected typed graphlet dictionary and its normalization;
-- frozen linear energy weights.
+The known forward process starts at a training graph and applies a
+time-inhomogeneous mixture of the same edits. Birth/death is a Bernoulli
+heat-bath update; relocation and switch are reversible typed edits. Training
+records noisy states and learns to rank inverse or reconstruction-improving
+edits with a listwise objective.
 
-It contains no edge list or original node identifier.
+The strongest validated sampler is staged. It samples a graph from the
+exchangeable prior and runs the count-preserving relocation/switch subset of
+the learned reverse kernel as terminal motif refinement. This is an
+edit-space discrete diffusion pipeline, but it is not the textbook
+independent-edge D3PM sampler and should not be described as one.
 
-## Graphlet Model
+## Inference Contract
 
-The automatic dictionary currently covers all observed typed three-node
-patterns rather than a hand-written metapath list:
+The full-graph IMDB and PubMed samplers receive only:
 
-- open typed wedges;
-- typed triangles, including repeated node types;
-- typed rooted triangles stratified by anonymous degree bucket;
-- typed geometrically weighted edgewise shared partners (GWESP), stratified by
-  relation family, endpoint degree roles, and shared-neighbor type;
-- family-specific endpoint degree mixing.
+- node type counts and the relation schema;
+- learned exchangeable-prior parameters;
+- learned reverse-kernel parameters;
+- a random seed and fixed sampling budget.
 
-GWESP is a curved-ERGM closure statistic: the first shared partner on an edge
-has full weight and additional shared partners have geometrically diminishing
-returns. It therefore represents typed distance-two support while discouraging
-all triangles from collapsing onto a few hub edges.
+They do not read the clean adjacency, exact clean degree rows, family edge
+counts, graphlet target values, or evaluation metrics. The clean graph is
+loaded only after generation to compute reported metrics.
 
-Open-wedge counters are still computed for diagnostics, but are excluded from
-the fitted energy by default. Under a fixed per-node relation-degree plan, the
-number of typed neighbor pairs at each center is fixed, so open wedges are an
-affine restatement of the corresponding closed-triangle statistics rather than
-an independent constraint.
+The HGEN40 protocol is a separate protocol-conditioned evaluation. It applies
+the public HGEN edge-cover view to an independently sampled full graph and is
+conditioned on the public total edge budget. Hyperparameters are selected on
+independent HGEN-style validation splits; the official held-out graph is used
+only once for final evaluation. This setting must be labeled separately from
+unconditional full-graph generation.
 
-Gate 2 asks only whether these statistics distinguish the real graph from a
-degree- and family-preserving null. Pairwise NCE is used for that diagnostic;
-its classifier weights are not treated as final ERGM parameters.
+## Final Entry Points
 
-Gate 3 fits the fixed-degree maximum-entropy model with persistent MCMC. For a
-frozen parameter vector, the negative log likelihood is convex and its
-gradient is the model expected statistic minus the real statistic. Each
-parameter round now keeps the energy frozen and extends the persistent chains
-until at least 90% of selected statistics pass ESS, split-Rhat, and
-Monte-Carlo drift tests. A diagonally preconditioned Robbins-Monro update uses
-a diminishing step size and a small trust radius. If a diagnostic fails, the
-weights remain frozen and the next round accumulates more samples from the same
-target distribution. Samples are cleared and warm-up is repeated only after a
-successful parameter update.
+Run the full-graph experiments:
 
-The IMDB adaptive scripts use a damped natural-gradient update. For an
-exponential-family graphlet energy, the Fisher matrix is the covariance of the
-normalized sufficient statistics. The update solves this covariance system and
-is scaled to satisfy a local KL trust region, with an Euclidean cap retained as
-a fallback for covariance-null directions. The older diagonal update remains
-available as an explicit ablation.
+```bash
+bash scripts/run_imdb_exchangeable_compact_switch_main_8gpu.sh
+bash scripts/run_pubmed_exchangeable_compact_switch_main_8gpu.sh
+```
 
-The formal adaptive scripts also use moment continuation. Instead of jumping
-directly from the degree-preserving null expectation to a real-graph statistic
-that can be hundreds of null standard deviations away, they track a geometric
-sequence of intermediate moment targets. A stage advances only after the
-frozen-chain expectation is both diagnostically valid and close to its current
-target. The KL radius is reduced in early stages, so continuation changes the
-distribution gradually rather than merely rescaling the same gradient.
+Run nested HGEN40 model selection and official evaluation:
 
-Fresh null and energy chains are also extended adaptively. Gate summaries use
-only the latest diagnostic window, and report ordinary Rhat, split-Rhat, ESS,
-and early-to-late drift. In particular, ordinary Rhat near one is not accepted
-as convergence when all chains share the same trend.
+```bash
+bash scripts/run_pubmed_hgen40_nested_selection_8gpu.sh
+```
 
-## Sampler Guarantee
+Run the complete paper queue:
 
-Every proposal is either a symmetric, family-preserving 2-switch or a
-symmetric Curveball neighborhood trade inside one bipartite family. Both keep
-the graph simple and exactly preserve every node's degree in every relation
-family. With frozen energy and Metropolis acceptance, the chain satisfies
-detailed balance for the typed graphlet energy distribution on that state
+```bash
+bash scripts/run_paper_final_queue.sh
+```
+
+## Retained Ablations
+
+The package still includes the mixed-kernel, factorized-head, HGT-head,
+fixed-degree switch, and graphlet-energy implementations required to reproduce
+paper ablations. Their old one-off launchers are not part of the final runtime
+surface. Git history retains removed GQER, family-set, absorbing-posterior, and
+QPPR experiment configurations.
+
+## Guarantees and Limits
+
+Typed edits preserve graph simplicity and schema validity. Relocation and
+2-switch preserve per-family edge counts; 2-switch additionally preserves
+per-node relation degrees. The forward kernels and legal inverse operations
+are explicit, so the learned process has a well-defined discrete Markov state
 space.
 
-This guarantees the invariant state space and stationary distribution. It does
-not claim that a finite chain has mixed; IAT, ESS, and multi-chain R-hat are
-reported for that reason.
-
-An optional replica-exchange sampler runs the same frozen energy at a ladder of
-inverse temperatures. Its local kernels and exchange ratio are exact, so the
-beta=1 replica has the same target marginal while gaining non-local paths
-between structural modes.
-
-## Commands
-
-Run the training-time gates:
-
-```bash
-python scripts/run_structure_energy_gates.py \
-  --output-dir results/imdb_structure_energy_seed0 \
-  --seed 0
-```
-
-Before the expensive fresh-chain validation, run the moment-fitting pilot. It
-stops after optimization and reports whether enough diagnostic-approved updates
-were made:
-
-```bash
-SEED=0 bash scripts/run_imdb_structure_energy_adaptive_f48_pilot.sh
-```
-
-Generate from the saved checkpoint without a dataset argument:
-
-```bash
-python scripts/sample_structure_energy_checkpoint.py \
-  --checkpoint results/imdb_structure_energy_seed0/structure_energy_checkpoint.json \
-  --output-dir results/imdb_structure_energy_sample_seed100 \
-  --seed 100
-```
-
-Use exact replica exchange when the ordinary chain has poor ESS:
-
-```bash
-python scripts/sample_structure_energy_tempered.py \
-  --checkpoint results/imdb_structure_energy_seed0/structure_energy_checkpoint.json \
-  --output-dir results/imdb_structure_energy_tempered_seed100 \
-  --seed 100
-```
-
-The diffusion model may later provide only an initializer. A learned
-state-dependent proposal is excluded from this version because it would need
-an explicit Hastings correction to preserve the same target distribution.
-
-## Switch-Space Diffusion
-
-`switch_diffusion.py` implements a separate learned reverse process directly
-on the degree-conditioned state space. Its forward kernel applies uniformly
-sampled legal family-preserving 2-switches. Training records an exact inverse
-switch together with negatives drawn from the same legal proposal kernel, and
-fits a listwise classifier. This is sampled reverse-kernel estimation, not
-independent edge classification.
-
-Every forward and reverse action preserves graph simplicity, every family edge
-count, and every node's degree in every relation family. Training uses
-type-preserving permutations of the clean witness to avoid binding anonymous
-roles to node IDs. A sampling checkpoint contains only anonymous role rows,
-the automatically selected typed graphlet statistics, and learned scorer
-parameters; sampling does not load the training adjacency.
-
-Three sampling modes isolate failure causes:
-
-- `random` measures the degree-conditioned switch null;
-- `oracle` selects the candidate with the largest immediate reduction in the
-  checkpoint statistic error and tests candidate-proposal coverage;
-- `model` uses the learned reverse-kernel score.
-
-The hard guarantee is membership in the feasible role state space after every
-step. Finite-step graphlet recovery remains an optimization result, so reports
-include validation top-k reverse accuracy, model-oracle agreement, graphlet
-target error, and graph metrics along the trajectory.
-
-Run the causal gate:
-
-```bash
-python scripts/run_switch_diffusion.py \
-  --structure-checkpoint results/imdb_structure_energy_seed0/structure_energy_checkpoint.json \
-  --output-dir results/imdb_switch_diffusion_seed0 \
-  --trajectories 8 --forward-steps 2000 --record-every 20 \
-  --train-candidates 32 --sample-steps 2000 --sample-candidates 64
-```
-
-### Target-Free Reverse Kernel
-
-`--conditioning-mode state_only` removes the clean graphlet target from both
-the scorer input and saved denoiser checkpoint. The scorer sees only the
-current anonymous graph state, the candidate switch delta, relation family,
-and diffusion time. The structure checkpoint still supplies the explicitly
-declared anonymous relation-degree condition; this mode is therefore
-target-free for motif statistics, not unconditional over degree sequences.
-
-At high noise, the exact switch that happened in the forward trajectory is not
-identifiable: many legal reverse switches can make equivalent structural
-progress. `--training-objective utility_kl` distills a soft distribution over
-all candidates from their training-only reduction in graphlet error. The
-recommended `scheduled_hybrid` objective uses utility-equivalent moves at high
-noise and continuously returns to exact inverse-switch CE near the clean
-endpoint. Candidate utilities are dataset labels only and are absent from the
-sampling checkpoint.
-
-With `--learned-condition`, the anonymous graphlet condition is estimated from
-those training utilities by convex ridge regression. The identity
-`utility(d,z)=2 d·(tau-z)-||d||²` makes `tau` identifiable whenever the
-candidate-delta design has full rank. The learned `tau` is stored as a model
-parameter; no clean target vector is supplied through the sampling interface.
-This is the learned-condition variant. Plain `state_only` relies on the neural
-scorer to learn the same mapping implicitly.
-
-```bash
-python scripts/run_switch_diffusion.py \
-  --dataset-dir data/PubMed_baseline_subgraphs/subgraph_000 \
-  --structure-checkpoint results/pubmed_switch_structure_seed0/structure_checkpoint.json \
-  --output-dir results/pubmed_switch_target_free_seed0 \
-  --conditioning-mode state_only --training-objective scheduled_hybrid \
-  --inverse-loss-weight 1.0 --utility-loss-weight 1.0 \
-  --utility-temperature 1.0 --utility-schedule-power 2.0 \
-  --forward-steps 20000 --record-every 100 --sample-steps 20000
-```
-
-Use `--training-objective utility_kl --learned-condition` for the explicit
-learned-condition variant.
-
-`--learned-condition-noop` adds the legal self-transition and commits a switch
-only when its utility under the learned condition is positive. With greedy
-decoding, the learned squared graphlet error is therefore monotonically
-non-increasing; degree and family invariants remain exact because both a
-2-switch and a no-op stay in the same feasible state space.
-`--learned-condition-noop-patience` can terminate after a fixed run of
-self-transitions, using only the learned condition rather than evaluation
-metrics.
-
-### Exact Tensor Switch Kernel
-
-`switch_accelerator.py` evaluates all affected typed triangle and rooted
-closure deltas for a candidate batch in one tensor program. Candidate
-generation and the committed 2-switch are unchanged, and unsupported feature
-families are rejected rather than approximated. Consequently the tensor and
-Python kernels produce the same transition for the same random seed. Use
-`scripts/benchmark_switch_kernel.py` to report exactness and kernel
-speedup. A single Markov chain still has a sequential dependency across steps;
-larger candidate batches and independent-chain batching provide the available
-GPU parallelism without changing the reverse kernel.
+These invariants do not guarantee that a finite learned reverse trajectory
+matches every statistic of the data graph. Structural quality remains an
+empirical result and must be reported over multiple seeds. In particular, the
+current full PubMed result matches triangle count and transitivity closely but
+still underestimates average clustering.
