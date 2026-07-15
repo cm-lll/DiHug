@@ -502,6 +502,51 @@ def train_factorized_edit_denoiser(
     return model, report
 
 
+def select_factorized_candidate(
+    action_logits: torch.Tensor,
+    family_logits: torch.Tensor,
+    endpoint_logits: torch.Tensor,
+    action_ids: torch.Tensor,
+    family_ids: torch.Tensor,
+    temperature: float,
+    generator: torch.Generator,
+) -> int:
+    """Select action, family, and endpoints in the modeled probability order."""
+
+    if action_logits.ndim != 1 or endpoint_logits.ndim != 1:
+        raise ValueError("single-state logits are required")
+    if family_logits.ndim != 2:
+        raise ValueError("family logits must have shape [A,F]")
+    if action_ids.shape != endpoint_logits.shape or family_ids.shape != action_ids.shape:
+        raise ValueError("candidate labels and endpoint logits must align")
+
+    def choose(logits: torch.Tensor, indices: torch.Tensor) -> int:
+        if indices.numel() == 0:
+            raise RuntimeError("factorized selection received an empty choice set")
+        selected_logits = logits[indices]
+        if float(temperature) <= 0.0:
+            offset = int(selected_logits.argmax().item())
+        else:
+            probability = torch.softmax(selected_logits / float(temperature), dim=0)
+            offset = int(
+                torch.multinomial(probability, 1, generator=generator).item()
+            )
+        return int(indices[offset].item())
+
+    available_actions = torch.unique(action_ids, sorted=True)
+    action_id = choose(action_logits, available_actions)
+    action_candidates = torch.nonzero(action_ids == action_id, as_tuple=False).flatten()
+    if action_id == 0:
+        return choose(endpoint_logits, action_candidates)
+
+    available_families = torch.unique(family_ids[action_candidates], sorted=True)
+    family_id = choose(family_logits[action_id], available_families)
+    endpoint_candidates = torch.nonzero(
+        (action_ids == action_id) & (family_ids == family_id), as_tuple=False
+    ).flatten()
+    return choose(endpoint_logits, endpoint_candidates)
+
+
 def sample_factorized_edit_diffusion(
     prior: MarginalGraphPrior,
     model: FactorizedEditDenoiser,
@@ -512,7 +557,10 @@ def sample_factorized_edit_diffusion(
     device: str | torch.device = "cpu",
     temperature: float = 0.0,
     metrics_every: int = 1000,
+    decode_mode: str = "hierarchical",
 ) -> MixedEditSamplingResult:
+    if decode_mode not in {"hierarchical", "joint_leaf"}:
+        raise ValueError(f"unknown factorized decode mode {decode_mode!r}")
     graph = prior.sample(seed=int(seed) + 71)
     rng = np.random.default_rng(int(seed))
     device = torch.device(device)
@@ -532,15 +580,41 @@ def sample_factorized_edit_diffusion(
         )
         proposed += len(candidates)
         matrix = mixed_edit_candidate_matrix(graph, candidates, time_fraction)
+        matrix_tensor = torch.from_numpy(matrix)[None].to(device)
         with torch.no_grad():
-            logits = model(torch.from_numpy(matrix)[None].to(device)).squeeze(0)
-        if float(temperature) <= 0.0:
-            chosen = int(logits.argmax().item())
-        else:
-            probability = torch.softmax(logits / float(temperature), dim=-1)
-            chosen = int(
-                torch.multinomial(probability, 1, generator=generator).item()
-            )
+            if decode_mode == "joint_leaf":
+                logits = model(matrix_tensor).squeeze(0)
+                if float(temperature) <= 0.0:
+                    chosen = int(logits.argmax().item())
+                else:
+                    probability = torch.softmax(logits / float(temperature), dim=-1)
+                    chosen = int(
+                        torch.multinomial(
+                            probability, 1, generator=generator
+                        ).item()
+                    )
+            else:
+                action_logits, family_logits, endpoint_logits = model.components(
+                    matrix_tensor
+                )
+                action_ids = matrix_tensor[
+                    0, :, : len(SCORER_ACTIONS)
+                ].argmax(dim=-1)
+                family_start = len(SCORER_ACTIONS)
+                family_ids = matrix_tensor[
+                    0,
+                    :,
+                    family_start : family_start + model.family_count,
+                ].argmax(dim=-1)
+                chosen = select_factorized_candidate(
+                    action_logits.squeeze(0),
+                    family_logits.squeeze(0),
+                    endpoint_logits.squeeze(0),
+                    action_ids,
+                    family_ids,
+                    temperature,
+                    generator,
+                )
         proposal = candidates[chosen]
         apply_edit(graph, proposal)
         action_counts[proposal.action] += 1

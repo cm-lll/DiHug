@@ -10,6 +10,11 @@ from .features import GraphletFeatureExtractor
 from .factorized_edit_denoiser import FactorizedEditDenoiser
 from .graph import FamilySpec, TypedGraph, load_typed_graph
 from .mixed_edit_diffusion import MarginalGraphPrior, MixedKernelSchedule
+from .markov_diagnostics import (
+    audit_state_summary_aliasing,
+    run_forward_coupling_diagnostic,
+    run_free_proposal_coverage_diagnostic,
+)
 from .roles import RolePlan, realize_role_plan, sample_role_plan
 from .switch_diffusion import SwitchDenoiserMLP
 
@@ -24,6 +29,9 @@ __all__ = [
     "TypedGraph",
     "SwitchDenoiserMLP",
     "load_typed_graph",
+    "audit_state_summary_aliasing",
     "realize_role_plan",
+    "run_forward_coupling_diagnostic",
+    "run_free_proposal_coverage_diagnostic",
     "sample_role_plan",
 ]

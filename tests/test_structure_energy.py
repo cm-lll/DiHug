@@ -1253,3 +1253,180 @@ def test_checkpoint_sampler_needs_no_training_adjacency():
     generated.validate()
     round_trip = TypedGraph.from_json_dict(generated.to_json_dict())
     assert round_trip.edge_family == generated.edge_family
+
+
+def test_forward_coupling_diagnostic_runs_exact_marginal_kernels():
+    from sparse_diffusion.structure_energy.markov_diagnostics import (
+        run_forward_coupling_diagnostic,
+    )
+
+    report = run_forward_coupling_diagnostic(
+        _toy_graph(),
+        steps=20,
+        checkpoints=(0, 5, 10, 20),
+        replicas=2,
+        seed=91,
+    )
+
+    assert report["format"] == "dihug-forward-coupling-diagnostic-v1"
+    assert [row["step"] for row in report["trajectory"]] == [0, 5, 10, 20]
+    assert np.isfinite(report["edge_disagreement_contraction"])
+    assert all(
+        0.0 <= row["edge_disagreement_mean"] <= 1.0
+        for row in report["trajectory"]
+    )
+
+
+def test_state_alias_audit_exposes_degree_preserving_summary_collisions():
+    from sparse_diffusion.structure_energy.markov_diagnostics import (
+        audit_state_summary_aliasing,
+    )
+
+    report = audit_state_summary_aliasing(_toy_graph(), trials=8, seed=92)
+
+    assert report["format"] == "dihug-state-summary-aliasing-v1"
+    assert report["accepted_trials"] == 8
+    assert report["summary_collision_rate"] == 1.0
+    assert 0.0 <= report["motif_change_rate"] <= 1.0
+
+
+def test_hierarchical_factorized_decode_does_not_compare_split_leaf_modes():
+    import torch
+
+    from sparse_diffusion.structure_energy.factorized_edit_denoiser import (
+        select_factorized_candidate,
+    )
+
+    # Noop is the largest individual leaf, while switch is the largest action.
+    # Hierarchical MAP must choose the switch action before ranking endpoints.
+    action_logits = torch.tensor([2.0, -2.0, -2.0, -2.0, 3.0])
+    family_logits = torch.zeros((5, 2))
+    family_logits[4] = torch.tensor([2.0, 1.0])
+    endpoint_logits = torch.tensor([4.0, 1.0, 3.0, 2.0])
+    action_ids = torch.tensor([0, 4, 4, 4])
+    family_ids = torch.tensor([0, 0, 0, 1])
+    generator = torch.Generator().manual_seed(7)
+
+    selected = select_factorized_candidate(
+        action_logits,
+        family_logits,
+        endpoint_logits,
+        action_ids,
+        family_ids,
+        temperature=0.0,
+        generator=generator,
+    )
+
+    assert selected == 2
+
+
+def test_free_proposal_coverage_does_not_inject_the_clean_inverse():
+    from sparse_diffusion.structure_energy.markov_diagnostics import (
+        run_free_proposal_coverage_diagnostic,
+    )
+
+    report = run_free_proposal_coverage_diagnostic(
+        _toy_graph(),
+        time_fractions=(0.25, 0.75),
+        trials_per_time=3,
+        forward_steps=12,
+        candidate_counts=(4, 8),
+        seed=93,
+    )
+
+    assert report["format"] == "dihug-free-proposal-coverage-v1"
+    assert report["positive_injection"] is False
+    assert report["candidate_counts"] == [4, 8]
+    for time_report in report["results"].values():
+        assert time_report["4"]["trials"] == 3
+        assert time_report["8"]["trials"] == 3
+        assert (
+            time_report["8"]["improving_candidate_rate"]
+            >= time_report["4"]["improving_candidate_rate"]
+        )
+
+
+def test_hgt_edit_dataset_keeps_graph_state_and_candidate_endpoints_aligned():
+    from sparse_diffusion.structure_energy.hgt_edit_denoiser import (
+        build_hgt_edit_dataset,
+    )
+
+    dataset = build_hgt_edit_dataset(
+        _toy_graph(),
+        trajectories=2,
+        forward_steps=4,
+        record_every=2,
+        candidates_per_example=4,
+        seed=94,
+    )
+
+    assert dataset.candidate_features.shape[:2] == (4, 4)
+    assert dataset.candidate_endpoints.shape == (4, 4, 8)
+    assert dataset.node_features.shape[:2] == (4, 10)
+    assert len(dataset.edge_indices) == 4
+    assert np.all((dataset.candidate_endpoints == -1) | (dataset.candidate_endpoints < 10))
+
+
+def test_hgt_listwise_scores_are_equivariant_to_same_type_node_permutation():
+    import torch
+
+    from sparse_diffusion.structure_energy.hgt_edit_denoiser import (
+        HGTListwiseEditDenoiser,
+        candidate_endpoint_matrix,
+        graph_edge_tensors,
+        graph_node_features,
+    )
+    from sparse_diffusion.structure_energy.mixed_edit_diffusion import (
+        mixed_edit_candidate_matrix,
+        sample_edit_candidates,
+    )
+
+    graph = _toy_graph()
+    rng = np.random.default_rng(95)
+    candidates, _ = sample_edit_candidates(graph, rng, 4)
+    permutation = np.arange(graph.num_nodes)
+    permutation[[0, 1]] = permutation[[1, 0]]
+    permuted_edges = {
+        family: [(int(permutation[u]), int(permutation[v])) for u, v in edges]
+        for family, edges in graph.family_edges.items()
+    }
+    permuted = TypedGraph(
+        graph.node_types.copy(), graph.type_names, graph.family_specs, permuted_edges
+    )
+    permuted_candidates = [
+        EditProposal(
+            proposal.action,
+            proposal.family,
+            tuple((int(permutation[u]), int(permutation[v])) for u, v in proposal.old_edges),
+            tuple((int(permutation[u]), int(permutation[v])) for u, v in proposal.new_edges),
+        )
+        for proposal in candidates
+    ]
+    model = HGTListwiseEditDenoiser(
+        node_feature_dim=graph_node_features(graph, 0.5).shape[1],
+        candidate_feature_dim=mixed_edit_candidate_matrix(graph, candidates, 0.5).shape[1],
+        type_count=2,
+        family_count=2,
+        hidden_dim=16,
+        heads=4,
+        hgt_layers=1,
+        scorer_layers=1,
+        dropout=0.0,
+        endpoint_dim=8,
+    ).eval()
+
+    def score(current, proposals):
+        edges, relations = graph_edge_tensors(current)
+        return model(
+            torch.from_numpy(graph_node_features(current, 0.5))[None],
+            torch.from_numpy(current.node_types)[None],
+            torch.from_numpy(edges),
+            torch.from_numpy(relations),
+            torch.from_numpy(mixed_edit_candidate_matrix(current, proposals, 0.5))[None],
+            torch.from_numpy(candidate_endpoint_matrix(proposals))[None],
+        )
+
+    with torch.no_grad():
+        original_scores = score(graph, candidates)
+        permuted_scores = score(permuted, permuted_candidates)
+    torch.testing.assert_close(original_scores, permuted_scores, rtol=1e-5, atol=1e-5)

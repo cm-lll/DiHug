@@ -77,6 +77,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sample-steps", type=int, default=20000)
     parser.add_argument("--sample-candidates", type=int, default=64)
     parser.add_argument("--sample-temperature", type=float, default=0.0)
+    parser.add_argument(
+        "--factorized-decode",
+        choices=("hierarchical", "joint_leaf"),
+        default="hierarchical",
+    )
     parser.add_argument("--metrics-every", type=int, default=1000)
     parser.add_argument("--fixed-t-trials", type=int, default=64)
     parser.add_argument("--balanced-action-aux-weight", type=float, default=0.1)
@@ -283,17 +288,18 @@ def main() -> None:
         if args.denoiser == "factorized"
         else sample_mixed_edit_diffusion
     )
-    result = sampler(
-        prior,
-        model,
-        steps=args.sample_steps,
-        candidates_per_step=args.sample_candidates,
-        seed=args.seed,
-        device=args.device,
-        temperature=args.sample_temperature,
-        metrics_every=args.metrics_every,
-        actions=KERNELS[args.kernel],
-    )
+    sample_kwargs = {
+        "steps": args.sample_steps,
+        "candidates_per_step": args.sample_candidates,
+        "seed": args.seed,
+        "device": args.device,
+        "temperature": args.sample_temperature,
+        "metrics_every": args.metrics_every,
+        "actions": KERNELS[args.kernel],
+    }
+    if args.denoiser == "factorized":
+        sample_kwargs["decode_mode"] = args.factorized_decode
+    result = sampler(prior, model, **sample_kwargs)
     payload = {
         "format": "dihug-mixed-edit-sampling-v1",
         "denoiser": args.denoiser,
@@ -311,6 +317,9 @@ def main() -> None:
             "steps": args.sample_steps,
             "candidates": args.sample_candidates,
             "temperature": args.sample_temperature,
+            "factorized_decode": (
+                args.factorized_decode if args.denoiser == "factorized" else None
+            ),
         },
     }
     write_json(args.output_dir / "sampling_report.json", payload)
