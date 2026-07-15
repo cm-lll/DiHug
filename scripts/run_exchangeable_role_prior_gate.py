@@ -19,6 +19,7 @@ from sparse_diffusion.structure_energy.exchangeable_role_prior import (
 )
 from sparse_diffusion.structure_energy.graph import (
     TypedGraph,
+    hgen_edge_cover_view,
     load_typed_graph,
     uniform_edge_view,
 )
@@ -62,7 +63,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sample-steps", type=int, default=2000)
     parser.add_argument("--sample-candidates", type=int, default=16)
     parser.add_argument(
-        "--sample-actions", choices=("checkpoint", "switch"), default="checkpoint"
+        "--sample-actions",
+        choices=("checkpoint", "switch", "relocation_switch"),
+        default="checkpoint",
     )
     parser.add_argument(
         "--allow-kernel-override",
@@ -73,9 +76,10 @@ def parse_args() -> argparse.Namespace:
         "--motif-refinement-stage",
         action="store_true",
         help=(
-            "Use the switch component of a checkpoint that was trained with switch "
-            "transitions. This is the terminal degree-preserving refinement stage, "
-            "not an arbitrary kernel override."
+            "Use a count-preserving terminal subset of a checkpoint trained with "
+            "the corresponding transitions. 'switch' preserves relation degrees; "
+            "'relocation_switch' preserves total and per-family edge counts while "
+            "allowing relation-degree correction."
         ),
     )
     parser.add_argument("--metrics-every", type=int, default=250)
@@ -88,6 +92,12 @@ def parse_args() -> argparse.Namespace:
             "exactly this many edges before denoising. This does not read target "
             "adjacency, family counts, or degrees."
         ),
+    )
+    parser.add_argument(
+        "--edge-view-source",
+        choices=("uniform", "hgen_split"),
+        default="uniform",
+        help="Target-free transform applied to a learned full-graph prior sample.",
     )
     parser.add_argument("--fixed-time-fraction", type=float)
     return parser.parse_args()
@@ -186,25 +196,26 @@ def main() -> None:
     )
     if role_prior.marginal.type_names != checkpoint_prior.type_names:
         raise ValueError("role prior and denoiser checkpoint schemas disagree")
-    sample_actions = (
-        ("switch",)
-        if args.sample_actions == "switch"
-        else tuple(metadata["actions"])
-    )
+    if args.sample_actions == "switch":
+        sample_actions = ("switch",)
+    elif args.sample_actions == "relocation_switch":
+        sample_actions = ("relocation", "switch")
+    else:
+        sample_actions = tuple(metadata["actions"])
     checkpoint_actions = tuple(metadata["actions"])
-    terminal_switch_subset = (
+    terminal_count_preserving_subset = (
         args.motif_refinement_stage
-        and sample_actions == ("switch",)
-        and "switch" in checkpoint_actions
+        and sample_actions in (("switch",), ("relocation", "switch"))
+        and set(sample_actions).issubset(checkpoint_actions)
     )
-    if args.motif_refinement_stage and not terminal_switch_subset:
+    if args.motif_refinement_stage and not terminal_count_preserving_subset:
         raise ValueError(
-            "--motif-refinement-stage requires switch-only sampling and a "
-            "checkpoint trained with switch transitions"
+            "--motif-refinement-stage requires a count-preserving action subset "
+            "and a checkpoint trained with every requested transition"
         )
     if (
         sample_actions != checkpoint_actions
-        and not terminal_switch_subset
+        and not terminal_count_preserving_subset
         and not args.allow_kernel_override
     ):
         raise ValueError(
@@ -221,11 +232,18 @@ def main() -> None:
         )
     elif args.edge_view_count is not None:
         full_prior_sample = role_prior.sample(args.seed + 71)
-        initial_graph = uniform_edge_view(
-            full_prior_sample,
-            edge_count=args.edge_view_count,
-            seed=args.seed + 193,
-        )
+        if args.edge_view_source == "hgen_split":
+            initial_graph = hgen_edge_cover_view(
+                full_prior_sample,
+                edge_count=args.edge_view_count,
+                seed=args.seed + 193,
+            )
+        else:
+            initial_graph = uniform_edge_view(
+                full_prior_sample,
+                edge_count=args.edge_view_count,
+                seed=args.seed + 193,
+            )
 
     result = sample_mixed_edit_diffusion(
         role_prior,
@@ -240,6 +258,11 @@ def main() -> None:
         initial_graph=initial_graph,
         fixed_time_fraction=args.fixed_time_fraction,
     )
+    if (
+        terminal_count_preserving_subset
+        and result.graph.num_edges != int(result.trace[0]["edges"])
+    ):
+        raise AssertionError("terminal count-preserving refinement changed edge count")
     payload = {
         "format": "dihug-exchangeable-role-mixed-edit-sample-v1",
         "initial": result.trace[0],
@@ -254,8 +277,8 @@ def main() -> None:
             "actions": list(sample_actions),
             "checkpoint_actions": list(checkpoint_actions),
             "kernel_contract": (
-                "terminal_switch_subset"
-                if terminal_switch_subset
+                "terminal_count_preserving_subset"
+                if terminal_count_preserving_subset
                 else (
                     "legacy_override"
                     if sample_actions != checkpoint_actions
@@ -263,12 +286,13 @@ def main() -> None:
                 )
             ),
             "kernel_override": (
-                sample_actions != checkpoint_actions and not terminal_switch_subset
+                sample_actions != checkpoint_actions
+                and not terminal_count_preserving_subset
             ),
             "initial_graph": args.initial_graph is not None,
             "edge_view_count": args.edge_view_count,
             "edge_view_source": (
-                "uniform_view_of_learned_prior_sample"
+                f"{args.edge_view_source}_view_of_learned_prior_sample"
                 if args.edge_view_count is not None
                 else None
             ),

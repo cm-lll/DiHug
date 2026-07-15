@@ -12,13 +12,14 @@ PRIOR="$OUT_ROOT/prior/exchangeable_role_prior.json"
 CHECKPOINT="$OUT_ROOT/model/mixed_edit_diffusion.pt"
 mkdir -p "$OUT_ROOT" "$LOG_ROOT"
 
-# The unbounded empirical codebook is still type-exchangeable: it stores only
-# anonymous role vectors and their frequencies, never node assignments or edges.
+# PubMed needs a wider anonymous role codebook than IMDB.  The 512-component
+# prior is the validated setting: it retains the heavy degree tail without
+# storing node assignments or training edges.
 if [[ ! -f "$PRIOR" ]]; then
   "$PYTHON" scripts/run_exchangeable_role_prior_gate.py \
     --mode fit-gate --dataset-dir "$DATASET" --output-dir "$OUT_ROOT/prior" \
-    --components 0 --role-model categorical \
-    --role-component-sampling systematic --prior-samples 16 --seed 0 \
+    --components 512 --role-model categorical \
+    --role-component-sampling systematic --prior-samples 32 --seed 0 \
     > "$LOG_ROOT/prior.log" 2>&1
 fi
 

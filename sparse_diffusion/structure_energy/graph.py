@@ -374,3 +374,109 @@ def uniform_edge_view(graph: TypedGraph, edge_count: int, seed: int) -> TypedGra
     )
     view.validate()
     return view
+
+
+def hgen_edge_cover_view(
+    graph: TypedGraph,
+    edge_count: int,
+    seed: int,
+    test_share: float = 0.4,
+) -> TypedGraph:
+    """Apply HGEN's public edge-cover split to a learned full-graph sample.
+
+    This is an inference protocol transform, not target conditioning.  It reads
+    only the sampled graph and the public split share.  A final uniform count
+    correction enforces the public generation budget when the learned prior's
+    full-graph edge count is itself random.
+    """
+
+    import networkx as nx
+    import scipy.sparse as sp
+
+    edge_count = int(edge_count)
+    if edge_count < 0 or edge_count > graph.num_edges:
+        raise ValueError(
+            f"edge view size {edge_count} is outside [0, {graph.num_edges}]"
+        )
+    rows = []
+    cols = []
+    for edges in graph.family_edges.values():
+        for u, v in edges:
+            rows.extend((int(u), int(v)))
+            cols.extend((int(v), int(u)))
+    adjacency = sp.csr_matrix(
+        (np.ones(len(rows), dtype=np.int8), (rows, cols)),
+        shape=(graph.num_nodes, graph.num_nodes),
+    )
+    adjacency = sp.tril(adjacency).tocsr()
+    adjacency.eliminate_zeros()
+    rng = np.random.RandomState(int(seed))
+    train_size = int(adjacency.nnz * (1.0 - float(test_share)))
+
+    matching = list(nx.maximal_matching(nx.Graph(adjacency)))
+    hold_edges = np.asarray(
+        [
+            (int(u), int(v))
+            if adjacency[int(u), int(v)]
+            else (int(v), int(u))
+            for u, v in matching
+        ],
+        dtype=np.int64,
+    )
+    covered = set(hold_edges.reshape(-1).tolist()) if hold_edges.size else set()
+    uncovered = np.asarray(
+        sorted(set(range(graph.num_nodes)).difference(covered)), dtype=np.int64
+    )
+    degree = adjacency.sum(1).A1
+    extra = []
+    for node in uncovered[degree[uncovered] > 0]:
+        neighbors = adjacency[int(node)].indices
+        extra.append((int(node), int(rng.choice(neighbors))))
+    for node in uncovered[degree[uncovered] == 0]:
+        neighbors = adjacency[:, int(node)].T.tocsr().indices
+        if len(neighbors):
+            extra.append((int(rng.choice(neighbors)), int(node)))
+    if extra:
+        extra_array = np.asarray(extra, dtype=np.int64)
+        hold_edges = (
+            np.row_stack((hold_edges, extra_array)) if hold_edges.size else extra_array
+        )
+    hold = sp.csr_matrix(
+        (np.ones(len(hold_edges)), (hold_edges[:, 0], hold_edges[:, 1])),
+        shape=adjacency.shape,
+    )
+    hold[hold > 1] = 1
+    hold.eliminate_zeros()
+    sample = adjacency - hold
+    sample.eliminate_zeros()
+    remaining_train = train_size - int(hold.nnz)
+    if remaining_train < 0:
+        raise ValueError("HGEN edge cover exceeds the requested training share")
+    ones = np.column_stack(sample.nonzero())
+    permutation = rng.permutation(sample.nnz)
+    selected_pairs = {
+        TypedGraph.canonical_edge(int(u), int(v))
+        for u, v in ones[permutation[remaining_train:]].tolist()
+    }
+    family_edges = {family: [] for family in graph.family_specs}
+    for canonical in selected_pairs:
+        family = graph.edge_family[canonical]
+        family_edges[family].append(graph.orient_edge(family, canonical))
+    view = TypedGraph(
+        graph.node_types.copy(), graph.type_names, graph.family_specs, family_edges
+    )
+
+    if view.num_edges > edge_count:
+        return uniform_edge_view(view, edge_count=edge_count, seed=int(seed) + 1009)
+    if view.num_edges < edge_count:
+        candidates = sorted(set(graph.edge_family).difference(view.edge_family))
+        needed = edge_count - view.num_edges
+        if len(candidates) < needed:
+            raise ValueError("sampled full graph cannot satisfy the edge-view budget")
+        selected = rng.choice(len(candidates), size=needed, replace=False)
+        for index in np.asarray(selected).astype(int).tolist():
+            canonical = candidates[index]
+            family = graph.edge_family[canonical]
+            view.add_edge(family, graph.orient_edge(family, canonical))
+    view.validate()
+    return view

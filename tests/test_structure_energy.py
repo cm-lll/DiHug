@@ -28,6 +28,7 @@ from sparse_diffusion.structure_energy.fit import (
 from sparse_diffusion.structure_energy.graph import (
     FamilySpec,
     TypedGraph,
+    hgen_edge_cover_view,
     uniform_edge_view,
 )
 from sparse_diffusion.structure_energy.roles import (
@@ -1567,6 +1568,18 @@ def test_uniform_edge_view_is_exact_reproducible_and_schema_preserving():
     assert first.node_types.tolist() == graph.node_types.tolist()
     assert set(first.edge_family).issubset(set(graph.edge_family))
     assert graph.num_edges > first.num_edges
+
+
+def test_hgen_edge_cover_view_is_exact_reproducible_and_target_free():
+    graph = _toy_graph()
+    first = hgen_edge_cover_view(graph, edge_count=6, seed=23)
+    second = hgen_edge_cover_view(graph, edge_count=6, seed=23)
+
+    assert first.num_edges == 6
+    assert first.to_json_dict() == second.to_json_dict()
+    assert first.type_names == graph.type_names
+    assert first.node_types.tolist() == graph.node_types.tolist()
+    assert set(first.edge_family).issubset(set(graph.edge_family))
 
 
 def test_mixed_edit_dataset_supervises_all_clean_reconstruction_improvements():

@@ -17,41 +17,20 @@ echo "[PAPER-FINAL] commit=$(git rev-parse --short HEAD) gpus=$GPU_LIST"
 echo "[PAPER-FINAL] starting at $(date)"
 
 # ═══════════════════════════════════════════════
-# B1: final ablation — IMDB + PubMed, 4 seeds each
+# B1: final method — each dataset runner already uses all 8 GPUs / 8 seeds
 # ═══════════════════════════════════════════════
 run_b1() {
   echo "[B1] final method ablation: exchangeable + learned switch"
-  local seeds=(0 1 2 3)
-  
-  # IMDB exchangeable compact switch
-  for i in "${!seeds[@]}"; do
-    local gpu="${GPUS[$i]}"
-    local seed="${seeds[$i]}"
-    (
-      export TAG="imdb_final_b1_s${seed}"
-      export SEED="$seed"
-      export OUT_ROOT="${OUT_ROOT}/imdb_final_b1_s${seed}"
-      export LOG_ROOT="${LOG_ROOT}/imdb_final_b1"
-      bash scripts/run_imdb_exchangeable_compact_switch_main_8gpu.sh \
-        > "${LOG_ROOT}/imdb_final_b1_s${seed}.log" 2>&1
-    ) &
-  done
-  wait
-  
-  # PubMed exchangeable compact switch  
-  for i in "${!seeds[@]}"; do
-    local gpu="${GPUS[$i]}"
-    local seed="${seeds[$i]}"
-    (
-      export TAG="pubmed_final_b1_s${seed}"
-      export SEED="$seed"
-      export OUT_ROOT="${OUT_ROOT}/pubmed_final_b1_s${seed}"
-      export LOG_ROOT="${LOG_ROOT}/pubmed_final_b1"
-      bash scripts/run_pubmed_exchangeable_compact_switch_main_8gpu.sh \
-        > "${LOG_ROOT}/pubmed_final_b1_s${seed}.log" 2>&1
-    ) &
-  done
-  wait
+
+  OUT_ROOT="${OUT_ROOT}/imdb_final_b1" \
+    LOG_ROOT="${LOG_ROOT}/imdb_final_b1" \
+    bash scripts/run_imdb_exchangeable_compact_switch_main_8gpu.sh \
+      > "${LOG_ROOT}/imdb_final_b1_driver.log" 2>&1
+
+  OUT_ROOT="${OUT_ROOT}/pubmed_final_b1" \
+    LOG_ROOT="${LOG_ROOT}/pubmed_final_b1" \
+    bash scripts/run_pubmed_exchangeable_compact_switch_main_8gpu.sh \
+      > "${LOG_ROOT}/pubmed_final_b1_driver.log" 2>&1
   echo "[B1] done"
 }
 
@@ -66,41 +45,16 @@ run_b2() {
 }
 
 # ═══════════════════════════════════════════════
-# B3: IMDB HGEN40 edge-split protocol
+# B3: PubMed HGEN40 edge-split protocol
 # ═══════════════════════════════════════════════
 run_b3() {
-  echo "[B3] IMDB HGEN40 edge-split protocol"
-  local hgen_out="${OUT_ROOT}/imdb_hgen40"
-  mkdir -p "$hgen_out"
-  
-  python scripts/build_hgen_edge_split_target.py \
-    --dataset-dir data/IMDB_movie_subgraphs/subgraph_000 \
-    --output "$hgen_out/target.json" \
-    --test-share 0.4 --seed 481516234 \
-    > "${LOG_ROOT}/b3_hgen40_target.log" 2>&1
-  
-  for seed in 0 1 2 3 4 5 6 7; do
-    local gpu="${GPUS[$((seed % ${#GPUS[@]}))]}"
-    (
-      CUDA_VISIBLE_DEVICES="$gpu" python scripts/run_mixed_edit_diffusion.py \
-        --dataset-dir data/IMDB_movie_subgraphs/subgraph_000 \
-        --structure-checkpoint "$hgen_out/target.json" \
-        --output-dir "$hgen_out/seed${seed}" \
-        --seed "$seed" --device cuda \
-        --trajectories 8 --forward-steps 1000 --record-every 20 \
-        --train-candidates 16 --epochs 40 --batch-size 32 \
-        --hidden-dim 256 --layers 3 --dropout 0.1 \
-        --sample-steps 1280 --sample-candidates 64 \
-        --sample-temperature 0 --sampling-mode model \
-        --switch-kernel tensor --metrics-every 100 \
-        > "${LOG_ROOT}/b3_hgen40_seed${seed}.log" 2>&1
-    ) &
-  done
-  wait
-  
-  python scripts/evaluate_hgen_edge_split_metrics.py \
-    --output-dir "$hgen_out" \
-    > "${LOG_ROOT}/b3_hgen40_summary.log" 2>&1
+  echo "[B3] PubMed HGEN40 edge-split protocol"
+  OUT_ROOT="${OUT_ROOT}/pubmed_hgen40_nested" \
+    LOG_ROOT="${LOG_ROOT}/pubmed_hgen40_nested" \
+    PRIOR="${OUT_ROOT}/pubmed_final_b1/prior/exchangeable_role_prior.json" \
+    CHECKPOINT="${OUT_ROOT}/pubmed_final_b1/model/mixed_edit_diffusion.pt" \
+    bash scripts/run_pubmed_hgen40_nested_selection_8gpu.sh \
+      > "${LOG_ROOT}/b3_pubmed_hgen40_driver.log" 2>&1
   echo "[B3] done"
 }
 
@@ -129,7 +83,7 @@ for rp in sorted(root.glob("**/sampling_report.json")):
 with open(root / "paper_main.tsv", "w") as fh:
     writer = None
     for r in reports:
-        fm = r.get("final_metrics", {})
+        fm = r.get("final", r.get("final_metrics", {}))
         sc = r.get("sampling_config", {})
         row = {
             "run": r["_path"],
