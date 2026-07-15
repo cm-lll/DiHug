@@ -20,6 +20,12 @@ from .switch_diffusion import (
 
 EDIT_ACTIONS = ("birth", "death", "relocation", "switch")
 SCORER_ACTIONS = ("noop",) + EDIT_ACTIONS
+MIXED_EDIT_FEATURE_VERSION = "typed_closure_v2"
+MIXED_EDIT_FEATURE_PROFILES = (
+    "legacy_local_v1",
+    "typed_closure_compact_v2",
+    "typed_closure_full_v2",
+)
 
 
 @dataclass(frozen=True)
@@ -580,6 +586,147 @@ def _edge_slots(proposal: EditProposal) -> Tuple[Optional[Edge], ...]:
     return old + new
 
 
+def _typed_common_neighbor_counts(graph: TypedGraph, edge: Edge) -> np.ndarray:
+    """Count common neighbors by type for one candidate edge.
+
+    For endpoint types A and B, coordinate C is the exact increment of the
+    typed A-C-B closed graphlet when the edge is added.  The vocabulary is
+    therefore inferred from the schema instead of a hand-written meta-path
+    list.
+    """
+
+    common = graph.adjacency[int(edge[0])] & graph.adjacency[int(edge[1])]
+    counts = np.zeros(len(graph.type_names), dtype=np.float64)
+    for node in common:
+        counts[int(graph.node_types[node])] += 1.0
+    return counts
+
+
+def _neighbors_after_edit(
+    graph: TypedGraph, node: int, proposal: EditProposal
+) -> set[int]:
+    neighbors = set(graph.adjacency[int(node)])
+    for left, right in proposal.old_edges:
+        if int(left) == int(node):
+            neighbors.discard(int(right))
+        elif int(right) == int(node):
+            neighbors.discard(int(left))
+    for left, right in proposal.new_edges:
+        if int(left) == int(node):
+            neighbors.add(int(right))
+        elif int(right) == int(node):
+            neighbors.add(int(left))
+    return neighbors
+
+
+def _typed_common_neighbor_counts_after_edit(
+    graph: TypedGraph, edge: Edge, proposal: EditProposal
+) -> np.ndarray:
+    common = _neighbors_after_edit(graph, int(edge[0]), proposal) & _neighbors_after_edit(
+        graph, int(edge[1]), proposal
+    )
+    counts = np.zeros(len(graph.type_names), dtype=np.float64)
+    for node in common:
+        counts[int(graph.node_types[node])] += 1.0
+    return counts
+
+
+def typed_closure_delta(graph: TypedGraph, proposal: EditProposal) -> np.ndarray:
+    """Exact typed triangle-count delta of a legal edit in the pre-edit graph."""
+
+    delta = np.zeros(len(graph.type_names), dtype=np.float64)
+    for edge in proposal.old_edges:
+        delta -= _typed_common_neighbor_counts(graph, edge)
+    for edge in proposal.new_edges:
+        delta += _typed_common_neighbor_counts_after_edit(graph, edge, proposal)
+    return delta
+
+
+def degree_normalized_closure_delta(
+    graph: TypedGraph, proposal: EditProposal
+) -> float:
+    """Exact change in summed local clustering for degree-preserving edits.
+
+    A triangle contributes ``1 / choose(deg(v), 2)`` to each participating
+    node's local clustering.  Weighting exact triangle deltas this way favors
+    closure around low-degree roles without defining dataset-specific degree
+    buckets or meta-paths.
+    """
+
+    degree_change: Dict[int, int] = {}
+    for edge in proposal.old_edges:
+        for node in edge:
+            degree_change[int(node)] = degree_change.get(int(node), 0) - 1
+    for edge in proposal.new_edges:
+        for node in edge:
+            degree_change[int(node)] = degree_change.get(int(node), 0) + 1
+    if any(value != 0 for value in degree_change.values()):
+        return 0.0
+
+    triangle_delta: Dict[int, int] = {}
+
+    def accumulate(edge: Edge, common: Iterable[int], sign: int) -> None:
+        for node in (int(edge[0]), int(edge[1])):
+            triangle_delta[node] = triangle_delta.get(node, 0) + int(sign) * len(
+                common
+            )
+        for node in common:
+            triangle_delta[int(node)] = triangle_delta.get(int(node), 0) + int(sign)
+
+    for edge in proposal.old_edges:
+        common = graph.adjacency[int(edge[0])] & graph.adjacency[int(edge[1])]
+        accumulate(edge, common, -1)
+    for edge in proposal.new_edges:
+        common = _neighbors_after_edit(
+            graph, int(edge[0]), proposal
+        ) & _neighbors_after_edit(graph, int(edge[1]), proposal)
+        accumulate(edge, common, 1)
+
+    degrees = graph.degrees()
+    value = 0.0
+    for node, delta in triangle_delta.items():
+        degree = int(degrees[node])
+        denominator = degree * (degree - 1) / 2
+        if denominator > 0:
+            value += float(delta) / denominator
+    return float(value)
+
+
+def _mixed_edit_local_width(family_count: int) -> int:
+    return len(SCORER_ACTIONS) + int(family_count) + 16 + 4 + 4
+
+
+def mixed_edit_feature_width(
+    profile: str, family_count: int, type_count: int
+) -> int:
+    profile = str(profile).strip().lower()
+    if profile not in MIXED_EDIT_FEATURE_PROFILES:
+        raise ValueError(f"unknown mixed edit feature profile {profile!r}")
+    local_width = _mixed_edit_local_width(family_count)
+    if profile == "legacy_local_v1":
+        return local_width
+    if profile == "typed_closure_compact_v2":
+        return local_width + int(type_count) + 2
+    return local_width + 5 + 13 * int(family_count) + 9 * int(type_count)
+
+
+def _select_mixed_edit_feature_profile(
+    full: np.ndarray,
+    profile: str,
+    family_count: int,
+    type_count: int,
+) -> np.ndarray:
+    profile = str(profile).strip().lower()
+    mixed_edit_feature_width(profile, family_count, type_count)
+    if profile == "typed_closure_full_v2":
+        return full
+    local_width = _mixed_edit_local_width(family_count)
+    if profile == "legacy_local_v1":
+        return full[:local_width]
+    compact_width = int(type_count) + 2
+    return np.concatenate((full[:local_width], full[-compact_width:]))
+
+
 def mixed_edit_state_vector(graph: TypedGraph, time_fraction: float) -> np.ndarray:
     """Target-free whole-graph summary shared by all edit candidates."""
 
@@ -624,6 +771,7 @@ def mixed_edit_candidate_matrix(
     graph: TypedGraph,
     candidates: Sequence[EditProposal],
     time_fraction: float,
+    feature_profile: str = "typed_closure_full_v2",
 ) -> np.ndarray:
     family_names = _family_names(graph)
     family_to_id = {name: index for index, name in enumerate(family_names)}
@@ -634,6 +782,7 @@ def mixed_edit_candidate_matrix(
         for family in family_names
     }
     degree_scale = max(float(np.log1p(graph.num_nodes)), 1.0)
+    common_scale = max(float(np.sqrt(graph.num_nodes)), 1.0)
     state = mixed_edit_state_vector(graph, time_fraction)
     rows = []
     for proposal in candidates:
@@ -644,10 +793,14 @@ def mixed_edit_candidate_matrix(
             family[family_to_id[proposal.family]] = 1.0
         endpoint = []
         common = []
-        for edge in _edge_slots(proposal):
+        endpoint_roles = []
+        typed_common = []
+        for slot, edge in enumerate(_edge_slots(proposal)):
             if edge is None:
                 endpoint.extend((0.0, 0.0, 0.0, 0.0))
                 common.append(0.0)
+                endpoint_roles.extend((0.0,) * (2 * len(family_names)))
+                typed_common.extend((0.0,) * len(graph.type_names))
                 continue
             u, v = int(edge[0]), int(edge[1])
             endpoint.extend(
@@ -658,10 +811,36 @@ def mixed_edit_candidate_matrix(
                     np.log1p(family_degrees[proposal.family][v]) / degree_scale,
                 )
             )
-            common.append(
-                len(graph.adjacency[u] & graph.adjacency[v])
-                / max(float(np.sqrt(graph.num_nodes)), 1.0)
+            typed_counts = (
+                _typed_common_neighbor_counts(graph, edge)
+                if slot < 2
+                else _typed_common_neighbor_counts_after_edit(graph, edge, proposal)
             )
+            common.append(float(typed_counts.sum()) / common_scale)
+            endpoint_roles.extend(
+                np.log1p(
+                    np.asarray(
+                        [family_degrees[name][u] for name in family_names]
+                        + [family_degrees[name][v] for name in family_names],
+                        dtype=np.float64,
+                    )
+                )
+                / degree_scale
+            )
+            typed_common.extend(typed_counts / common_scale)
+        closure_delta = typed_closure_delta(graph, proposal) / common_scale
+        closure_features = np.concatenate(
+            (
+                closure_delta,
+                np.asarray(
+                    [
+                        closure_delta.sum(),
+                        degree_normalized_closure_delta(graph, proposal),
+                    ],
+                    dtype=np.float64,
+                ),
+            )
+        )
         scalar = np.asarray(
             [
                 float(time_fraction),
@@ -674,12 +853,50 @@ def mixed_edit_candidate_matrix(
             ],
             dtype=np.float64,
         )
+        full = np.concatenate(
+            (action, family, endpoint, np.asarray(common), scalar, state)
+            + (np.asarray(endpoint_roles), np.asarray(typed_common), closure_features)
+        )
         rows.append(
-            np.concatenate(
-                (action, family, endpoint, np.asarray(common), scalar, state)
+            _select_mixed_edit_feature_profile(
+                full,
+                feature_profile,
+                family_count=len(family_names),
+                type_count=len(graph.type_names),
             )
         )
     return np.asarray(rows, dtype=np.float32)
+
+
+def align_mixed_edit_features_for_model(
+    matrix: np.ndarray,
+    model: SwitchDenoiserMLP,
+    family_count: int,
+) -> np.ndarray:
+    """Load pre-state-summary MLP checkpoints without hiding other mismatches."""
+
+    expected = int(model.input_dim)
+    if matrix.shape[-1] == expected:
+        return matrix
+    local_width = _mixed_edit_local_width(family_count)
+    if expected == local_width and matrix.shape[-1] > local_width:
+        return matrix[..., :local_width]
+    # State-summary checkpoints predate typed closure and endpoint-role
+    # features, but are otherwise semantically compatible.
+    type_count = (matrix.shape[-1] - local_width - 5 - 13 * int(family_count)) // 9
+    state_width = 3 + 4 * int(type_count) + 5 * int(family_count)
+    if type_count >= 1 and expected == local_width + state_width:
+        return matrix[..., :expected]
+    compact_width = int(type_count) + 2
+    if type_count >= 1 and expected == local_width + compact_width:
+        return np.concatenate(
+            (matrix[..., :local_width], matrix[..., -compact_width:]), axis=-1
+        )
+    raise ValueError(
+        f"mixed edit feature width {matrix.shape[-1]} is incompatible with "
+        f"checkpoint width {expected}; only known legacy local/state feature "
+        "checkpoints are supported"
+    )
 
 
 def build_mixed_edit_diffusion_dataset(
@@ -691,6 +908,7 @@ def build_mixed_edit_diffusion_dataset(
     seed: int,
     schedule: Optional[MixedKernelSchedule] = None,
     actions: Sequence[str] = EDIT_ACTIONS,
+    feature_profile: str = "typed_closure_full_v2",
 ) -> SwitchDiffusionDataset:
     if int(trajectories) < 2:
         raise ValueError("mixed edit training needs at least two trajectories")
@@ -699,6 +917,7 @@ def build_mixed_edit_diffusion_dataset(
     prior = MarginalGraphPrior.from_training_graph(source)
     schedule = schedule or MixedKernelSchedule()
     examples = []
+    candidate_improvements = []
     targets = []
     trajectory_ids = []
     for trajectory_id in range(int(trajectories)):
@@ -726,19 +945,34 @@ def build_mixed_edit_diffusion_dataset(
                 positive=positive,
             )
             examples.append(
-                mixed_edit_candidate_matrix(
-                    graph, candidates, float(step) / float(forward_steps)
+                np.asarray(
+                    mixed_edit_candidate_matrix(
+                        graph,
+                        candidates,
+                        float(step) / float(forward_steps),
+                        feature_profile=feature_profile,
+                    ),
+                    dtype=np.float32,
                 )
+            )
+            improvements = np.asarray(
+                [
+                    edit_distance_improvement(graph, source, candidate)
+                    for candidate in candidates
+                ],
+                dtype=np.float32,
             )
             targets.append(target)
             trajectory_ids.append(trajectory_id)
+            # Keep all reconstruction-improving switches as valid soft
+            # supervision, not only the single sampled inverse transition.
+            candidate_improvements.append(improvements)
             recorded += 1
         if recorded == 0:
             raise RuntimeError(f"trajectory {trajectory_id} produced no examples")
-    shape = (len(examples), int(candidates_per_example))
     return SwitchDiffusionDataset(
         candidate_features=np.stack(examples),
-        candidate_improvements=np.zeros(shape, dtype=np.float32),
+        candidate_improvements=np.stack(candidate_improvements),
         targets=np.asarray(targets, dtype=np.int64),
         trajectory_ids=np.asarray(trajectory_ids, dtype=np.int64),
     )
@@ -754,8 +988,21 @@ def sample_mixed_edit_diffusion(
     temperature: float = 0.0,
     metrics_every: int = 100,
     actions: Sequence[str] = EDIT_ACTIONS,
+    initial_graph: Optional[TypedGraph] = None,
+    fixed_time_fraction: Optional[float] = None,
 ) -> MixedEditSamplingResult:
-    graph = prior.sample(seed=int(seed) + 71)
+    graph = (
+        prior.sample(seed=int(seed) + 71)
+        if initial_graph is None
+        else initial_graph.clone()
+    )
+    prior_type_names = (
+        prior.marginal.type_names if hasattr(prior, "marginal") else prior.type_names
+    )
+    if tuple(graph.type_names) != tuple(prior_type_names):
+        raise ValueError("initial graph and sampling prior schemas disagree")
+    if fixed_time_fraction is not None and not 0.0 <= float(fixed_time_fraction) <= 1.0:
+        raise ValueError("fixed time fraction must be in [0, 1]")
     rng = np.random.default_rng(int(seed))
     device = torch.device(device)
     generator = torch.Generator(device=device).manual_seed(int(seed))
@@ -766,12 +1013,19 @@ def sample_mixed_edit_diffusion(
     proposed = 0
     applied = 0
     for reverse_step in range(int(steps), 0, -1):
-        time_fraction = float(reverse_step) / float(steps)
+        time_fraction = (
+            float(reverse_step) / float(steps)
+            if fixed_time_fraction is None
+            else float(fixed_time_fraction)
+        )
         candidates, _ = sample_edit_candidates(
             graph, rng, candidates_per_step, actions=actions
         )
         proposed += len(candidates)
         matrix = mixed_edit_candidate_matrix(graph, candidates, time_fraction)
+        matrix = align_mixed_edit_features_for_model(
+            matrix, model, family_count=len(graph.family_specs)
+        )
         with torch.no_grad():
             logits = model(torch.from_numpy(matrix)[None].to(device)).squeeze(0)
         if float(temperature) <= 0.0:
@@ -857,6 +1111,9 @@ def evaluate_fixed_t_denoising(
                 positive=positive,
             )
             matrix = mixed_edit_candidate_matrix(graph, candidates, fraction)
+            matrix = align_mixed_edit_features_for_model(
+                matrix, model, family_count=len(graph.family_specs)
+            )
             with torch.no_grad():
                 logits = model(torch.from_numpy(matrix)[None].to(device)).squeeze(0)
             order = torch.argsort(logits, descending=True)
@@ -948,6 +1205,8 @@ def save_mixed_edit_checkpoint(
     dropout: float,
     report: SwitchDiffusionTrainReport,
     actions: Sequence[str] = EDIT_ACTIONS,
+    feature_version: str = MIXED_EDIT_FEATURE_VERSION,
+    feature_profile: str = "typed_closure_full_v2",
 ) -> None:
     payload = {
         "format": "dihug-mixed-edit-diffusion-v1",
@@ -959,6 +1218,8 @@ def save_mixed_edit_checkpoint(
         "state_dict": model.state_dict(),
         "train_report": report.to_json_dict(),
         "actions": list(actions),
+        "feature_version": str(feature_version),
+        "feature_profile": str(feature_profile),
         "inference_contract": prior.to_json_dict()["inference_contract"],
     }
     path = Path(path)
@@ -984,5 +1245,7 @@ def load_mixed_edit_checkpoint(
     metadata = {
         "train_report": payload.get("train_report", {}),
         "actions": tuple(payload.get("actions", EDIT_ACTIONS)),
+        "feature_version": str(payload.get("feature_version", "legacy_local_v1")),
+        "feature_profile": str(payload.get("feature_profile", "legacy_local_v1")),
     }
     return model, prior, metadata

@@ -25,7 +25,11 @@ from sparse_diffusion.structure_energy.fit import (
     fit_moment_matching_energy,
     fit_pairwise_nce,
 )
-from sparse_diffusion.structure_energy.graph import FamilySpec, TypedGraph
+from sparse_diffusion.structure_energy.graph import (
+    FamilySpec,
+    TypedGraph,
+    uniform_edge_view,
+)
 from sparse_diffusion.structure_energy.roles import (
     permuted_witness,
     realize_role_plan,
@@ -529,7 +533,7 @@ def test_edit_distance_oracle_uses_marginal_prior_and_improves_coverage():
     result.graph.validate()
 
 
-def test_mixed_edit_dataset_contains_known_inverse_without_target_metrics():
+def test_mixed_edit_dataset_contains_known_inverse_and_training_only_x0_utility():
     source = _toy_graph()
     dataset = build_mixed_edit_diffusion_dataset(
         source,
@@ -542,7 +546,8 @@ def test_mixed_edit_dataset_contains_known_inverse_without_target_metrics():
     assert dataset.candidate_features.ndim == 3
     assert dataset.candidate_features.shape[1] == 8
     assert np.isfinite(dataset.candidate_features).all()
-    assert np.all(dataset.candidate_improvements == 0.0)
+    assert np.isfinite(dataset.candidate_improvements).all()
+    assert np.any(dataset.candidate_improvements != 0.0)
     assert np.all(dataset.targets >= 0)
     assert np.all(dataset.targets < 8)
 
@@ -1387,6 +1392,199 @@ def test_hgt_free_x0_supervision_uses_non_injected_candidate_utilities():
         dataset.targets, dataset.candidate_improvements.argmax(axis=1)
     )
     assert np.isfinite(dataset.candidate_improvements).all()
+
+
+def test_exchangeable_role_prior_samples_random_counts_without_node_role_rows():
+    import json
+
+    from sparse_diffusion.structure_energy.exchangeable_role_prior import (
+        ExchangeableJointRolePrior,
+    )
+
+    source = _toy_graph()
+    prior = ExchangeableJointRolePrior.from_training_graph(
+        source, components=2, seed=17, randomization_steps_per_edge=1.0
+    )
+    payload = prior.to_json_dict()
+    generated = prior.sample(seed=18)
+
+    assert payload["inference_contract"]["stores_training_adjacency"] is False
+    assert payload["inference_contract"]["stores_per_node_role_rows"] is False
+    assert '"edges"' not in json.dumps(payload)
+    assert generated.type_names == source.type_names
+    generated.validate()
+
+
+def test_legacy_mixed_edit_checkpoint_only_drops_known_trailing_state_summary():
+    from sparse_diffusion.structure_energy.mixed_edit_diffusion import (
+        align_mixed_edit_features_for_model,
+        mixed_edit_candidate_matrix,
+        mixed_edit_feature_width,
+        sample_edit_candidates,
+    )
+
+    graph = _toy_graph()
+    candidates, _ = sample_edit_candidates(graph, np.random.default_rng(19), 4)
+    matrix = mixed_edit_candidate_matrix(graph, candidates, 0.5)
+    local_width = 5 + len(graph.family_specs) + 16 + 4 + 4
+    legacy = SwitchDenoiserMLP(input_dim=local_width, hidden_dim=8, layers=1)
+    aligned = align_mixed_edit_features_for_model(
+        matrix, legacy, family_count=len(graph.family_specs)
+    )
+
+    assert aligned.shape == (4, local_width)
+    np.testing.assert_array_equal(aligned, matrix[:, :local_width])
+
+    compact_width = mixed_edit_feature_width(
+        "typed_closure_compact_v2",
+        family_count=len(graph.family_specs),
+        type_count=len(graph.type_names),
+    )
+    compact = SwitchDenoiserMLP(input_dim=compact_width, hidden_dim=8, layers=1)
+    compact_aligned = align_mixed_edit_features_for_model(
+        matrix, compact, family_count=len(graph.family_specs)
+    )
+    assert compact_aligned.shape == (4, compact_width)
+    np.testing.assert_array_equal(compact_aligned[:, :local_width], matrix[:, :local_width])
+    np.testing.assert_array_equal(
+        compact_aligned[:, local_width:], matrix[:, -(len(graph.type_names) + 2) :]
+    )
+
+
+def test_low_noise_switch_continuation_preserves_initial_role_plan():
+    from sparse_diffusion.structure_energy.mixed_edit_diffusion import (
+        mixed_edit_feature_width,
+        sample_mixed_edit_diffusion,
+    )
+
+    initial = _toy_graph()
+    before = initial.to_json_dict()
+    prior = MarginalGraphPrior.from_training_graph(initial)
+    model = SwitchDenoiserMLP(
+        input_dim=mixed_edit_feature_width(
+            "typed_closure_full_v2",
+            family_count=len(initial.family_specs),
+            type_count=len(initial.type_names),
+        ),
+        hidden_dim=8,
+        layers=1,
+        dropout=0.0,
+    )
+    result = sample_mixed_edit_diffusion(
+        prior,
+        model,
+        steps=4,
+        candidates_per_step=4,
+        seed=191,
+        device="cpu",
+        actions=("switch",),
+        initial_graph=initial,
+        fixed_time_fraction=0.0,
+        metrics_every=1,
+    )
+
+    assert initial.to_json_dict() == before
+    for family in initial.family_specs:
+        np.testing.assert_array_equal(
+            result.graph.family_degrees(family), initial.family_degrees(family)
+        )
+    assert result.trace[0]["edges"] == result.trace[-1]["edges"]
+
+
+def test_systematic_role_sampling_is_unbiased_and_variance_reduced():
+    from sparse_diffusion.structure_energy.exchangeable_role_prior import (
+        TypeRoleMixture,
+        _sample_type_propensities,
+    )
+
+    mixture = TypeRoleMixture(
+        family_names=("f",),
+        weights=np.asarray([0.5, 0.25, 0.25]),
+        means=np.log1p(np.asarray([[0.0], [2.0], [7.0]])),
+        covariances=np.zeros((3, 1, 1)),
+        discrete=True,
+    )
+    for seed in range(8):
+        sampled = _sample_type_propensities(
+            mixture, 4, np.random.default_rng(seed), sampling="systematic"
+        )
+        np.testing.assert_allclose(
+            np.sort(sampled[:, 0]), np.asarray([0.0, 0.0, 2.0, 7.0])
+        )
+
+
+def test_unbounded_categorical_role_codebook_keeps_all_anonymous_roles():
+    from sparse_diffusion.structure_energy.exchangeable_role_prior import (
+        _fit_categorical_role_codebook,
+    )
+
+    rows = np.asarray([[0, 0], [1, 0], [2, 1], [3, 1], [3, 1]])
+    full = _fit_categorical_role_codebook(rows, ("f0", "f1"), max_prototypes=0)
+    capped = _fit_categorical_role_codebook(rows, ("f0", "f1"), max_prototypes=2)
+
+    assert len(full.weights) == 4
+    assert len(capped.weights) == 2
+    np.testing.assert_allclose(full.weights.sum(), 1.0)
+
+
+def test_typed_closure_delta_matches_exact_triangle_change():
+    from sparse_diffusion.structure_energy.mixed_edit_diffusion import (
+        apply_edit,
+        degree_normalized_closure_delta,
+        sample_valid_edit,
+        typed_closure_delta,
+    )
+
+    graph = _toy_graph()
+    rng = np.random.default_rng(193)
+    for _ in range(32):
+        proposal = sample_valid_edit(graph, rng, actions=("switch",))
+        assert proposal is not None
+        before = graph_metrics(graph)["triangles"]
+        clustering_before = graph_metrics(graph)["clustering"]
+        delta = typed_closure_delta(graph, proposal)
+        clustering_delta = degree_normalized_closure_delta(graph, proposal)
+        apply_edit(graph, proposal)
+        after = graph_metrics(graph)["triangles"]
+        clustering_after = graph_metrics(graph)["clustering"]
+        assert float(delta.sum()) == after - before
+        np.testing.assert_allclose(
+            clustering_delta,
+            (clustering_after - clustering_before) * graph.num_nodes,
+            atol=1.0e-10,
+        )
+        assert delta.shape == (len(graph.type_names),)
+
+
+def test_uniform_edge_view_is_exact_reproducible_and_schema_preserving():
+    graph = _toy_graph()
+    first = uniform_edge_view(graph, edge_count=3, seed=17)
+    second = uniform_edge_view(graph, edge_count=3, seed=17)
+
+    assert first.num_edges == 3
+    assert first.to_json_dict() == second.to_json_dict()
+    assert first.type_names == graph.type_names
+    assert first.node_types.tolist() == graph.node_types.tolist()
+    assert set(first.edge_family).issubset(set(graph.edge_family))
+    assert graph.num_edges > first.num_edges
+
+
+def test_mixed_edit_dataset_supervises_all_clean_reconstruction_improvements():
+    from sparse_diffusion.structure_energy.mixed_edit_diffusion import (
+        build_mixed_edit_diffusion_dataset,
+    )
+
+    dataset = build_mixed_edit_diffusion_dataset(
+        _toy_graph(),
+        trajectories=2,
+        forward_steps=8,
+        record_every=2,
+        candidates_per_example=8,
+        seed=194,
+        actions=("switch",),
+    )
+    assert dataset.candidate_features.shape[:2] == (8, 8)
+    assert np.any(dataset.candidate_improvements != 0.0)
 
 
 def test_hgt_listwise_scores_are_equivariant_to_same_type_node_permutation():

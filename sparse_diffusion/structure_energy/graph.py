@@ -337,3 +337,40 @@ def load_typed_graph(dataset_dir: str | Path, active_only: bool = True) -> Typed
     )
     graph.validate()
     return graph
+
+
+def uniform_edge_view(graph: TypedGraph, edge_count: int, seed: int) -> TypedGraph:
+    """Return an exact-size uniform edge view while preserving the full schema.
+
+    The operation only observes ``graph`` itself.  It is useful for evaluating a
+    learned full-graph generator under an edge-held-out protocol: first sample a
+    full graph from the learned prior, then expose the requested number of its
+    edges without consulting the held-out target adjacency or target families.
+    """
+
+    edge_count = int(edge_count)
+    if edge_count < 0 or edge_count > graph.num_edges:
+        raise ValueError(
+            f"edge view size {edge_count} is outside [0, {graph.num_edges}]"
+        )
+    entries = [
+        (family, edge)
+        for family in sorted(graph.family_edges)
+        for edge in graph.family_edges[family]
+    ]
+    rng = np.random.default_rng(int(seed))
+    selected = set(
+        rng.choice(len(entries), size=edge_count, replace=False).astype(int).tolist()
+    )
+    family_edges = {family: [] for family in graph.family_specs}
+    for index, (family, edge) in enumerate(entries):
+        if index in selected:
+            family_edges[family].append(edge)
+    view = TypedGraph(
+        graph.node_types.copy(),
+        graph.type_names,
+        graph.family_specs,
+        family_edges,
+    )
+    view.validate()
+    return view

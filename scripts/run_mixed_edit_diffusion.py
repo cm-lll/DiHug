@@ -25,11 +25,13 @@ from sparse_diffusion.structure_energy.factorized_edit_denoiser import (
 )
 from sparse_diffusion.structure_energy.mixed_edit_diffusion import (
     EDIT_ACTIONS,
+    MIXED_EDIT_FEATURE_PROFILES,
     MarginalGraphPrior,
     build_mixed_edit_diffusion_dataset,
     edge_edit_distance,
     evaluate_fixed_t_denoising,
     load_mixed_edit_checkpoint,
+    mixed_edit_feature_width,
     run_edit_distance_oracle,
     sample_mixed_edit_diffusion,
     save_mixed_edit_checkpoint,
@@ -42,6 +44,7 @@ KERNELS = {
     "bd": ("birth", "death"),
     "bdr": ("birth", "death", "relocation"),
     "bdrs": EDIT_ACTIONS,
+    "switch": ("switch",),
 }
 
 
@@ -84,7 +87,25 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--metrics-every", type=int, default=1000)
     parser.add_argument("--fixed-t-trials", type=int, default=64)
+    parser.add_argument(
+        "--dataset-cache",
+        type=Path,
+        help="Optional shared NPZ cache for listwise candidate tensors.",
+    )
     parser.add_argument("--balanced-action-aux-weight", type=float, default=0.1)
+    parser.add_argument(
+        "--feature-profile",
+        choices=MIXED_EDIT_FEATURE_PROFILES,
+        default="typed_closure_full_v2",
+    )
+    parser.add_argument(
+        "--training-objective",
+        choices=("inverse_ce", "utility_kl", "hybrid"),
+        default="inverse_ce",
+    )
+    parser.add_argument("--inverse-loss-weight", type=float, default=1.0)
+    parser.add_argument("--utility-loss-weight", type=float, default=1.0)
+    parser.add_argument("--utility-temperature", type=float, default=1.0)
     return parser.parse_args()
 
 
@@ -142,7 +163,45 @@ def main() -> None:
     if args.mode == "train":
         source = load_typed_graph(args.dataset_dir, active_only=True)
         prior = MarginalGraphPrior.from_training_graph(source)
-        if args.denoiser == "factorized":
+        if args.dataset_cache is not None and args.denoiser != "listwise":
+            raise ValueError("--dataset-cache currently supports only listwise denoisers")
+        if args.dataset_cache is not None and args.dataset_cache.exists():
+            cached = np.load(args.dataset_cache)
+            from sparse_diffusion.structure_energy.switch_diffusion import (
+                SwitchDiffusionDataset,
+            )
+
+            dataset = SwitchDiffusionDataset(
+                candidate_features=cached["candidate_features"],
+                candidate_improvements=cached["candidate_improvements"],
+                targets=cached["targets"],
+                trajectory_ids=cached["trajectory_ids"],
+            )
+            expected_width = mixed_edit_feature_width(
+                args.feature_profile,
+                family_count=len(source.family_specs),
+                type_count=len(source.type_names),
+            )
+            if int(dataset.candidate_features.shape[-1]) != expected_width:
+                raise ValueError(
+                    f"cached feature width {dataset.candidate_features.shape[-1]} "
+                    f"does not match {args.feature_profile} width {expected_width}"
+                )
+            if "feature_profile" in cached.files:
+                cached_profile = str(cached["feature_profile"].item())
+                if cached_profile != args.feature_profile:
+                    raise ValueError(
+                        f"cached feature profile {cached_profile!r} does not match "
+                        f"requested profile {args.feature_profile!r}"
+                    )
+            if "kernel" in cached.files:
+                cached_kernel = str(cached["kernel"].item())
+                if cached_kernel != args.kernel:
+                    raise ValueError(
+                        f"cached kernel {cached_kernel!r} does not match requested "
+                        f"kernel {args.kernel!r}"
+                    )
+        elif args.denoiser == "factorized":
             dataset = build_factorized_edit_dataset(
                 source,
                 trajectories=args.trajectories,
@@ -161,14 +220,21 @@ def main() -> None:
                 candidates_per_example=args.train_candidates,
                 seed=args.seed,
                 actions=KERNELS[args.kernel],
+                feature_profile=args.feature_profile,
             )
+        dataset_path = args.output_dir / "mixed_edit_dataset.npz"
         np.savez_compressed(
-            args.output_dir / "mixed_edit_dataset.npz",
+            dataset_path,
             candidate_features=dataset.candidate_features,
             candidate_improvements=dataset.candidate_improvements,
             targets=dataset.targets,
             trajectory_ids=dataset.trajectory_ids,
+            feature_profile=np.asarray(args.feature_profile),
+            kernel=np.asarray(args.kernel),
         )
+        if args.dataset_cache is not None and not args.dataset_cache.exists():
+            args.dataset_cache.parent.mkdir(parents=True, exist_ok=True)
+            args.dataset_cache.write_bytes(dataset_path.read_bytes())
         if args.denoiser == "factorized":
             model, train_report = train_factorized_edit_denoiser(
                 dataset,
@@ -218,9 +284,10 @@ def main() -> None:
                 batch_size=args.batch_size,
                 learning_rate=args.learning_rate,
                 weight_decay=args.weight_decay,
-                training_objective="inverse_ce",
-                inverse_loss_weight=1.0,
-                utility_loss_weight=0.0,
+                training_objective=args.training_objective,
+                inverse_loss_weight=args.inverse_loss_weight,
+                utility_loss_weight=args.utility_loss_weight,
+                utility_temperature=args.utility_temperature,
                 device=args.device,
                 seed=args.seed,
             )
@@ -234,6 +301,7 @@ def main() -> None:
                 dropout=args.dropout,
                 report=train_report,
                 actions=KERNELS[args.kernel],
+                feature_profile=args.feature_profile,
             )
             fixed_t = evaluate_fixed_t_denoising(
                 source,
@@ -252,6 +320,8 @@ def main() -> None:
             {
                 "format": "dihug-mixed-edit-train-v1",
                 "denoiser": args.denoiser,
+                "training_objective": args.training_objective,
+                "feature_profile": args.feature_profile,
                 "train": serialized_train_report,
                 "fixed_t": fixed_t,
                 "prior": prior.to_json_dict(),
