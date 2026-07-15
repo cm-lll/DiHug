@@ -17,6 +17,7 @@ from sparse_diffusion.structure_energy.graph import load_typed_graph
 from sparse_diffusion.structure_energy.hgt_edit_denoiser import (
     build_hgt_edit_dataset,
     evaluate_hgt_fixed_t,
+    evaluate_paired_free_x0_fixed_t,
     load_hgt_edit_checkpoint,
     sample_hgt_listwise_edit_diffusion,
     save_hgt_edit_checkpoint,
@@ -56,6 +57,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--scorer-layers", type=int, default=2)
     parser.add_argument("--dropout", type=float, default=0.1)
     parser.add_argument("--fixed-t-trials", type=int, default=64)
+    parser.add_argument(
+        "--supervision",
+        choices=("exact_inverse", "free_x0"),
+        default="exact_inverse",
+    )
+    parser.add_argument("--teacher-temperature", type=float, default=1.0)
     parser.add_argument("--sample-steps", type=int, default=2000)
     parser.add_argument("--metrics-every", type=int, default=250)
     return parser.parse_args()
@@ -80,6 +87,7 @@ def main() -> None:
             candidates_per_example=args.candidates,
             seed=args.seed,
             actions=actions,
+            supervision=args.supervision,
         )
         hgt, hgt_report = train_hgt_listwise_edit_denoiser(
             dataset,
@@ -93,6 +101,10 @@ def main() -> None:
             hgt_layers=args.hgt_layers,
             scorer_layers=args.scorer_layers,
             dropout=args.dropout,
+            training_objective=(
+                "utility_kl" if args.supervision == "free_x0" else "inverse_ce"
+            ),
+            utility_temperature=args.teacher_temperature,
         )
         mlp, mlp_report = train_paired_mlp(
             dataset,
@@ -102,42 +114,68 @@ def main() -> None:
             epochs=args.epochs,
             batch_size=64,
             learning_rate=1.0e-3,
-            training_objective="inverse_ce",
+            training_objective=(
+                "utility_kl" if args.supervision == "free_x0" else "inverse_ce"
+            ),
             inverse_loss_weight=1.0,
-            utility_loss_weight=0.0,
+            utility_loss_weight=(1.0 if args.supervision == "free_x0" else 0.0),
+            utility_temperature=args.teacher_temperature,
             device=args.device,
             seed=args.seed,
         )
-        hgt_fixed_t = evaluate_hgt_fixed_t(
-            source,
-            hgt,
-            time_fractions=(0.1, 0.5, 0.9),
-            trials_per_time=args.fixed_t_trials,
-            forward_steps=args.forward_steps,
-            candidates_per_example=args.candidates,
-            seed=args.seed + 991,
-            actions=actions,
-            device=args.device,
-        )
-        mlp_fixed_t = evaluate_fixed_t_denoising(
-            source,
-            mlp,
-            time_fractions=(0.1, 0.5, 0.9),
-            trials_per_time=args.fixed_t_trials,
-            forward_steps=args.forward_steps,
-            candidates_per_example=args.candidates,
-            seed=args.seed + 991,
-            actions=actions,
-            device=args.device,
-        )
+        if args.supervision == "free_x0":
+            paired_fixed_t = evaluate_paired_free_x0_fixed_t(
+                source,
+                hgt,
+                mlp,
+                time_fractions=(0.1, 0.5, 0.9),
+                trials_per_time=args.fixed_t_trials,
+                forward_steps=args.forward_steps,
+                candidates_per_example=args.candidates,
+                seed=args.seed + 991,
+                actions=actions,
+                device=args.device,
+            )
+            hgt_fixed_t = {
+                key: value["hgt"] for key, value in paired_fixed_t.items()
+            }
+            mlp_fixed_t = {
+                key: value["mlp"] for key, value in paired_fixed_t.items()
+            }
+        else:
+            paired_fixed_t = None
+            hgt_fixed_t = evaluate_hgt_fixed_t(
+                source,
+                hgt,
+                time_fractions=(0.1, 0.5, 0.9),
+                trials_per_time=args.fixed_t_trials,
+                forward_steps=args.forward_steps,
+                candidates_per_example=args.candidates,
+                seed=args.seed + 991,
+                actions=actions,
+                device=args.device,
+            )
+            mlp_fixed_t = evaluate_fixed_t_denoising(
+                source,
+                mlp,
+                time_fractions=(0.1, 0.5, 0.9),
+                trials_per_time=args.fixed_t_trials,
+                forward_steps=args.forward_steps,
+                candidates_per_example=args.candidates,
+                seed=args.seed + 991,
+                actions=actions,
+                device=args.device,
+            )
         report = {
             "format": "dihug-hgt-listwise-paired-gate-v1",
             "candidate_count": args.candidates,
             "examples": int(dataset.targets.shape[0]),
             "same_states_and_candidates": True,
-            "supervision": "injected_exact_inverse_only",
+            "supervision": args.supervision,
+            "teacher_temperature": args.teacher_temperature,
             "hgt": {"train": dict(hgt_report), "fixed_t": hgt_fixed_t},
             "mlp": {"train": dict(mlp_report), "fixed_t": mlp_fixed_t},
+            "paired_free_fixed_t": paired_fixed_t,
             "inference_uses_clean_graph": False,
         }
         save_hgt_edit_checkpoint(

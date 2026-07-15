@@ -20,6 +20,7 @@ from .mixed_edit_diffusion import (
     _edge_slots,
     _family_names,
     apply_edit,
+    edit_distance_improvement,
     inverse_edit,
     mixed_edit_candidate_matrix,
     sample_edit_candidates,
@@ -33,6 +34,7 @@ from .switch_diffusion import SwitchDiffusionDataset, SwitchDenoiserMLP, train_s
 class HGTEditDataset:
     candidate_features: np.ndarray
     candidate_endpoints: np.ndarray
+    candidate_improvements: np.ndarray
     node_features: np.ndarray
     edge_indices: Tuple[np.ndarray, ...]
     edge_types: Tuple[np.ndarray, ...]
@@ -46,6 +48,8 @@ class HGTEditDataset:
         count, candidates, _ = self.candidate_features.shape
         if self.candidate_endpoints.shape != (count, candidates, 8):
             raise ValueError("candidate endpoints must have shape [N,C,8]")
+        if self.candidate_improvements.shape != (count, candidates):
+            raise ValueError("candidate improvements must have shape [N,C]")
         if self.node_features.shape[:2] != (count, self.node_types.shape[0]):
             raise ValueError("node feature snapshots have incompatible shape")
         if len(self.edge_indices) != count or len(self.edge_types) != count:
@@ -57,7 +61,7 @@ class HGTEditDataset:
         shape = self.candidate_features.shape[:2]
         return SwitchDiffusionDataset(
             candidate_features=self.candidate_features,
-            candidate_improvements=np.zeros(shape, dtype=np.float32),
+            candidate_improvements=self.candidate_improvements,
             targets=self.targets,
             trajectory_ids=self.trajectory_ids,
         )
@@ -117,13 +121,18 @@ def build_hgt_edit_dataset(
     seed: int,
     schedule: Optional[MixedKernelSchedule] = None,
     actions: Sequence[str] = EDIT_ACTIONS,
+    supervision: str = "exact_inverse",
 ) -> HGTEditDataset:
     if int(trajectories) < 2:
         raise ValueError("HGT edit training needs at least two trajectories")
     prior = MarginalGraphPrior.from_training_graph(source)
     schedule = schedule or MixedKernelSchedule()
+    supervision = str(supervision).strip().lower()
+    if supervision not in {"exact_inverse", "free_x0"}:
+        raise ValueError("HGT edit supervision must be exact_inverse or free_x0")
     candidate_features = []
     candidate_endpoints = []
+    candidate_improvements = []
     node_features = []
     edge_indices = []
     edge_types = []
@@ -145,18 +154,30 @@ def build_hgt_edit_dataset(
             if step % int(record_every) != 0:
                 continue
             fraction = float(step) / float(forward_steps)
-            candidates, target = sample_edit_candidates(
-                graph,
-                rng,
-                candidates_per_example,
-                actions=actions,
-                positive=inverse_edit(proposal),
-            )
+            if supervision == "exact_inverse":
+                candidates, target = sample_edit_candidates(
+                    graph,
+                    rng,
+                    candidates_per_example,
+                    actions=actions,
+                    positive=inverse_edit(proposal),
+                )
+                improvements = np.zeros(len(candidates), dtype=np.float32)
+            else:
+                candidates, _ = sample_edit_candidates(
+                    graph, rng, candidates_per_example, actions=actions
+                )
+                improvements = np.asarray(
+                    [edit_distance_improvement(graph, source, item) for item in candidates],
+                    dtype=np.float32,
+                )
+                target = int(improvements.argmax())
             edges, relations = graph_edge_tensors(graph)
             candidate_features.append(
                 mixed_edit_candidate_matrix(graph, candidates, fraction)
             )
             candidate_endpoints.append(candidate_endpoint_matrix(candidates))
+            candidate_improvements.append(improvements)
             node_features.append(graph_node_features(graph, fraction))
             edge_indices.append(edges)
             edge_types.append(relations)
@@ -165,6 +186,7 @@ def build_hgt_edit_dataset(
     return HGTEditDataset(
         candidate_features=np.stack(candidate_features).astype(np.float32),
         candidate_endpoints=np.stack(candidate_endpoints),
+        candidate_improvements=np.stack(candidate_improvements),
         node_features=np.stack(node_features).astype(np.float32),
         edge_indices=tuple(edge_indices),
         edge_types=tuple(edge_types),
@@ -314,6 +336,8 @@ def train_hgt_listwise_edit_denoiser(
     weight_decay: float = 1.0e-4,
     device: str | torch.device = "cuda",
     seed: int = 0,
+    training_objective: str = "inverse_ce",
+    utility_temperature: float = 1.0,
     **model_kwargs,
 ) -> tuple[HGTListwiseEditDenoiser, Mapping[str, float]]:
     torch.manual_seed(int(seed))
@@ -330,6 +354,9 @@ def train_hgt_listwise_edit_denoiser(
         **model_kwargs,
     ).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+    training_objective = str(training_objective).strip().lower()
+    if training_objective not in {"inverse_ce", "utility_kl"}:
+        raise ValueError("HGT listwise objective must be inverse_ce or utility_kl")
     final_loss = float("nan")
     for epoch in range(int(epochs)):
         model.train()
@@ -339,7 +366,16 @@ def train_hgt_listwise_edit_denoiser(
             batch = _make_batch(dataset, shuffled[start : start + int(batch_size)], device)
             optimizer.zero_grad(set_to_none=True)
             logits = model(*batch[:-1])
-            loss = nn.functional.cross_entropy(logits, batch[-1])
+            if training_objective == "inverse_ce":
+                loss = nn.functional.cross_entropy(logits, batch[-1])
+            else:
+                improvements = torch.from_numpy(
+                    dataset.candidate_improvements[
+                        shuffled[start : start + int(batch_size)]
+                    ]
+                ).float().to(device)
+                teacher = torch.softmax(improvements / float(utility_temperature), dim=1)
+                loss = -(teacher * torch.log_softmax(logits, dim=1)).sum(dim=1).mean()
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), 5.0)
             optimizer.step()
@@ -357,11 +393,30 @@ def train_hgt_listwise_edit_denoiser(
     logits = torch.cat(all_logits)
     targets = torch.cat(all_targets)
     metrics = dict(_ranking_metrics(logits, targets))
+    validation_improvements = torch.from_numpy(
+        dataset.candidate_improvements[validation_indices]
+    ).float().to(device)
+    selected = logits.argmax(dim=1)
+    rows = torch.arange(logits.size(0), device=device)
     metrics.update(
         train_loss=final_loss,
         train_examples=float(len(train_indices)),
         validation_examples=float(len(validation_indices)),
         validation_cross_entropy=float(nn.functional.cross_entropy(logits, targets).cpu()),
+        validation_selected_utility=float(
+            validation_improvements[rows, selected].mean().cpu()
+        ),
+        validation_oracle_utility=float(
+            validation_improvements.max(dim=1).values.mean().cpu()
+        ),
+        validation_utility_regret=float(
+            (
+                validation_improvements.max(dim=1).values
+                - validation_improvements[rows, selected]
+            ).mean().cpu()
+        ),
+        training_objective=training_objective,
+        utility_temperature=float(utility_temperature),
     )
     return model, metrics
 
@@ -435,6 +490,84 @@ def evaluate_hgt_fixed_t(
             "action_top1": action_correct / float(trials_per_time),
             "margin": float(np.mean(margins)),
         }
+    return report
+
+
+def evaluate_paired_free_x0_fixed_t(
+    source: TypedGraph,
+    hgt_model: HGTListwiseEditDenoiser,
+    mlp_model: SwitchDenoiserMLP,
+    time_fractions: Sequence[float],
+    trials_per_time: int,
+    forward_steps: int,
+    candidates_per_example: int,
+    seed: int,
+    actions: Sequence[str] = EDIT_ACTIONS,
+    device: str | torch.device = "cuda",
+) -> Mapping[str, Mapping[str, Mapping[str, float]]]:
+    """Evaluate both scorers on identical non-injected inference candidates."""
+
+    prior = MarginalGraphPrior.from_training_graph(source)
+    schedule = MixedKernelSchedule()
+    device = torch.device(device)
+    hgt_model = hgt_model.to(device).eval()
+    mlp_model = mlp_model.to(device).eval()
+    report = {}
+    for time_index, fraction in enumerate(time_fractions):
+        stats = {
+            "hgt": {"top1": 0, "top5": 0, "selected_improvement": []},
+            "mlp": {"top1": 0, "top5": 0, "selected_improvement": []},
+        }
+        improving_coverage = 0
+        for trial in range(int(trials_per_time)):
+            rng = np.random.default_rng(
+                int(seed) + 10_000_019 * time_index + 1_000_003 * trial
+            )
+            graph = source.clone()
+            steps = max(1, int(round(float(fraction) * forward_steps)))
+            for step in range(1, steps + 1):
+                proposal = sample_mixed_forward_transition(
+                    graph, prior, rng, step / forward_steps, schedule, actions=actions
+                )
+                apply_edit(graph, proposal)
+            candidates, _ = sample_edit_candidates(
+                graph, rng, candidates_per_example, actions=actions
+            )
+            improvements = np.asarray(
+                [edit_distance_improvement(graph, source, item) for item in candidates],
+                dtype=np.float32,
+            )
+            target = int(improvements.argmax())
+            improving_coverage += int(improvements[target] > 0)
+            matrix = mixed_edit_candidate_matrix(graph, candidates, float(fraction))
+            with torch.no_grad():
+                hgt_logits = score_graph_candidates(
+                    hgt_model, graph, candidates, float(fraction), device
+                )
+                mlp_logits = mlp_model(
+                    torch.from_numpy(matrix)[None].float().to(device)
+                ).squeeze(0)
+            for name, logits in (("hgt", hgt_logits), ("mlp", mlp_logits)):
+                order = logits.argsort(descending=True)
+                selected = int(order[0])
+                stats[name]["top1"] += int(selected == target)
+                stats[name]["top5"] += int(
+                    target in order[: min(5, len(candidates))].tolist()
+                )
+                stats[name]["selected_improvement"].append(float(improvements[selected]))
+        row = {
+            "trials": float(trials_per_time),
+            "improving_candidate_rate": improving_coverage / float(trials_per_time),
+        }
+        for name in ("hgt", "mlp"):
+            row[name] = {
+                "top1": stats[name]["top1"] / float(trials_per_time),
+                "top5": stats[name]["top5"] / float(trials_per_time),
+                "selected_improvement": float(
+                    np.mean(stats[name]["selected_improvement"])
+                ),
+            }
+        report[f"{float(fraction):.3f}"] = row
     return report
 
 

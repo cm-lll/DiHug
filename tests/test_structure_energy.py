@@ -1367,6 +1367,28 @@ def test_hgt_edit_dataset_keeps_graph_state_and_candidate_endpoints_aligned():
     assert np.all((dataset.candidate_endpoints == -1) | (dataset.candidate_endpoints < 10))
 
 
+def test_hgt_free_x0_supervision_uses_non_injected_candidate_utilities():
+    from sparse_diffusion.structure_energy.hgt_edit_denoiser import (
+        build_hgt_edit_dataset,
+    )
+
+    dataset = build_hgt_edit_dataset(
+        _toy_graph(),
+        trajectories=2,
+        forward_steps=8,
+        record_every=2,
+        candidates_per_example=8,
+        seed=941,
+        supervision="free_x0",
+    )
+
+    assert dataset.candidate_improvements.shape == (8, 8)
+    np.testing.assert_array_equal(
+        dataset.targets, dataset.candidate_improvements.argmax(axis=1)
+    )
+    assert np.isfinite(dataset.candidate_improvements).all()
+
+
 def test_hgt_listwise_scores_are_equivariant_to_same_type_node_permutation():
     import torch
 
