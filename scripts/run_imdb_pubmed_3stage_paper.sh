@@ -14,10 +14,10 @@ export MKL_NUM_THREADS=2
 IMDB_STRUCTURE="results/imdb_standard_switch_diffusion_gpu7/structure_checkpoint.json"
 IMDB_MODEL="results/imdb_standard_switch_diffusion_gpu7/guided_train/switch_diffusion.pt"
 IMDB_DATASET="data/IMDB_movie_subgraphs/subgraph_000"
-STAGE_A_DIR="results/imdb_step_ablation_8gpu"
-STAGE_B_DIR="results/imdb_10graph_official"
-STAGE_C_DIR="results/pubmed_standard_diffusion"
-LOG_DIR="logs/imdb_pubmed_3stage"
+STAGE_A_DIR="${STAGE_A_DIR:-results/imdb_step_ablation_macro_v2_8gpu}"
+STAGE_B_DIR="${STAGE_B_DIR:-results/imdb_10graph_macro_v2}"
+STAGE_C_DIR="${STAGE_C_DIR:-results/pubmed_standard_diffusion_macro_v2}"
+LOG_DIR="${LOG_DIR:-logs/imdb_pubmed_3stage_macro_v2}"
 mkdir -p "$STAGE_A_DIR" "$STAGE_B_DIR" "$STAGE_C_DIR" "$LOG_DIR"
 
 # ═══════════════════════════════════════════════════════
@@ -25,22 +25,20 @@ mkdir -p "$STAGE_A_DIR" "$STAGE_B_DIR" "$STAGE_C_DIR" "$LOG_DIR"
 # ═══════════════════════════════════════════════════════
 run_stage_a() {
   echo "[STAGE-A] beginning diffusion-step ablation on 8 GPUs"
-  declare -A CONFIGS
-  CONFIGS=(
-    [0]="T=0,K=20000"
-    [1]="T=100,K=20000"
-    [2]="T=50,K=400"
-    [3]="T=100,K=200"
-    [4]="T=200,K=100"
-    [5]="T=500,K=40"
-    [6]="T=1000,K=20"
-    [7]="T=2000,K=10"
+  local configs=(
+    "10 2000"
+    "20 1000"
+    "50 400"
+    "100 200"
+    "200 100"
+    "500 40"
+    "1000 20"
+    "2000 10"
   )
 
   for gpu in 0 1 2 3 4 5 6 7; do
-    local spec="${CONFIGS[$gpu]}"
-    local T_val="${spec#T=}"; T_val="${T_val%,*}"
-    local K_val="${spec##*,K=}"
+    local T_val K_val
+    read -r T_val K_val <<< "${configs[$gpu]}"
     local name="ablation_T${T_val}_K${K_val}"
     echo "[STAGE-A] GPU=$gpu $name"
     CUDA_VISIBLE_DEVICES="$gpu" python scripts/run_switch_diffusion.py \
@@ -49,9 +47,10 @@ run_stage_a() {
       --output-dir "$STAGE_A_DIR/$name" \
       --seed 0 --device cuda \
       --test-only "$IMDB_MODEL" \
+      --diffusion-steps "$T_val" \
+      --switches-per-diffusion-step "$K_val" \
       --randomization-steps 20000 \
-      --sample-steps "$T_val" \
-      --sample-candidates "$K_val" \
+      --sample-candidates 64 \
       --sample-temperature 1.0 \
       --sampling-mode model \
       --switch-kernel tensor \
@@ -61,7 +60,7 @@ run_stage_a() {
   wait
 
   # Select best (T,K) by max(tri_err, clust_err)
-  python3 - "$STAGE_A_DIR" /data2/lyh/gnn_project/DiHug/imdb_step_ablation_8gpu <<'PY'
+  python3 - "$STAGE_A_DIR" <<'PY'
 import json, pathlib, sys
 root = pathlib.Path(sys.argv[1])
 best_score = float("inf")
@@ -77,6 +76,19 @@ for report_path in sorted(root.glob("ablation_T*/sampling_report.json")):
     score = max(tri_err, clust_err)
     T_val = name.split("_T")[1].split("_")[0]
     K_val = name.split("_K")[1]
+    config = payload["sampling_config"]
+    expected = {
+        "diffusion_steps": int(T_val),
+        "switches_per_diffusion_step": int(K_val),
+        "requested_steps": 20_000,
+        "candidates_per_step": 64,
+    }
+    actual = {key: int(config[key]) for key in expected}
+    if actual != expected:
+        raise RuntimeError(
+            f"macro diffusion contract failed for {name}: "
+            f"expected={expected} actual={actual}"
+        )
     print(f"{name}: T={T_val} K={K_val} tri={tri:.0f} clust={clust:.4f} tri_err={tri_err:.4f} clust_err={clust_err:.4f} score={score:.4f}")
     if score < best_score:
         best_score = score
@@ -109,9 +121,10 @@ run_stage_b() {
       --output-dir "$STAGE_B_DIR/seed${seed}" \
       --seed "$seed" --device cuda \
       --test-only "$IMDB_MODEL" \
+      --diffusion-steps "$best_T" \
+      --switches-per-diffusion-step "$best_K" \
       --randomization-steps 20000 \
-      --sample-steps "$best_T" \
-      --sample-candidates "$best_K" \
+      --sample-candidates 64 \
       --sample-temperature 1.0 \
       --sampling-mode model \
       --switch-kernel tensor \
@@ -130,9 +143,10 @@ run_stage_b() {
       --output-dir "$STAGE_B_DIR/seed${seed}" \
       --seed "$seed" --device cuda \
       --test-only "$IMDB_MODEL" \
+      --diffusion-steps "$best_T" \
+      --switches-per-diffusion-step "$best_K" \
       --randomization-steps 20000 \
-      --sample-steps "$best_T" \
-      --sample-candidates "$best_K" \
+      --sample-candidates 64 \
       --sample-temperature 1.0 \
       --sampling-mode model \
       --switch-kernel tensor \
@@ -142,12 +156,34 @@ run_stage_b() {
   wait
 
   # Aggregate 10-seed summary
-  python3 - "$STAGE_B_DIR" <<'PY'
+  python3 - "$STAGE_B_DIR" "$STAGE_A_DIR/best_config.txt" <<'PY'
 import json, pathlib, sys, statistics, math
 root = pathlib.Path(sys.argv[1])
+best = dict(
+    line.strip().split("=", 1)
+    for line in pathlib.Path(sys.argv[2]).read_text().splitlines()
+    if "=" in line
+)
+expected_config = {
+    "diffusion_steps": int(best["T"]),
+    "switches_per_diffusion_step": int(best["K"]),
+    "requested_steps": 20_000,
+    "candidates_per_step": 64,
+}
 triangles = []; clustering = []; transitivity = []; assort = []; lcc = []
 for report_path in sorted(root.glob("seed*/sampling_report.json")):
-    m = json.loads(report_path.read_text(encoding="utf-8"))["final_metrics"]
+    payload = json.loads(report_path.read_text(encoding="utf-8"))
+    config = payload["sampling_config"]
+    actual_config = {key: int(config[key]) for key in expected_config}
+    if actual_config != expected_config:
+        raise RuntimeError(
+            f"Stage B diffusion contract failed: {report_path}: "
+            f"expected={expected_config} actual={actual_config}"
+        )
+    contract = payload["inference_contract"]
+    if contract.get("clean_graphlet_target") or not contract.get("learned_graphlet_condition"):
+        raise RuntimeError(f"Stage B inference contract failed: {report_path}: {contract}")
+    m = payload["final_metrics"]
     triangles.append(m["triangles"])
     clustering.append(m["clustering"])
     transitivity.append(m["transitivity"])
@@ -157,7 +193,7 @@ def stats(vals, target):
     vals = [float(v) for v in vals]
     return {"mean": statistics.mean(vals), "std": statistics.stdev(vals) if len(vals)>1 else 0.0,
             "min": min(vals), "max": max(vals),
-            "rel_err": abs(statistics.mean(vals)-target)/target}
+            "rel_err": abs(statistics.mean(vals)-target)/max(abs(target), 1.0e-12)}
 report = {
     "triangles": stats(triangles, 655.0),
     "clustering": stats(clustering, 0.4689355333),
@@ -181,36 +217,41 @@ PY
 # ═══════════════════════════════════════════════════════
 run_stage_c() {
   local PUBMED_DATASET="data/PubMed_baseline_subgraphs/subgraph_000"
-  local PUBMED_CKPT="$STAGE_C_DIR/structure_checkpoint.json"
-  local PUBMED_NPZ="/tmp/pubmed_switch_dataset.npz"
+  local PUBMED_CKPT="${PUBMED_STRUCTURE_CKPT:-results/pubmed_switch_structure_seed0/structure_checkpoint.json}"
+  local PUBMED_NPZ="$STAGE_C_DIR/data_build/switch_dataset.npz"
+  local T_val=100 K_val=200
 
-  # Build canonical dataset once
-  echo "[STAGE-C] building canonical PubMed structure checkpoint"
-  python scripts/build_switch_structure_checkpoint.py \
-    --dataset-dir "$PUBMED_DATASET" \
-    --output "$PUBMED_CKPT" \
-    --seed 0 --null-chains 4 --null-steps 5000 --null-thin 500 \
-    --max-features 64 \
-    --feature-prefix triangle/ \
-    --feature-prefix root_triangle/ \
-    --feature-prefix root_triangle_total/ \
-    --reserve-prefix triangle/=-1 \
-    --reserve-prefix root_triangle_total/=-1 \
-    > "$LOG_DIR/stage_c_structure.log" 2>&1
+  if [[ ! -s "$PUBMED_CKPT" ]]; then
+    echo "[STAGE-C] building canonical PubMed structure checkpoint"
+    mkdir -p "$(dirname "$PUBMED_CKPT")"
+    python scripts/build_switch_structure_checkpoint.py \
+      --dataset-dir "$PUBMED_DATASET" \
+      --output "$PUBMED_CKPT" \
+      --seed 0 --null-chains 4 --null-steps 5000 --null-thin 500 \
+      --max-features 64 \
+      --feature-prefix triangle/ \
+      --feature-prefix root_triangle/ \
+      --feature-prefix root_triangle_total/ \
+      --reserve-prefix triangle/=-1 \
+      --reserve-prefix root_triangle_total/=-1 \
+      > "$LOG_DIR/stage_c_structure.log" 2>&1
+  fi
 
   # Build canonical switch dataset (single-process)
-  if [[ ! -f "$PUBMED_NPZ" ]]; then
+  if [[ ! -s "$PUBMED_NPZ" ]]; then
     echo "[STAGE-C] building canonical switch dataset (single-process)"
+    mkdir -p "$STAGE_C_DIR/data_build"
     python scripts/run_switch_diffusion.py \
       --dataset-dir "$PUBMED_DATASET" \
       --structure-checkpoint "$PUBMED_CKPT" \
       --output-dir "$STAGE_C_DIR/data_build" \
       --seed 0 --device cpu \
-      --trajectories 8 --forward-steps 2000 --record-every 10 \
-      --train-candidates 32 --epochs 1 --train-only \
+      --conditioning-mode state_only \
+      --diffusion-steps "$T_val" \
+      --switches-per-diffusion-step "$K_val" \
+      --trajectories 4 --record-every 50 \
+      --train-candidates 32 --build-dataset-only \
       > "$LOG_DIR/stage_c_data.log" 2>&1
-    # Copy npz to /tmp cache
-    cp "$STAGE_C_DIR/data_build/switch_dataset.npz" "$PUBMED_NPZ" 2>/dev/null || true
   fi
 
   # Train state_only + utility_kl + learned_condition
@@ -218,15 +259,19 @@ run_stage_c() {
   CUDA_VISIBLE_DEVICES=0 python scripts/run_switch_diffusion.py \
     --dataset-dir "$PUBMED_DATASET" \
     --structure-checkpoint "$PUBMED_CKPT" \
+    --dataset-cache "$PUBMED_NPZ" \
     --output-dir "$STAGE_C_DIR/train" \
     --seed 0 --device cuda \
-    --trajectories 8 --forward-steps 2000 --record-every 10 \
-    --train-candidates 32 --epochs 40 --batch-size 64 \
-    --hidden-dim 256 --layers 3 --dropout 0.1 \
+    --conditioning-mode state_only --training-objective utility_kl \
+    --utility-temperature 1 --learned-condition --learned-condition-ridge 1e-6 \
+    --diffusion-steps "$T_val" \
+    --switches-per-diffusion-step "$K_val" \
+    --epochs 1 --batch-size 64 \
+    --hidden-dim 256 --layers 3 --dropout 0 \
+    --train-only \
     > "$LOG_DIR/stage_c_train.log" 2>&1
 
   # Generate 10 graphs with T=100, K=200
-  local T_val=100 K_val=200
   echo "[STAGE-C] generating 10 PubMed graphs (T=$T_val, K=$K_val)"
 
   for seed in 0 1 2 3 4 5 6 7; do
@@ -235,8 +280,10 @@ run_stage_c() {
       --output-dir "$STAGE_C_DIR/seed${seed}" \
       --seed "$seed" --device cuda \
       --test-only "$STAGE_C_DIR/train/switch_diffusion.pt" \
-      --sample-steps "$T_val" \
-      --sample-candidates "$K_val" \
+      --diffusion-steps "$T_val" \
+      --switches-per-diffusion-step "$K_val" \
+      --randomization-steps 20000 \
+      --sample-candidates 64 \
       --sample-temperature 1.0 \
       --sampling-mode model \
       --switch-kernel tensor \
@@ -252,8 +299,10 @@ run_stage_c() {
       --output-dir "$STAGE_C_DIR/seed${seed}" \
       --seed "$seed" --device cuda \
       --test-only "$STAGE_C_DIR/train/switch_diffusion.pt" \
-      --sample-steps "$T_val" \
-      --sample-candidates "$K_val" \
+      --diffusion-steps "$T_val" \
+      --switches-per-diffusion-step "$K_val" \
+      --randomization-steps 20000 \
+      --sample-candidates 64 \
       --sample-temperature 1.0 \
       --sampling-mode model \
       --switch-kernel tensor \
@@ -270,7 +319,26 @@ tri_target = float(sys.argv[2])
 clust_target = float(sys.argv[3])
 triangles = []; clustering = []; transitivity = []; lcc = []
 for report_path in sorted(root.glob("seed*/sampling_report.json")):
-    m = json.loads(report_path.read_text(encoding="utf-8"))["final_metrics"]
+    payload = json.loads(report_path.read_text(encoding="utf-8"))
+    config = payload["sampling_config"]
+    expected = {
+        "diffusion_steps": 100,
+        "switches_per_diffusion_step": 200,
+        "requested_steps": 20_000,
+        "candidates_per_step": 64,
+    }
+    actual = {key: int(config[key]) for key in expected}
+    if actual != expected:
+        raise RuntimeError(
+            f"PubMed macro diffusion contract failed: {report_path}: "
+            f"expected={expected} actual={actual}"
+        )
+    contract = payload["inference_contract"]
+    if contract.get("clean_graphlet_target") or not contract.get("learned_graphlet_condition"):
+        raise RuntimeError(
+            f"PubMed inference contract failed: {report_path}: {contract}"
+        )
+    m = payload["final_metrics"]
     triangles.append(m["triangles"])
     clustering.append(m["clustering"])
     transitivity.append(m["transitivity"])
@@ -279,7 +347,7 @@ def stats(vals, target):
     vals = [float(v) for v in vals]
     return {"mean": statistics.mean(vals), "std": statistics.stdev(vals) if len(vals)>1 else 0.0,
             "min": min(vals), "max": max(vals),
-            "rel_err": abs(statistics.mean(vals)-target)/target}
+            "rel_err": abs(statistics.mean(vals)-target)/max(abs(target), 1.0e-12)}
 report = {
     "triangles": stats(triangles, tri_target),
     "clustering": stats(clustering, clust_target),
