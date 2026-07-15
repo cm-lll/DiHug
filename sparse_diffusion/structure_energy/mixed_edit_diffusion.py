@@ -488,34 +488,46 @@ def sample_valid_edit(
     graph: TypedGraph,
     rng: np.random.Generator,
     actions: Sequence[str] = EDIT_ACTIONS,
+    family: Optional[str] = None,
 ) -> Optional[EditProposal]:
     actions = tuple(str(action) for action in actions)
     unknown = set(actions) - set(EDIT_ACTIONS)
     if unknown:
         raise ValueError(f"unknown edit actions: {sorted(unknown)}")
+    if family is not None and str(family) not in graph.family_specs:
+        raise ValueError(f"unknown family {family!r}")
     for _ in range(max(64, 16 * len(actions))):
         action = str(rng.choice(actions))
-        family = str(rng.choice(_family_names(graph)))
-        edges = graph.family_edges[family]
+        selected_family = (
+            str(family)
+            if family is not None
+            else str(rng.choice(_family_names(graph)))
+        )
+        edges = graph.family_edges[selected_family]
         if action == "birth":
-            new_edge = _sample_absent_edge(graph, family, rng)
+            new_edge = _sample_absent_edge(graph, selected_family, rng)
             if new_edge is not None:
-                return EditProposal("birth", family, (), (new_edge,))
+                return EditProposal("birth", selected_family, (), (new_edge,))
         elif action == "death":
             if edges:
                 old_edge = edges[int(rng.integers(len(edges)))]
-                return EditProposal("death", family, (old_edge,), ())
+                return EditProposal("death", selected_family, (old_edge,), ())
         elif action == "relocation":
             if edges:
                 old_edge = edges[int(rng.integers(len(edges)))]
-                new_edge = _sample_absent_edge(graph, family, rng)
+                new_edge = _sample_absent_edge(graph, selected_family, rng)
                 if new_edge is not None:
-                    return EditProposal("relocation", family, (old_edge,), (new_edge,))
+                    return EditProposal(
+                        "relocation", selected_family, (old_edge,), (new_edge,)
+                    )
         else:
-            proposal = propose_switch(graph, family, rng)
+            proposal = propose_switch(graph, selected_family, rng)
             if proposal is not None:
                 return EditProposal(
-                    "switch", family, proposal.old_edges, proposal.new_edges
+                    "switch",
+                    selected_family,
+                    proposal.old_edges,
+                    proposal.new_edges,
                 )
     return None
 
@@ -568,6 +580,46 @@ def _edge_slots(proposal: EditProposal) -> Tuple[Optional[Edge], ...]:
     return old + new
 
 
+def mixed_edit_state_vector(graph: TypedGraph, time_fraction: float) -> np.ndarray:
+    """Target-free whole-graph summary shared by all edit candidates."""
+
+    degrees = graph.degrees().astype(np.float64)
+    log_scale = max(float(np.log1p(graph.num_nodes)), 1.0)
+    total_capacity = sum(family_domain_size(spec) for spec in graph.family_specs.values())
+    values = [
+        float(time_fraction),
+        float(graph.num_edges) / max(total_capacity, 1),
+        float(np.log1p(graph.num_edges)) / log_scale,
+    ]
+    for type_id in range(len(graph.type_names)):
+        selected = degrees[graph.node_types == type_id]
+        logged = np.log1p(selected) / log_scale
+        values.extend(
+            (
+                float(logged.mean()) if logged.size else 0.0,
+                float(logged.std()) if logged.size else 0.0,
+                float(logged.max()) if logged.size else 0.0,
+                float(np.mean(selected == 0)) if selected.size else 0.0,
+            )
+        )
+    for family in _family_names(graph):
+        spec = graph.family_specs[family]
+        family_degree = graph.family_degrees(family).astype(np.float64)
+        source = family_degree[np.asarray(spec.src_nodes, dtype=np.int64)]
+        target = family_degree[np.asarray(spec.dst_nodes, dtype=np.int64)]
+        capacity = family_domain_size(spec)
+        values.extend(
+            (
+                len(graph.family_edges[family]) / max(capacity, 1),
+                float(np.log1p(source).mean() / log_scale),
+                float(np.log1p(target).mean() / log_scale),
+                float(np.log1p(source.max(initial=0.0)) / log_scale),
+                float(np.log1p(target.max(initial=0.0)) / log_scale),
+            )
+        )
+    return np.asarray(values, dtype=np.float32)
+
+
 def mixed_edit_candidate_matrix(
     graph: TypedGraph,
     candidates: Sequence[EditProposal],
@@ -582,6 +634,7 @@ def mixed_edit_candidate_matrix(
         for family in family_names
     }
     degree_scale = max(float(np.log1p(graph.num_nodes)), 1.0)
+    state = mixed_edit_state_vector(graph, time_fraction)
     rows = []
     for proposal in candidates:
         action = np.zeros(len(SCORER_ACTIONS), dtype=np.float64)
@@ -622,7 +675,9 @@ def mixed_edit_candidate_matrix(
             dtype=np.float64,
         )
         rows.append(
-            np.concatenate((action, family, endpoint, np.asarray(common), scalar))
+            np.concatenate(
+                (action, family, endpoint, np.asarray(common), scalar, state)
+            )
         )
     return np.asarray(rows, dtype=np.float32)
 

@@ -54,6 +54,15 @@ from sparse_diffusion.structure_energy.mixed_edit_diffusion import (
     sample_mixed_forward_transition,
     sample_valid_edit,
 )
+from sparse_diffusion.structure_energy.factorized_edit_denoiser import (
+    FactorizedEditDenoiser,
+    build_factorized_edit_dataset,
+    load_factorized_edit_checkpoint,
+    sample_factorized_edit_candidates,
+    sample_factorized_edit_diffusion,
+    save_factorized_edit_checkpoint,
+    train_factorized_edit_denoiser,
+)
 from sparse_diffusion.structure_energy.switch_chain import (
     LinearGraphletEnergy,
     graph_metrics,
@@ -536,6 +545,90 @@ def test_mixed_edit_dataset_contains_known_inverse_without_target_metrics():
     assert np.all(dataset.candidate_improvements == 0.0)
     assert np.all(dataset.targets >= 0)
     assert np.all(dataset.targets < 8)
+
+
+def test_factorized_candidates_cover_positive_endpoint_group():
+    graph = _toy_graph()
+    rng = np.random.default_rng(909)
+    positive = sample_valid_edit(
+        graph, rng, actions=("relocation",), family="AB"
+    )
+    assert positive is not None
+    candidates, target = sample_factorized_edit_candidates(
+        graph,
+        rng,
+        count=16,
+        actions=("birth", "death", "relocation", "switch"),
+        positive=positive,
+    )
+    same_group = [
+        proposal
+        for proposal in candidates
+        if proposal.action == positive.action and proposal.family == positive.family
+    ]
+    assert candidates[target] == positive
+    assert len(same_group) >= 4
+    assert sum(proposal.action == "noop" for proposal in candidates) == 1
+
+
+def test_factorized_edit_denoiser_tiny_end_to_end_is_target_free():
+    source = _toy_graph()
+    dataset = build_factorized_edit_dataset(
+        source,
+        trajectories=3,
+        forward_steps=30,
+        record_every=3,
+        candidates_per_example=8,
+        seed=910,
+    )
+    model, report = train_factorized_edit_denoiser(
+        dataset,
+        type_count=len(source.type_names),
+        family_count=len(source.family_specs),
+        hidden_dim=16,
+        layers=1,
+        dropout=0.0,
+        epochs=2,
+        batch_size=4,
+        learning_rate=1.0e-2,
+        device="cpu",
+        seed=911,
+    )
+    assert isinstance(model, FactorizedEditDenoiser)
+    assert set(report["validation_action_recall"]) == {
+        "noop",
+        "birth",
+        "death",
+        "relocation",
+        "switch",
+    }
+    prior = MarginalGraphPrior.from_training_graph(source)
+    result = sample_factorized_edit_diffusion(
+        prior,
+        model,
+        steps=10,
+        candidates_per_step=8,
+        seed=912,
+        device="cpu",
+        metrics_every=5,
+    )
+    result.graph.validate()
+    with TemporaryDirectory() as directory:
+        checkpoint = Path(directory) / "factorized.pt"
+        save_factorized_edit_checkpoint(
+            checkpoint,
+            model,
+            prior,
+            hidden_dim=16,
+            layers=1,
+            dropout=0.0,
+            actions=("birth", "death", "relocation", "switch"),
+            report=report,
+        )
+        loaded, loaded_prior, metadata = load_factorized_edit_checkpoint(checkpoint)
+        assert isinstance(loaded, FactorizedEditDenoiser)
+        assert loaded_prior.to_json_dict() == prior.to_json_dict()
+        assert "training_adjacency" not in metadata
 
 
 def test_switch_diffusion_macro_schedule_has_exact_discrete_time_layers():

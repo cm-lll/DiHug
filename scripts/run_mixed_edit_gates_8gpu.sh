@@ -79,6 +79,7 @@ for gpu in 0 1 2 3 4 5 6 7; do
     CUDA_VISIBLE_DEVICES="$gpu" python scripts/run_mixed_edit_diffusion.py \
       --mode train --dataset-dir "$DATASET_DIR" \
       --output-dir "$OUT_ROOT/model/$name" \
+      --denoiser factorized \
       --kernel "$kernel" --seed "$seed" --device cuda \
       --trajectories 32 --forward-steps 2000 --record-every 20 \
       --train-candidates "$candidates" --epochs 100 --batch-size 64 \
@@ -86,7 +87,8 @@ for gpu in 0 1 2 3 4 5 6 7; do
       > "$LOG_ROOT/train_${name}.log" 2>&1
     CUDA_VISIBLE_DEVICES="$gpu" python scripts/run_mixed_edit_diffusion.py \
       --mode sample --output-dir "$OUT_ROOT/model/${name}_sample" \
-      --checkpoint "$OUT_ROOT/model/$name/mixed_edit_diffusion.pt" \
+      --denoiser factorized \
+      --checkpoint "$OUT_ROOT/model/$name/factorized_edit_diffusion.pt" \
       --kernel "$kernel" --seed "$seed" --device cuda \
       --sample-steps 20000 --sample-candidates 64 \
       --sample-temperature 0 --metrics-every 1000 \

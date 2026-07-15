@@ -15,6 +15,14 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
 from sparse_diffusion.structure_energy.graph import load_typed_graph
+from sparse_diffusion.structure_energy.factorized_edit_denoiser import (
+    build_factorized_edit_dataset,
+    evaluate_factorized_fixed_t,
+    load_factorized_edit_checkpoint,
+    sample_factorized_edit_diffusion,
+    save_factorized_edit_checkpoint,
+    train_factorized_edit_denoiser,
+)
 from sparse_diffusion.structure_energy.mixed_edit_diffusion import (
     EDIT_ACTIONS,
     MarginalGraphPrior,
@@ -47,6 +55,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--mode", choices=("oracle", "train", "sample"), required=True)
     parser.add_argument("--checkpoint", type=Path)
+    parser.add_argument(
+        "--denoiser", choices=("factorized", "listwise"), default="factorized"
+    )
     parser.add_argument("--kernel", choices=tuple(KERNELS), default="bdrs")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument(
@@ -68,6 +79,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sample-temperature", type=float, default=0.0)
     parser.add_argument("--metrics-every", type=int, default=1000)
     parser.add_argument("--fixed-t-trials", type=int, default=64)
+    parser.add_argument("--balanced-action-aux-weight", type=float, default=0.1)
     return parser.parse_args()
 
 
@@ -125,15 +137,26 @@ def main() -> None:
     if args.mode == "train":
         source = load_typed_graph(args.dataset_dir, active_only=True)
         prior = MarginalGraphPrior.from_training_graph(source)
-        dataset = build_mixed_edit_diffusion_dataset(
-            source,
-            trajectories=args.trajectories,
-            forward_steps=args.forward_steps,
-            record_every=args.record_every,
-            candidates_per_example=args.train_candidates,
-            seed=args.seed,
-            actions=KERNELS[args.kernel],
-        )
+        if args.denoiser == "factorized":
+            dataset = build_factorized_edit_dataset(
+                source,
+                trajectories=args.trajectories,
+                forward_steps=args.forward_steps,
+                record_every=args.record_every,
+                candidates_per_example=args.train_candidates,
+                seed=args.seed,
+                actions=KERNELS[args.kernel],
+            )
+        else:
+            dataset = build_mixed_edit_diffusion_dataset(
+                source,
+                trajectories=args.trajectories,
+                forward_steps=args.forward_steps,
+                record_every=args.record_every,
+                candidates_per_example=args.train_candidates,
+                seed=args.seed,
+                actions=KERNELS[args.kernel],
+            )
         np.savez_compressed(
             args.output_dir / "mixed_edit_dataset.npz",
             candidate_features=dataset.candidate_features,
@@ -141,56 +164,99 @@ def main() -> None:
             targets=dataset.targets,
             trajectory_ids=dataset.trajectory_ids,
         )
-        model, train_report = train_switch_denoiser(
-            dataset,
-            hidden_dim=args.hidden_dim,
-            layers=args.layers,
-            dropout=args.dropout,
-            epochs=args.epochs,
-            batch_size=args.batch_size,
-            learning_rate=args.learning_rate,
-            weight_decay=args.weight_decay,
-            training_objective="inverse_ce",
-            inverse_loss_weight=1.0,
-            utility_loss_weight=0.0,
-            device=args.device,
-            seed=args.seed,
-        )
-        checkpoint = args.output_dir / "mixed_edit_diffusion.pt"
-        save_mixed_edit_checkpoint(
-            checkpoint,
-            model,
-            prior,
-            hidden_dim=args.hidden_dim,
-            layers=args.layers,
-            dropout=args.dropout,
-            report=train_report,
-            actions=KERNELS[args.kernel],
-        )
-        fixed_t = evaluate_fixed_t_denoising(
-            source,
-            model,
-            time_fractions=(0.1, 0.5, 0.9),
-            trials_per_time=args.fixed_t_trials,
-            forward_steps=args.forward_steps,
-            candidates_per_example=args.train_candidates,
-            seed=args.seed + 991,
-            device=args.device,
-            actions=KERNELS[args.kernel],
-        )
+        if args.denoiser == "factorized":
+            model, train_report = train_factorized_edit_denoiser(
+                dataset,
+                type_count=len(source.type_names),
+                family_count=len(source.family_specs),
+                hidden_dim=args.hidden_dim,
+                layers=args.layers,
+                dropout=args.dropout,
+                epochs=args.epochs,
+                batch_size=args.batch_size,
+                learning_rate=args.learning_rate,
+                weight_decay=args.weight_decay,
+                balanced_action_aux_weight=args.balanced_action_aux_weight,
+                device=args.device,
+                seed=args.seed,
+            )
+            checkpoint = args.output_dir / "factorized_edit_diffusion.pt"
+            save_factorized_edit_checkpoint(
+                checkpoint,
+                model,
+                prior,
+                hidden_dim=args.hidden_dim,
+                layers=args.layers,
+                dropout=args.dropout,
+                actions=KERNELS[args.kernel],
+                report=train_report,
+            )
+            fixed_t = evaluate_factorized_fixed_t(
+                source,
+                model,
+                time_fractions=(0.1, 0.5, 0.9),
+                trials_per_time=args.fixed_t_trials,
+                forward_steps=args.forward_steps,
+                candidates_per_example=args.train_candidates,
+                seed=args.seed + 991,
+                actions=KERNELS[args.kernel],
+                device=args.device,
+            )
+            serialized_train_report = dict(train_report)
+        else:
+            model, train_report = train_switch_denoiser(
+                dataset,
+                hidden_dim=args.hidden_dim,
+                layers=args.layers,
+                dropout=args.dropout,
+                epochs=args.epochs,
+                batch_size=args.batch_size,
+                learning_rate=args.learning_rate,
+                weight_decay=args.weight_decay,
+                training_objective="inverse_ce",
+                inverse_loss_weight=1.0,
+                utility_loss_weight=0.0,
+                device=args.device,
+                seed=args.seed,
+            )
+            checkpoint = args.output_dir / "mixed_edit_diffusion.pt"
+            save_mixed_edit_checkpoint(
+                checkpoint,
+                model,
+                prior,
+                hidden_dim=args.hidden_dim,
+                layers=args.layers,
+                dropout=args.dropout,
+                report=train_report,
+                actions=KERNELS[args.kernel],
+            )
+            fixed_t = evaluate_fixed_t_denoising(
+                source,
+                model,
+                time_fractions=(0.1, 0.5, 0.9),
+                trials_per_time=args.fixed_t_trials,
+                forward_steps=args.forward_steps,
+                candidates_per_example=args.train_candidates,
+                seed=args.seed + 991,
+                device=args.device,
+                actions=KERNELS[args.kernel],
+            )
+            serialized_train_report = train_report.to_json_dict()
         write_json(
             args.output_dir / "train_report.json",
             {
                 "format": "dihug-mixed-edit-train-v1",
-                "train": train_report.to_json_dict(),
+                "denoiser": args.denoiser,
+                "train": serialized_train_report,
                 "fixed_t": fixed_t,
                 "prior": prior.to_json_dict(),
             },
         )
         print(
             "[MIXED-EDIT-TRAIN] "
+            f"denoiser={args.denoiser} "
             f"examples={len(dataset.targets)} "
-            f"top1={train_report.validation_top1:.4f} "
+            f"top1={serialized_train_report.get('validation_candidate_top1', serialized_train_report.get('validation_top1', float('nan'))):.4f} "
             f"fixed_t={json.dumps(fixed_t, sort_keys=True)}",
             flush=True,
         )
@@ -198,16 +264,26 @@ def main() -> None:
 
     if args.checkpoint is None:
         raise ValueError("--checkpoint is required in sample mode")
-    model, prior, checkpoint_metadata = load_mixed_edit_checkpoint(
-        args.checkpoint, device=args.device
-    )
+    if args.denoiser == "factorized":
+        model, prior, checkpoint_metadata = load_factorized_edit_checkpoint(
+            args.checkpoint, device=args.device
+        )
+    else:
+        model, prior, checkpoint_metadata = load_mixed_edit_checkpoint(
+            args.checkpoint, device=args.device
+        )
     checkpoint_actions = tuple(checkpoint_metadata["actions"])
     if checkpoint_actions != tuple(KERNELS[args.kernel]):
         raise ValueError(
             f"checkpoint kernel {checkpoint_actions} does not match --kernel "
             f"{KERNELS[args.kernel]}"
         )
-    result = sample_mixed_edit_diffusion(
+    sampler = (
+        sample_factorized_edit_diffusion
+        if args.denoiser == "factorized"
+        else sample_mixed_edit_diffusion
+    )
+    result = sampler(
         prior,
         model,
         steps=args.sample_steps,
@@ -220,6 +296,7 @@ def main() -> None:
     )
     payload = {
         "format": "dihug-mixed-edit-sampling-v1",
+        "denoiser": args.denoiser,
         "seed": args.seed,
         "initial": result.trace[0],
         "final": graph_metrics(result.graph),
