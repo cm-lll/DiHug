@@ -1,0 +1,46 @@
+# @package _global_
+defaults:
+  - imdb_movie_hgt_l3h4_moment
+
+general:
+  name: imdb_movie_hgt_global_context_joint_gate
+  wandb: disabled
+  run_test_after_train: false
+  enable_test_sampling: false
+  enable_val_sampling: false
+  profile_training_efficiency: true
+  profile_training_efficiency_every_n_epochs: 1
+
+train:
+  n_epochs: 1
+  batch_size: 1
+  save_model: false
+
+model:
+  # Encode the complete visible sparse G_t once with PyHGT. Candidate edges are
+  # decoder-only and streamed in bounded-memory chunks.
+  denoiser: hgt
+  edge_diffusion_mode: marginal
+  block_query: false
+  train_all_blocks_per_noise: false
+  train_partition_ensemble: false
+  train_family_staged_queryfree: true
+  train_family_staged_query_chunk_size: 8192
+  train_family_staged_max_chunks: 0
+  train_family_staged_balance_by_family: true
+
+  use_edge_phi_fusion: true
+  use_edge_state_update: true
+  use_two_hop_structure: false
+  use_typed_two_hop_structure: false
+  use_endpoint_role_residual: false
+  use_family_edge_adapters: false
+  use_iterative_motif_decoder: false
+  use_joint_edge_bundle: false
+
+  exist_loss_type: ce
+  exist_pos_weight: 1
+  family_count_loss_weight: 0.0
+  degree_pair_dist_loss_weight: 0.0
+  closure_rank_loss_weight: 0.0
+  structure_delta_loss_weight: 0.0

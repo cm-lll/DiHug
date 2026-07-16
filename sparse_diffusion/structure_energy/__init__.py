@@ -9,6 +9,7 @@ from .checkpoint import StructureEnergyCheckpoint
 from .features import GraphletFeatureExtractor
 from .factorized_edit_denoiser import FactorizedEditDenoiser
 from .graph import FamilySpec, TypedGraph, load_typed_graph
+from .global_context_joint_edit import GlobalContextJointEditResidual
 from .mixed_edit_diffusion import MarginalGraphPrior, MixedKernelSchedule
 from .markov_diagnostics import (
     audit_state_summary_aliasing,
@@ -22,6 +23,7 @@ __all__ = [
     "FamilySpec",
     "FactorizedEditDenoiser",
     "GraphletFeatureExtractor",
+    "GlobalContextJointEditResidual",
     "MarginalGraphPrior",
     "MixedKernelSchedule",
     "RolePlan",

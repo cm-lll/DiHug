@@ -21038,6 +21038,10 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         if not self.heterogeneous:
             raise ValueError("train_family_staged_queryfree requires heterogeneous data")
 
+        profile_efficiency = self._profile_training_efficiency_enabled()
+        if profile_efficiency and self.device.type == "cuda":
+            torch.cuda.reset_peak_memory_stats(self.device)
+        profile_start = self._profile_time(profile_efficiency)
         opt = self.optimizers() if do_backward else None
         if do_backward:
             opt.zero_grad()
@@ -21046,6 +21050,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         sparse_noisy_data = self.apply_sparse_noise(
             data_one_hot, t_override=t_override
         )
+        noise_done = self._profile_time(profile_efficiency)
         node_subtype = (
             data_one_hot.x.argmax(dim=-1).long()
             if data_one_hot.x.dim() > 1
@@ -21062,6 +21067,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             ptr=ptr,
             t_float=sparse_noisy_data["t_float"],
         )
+        encode_done = self._profile_time(profile_efficiency)
 
         chunk_size = int(
             getattr(
@@ -21103,6 +21109,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         total_chunks = len(chunk_meta)
         chunk_count = 0
         total_loss_metric = None
+        decode_backward_time = 0.0
         for stage, fam_name, query_edge_index, query_edge_batch in (
             self._iter_family_staged_query_chunks(
                 node_subtype=node_subtype,
@@ -21114,6 +21121,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 continue
             if max_chunks > 0 and chunk_count >= max_chunks:
                 break
+            chunk_start = self._profile_time(profile_efficiency)
             loss_piece = self._training_loss_from_encoded_queries(
                 encoded=encoded,
                 data=data_one_hot,
@@ -21139,11 +21147,14 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             if do_backward:
                 retain_graph = chunk_count < total_chunks
                 self.manual_backward(scaled_loss, retain_graph=retain_graph)
+            chunk_done = self._profile_time(profile_efficiency)
+            decode_backward_time += chunk_done - chunk_start
             total_loss_metric = (
                 scaled_loss.detach()
                 if total_loss_metric is None
                 else total_loss_metric + scaled_loss.detach()
             )
+        optimizer_start = self._profile_time(profile_efficiency)
         clip_val = float(getattr(self.cfg.train, "clip_grad", 0.0) or 0.0)
         if do_backward and clip_val > 0:
             self.clip_gradients(
@@ -21153,6 +21164,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             )
         if do_backward:
             opt.step()
+        optimizer_done = self._profile_time(profile_efficiency)
         if total_loss_metric is None:
             return None
         if (
@@ -21167,6 +21179,29 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 f"families={fam_counts}"
             )
             self._logged_train_family_staged_queryfree = True
+        if profile_efficiency and getattr(self, "local_rank", 0) == 0:
+            peak_allocated = (
+                int(torch.cuda.max_memory_allocated(self.device))
+                if self.device.type == "cuda"
+                else 0
+            )
+            peak_reserved = (
+                int(torch.cuda.max_memory_reserved(self.device))
+                if self.device.type == "cuda"
+                else 0
+            )
+            print(
+                "[TRAIN-QUERYFREE-PERF] "
+                f"epoch={int(self.current_epoch)} queries={total_queries} "
+                f"chunks={chunk_count} chunk_size={chunk_size} "
+                f"noise_s={noise_done - profile_start:.4f} "
+                f"encode_s={encode_done - noise_done:.4f} "
+                f"decode_backward_s={decode_backward_time:.4f} "
+                f"optimizer_s={optimizer_done - optimizer_start:.4f} "
+                f"total_s={optimizer_done - profile_start:.4f} "
+                f"peak_alloc_mb={peak_allocated / (1024 ** 2):.1f} "
+                f"peak_reserved_mb={peak_reserved / (1024 ** 2):.1f}"
+            )
         return {"loss": total_loss_metric.detach()}
 
     def _training_step_once(
