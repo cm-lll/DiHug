@@ -33,6 +33,7 @@ from sparse_diffusion.structure_energy.mixed_edit_diffusion import (
     MarginalGraphPrior,
     build_mixed_edit_diffusion_dataset,
     edge_edit_distance,
+    evaluate_closed_form_policy,
     evaluate_fixed_t_denoising,
     load_mixed_edit_checkpoint,
     mixed_edit_feature_width,
@@ -75,6 +76,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--trajectories", type=int, default=16)
     parser.add_argument("--forward-steps", type=int, default=1000)
     parser.add_argument("--record-every", type=int, default=10)
+    parser.add_argument(
+        "--forward-mode", choices=("micro", "closed_form"), default="micro"
+    )
+    parser.add_argument(
+        "--closed-form-noise-fractions", default="0.05,0.2,0.5,0.8,1.0"
+    )
+    parser.add_argument(
+        "--anonymous-role-condition",
+        action="store_true",
+        help="Condition on an iid type-exchangeable role latent; edges stay Bernoulli.",
+    )
     parser.add_argument("--train-candidates", type=int, default=32)
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--batch-size", type=int, default=64)
@@ -201,10 +213,24 @@ def main() -> None:
             raise ValueError("role corruption requires the reversible bdrs edit kernel")
         if args.role_corruption_fraction > 0.0 and args.dataset_cache is not None:
             raise ValueError("role corruption cannot reuse an unlabelled dataset cache")
-        if args.type_orbit_augmentation and args.role_corruption_fraction != 1.0:
+        if (
+            args.type_orbit_augmentation
+            and args.forward_mode == "micro"
+            and args.role_corruption_fraction != 1.0
+        ):
             raise ValueError(
                 "type-orbit augmentation requires role-corruption-fraction=1 so "
                 "the training terminal distribution matches the sampling prior"
+            )
+        if args.forward_mode == "closed_form" and args.denoiser != "listwise":
+            raise ValueError("closed-form forward noise currently requires listwise")
+        if args.forward_mode == "closed_form" and args.training_objective != "utility_kl":
+            raise ValueError("closed-form free candidates require utility_kl training")
+        if args.anonymous_role_condition and args.forward_mode != "closed_form":
+            raise ValueError("anonymous role conditioning requires closed-form noise")
+        if args.anonymous_role_condition and args.feature_profile != "typed_closure_role_v3":
+            raise ValueError(
+                "anonymous role conditioning requires typed_closure_role_v3"
             )
 
         clean_targets = {}
@@ -223,7 +249,31 @@ def main() -> None:
             "fraction": 0.0,
             "strengths": [],
             "trajectory_ids": [],
+            "forward_mode": args.forward_mode,
+            "closed_form_noise_fractions": [
+                float(value.strip())
+                for value in args.closed_form_noise_fractions.split(",")
+                if value.strip()
+            ],
+            "terminal_matches_sampling_prior": args.forward_mode == "closed_form",
+            "anonymous_role_condition": False,
         }
+        latent_role_prior = None
+        if args.anonymous_role_condition:
+            latent_role_prior = ExchangeableJointRolePrior.from_training_graph(
+                source,
+                components=args.role_prior_components,
+                seed=args.seed,
+                randomization_steps_per_edge=0.0,
+                role_model="categorical",
+                role_component_sampling="iid",
+            )
+            role_corruption_metadata.update(
+                anonymous_role_condition=True,
+                anonymous_role_prior=latent_role_prior.to_json_dict(),
+                role_component_sampling="iid",
+                role_initializes_edges=False,
+            )
         if args.role_corruption_fraction > 0.0:
             strengths = tuple(
                 float(value.strip())
@@ -335,6 +385,13 @@ def main() -> None:
                 clean_noop_examples_per_trajectory=(
                     args.clean_noop_examples_per_trajectory
                 ),
+                forward_mode=args.forward_mode,
+                closed_form_noise_fractions=tuple(
+                    float(value.strip())
+                    for value in args.closed_form_noise_fractions.split(",")
+                    if value.strip()
+                ),
+                use_role_condition=args.anonymous_role_condition,
             )
         dataset_path = args.output_dir / "mixed_edit_dataset.npz"
         np.savez_compressed(
@@ -346,7 +403,9 @@ def main() -> None:
             feature_profile=np.asarray(args.feature_profile),
             kernel=np.asarray(args.kernel),
             role_corruption=np.asarray(json.dumps(role_corruption_metadata)),
-            type_orbit_augmentation=np.asarray(args.type_orbit_augmentation),
+                type_orbit_augmentation=np.asarray(args.type_orbit_augmentation),
+                forward_mode=np.asarray(args.forward_mode),
+                anonymous_role_condition=np.asarray(args.anonymous_role_condition),
             clean_noop_examples_per_trajectory=np.asarray(
                 args.clean_noop_examples_per_trajectory
             ),
@@ -423,17 +482,31 @@ def main() -> None:
                 feature_profile=args.feature_profile,
                 training_noise=role_corruption_metadata,
             )
-            fixed_t = evaluate_fixed_t_denoising(
-                source,
-                model,
-                time_fractions=(0.1, 0.5, 0.9),
-                trials_per_time=args.fixed_t_trials,
-                forward_steps=args.forward_steps,
-                candidates_per_example=args.train_candidates,
-                seed=args.seed + 991,
-                device=args.device,
-                actions=KERNELS[args.kernel],
-            )
+            if args.forward_mode == "closed_form":
+                fixed_t = evaluate_closed_form_policy(
+                    source,
+                    model,
+                    time_fractions=(0.1, 0.5, 0.9, 1.0),
+                    trials_per_time=args.fixed_t_trials,
+                    candidates_per_example=args.train_candidates,
+                    seed=args.seed + 991,
+                    device=args.device,
+                    actions=KERNELS[args.kernel],
+                    feature_profile=args.feature_profile,
+                    use_role_condition=args.anonymous_role_condition,
+                )
+            else:
+                fixed_t = evaluate_fixed_t_denoising(
+                    source,
+                    model,
+                    time_fractions=(0.1, 0.5, 0.9),
+                    trials_per_time=args.fixed_t_trials,
+                    forward_steps=args.forward_steps,
+                    candidates_per_example=args.train_candidates,
+                    seed=args.seed + 991,
+                    device=args.device,
+                    actions=KERNELS[args.kernel],
+                )
             serialized_train_report = train_report.to_json_dict()
         write_json(
             args.output_dir / "train_report.json",
@@ -490,6 +563,18 @@ def main() -> None:
     }
     if args.denoiser == "factorized":
         sample_kwargs["decode_mode"] = args.factorized_decode
+    else:
+        feature_profile = checkpoint_metadata["feature_profile"]
+        sample_kwargs["feature_profile"] = feature_profile
+        if feature_profile == "typed_closure_role_v3":
+            role_payload = checkpoint_metadata["training_noise"].get(
+                "anonymous_role_prior"
+            )
+            if role_payload is None:
+                raise RuntimeError("role-conditioned checkpoint lacks its role prior")
+            role_prior = ExchangeableJointRolePrior.from_json_dict(role_payload)
+            role_graph = role_prior.sample(args.seed + 80_000_113)
+            sample_kwargs["role_condition"] = role_graph.all_family_degrees()
     result = sampler(prior, model, **sample_kwargs)
     payload = {
         "format": "dihug-mixed-edit-sampling-v1",

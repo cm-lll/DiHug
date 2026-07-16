@@ -25,7 +25,9 @@ MIXED_EDIT_FEATURE_PROFILES = (
     "legacy_local_v1",
     "typed_closure_compact_v2",
     "typed_closure_full_v2",
+    "typed_closure_role_v3",
 )
+ROLE_CONDITION_FEATURE_WIDTH = 6
 
 
 @dataclass(frozen=True)
@@ -259,6 +261,73 @@ def domain_edge_from_rank(spec: FamilySpec, rank: int) -> Edge:
 
 def sample_domain_edge(spec: FamilySpec, rng: np.random.Generator) -> Edge:
     return domain_edge_from_rank(spec, int(rng.integers(family_domain_size(spec))))
+
+
+def domain_rank_from_edge(spec: FamilySpec, edge: Edge) -> int:
+    """Inverse of :func:`domain_edge_from_rank` for one typed family domain."""
+
+    left, right = int(edge[0]), int(edge[1])
+    if spec.bipartite:
+        left_index = {int(node): index for index, node in enumerate(spec.src_nodes)}
+        right_index = {int(node): index for index, node in enumerate(spec.dst_nodes)}
+        if left not in left_index or right not in right_index:
+            left, right = right, left
+        return int(left_index[left] * len(spec.dst_nodes) + right_index[right])
+    positions = {int(node): index for index, node in enumerate(spec.src_nodes)}
+    i, j = sorted((positions[left], positions[right]))
+    n = len(spec.src_nodes)
+    return int(i * (2 * n - i - 1) // 2 + (j - i - 1))
+
+
+def sample_closed_form_marginal_noise(
+    clean: TypedGraph,
+    prior: MarginalGraphPrior,
+    alpha_bar: float,
+    seed: int,
+) -> TypedGraph:
+    """Sample q-bar(G_t|G_0) without simulating a slowly mixing edit chain.
+
+    Every typed edge is retained from ``clean`` with probability ``alpha_bar``;
+    otherwise it is redrawn from the learned family Bernoulli marginal.  At
+    alpha=0 this is exactly ``prior.sample`` in distribution, and at alpha=1
+    it is exactly the clean graph.
+    """
+
+    alpha = float(alpha_bar)
+    if not 0.0 <= alpha <= 1.0:
+        raise ValueError("alpha_bar must be in [0, 1]")
+    graph = prior.schema_graph()
+    if tuple(graph.type_names) != tuple(clean.type_names) or not np.array_equal(
+        graph.node_types, clean.node_types
+    ):
+        raise ValueError("clean graph and marginal prior schemas differ")
+    rng = np.random.default_rng(int(seed))
+    for family in prior.family_names:
+        spec = graph.family_specs[family]
+        capacity = family_domain_size(spec)
+        probability = float(prior.family_probabilities[family])
+        clean_ranks = {
+            domain_rank_from_edge(spec, edge) for edge in clean.family_edges[family]
+        }
+        clean_probability = alpha + (1.0 - alpha) * probability
+        for rank in clean_ranks:
+            if rng.random() < clean_probability:
+                graph.add_edge(family, domain_edge_from_rank(spec, rank))
+        nonclean_probability = (1.0 - alpha) * probability
+        desired = int(rng.binomial(capacity - len(clean_ranks), nonclean_probability))
+        selected = set()
+        while len(selected) < desired:
+            draw_count = max(32, 2 * (desired - len(selected)))
+            for rank in rng.integers(0, capacity, size=draw_count).tolist():
+                rank = int(rank)
+                if rank not in clean_ranks:
+                    selected.add(rank)
+                    if len(selected) == desired:
+                        break
+        for rank in selected:
+            graph.add_edge(family, domain_edge_from_rank(spec, rank))
+    graph.validate()
+    return graph
 
 
 def inverse_edit(proposal: EditProposal) -> EditProposal:
@@ -782,7 +851,12 @@ def mixed_edit_feature_width(
         return local_width
     if profile == "typed_closure_compact_v2":
         return local_width + int(type_count) + 2
-    return local_width + 5 + 13 * int(family_count) + 9 * int(type_count)
+    full_width = local_width + 5 + 13 * int(family_count) + 9 * int(type_count)
+    return (
+        full_width + ROLE_CONDITION_FEATURE_WIDTH
+        if profile == "typed_closure_role_v3"
+        else full_width
+    )
 
 
 def _select_mixed_edit_feature_profile(
@@ -793,7 +867,7 @@ def _select_mixed_edit_feature_profile(
 ) -> np.ndarray:
     profile = str(profile).strip().lower()
     mixed_edit_feature_width(profile, family_count, type_count)
-    if profile == "typed_closure_full_v2":
+    if profile in {"typed_closure_full_v2", "typed_closure_role_v3"}:
         return full
     local_width = _mixed_edit_local_width(family_count)
     if profile == "legacy_local_v1":
@@ -847,6 +921,7 @@ def mixed_edit_candidate_matrix(
     candidates: Sequence[EditProposal],
     time_fraction: float,
     feature_profile: str = "typed_closure_full_v2",
+    role_condition: Optional[Mapping[str, np.ndarray]] = None,
 ) -> np.ndarray:
     family_names = _family_names(graph)
     family_to_id = {name: index for index, name in enumerate(family_names)}
@@ -928,9 +1003,43 @@ def mixed_edit_candidate_matrix(
             ],
             dtype=np.float64,
         )
+        role_features = np.zeros(ROLE_CONDITION_FEATURE_WIDTH, dtype=np.float64)
+        if feature_profile == "typed_closure_role_v3":
+            if role_condition is None:
+                raise ValueError("typed_closure_role_v3 requires a role condition")
+            if proposal.action != "noop":
+                target = np.asarray(role_condition[proposal.family], dtype=np.float64)
+                current = family_degrees[proposal.family]
+                affected = sorted(
+                    {int(node) for edge in _edge_slots(proposal) if edge for node in edge}
+                )
+                after = current[affected].copy()
+                positions = {node: index for index, node in enumerate(affected)}
+                for edge in proposal.old_edges:
+                    for node in edge:
+                        after[positions[int(node)]] -= 1.0
+                for edge in proposal.new_edges:
+                    for node in edge:
+                        after[positions[int(node)]] += 1.0
+                before_residual = target[affected] - current[affected]
+                after_residual = target[affected] - after
+                role_features = np.asarray(
+                    [
+                        (np.abs(before_residual).sum() - np.abs(after_residual).sum())
+                        / max(len(affected), 1),
+                        (np.square(before_residual).sum() - np.square(after_residual).sum())
+                        / max(len(affected), 1),
+                        np.abs(before_residual).mean() / degree_scale,
+                        np.abs(before_residual).max(initial=0.0) / degree_scale,
+                        np.mean(before_residual > 0.0),
+                        np.mean(before_residual < 0.0),
+                    ],
+                    dtype=np.float64,
+                )
         full = np.concatenate(
             (action, family, endpoint, np.asarray(common), scalar, state)
             + (np.asarray(endpoint_roles), np.asarray(typed_common), closure_features)
+            + ((role_features,) if feature_profile == "typed_closure_role_v3" else ())
         )
         rows.append(
             _select_mixed_edit_feature_profile(
@@ -987,6 +1096,9 @@ def build_mixed_edit_diffusion_dataset(
     role_corruption_targets: Optional[Mapping[int, TypedGraph]] = None,
     clean_targets: Optional[Mapping[int, TypedGraph]] = None,
     clean_noop_examples_per_trajectory: int = 0,
+    forward_mode: str = "micro",
+    closed_form_noise_fractions: Sequence[float] = (0.05, 0.2, 0.5, 0.8, 1.0),
+    use_role_condition: bool = False,
 ) -> SwitchDiffusionDataset:
     if int(trajectories) < 2:
         raise ValueError("mixed edit training needs at least two trajectories")
@@ -998,6 +1110,18 @@ def build_mixed_edit_diffusion_dataset(
     clean_targets = dict(clean_targets or {})
     if int(clean_noop_examples_per_trajectory) < 0:
         raise ValueError("clean noop example count must be non-negative")
+    forward_mode = str(forward_mode).strip().lower()
+    if forward_mode not in {"micro", "closed_form"}:
+        raise ValueError("forward mode must be micro or closed_form")
+    noise_fractions = tuple(float(value) for value in closed_form_noise_fractions)
+    if forward_mode == "closed_form" and (
+        not noise_fractions or any(not 0.0 < value <= 1.0 for value in noise_fractions)
+    ):
+        raise ValueError("closed-form noise fractions must be in (0, 1]")
+    if bool(use_role_condition) != (feature_profile == "typed_closure_role_v3"):
+        raise ValueError(
+            "role conditioning requires the typed_closure_role_v3 feature profile"
+        )
     if role_corruption_targets and not {
         "birth",
         "death",
@@ -1045,13 +1169,15 @@ def build_mixed_edit_diffusion_dataset(
         rng: np.random.Generator,
         time_fraction: float,
         trajectory_id: int,
+        role_condition: Optional[Mapping[str, np.ndarray]] = None,
+        inject_positive: bool = True,
     ) -> None:
         candidates, target = sample_edit_candidates(
             graph,
             rng,
             candidates_per_example,
             actions=actions,
-            positive=positive,
+            positive=positive if inject_positive else None,
         )
         examples.append(
             np.asarray(
@@ -1060,6 +1186,7 @@ def build_mixed_edit_diffusion_dataset(
                     candidates,
                     time_fraction,
                     feature_profile=feature_profile,
+                    role_condition=role_condition,
                 ),
                 dtype=np.float32,
             )
@@ -1073,12 +1200,17 @@ def build_mixed_edit_diffusion_dataset(
                 dtype=np.float32,
             )
         )
+        if not inject_positive:
+            target = int(candidate_improvements[-1].argmax())
         targets.append(target)
         trajectory_ids.append(trajectory_id)
 
     for trajectory_id in range(int(trajectories)):
         rng = np.random.default_rng(int(seed) + 1_000_003 * trajectory_id)
         clean_graph = clean_targets.get(trajectory_id, source)
+        role_condition = (
+            clean_graph.all_family_degrees() if use_role_condition else None
+        )
         for _ in range(int(clean_noop_examples_per_trajectory)):
             record_example(
                 clean_graph,
@@ -1087,7 +1219,31 @@ def build_mixed_edit_diffusion_dataset(
                 rng,
                 0.0,
                 trajectory_id,
+                role_condition=role_condition,
             )
+        if forward_mode == "closed_form":
+            for level_index, fraction in enumerate(noise_fractions):
+                graph = sample_closed_form_marginal_noise(
+                    clean_graph,
+                    prior,
+                    alpha_bar=(1.0 - float(fraction)) ** 2,
+                    seed=(
+                        int(seed)
+                        + 70_000_087 * trajectory_id
+                        + 1_000_003 * level_index
+                    ),
+                )
+                record_example(
+                    graph,
+                    clean_graph,
+                    EditProposal("noop", _family_names(graph)[0], (), ()),
+                    rng,
+                    float(fraction),
+                    trajectory_id,
+                    role_condition=role_condition,
+                    inject_positive=False,
+                )
+            continue
         if trajectory_id in role_corruption_targets:
             target_graph = role_corruption_targets[trajectory_id]
             path = exact_edit_path(clean_graph, target_graph, rng)
@@ -1112,6 +1268,7 @@ def build_mixed_edit_diffusion_dataset(
                         rng,
                         float(path_step) / float(len(path)),
                         trajectory_id,
+                        role_condition=role_condition,
                     )
             if any(
                 graph.family_edge_sets[family]
@@ -1142,6 +1299,7 @@ def build_mixed_edit_diffusion_dataset(
                 rng,
                 float(step) / float(forward_steps),
                 trajectory_id,
+                role_condition=role_condition,
             )
             recorded += 1
         if recorded == 0:
@@ -1167,6 +1325,8 @@ def sample_mixed_edit_diffusion(
     initial_graph: Optional[TypedGraph] = None,
     fixed_time_fraction: Optional[float] = None,
     time_schedule_steps: Optional[int] = None,
+    feature_profile: str = "typed_closure_full_v2",
+    role_condition: Optional[Mapping[str, np.ndarray]] = None,
 ) -> MixedEditSamplingResult:
     graph = (
         prior.sample(seed=int(seed) + 71)
@@ -1203,7 +1363,13 @@ def sample_mixed_edit_diffusion(
             graph, rng, candidates_per_step, actions=actions
         )
         proposed += len(candidates)
-        matrix = mixed_edit_candidate_matrix(graph, candidates, time_fraction)
+        matrix = mixed_edit_candidate_matrix(
+            graph,
+            candidates,
+            time_fraction,
+            feature_profile=feature_profile,
+            role_condition=role_condition,
+        )
         matrix = align_mixed_edit_features_for_model(
             matrix, model, family_count=len(graph.family_specs)
         )
@@ -1313,6 +1479,80 @@ def evaluate_fixed_t_denoising(
             "top5": float(top5) / completed,
             "action_top1": float(action_correct) / completed,
             "margin": float(np.mean(margins)),
+        }
+    return report
+
+
+def evaluate_closed_form_policy(
+    source: TypedGraph,
+    model: SwitchDenoiserMLP,
+    time_fractions: Sequence[float],
+    trials_per_time: int,
+    candidates_per_example: int,
+    seed: int,
+    device: str | torch.device = "cpu",
+    actions: Sequence[str] = EDIT_ACTIONS,
+    feature_profile: str = "typed_closure_full_v2",
+    use_role_condition: bool = False,
+) -> Mapping[str, Mapping[str, float]]:
+    """Evaluate free-candidate utility regret under the exact q-bar noise law."""
+
+    prior = MarginalGraphPrior.from_training_graph(source)
+    rng = np.random.default_rng(int(seed))
+    device = torch.device(device)
+    model = model.to(device).eval()
+    report = {}
+    for fraction in time_fractions:
+        selected_values = []
+        oracle_values = []
+        random_values = []
+        positive = []
+        for trial in range(int(trials_per_time)):
+            clean = permute_typed_graph_within_types(
+                source, int(seed) + 90_000_119 + 1009 * trial
+            )
+            graph = sample_closed_form_marginal_noise(
+                clean,
+                prior,
+                alpha_bar=(1.0 - float(fraction)) ** 2,
+                seed=int(seed) + 91_000_123 + 1013 * trial,
+            )
+            candidates, _ = sample_edit_candidates(
+                graph,
+                rng,
+                int(candidates_per_example),
+                actions=actions,
+            )
+            improvements = np.asarray(
+                [edit_distance_improvement(graph, clean, item) for item in candidates],
+                dtype=np.float32,
+            )
+            role_condition = clean.all_family_degrees() if use_role_condition else None
+            matrix = mixed_edit_candidate_matrix(
+                graph,
+                candidates,
+                float(fraction),
+                feature_profile=feature_profile,
+                role_condition=role_condition,
+            )
+            with torch.no_grad():
+                logits = model(torch.from_numpy(matrix)[None].to(device)).squeeze(0)
+            selected_values.append(float(improvements[int(logits.argmax().item())]))
+            oracle_values.append(float(improvements.max()))
+            random_values.append(float(improvements[int(rng.integers(len(candidates)))]))
+            positive.append(float(improvements.max() > 0.0))
+        oracle_mean = float(np.mean(oracle_values))
+        selected_mean = float(np.mean(selected_values))
+        random_mean = float(np.mean(random_values))
+        denominator = max(oracle_mean - random_mean, 1.0e-8)
+        report[f"t={float(fraction):.3f}"] = {
+            "selected_utility": selected_mean,
+            "oracle_utility": oracle_mean,
+            "random_utility": random_mean,
+            "normalized_regret": float(
+                np.clip((oracle_mean - selected_mean) / denominator, 0.0, 2.0)
+            ),
+            "positive_candidate_coverage": float(np.mean(positive)),
         }
     return report
 

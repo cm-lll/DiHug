@@ -51,14 +51,18 @@ from sparse_diffusion.structure_energy.mixed_edit_diffusion import (
     MixedKernelSchedule,
     apply_edit,
     build_mixed_edit_diffusion_dataset,
+    domain_edge_from_rank,
+    domain_rank_from_edge,
     edge_edit_distance,
     exact_edit_path,
     inverse_edit,
     marginal_log_probability,
     mixed_transition_probability,
+    mixed_edit_candidate_matrix,
     permute_typed_graph_within_types,
     run_edit_distance_oracle,
     sample_mixed_forward_transition,
+    sample_closed_form_marginal_noise,
     sample_valid_edit,
 )
 from sparse_diffusion.structure_energy.factorized_edit_denoiser import (
@@ -1987,3 +1991,61 @@ def test_relocation_switch_kernel_matches_terminal_sampling_actions():
     from scripts.run_mixed_edit_diffusion import KERNELS
 
     assert KERNELS["rs"] == ("relocation", "switch")
+
+
+def test_closed_form_domain_rank_round_trip_and_noise_endpoints():
+    graph = _toy_graph()
+    prior = MarginalGraphPrior.from_training_graph(graph)
+    for spec in graph.family_specs.values():
+        for rank in range(
+            len(spec.src_nodes) * len(spec.dst_nodes)
+            if spec.bipartite
+            else len(spec.src_nodes) * (len(spec.src_nodes) - 1) // 2
+        ):
+            assert domain_rank_from_edge(spec, domain_edge_from_rank(spec, rank)) == rank
+
+    clean = sample_closed_form_marginal_noise(graph, prior, 1.0, seed=23)
+    assert all(
+        clean.family_edge_sets[name] == graph.family_edge_sets[name]
+        for name in graph.family_specs
+    )
+    draws = [
+        sample_closed_form_marginal_noise(graph, prior, 0.0, seed=1000 + seed)
+        for seed in range(400)
+    ]
+    for family, spec in graph.family_specs.items():
+        capacity = (
+            len(spec.src_nodes) * len(spec.dst_nodes)
+            if spec.bipartite
+            else len(spec.src_nodes) * (len(spec.src_nodes) - 1) // 2
+        )
+        expected = capacity * prior.family_probabilities[family]
+        observed = np.mean([len(item.family_edges[family]) for item in draws])
+        assert abs(observed - expected) < 0.12
+
+
+def test_closed_form_free_candidate_dataset_and_role_condition_are_aligned():
+    graph = _toy_graph()
+    dataset = build_mixed_edit_diffusion_dataset(
+        graph,
+        trajectories=2,
+        forward_steps=8,
+        record_every=2,
+        candidates_per_example=8,
+        seed=211,
+        actions=("birth", "death", "relocation", "switch"),
+        feature_profile="typed_closure_role_v3",
+        forward_mode="closed_form",
+        closed_form_noise_fractions=(0.2, 1.0),
+        use_role_condition=True,
+    )
+    assert dataset.candidate_features.shape[:2] == (4, 8)
+    assert np.array_equal(dataset.targets, dataset.candidate_improvements.argmax(axis=1))
+    assert np.isfinite(dataset.candidate_features).all()
+    assert dataset.candidate_features.shape[-1] == mixed_edit_candidate_matrix(
+        graph,
+        [EditProposal("noop", sorted(graph.family_specs)[0], (), ())],
+        0.5,
+        feature_profile="typed_closure_role_v3",
+        role_condition=graph.all_family_degrees(),
+    ).shape[-1]
