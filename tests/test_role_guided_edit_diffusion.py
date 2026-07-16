@@ -8,9 +8,11 @@ from sparse_diffusion.structure_energy.role_guided_edit_diffusion import (
     combine_structure_and_role_scores,
     denoising_time_fraction,
     proposal_relation_degree_gain,
+    propose_wedge_seeded_switch,
     role_alignment_complete,
     role_error_per_node,
     relation_degree_error,
+    sample_switch_refinement_candidates,
 )
 
 
@@ -99,3 +101,40 @@ def test_model_time_horizon_can_end_before_structural_refinement():
     assert np.isclose(denoising_time_fraction(20, 20), 0.05)
     assert denoising_time_fraction(21, 20) == 0.0
     assert denoising_time_fraction(40, 20) == 0.0
+
+
+def test_wedge_seeded_switch_is_legal_and_preserves_family_degrees():
+    graph = _graph()
+    graph.add_edge("AB", (3, 4))
+    before = graph.family_degrees("AB").copy()
+    proposal = propose_wedge_seeded_switch(
+        graph, np.random.default_rng(3), max_attempts=4096
+    )
+    assert proposal is not None
+    assert proposal.action == "switch"
+    before_triangles = sum(
+        len(graph.adjacency[u] & graph.adjacency[v])
+        for u, v in proposal.new_edges
+    )
+    assert before_triangles >= 1
+    apply_edit(graph, proposal)
+    assert np.array_equal(graph.family_degrees("AB"), before)
+    graph.validate()
+
+
+def test_closure_mixed_candidate_sampler_preserves_count_and_legality():
+    graph = _graph()
+    graph.add_edge("AB", (3, 4))
+    candidates = sample_switch_refinement_candidates(
+        graph,
+        np.random.default_rng(7),
+        count=4,
+        closure_fraction=0.5,
+        degree_bias_power=1.0,
+    )
+    assert len(candidates) == 4
+    assert candidates[0].action == "noop"
+    for proposal in candidates[1:]:
+        candidate = graph.clone()
+        apply_edit(candidate, proposal)
+        candidate.validate()

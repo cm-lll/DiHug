@@ -11,7 +11,7 @@ from sparse_diffusion.structure_energy.cardinality_conditioned_edit import (
     FamilyCountCondition,
     family_edge_counts,
 )
-from sparse_diffusion.structure_energy.graph import load_typed_graph
+from sparse_diffusion.structure_energy.graph import TypedGraph, load_typed_graph
 from sparse_diffusion.structure_energy.mixed_edit_diffusion import (
     load_mixed_edit_checkpoint,
 )
@@ -38,6 +38,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--schedule-floor", type=float, default=0.0)
     parser.add_argument("--role-error-per-node-threshold", type=float, default=0.0)
     parser.add_argument("--model-time-horizon-steps", type=int, default=0)
+    parser.add_argument("--model-time-start-step", type=int, default=0)
+    parser.add_argument("--initial-graph", type=Path)
+    parser.add_argument("--closure-candidate-fraction", type=float, default=0.0)
+    parser.add_argument("--closure-degree-bias-power", type=float, default=0.0)
     return parser.parse_args()
 
 
@@ -51,8 +55,14 @@ def main() -> None:
     role_path = args.output_dir / "exchangeable_role_degree_prior.json"
     ExchangeableRoleDegreePrior.from_training_graph(source).save(role_path)
     role_prior = ExchangeableRoleDegreePrior.load(role_path)
-    initial = FamilyCountCondition.from_training_graph(source).sample_graph(
-        args.seed + 71, mode="fixed"
+    initial = (
+        TypedGraph.from_json_dict(
+            json.loads(args.initial_graph.read_text(encoding="utf-8"))
+        )
+        if args.initial_graph is not None
+        else FamilyCountCondition.from_training_graph(source).sample_graph(
+            args.seed + 71, mode="fixed"
+        )
     )
     initial_counts = family_edge_counts(initial)
     result = sample_role_guided_edit_diffusion(
@@ -74,6 +84,9 @@ def main() -> None:
         model_time_horizon_steps=(
             None if args.model_time_horizon_steps <= 0 else args.model_time_horizon_steps
         ),
+        model_time_start_step=args.model_time_start_step,
+        closure_candidate_fraction=args.closure_candidate_fraction,
+        closure_degree_bias_power=args.closure_degree_bias_power,
     )
     final_counts = family_edge_counts(result.graph)
     if final_counts != initial_counts:
@@ -93,6 +106,14 @@ def main() -> None:
             if args.model_time_horizon_steps <= 0
             else args.model_time_horizon_steps
         ),
+        "model_time_start_step": args.model_time_start_step,
+        "closure_candidate_fraction": args.closure_candidate_fraction,
+        "closure_degree_bias_power": args.closure_degree_bias_power,
+        "initial_graph_source": (
+            "fixed_family_count_prior"
+            if args.initial_graph is None
+            else str(args.initial_graph)
+        ),
         "initial": graph_metrics(initial),
         "final": graph_metrics(result.graph),
         "real": graph_metrics(source),
@@ -104,6 +125,10 @@ def main() -> None:
     }
     (args.output_dir / "gate_report.json").write_text(
         json.dumps(report, indent=2, sort_keys=True), encoding="utf-8"
+    )
+    (args.output_dir / "final_graph.json").write_text(
+        json.dumps(result.graph.to_json_dict(), indent=2, sort_keys=True),
+        encoding="utf-8",
     )
     for row in result.trace:
         print(

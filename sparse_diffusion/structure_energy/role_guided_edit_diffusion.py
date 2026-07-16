@@ -17,6 +17,7 @@ from .mixed_edit_diffusion import (
     apply_edit,
     mixed_edit_candidate_matrix,
     sample_edit_candidates,
+    sample_valid_edit,
 )
 from .switch_chain import graph_metrics
 from .switch_diffusion import SwitchDenoiserMLP
@@ -182,6 +183,160 @@ def denoising_time_fraction(completed: int, horizon_steps: int) -> float:
     return max(0.0, 1.0 - (int(completed) - 1) / float(horizon_steps))
 
 
+def _edit_key(proposal: EditProposal) -> tuple:
+    return (
+        proposal.action,
+        proposal.family,
+        tuple(sorted(proposal.old_edges)),
+        tuple(sorted(proposal.new_edges)),
+    )
+
+
+def propose_wedge_seeded_switch(
+    graph: TypedGraph,
+    rng: np.random.Generator,
+    max_attempts: int = 512,
+    degree_bias_power: float = 0.0,
+) -> Optional[EditProposal]:
+    """Propose a legal 2-switch containing one currently open typed wedge."""
+
+    domain_to_family = {
+        tuple(sorted((int(spec.src_type), int(spec.dst_type)))): family
+        for family, spec in graph.family_specs.items()
+    }
+    if float(degree_bias_power) < 0.0:
+        raise ValueError("degree bias power must be non-negative")
+    centers = np.asarray(
+        [node for node, neighbors in enumerate(graph.adjacency) if len(neighbors) >= 2],
+        dtype=np.int64,
+    )
+    if centers.size == 0:
+        return None
+    degrees = graph.degrees().astype(np.float64)
+
+    def selection_probabilities(nodes: np.ndarray) -> Optional[np.ndarray]:
+        if float(degree_bias_power) == 0.0:
+            return None
+        denominator = np.maximum(
+            degrees[nodes] * np.maximum(degrees[nodes] - 1.0, 0.0) / 2.0,
+            1.0,
+        )
+        weights = np.power(denominator, -float(degree_bias_power))
+        return weights / weights.sum()
+
+    center_probabilities = selection_probabilities(centers)
+    for _ in range(int(max_attempts)):
+        center = int(rng.choice(centers, p=center_probabilities))
+        neighbors = np.asarray(sorted(graph.adjacency[center]), dtype=np.int64)
+        left, right = rng.choice(
+            neighbors,
+            size=2,
+            replace=False,
+            p=selection_probabilities(neighbors),
+        ).tolist()
+        if graph.has_edge(int(left), int(right)):
+            continue
+        domain = tuple(
+            sorted(
+                (
+                    int(graph.node_types[int(left)]),
+                    int(graph.node_types[int(right)]),
+                )
+            )
+        )
+        family = domain_to_family.get(domain)
+        if family is None:
+            continue
+        try:
+            desired = graph.orient_edge(family, (int(left), int(right)))
+        except ValueError:
+            continue
+        source, target = desired
+        source_neighbors = [
+            node
+            for node in graph.adjacency[source]
+            if int(node) != center and graph.family_of(source, node) == family
+        ]
+        target_neighbors = [
+            node
+            for node in graph.adjacency[target]
+            if int(node) != center and graph.family_of(target, node) == family
+        ]
+        if not source_neighbors or not target_neighbors:
+            continue
+        source_other = int(rng.choice(np.asarray(source_neighbors)))
+        target_other = int(rng.choice(np.asarray(target_neighbors)))
+        if len({source, target, source_other, target_other}) < 4:
+            continue
+        try:
+            old_edges = (
+                graph.orient_edge(family, (source, source_other)),
+                graph.orient_edge(family, (target_other, target)),
+            )
+            complement = graph.orient_edge(
+                family, (target_other, source_other)
+            )
+        except ValueError:
+            continue
+        new_edges = (desired, complement)
+        if old_edges[0] == old_edges[1] or new_edges[0] == new_edges[1]:
+            continue
+        old_canonical = {graph.canonical_edge(*edge) for edge in old_edges}
+        legal = True
+        seen = set()
+        for edge in new_edges:
+            canonical = graph.canonical_edge(*edge)
+            if canonical in seen:
+                legal = False
+                break
+            seen.add(canonical)
+            if graph.has_edge(*edge) and canonical not in old_canonical:
+                legal = False
+                break
+        if legal:
+            return EditProposal("switch", family, old_edges, new_edges)
+    return None
+
+
+def sample_switch_refinement_candidates(
+    graph: TypedGraph,
+    rng: np.random.Generator,
+    count: int,
+    closure_fraction: float = 0.0,
+    degree_bias_power: float = 0.0,
+) -> list[EditProposal]:
+    if not 0.0 <= float(closure_fraction) <= 1.0:
+        raise ValueError("closure candidate fraction must lie in [0,1]")
+    if float(closure_fraction) == 0.0:
+        return sample_edit_candidates(
+            graph, rng, int(count), actions=("switch",)
+        )[0]
+    candidates = [EditProposal("noop", sorted(graph.family_specs)[0], (), ())]
+    keys = {_edit_key(candidates[0])}
+    requested = min(int(count) - 1, int(round((int(count) - 1) * closure_fraction)))
+    attempts = 0
+    while len(candidates) - 1 < requested and attempts < max(512, requested * 64):
+        attempts += 1
+        proposal = propose_wedge_seeded_switch(
+            graph, rng, degree_bias_power=degree_bias_power
+        )
+        if proposal is not None and _edit_key(proposal) not in keys:
+            keys.add(_edit_key(proposal))
+            candidates.append(proposal)
+    attempts = 0
+    while len(candidates) < int(count) and attempts < int(count) * 512:
+        attempts += 1
+        proposal = sample_valid_edit(graph, rng, actions=("switch",))
+        if proposal is not None and _edit_key(proposal) not in keys:
+            keys.add(_edit_key(proposal))
+            candidates.append(proposal)
+    if len(candidates) != int(count):
+        raise RuntimeError(
+            f"sampled only {len(candidates)}/{count} switch refinement candidates"
+        )
+    return candidates
+
+
 def sample_role_guided_edit_diffusion(
     prior: MarginalGraphPrior,
     model: SwitchDenoiserMLP,
@@ -201,6 +356,9 @@ def sample_role_guided_edit_diffusion(
     schedule_floor: float = 0.0,
     role_error_per_node_threshold: float = 0.0,
     model_time_horizon_steps: Optional[int] = None,
+    model_time_start_step: int = 0,
+    closure_candidate_fraction: float = 0.0,
+    closure_degree_bias_power: float = 0.0,
 ) -> MixedEditSamplingResult:
     graph = prior.sample(seed + 71) if initial_graph is None else initial_graph.clone()
     if tuple(graph.type_names) != role_prior.type_names:
@@ -242,9 +400,13 @@ def sample_role_guided_edit_diffusion(
     )
     if time_horizon <= 0:
         raise ValueError("model time horizon must be positive")
+    if int(model_time_start_step) < 0:
+        raise ValueError("model time start step must be non-negative")
     with torch.no_grad():
         for completed in range(1, int(steps) + 1):
-            time_fraction = denoising_time_fraction(completed, time_horizon)
+            time_fraction = denoising_time_fraction(
+                int(model_time_start_step) + completed, time_horizon
+            )
             if not switch_refinement and role_alignment_complete(
                 current_role_error,
                 graph.num_nodes,
@@ -252,10 +414,18 @@ def sample_role_guided_edit_diffusion(
             ):
                 switch_refinement = True
                 transition_step = completed
-            step_actions = ("switch",) if switch_refinement else actions
-            candidates, _ = sample_edit_candidates(
-                graph, rng, candidates_per_step, actions=step_actions
-            )
+            if switch_refinement:
+                candidates = sample_switch_refinement_candidates(
+                    graph,
+                    rng,
+                    candidates_per_step,
+                    closure_fraction=closure_candidate_fraction,
+                    degree_bias_power=closure_degree_bias_power,
+                )
+            else:
+                candidates, _ = sample_edit_candidates(
+                    graph, rng, candidates_per_step, actions=actions
+                )
             proposed += len(candidates)
             matrix = mixed_edit_candidate_matrix(
                 graph,
