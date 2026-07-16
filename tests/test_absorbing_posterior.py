@@ -115,6 +115,38 @@ def test_absorbing_micro_intervals_are_contiguous_and_reach_endpoint():
         torch.testing.assert_close(previous[0], current[1])
 
 
+def test_global_posterior_merge_uses_lowest_stable_owner_once():
+    first = {
+        "edge_index": torch.tensor([[0, 1], [2, 3]]),
+        "edge_keys": torch.tensor([2, 7]),
+        "family": torch.tensor([0, 1]),
+        "batch": torch.tensor([0, 0]),
+        "logits": torch.tensor([[1.0, 2.0], [3.0, 4.0]]),
+        "owner": torch.tensor([4, 4]),
+    }
+    overlapping_lower_owner = {
+        "edge_index": torch.tensor([[0, 2], [2, 3]]),
+        "edge_keys": torch.tensor([2, 11]),
+        "family": torch.tensor([0, 1]),
+        "batch": torch.tensor([0, 0]),
+        "logits": torch.tensor([[9.0, 8.0], [5.0, 6.0]]),
+        "owner": torch.tensor([1, 1]),
+    }
+
+    merged = DiscreteDenoisingDiffusion._merge_global_posterior_candidate_parts(
+        [first, overlapping_lower_owner], total_nodes=4
+    )
+
+    assert merged is not None
+    assert merged["edge_index"].shape[1] == 3
+    duplicate = merged["composite_key"] == 2
+    assert int(duplicate.sum().item()) == 1
+    assert int(merged["owner"][duplicate].item()) == 1
+    torch.testing.assert_close(
+        merged["logits"][duplicate].squeeze(0), torch.tensor([9.0, 8.0])
+    )
+
+
 def _joint_bundle_head_harness():
     model = object.__new__(PyHGTDenoiser)
     nn.Module.__init__(model)

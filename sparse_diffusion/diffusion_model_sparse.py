@@ -4383,6 +4383,124 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         candidate_parts.append(part)
 
     @staticmethod
+    def _merge_global_posterior_candidate_parts(candidate_parts, total_nodes):
+        """Merge overlapping block views with one stable owner per edge."""
+        if not candidate_parts:
+            return None
+        edge_index = torch.cat(
+            [part["edge_index"] for part in candidate_parts], dim=1
+        )
+        edge_keys = torch.cat([part["edge_keys"] for part in candidate_parts])
+        families = torch.cat([part["family"] for part in candidate_parts])
+        edge_batch = torch.cat([part["batch"] for part in candidate_parts])
+        logits = torch.cat([part["logits"] for part in candidate_parts], dim=0)
+        owners = torch.cat([part["owner"] for part in candidate_parts])
+        composite_key = (
+            edge_batch.long() * int(total_nodes * total_nodes) + edge_keys.long()
+        )
+        owner_base = max(int(owners.max().item()) + 2, 2)
+        stable_order = torch.argsort(
+            composite_key * owner_base + owners.clamp(min=0)
+        )
+        composite_key = composite_key[stable_order]
+        edge_index = edge_index[:, stable_order]
+        families = families[stable_order]
+        edge_batch = edge_batch[stable_order]
+        logits = logits[stable_order]
+        owners = owners[stable_order]
+        keep = torch.ones(
+            composite_key.numel(), dtype=torch.bool, device=logits.device
+        )
+        if composite_key.numel() > 1:
+            keep[1:] = composite_key[1:] != composite_key[:-1]
+        return {
+            "edge_index": edge_index[:, keep],
+            "composite_key": composite_key[keep],
+            "family": families[keep],
+            "batch": edge_batch[keep],
+            "logits": logits[keep],
+            "owner": owners[keep],
+        }
+
+    def _finalize_global_marginal_posterior_candidates(
+        self,
+        data,
+        candidate_parts,
+    ):
+        """Draw one marginal-D3PM posterior edge state per canonical edge."""
+        total_nodes = int(data.node.shape[0])
+        merged = self._merge_global_posterior_candidate_parts(
+            candidate_parts, total_nodes
+        )
+        if merged is None:
+            return None, None
+
+        edge_index = merged["edge_index"]
+        families = merged["family"]
+        edge_batch = merged["batch"]
+        logits = merged["logits"]
+        candidate_keys = merged["composite_key"]
+
+        if bool(
+            getattr(
+                self.cfg.model,
+                "sampling_global_posterior_require_current_edge_coverage",
+                True,
+            )
+        ):
+            current_edge_index = getattr(data, "edge_index", None)
+            if current_edge_index is not None and current_edge_index.numel() > 0:
+                current_edge_index = current_edge_index.long().to(logits.device)
+                current_u = torch.minimum(
+                    current_edge_index[0], current_edge_index[1]
+                )
+                current_v = torch.maximum(
+                    current_edge_index[0], current_edge_index[1]
+                )
+                current_batch = data.batch.long().to(logits.device)[current_u]
+                current_keys = (
+                    current_batch * int(total_nodes * total_nodes)
+                    + current_u * int(total_nodes)
+                    + current_v
+                )
+                covered = torch.isin(current_keys, candidate_keys)
+                if not bool(covered.all()):
+                    raise RuntimeError(
+                        "global posterior block cover omitted current edges: "
+                        f"missing={int((~covered).sum().item())}/"
+                        f"{int(current_keys.numel())}"
+                    )
+
+        selection_override = (
+            "bernoulli_expected_density"
+            if bool(
+                getattr(
+                    self.cfg.model,
+                    "sampling_global_posterior_expected_density_calibration",
+                    False,
+                )
+            )
+            else "bernoulli"
+        )
+        sampled_labels = self._sample_edge_labels_hierarchical(
+            logits,
+            families,
+            edge_index,
+            selection_override=selection_override,
+        )
+        if getattr(self, "local_rank", 0) == 0:
+            print(
+                "[GLOBAL-POSTERIOR] "
+                f"candidates={int(logits.shape[0])} "
+                f"owners={int(torch.unique(merged['owner']).numel())} "
+                f"calibration={selection_override} "
+                f"sampled_edges={int((sampled_labels > 0).sum().item())}"
+            )
+        # Zero labels are intentionally returned: replacing the complete query
+        # cover must also remove edges that disappeared under the posterior.
+        return edge_index, sampled_labels
+
+    @staticmethod
     def _shift_binary_logits_to_expected_count(logits, target):
         """Return an additive intercept with sum(sigmoid(logits+b))=target."""
         if logits.numel() == 0:
@@ -28932,11 +29050,29 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             and query_rounds[0][2] is not None
             and not use_autoregressive_context
         )
+        use_global_marginal_posterior = (
+            selection_mode == "global_posterior_bernoulli"
+            and query_rounds
+            and query_rounds[0][2] is not None
+            and not use_autoregressive_context
+        )
         if selection_mode == "absorbing_posterior_bernoulli" and not absorbing_edge_diffusion:
             raise ValueError(
                 "absorbing_posterior_bernoulli requires "
                 "model.edge_diffusion_mode=absorbing_delete"
             )
+        if selection_mode == "global_posterior_bernoulli":
+            if absorbing_edge_diffusion:
+                raise ValueError(
+                    "global_posterior_bernoulli requires marginal edge diffusion"
+                )
+            if not bool(
+                getattr(self.cfg.model, "sampling_use_reverse_posterior", False)
+            ):
+                raise ValueError(
+                    "global_posterior_bernoulli requires "
+                    "model.sampling_use_reverse_posterior=true"
+                )
         if absorbing_edge_diffusion and exact_k_final_only:
             raise ValueError(
                 "absorbing_delete sampling requires "
@@ -28990,6 +29126,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         repair_candidate_parts = []
         global_exact_k_candidate_parts = []
         global_absorbing_posterior_candidate_parts = []
+        global_marginal_posterior_candidate_parts = []
         clean_exact_k_candidate_parts = []
         use_ranking_intervention_diag = (
             use_global_exact_k
@@ -29428,6 +29565,22 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                     s_float,
                     t_float,
                 )
+            if use_global_marginal_posterior:
+                owner_id = (
+                    query_round_owner_ids[query_round_idx]
+                    if query_round_idx < len(query_round_owner_ids)
+                    else query_round_idx
+                )
+                self._update_global_absorbing_posterior_candidates(
+                    global_marginal_posterior_candidate_parts,
+                    query_logits,
+                    selected_query_family,
+                    selected_query_edge_index,
+                    selected_query_batch,
+                    total_nodes,
+                    owner_id,
+                )
+                continue
             if use_exactk_equivariance_diag and not absorbing_edge_diffusion:
                 paired_current_query_labels = self._lookup_query_edge_labels(
                     paired_selected_query_edge_index,
@@ -29612,7 +29765,29 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 s_float,
             )
 
-        if use_global_absorbing_posterior:
+        if use_global_marginal_posterior:
+            posterior_edges, posterior_labels = (
+                self._finalize_global_marginal_posterior_candidates(
+                    data,
+                    global_marginal_posterior_candidate_parts,
+                )
+            )
+            if posterior_edges is not None and posterior_labels is not None:
+                cur_edge_index, cur_edge_attr_ids = self._replace_edges_with_labels(
+                    cur_edge_index,
+                    cur_edge_attr_ids,
+                    posterior_edges,
+                    posterior_labels,
+                )
+            keep = cur_edge_attr_ids != 0
+            cur_edge_index = cur_edge_index[:, keep]
+            cur_edge_attr_ids = cur_edge_attr_ids[keep].clamp(
+                0, self.out_dims.E - 1
+            )
+            cur_edge_attr_onehot = F.one_hot(
+                cur_edge_attr_ids, num_classes=self.out_dims.E
+            ).float()
+        elif use_global_absorbing_posterior:
             selected_edges, selected_labels = (
                 self._finalize_global_absorbing_posterior_candidates(
                     data,

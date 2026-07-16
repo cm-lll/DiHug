@@ -211,6 +211,12 @@ sampling_ranking_intervention_diag: false
 # on intermediate steps as in SparseDiff for legacy local selection policies.
 # Global gumbel_exact_k/deterministic_exact_k remain global exact-K at every step.
 sampling_reverse_posterior_stochastic_steps: true
+# Fail instead of silently preserving stale current edges when a global
+# posterior candidate cover omits an edge already present in G_t.
+sampling_global_posterior_require_current_edge_coverage: true
+# Optional family-wise intercept calibration for the global posterior. It uses
+# only training-set family marginals and preserves stochastic Bernoulli draws.
+sampling_global_posterior_expected_density_calibration: false
 # If true, global family exact-K is applied only at the explicit final reverse
 # step. Intermediate steps use the reverse-posterior Bernoulli path.
 sampling_exact_k_final_only: false
@@ -219,6 +225,9 @@ sampling_exact_k_final_only: false
 sampling_final_exact_k_use_clean_logits: false
 # Sampling edge decision:
 # - bernoulli: sample each query edge independently from p_exist.
+# - global_posterior_bernoulli: collect reverse-posterior logits from every
+#   block view, assign each canonical edge to its stable lowest-id owner block,
+#   and draw its categorical state exactly once.
 # - bernoulli_expected_density: before Bernoulli sampling, solve one additive
 #   intercept per relation family so the sum of probabilities matches that
 #   family's canonical marginal expected edge count in the current query pool.
