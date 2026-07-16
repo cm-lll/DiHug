@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -15,6 +16,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
 from sparse_diffusion.structure_energy.graph import load_typed_graph
+from sparse_diffusion.structure_energy.exchangeable_role_prior import (
+    ExchangeableJointRolePrior,
+)
 from sparse_diffusion.structure_energy.factorized_edit_denoiser import (
     build_factorized_edit_dataset,
     evaluate_factorized_fixed_t,
@@ -106,6 +110,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--inverse-loss-weight", type=float, default=1.0)
     parser.add_argument("--utility-loss-weight", type=float, default=1.0)
     parser.add_argument("--utility-temperature", type=float, default=1.0)
+    parser.add_argument(
+        "--role-corruption-fraction",
+        type=float,
+        default=0.0,
+        help="Fraction of training trajectories bridged to weak anonymous role priors.",
+    )
+    parser.add_argument(
+        "--role-correlation-strengths",
+        default="0,0.25,0.5,0.75,1",
+        help="Comma-separated rho schedule for role-corruption trajectories.",
+    )
+    parser.add_argument("--role-prior-components", type=int, default=64)
+    parser.add_argument("--role-prior-randomization-steps-per-edge", type=float, default=10.0)
     return parser.parse_args()
 
 
@@ -163,6 +180,70 @@ def main() -> None:
     if args.mode == "train":
         source = load_typed_graph(args.dataset_dir, active_only=True)
         prior = MarginalGraphPrior.from_training_graph(source)
+        if not 0.0 <= float(args.role_corruption_fraction) <= 1.0:
+            raise ValueError("--role-corruption-fraction must be in [0, 1]")
+        if args.role_corruption_fraction > 0.0 and args.denoiser != "listwise":
+            raise ValueError("role corruption currently supports only listwise denoisers")
+        if args.role_corruption_fraction > 0.0 and args.kernel != "bdrs":
+            raise ValueError("role corruption requires the reversible bdrs edit kernel")
+        if args.role_corruption_fraction > 0.0 and args.dataset_cache is not None:
+            raise ValueError("role corruption cannot reuse an unlabelled dataset cache")
+
+        role_corruption_targets = {}
+        role_corruption_metadata = {
+            "enabled": False,
+            "fraction": 0.0,
+            "strengths": [],
+            "trajectory_ids": [],
+        }
+        if args.role_corruption_fraction > 0.0:
+            strengths = tuple(
+                float(value.strip())
+                for value in args.role_correlation_strengths.split(",")
+                if value.strip()
+            )
+            if not strengths or any(not 0.0 <= value <= 1.0 for value in strengths):
+                raise ValueError("role correlation strengths must all be in [0, 1]")
+            role_count = min(
+                int(args.trajectories),
+                max(1, int(round(args.trajectories * args.role_corruption_fraction))),
+            )
+            role_ids = np.rint(
+                np.linspace(0, int(args.trajectories) - 1, role_count)
+            ).astype(np.int64)
+            if len(set(role_ids.tolist())) != role_count:
+                raise AssertionError("role corruption trajectory allocation is not unique")
+            base_role_prior = ExchangeableJointRolePrior.from_training_graph(
+                source,
+                components=args.role_prior_components,
+                seed=args.seed,
+                randomization_steps_per_edge=(
+                    args.role_prior_randomization_steps_per_edge
+                ),
+                role_model="categorical",
+                role_component_sampling="systematic",
+            )
+            assigned_strengths = []
+            for index, trajectory_id in enumerate(role_ids.tolist()):
+                strength = strengths[index % len(strengths)]
+                assigned_strengths.append(strength)
+                role_corruption_targets[int(trajectory_id)] = replace(
+                    base_role_prior,
+                    role_correlation_strength=float(strength),
+                ).sample(args.seed + 10_000_019 + int(trajectory_id))
+            role_corruption_metadata = {
+                "enabled": True,
+                "fraction": float(args.role_corruption_fraction),
+                "strength_schedule": list(strengths),
+                "strengths": assigned_strengths,
+                "trajectory_ids": role_ids.tolist(),
+                "components": int(args.role_prior_components),
+                "randomization_steps_per_edge": float(
+                    args.role_prior_randomization_steps_per_edge
+                ),
+                "target_contains_training_adjacency": False,
+                "corruption_bridge": "exact_birth_death_relocation",
+            }
         if args.dataset_cache is not None and args.denoiser != "listwise":
             raise ValueError("--dataset-cache currently supports only listwise denoisers")
         if args.dataset_cache is not None and args.dataset_cache.exists():
@@ -221,6 +302,7 @@ def main() -> None:
                 seed=args.seed,
                 actions=KERNELS[args.kernel],
                 feature_profile=args.feature_profile,
+                role_corruption_targets=role_corruption_targets,
             )
         dataset_path = args.output_dir / "mixed_edit_dataset.npz"
         np.savez_compressed(
@@ -231,6 +313,7 @@ def main() -> None:
             trajectory_ids=dataset.trajectory_ids,
             feature_profile=np.asarray(args.feature_profile),
             kernel=np.asarray(args.kernel),
+            role_corruption=np.asarray(json.dumps(role_corruption_metadata)),
         )
         if args.dataset_cache is not None and not args.dataset_cache.exists():
             args.dataset_cache.parent.mkdir(parents=True, exist_ok=True)
@@ -302,6 +385,7 @@ def main() -> None:
                 report=train_report,
                 actions=KERNELS[args.kernel],
                 feature_profile=args.feature_profile,
+                training_noise=role_corruption_metadata,
             )
             fixed_t = evaluate_fixed_t_denoising(
                 source,
@@ -325,6 +409,7 @@ def main() -> None:
                 "train": serialized_train_report,
                 "fixed_t": fixed_t,
                 "prior": prior.to_json_dict(),
+                "training_noise": role_corruption_metadata,
             },
         )
         print(

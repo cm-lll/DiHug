@@ -52,6 +52,7 @@ from sparse_diffusion.structure_energy.mixed_edit_diffusion import (
     apply_edit,
     build_mixed_edit_diffusion_dataset,
     edge_edit_distance,
+    exact_edit_path,
     inverse_edit,
     marginal_log_probability,
     mixed_transition_probability,
@@ -549,6 +550,52 @@ def test_mixed_edit_dataset_contains_known_inverse_and_training_only_x0_utility(
     assert np.isfinite(dataset.candidate_features).all()
     assert np.isfinite(dataset.candidate_improvements).all()
     assert np.any(dataset.candidate_improvements != 0.0)
+    assert np.all(dataset.targets >= 0)
+    assert np.all(dataset.targets < 8)
+
+
+def test_exact_edit_path_reaches_target_and_reverses_to_clean():
+    source = _toy_graph()
+    target = source.clone()
+    rng = np.random.default_rng(1201)
+    for _ in range(3):
+        proposal = sample_valid_edit(target, rng, actions=("relocation",))
+        assert proposal is not None
+        apply_edit(target, proposal)
+
+    path = exact_edit_path(source, target, np.random.default_rng(1202))
+    reconstructed = source.clone()
+    for proposal in path:
+        apply_edit(reconstructed, proposal)
+    assert reconstructed.family_edge_sets == target.family_edge_sets
+
+    for proposal in reversed(path):
+        apply_edit(reconstructed, inverse_edit(proposal))
+    assert reconstructed.family_edge_sets == source.family_edge_sets
+
+
+def test_mixed_edit_dataset_accepts_exact_weak_role_corruption_bridge():
+    source = _toy_graph()
+    target = source.clone()
+    rng = np.random.default_rng(1203)
+    for _ in range(3):
+        proposal = sample_valid_edit(target, rng, actions=("relocation",))
+        assert proposal is not None
+        apply_edit(target, proposal)
+
+    dataset = build_mixed_edit_diffusion_dataset(
+        source,
+        trajectories=2,
+        forward_steps=8,
+        record_every=2,
+        candidates_per_example=8,
+        seed=1204,
+        role_corruption_targets={1: target},
+    )
+
+    assert 1 in set(dataset.trajectory_ids.tolist())
+    assert np.isfinite(dataset.candidate_features).all()
+    assert np.isfinite(dataset.candidate_improvements).all()
     assert np.all(dataset.targets >= 0)
     assert np.all(dataset.targets < 8)
 

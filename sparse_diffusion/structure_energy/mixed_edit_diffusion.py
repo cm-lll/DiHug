@@ -455,6 +455,48 @@ def edge_edit_distance(graph: TypedGraph, clean: TypedGraph) -> int:
     )
 
 
+def exact_edit_path(
+    source: TypedGraph,
+    target: TypedGraph,
+    rng: np.random.Generator,
+) -> Tuple[EditProposal, ...]:
+    """Construct a randomized legal edit bridge from source to target."""
+    if source.type_names != target.type_names or not np.array_equal(
+        source.node_types, target.node_types
+    ):
+        raise ValueError("edit bridge graphs use different typed node schemas")
+    if set(source.family_specs) != set(target.family_specs):
+        raise ValueError("edit bridge graphs use different family schemas")
+
+    proposals: List[EditProposal] = []
+    for family in sorted(source.family_specs):
+        old_only = sorted(
+            source.family_edge_sets[family] - target.family_edge_sets[family]
+        )
+        new_only = sorted(
+            target.family_edge_sets[family] - source.family_edge_sets[family]
+        )
+        rng.shuffle(old_only)
+        rng.shuffle(new_only)
+        paired = min(len(old_only), len(new_only))
+        proposals.extend(
+            EditProposal("relocation", family, (old_only[index],), (new_only[index],))
+            for index in range(paired)
+        )
+        proposals.extend(
+            EditProposal("death", family, (edge,), ())
+            for edge in old_only[paired:]
+        )
+        proposals.extend(
+            EditProposal("birth", family, (), (edge,))
+            for edge in new_only[paired:]
+        )
+    if proposals:
+        order = rng.permutation(len(proposals))
+        proposals = [proposals[index] for index in order.tolist()]
+    return tuple(proposals)
+
+
 def edit_distance_improvement(
     graph: TypedGraph, clean: TypedGraph, proposal: EditProposal
 ) -> int:
@@ -909,6 +951,7 @@ def build_mixed_edit_diffusion_dataset(
     schedule: Optional[MixedKernelSchedule] = None,
     actions: Sequence[str] = EDIT_ACTIONS,
     feature_profile: str = "typed_closure_full_v2",
+    role_corruption_targets: Optional[Mapping[int, TypedGraph]] = None,
 ) -> SwitchDiffusionDataset:
     if int(trajectories) < 2:
         raise ValueError("mixed edit training needs at least two trajectories")
@@ -916,12 +959,98 @@ def build_mixed_edit_diffusion_dataset(
         raise ValueError("forward_steps and record_every must be positive")
     prior = MarginalGraphPrior.from_training_graph(source)
     schedule = schedule or MixedKernelSchedule()
+    role_corruption_targets = dict(role_corruption_targets or {})
+    if role_corruption_targets and not {
+        "birth",
+        "death",
+        "relocation",
+    }.issubset(set(actions)):
+        raise ValueError(
+            "role corruption bridges require birth, death, and relocation actions"
+        )
+    invalid_ids = sorted(
+        trajectory_id
+        for trajectory_id in role_corruption_targets
+        if trajectory_id < 0 or trajectory_id >= int(trajectories)
+    )
+    if invalid_ids:
+        raise ValueError(f"invalid role corruption trajectory ids: {invalid_ids}")
     examples = []
     candidate_improvements = []
     targets = []
     trajectory_ids = []
+
+    def record_example(
+        graph: TypedGraph,
+        positive: EditProposal,
+        rng: np.random.Generator,
+        time_fraction: float,
+        trajectory_id: int,
+    ) -> None:
+        candidates, target = sample_edit_candidates(
+            graph,
+            rng,
+            candidates_per_example,
+            actions=actions,
+            positive=positive,
+        )
+        examples.append(
+            np.asarray(
+                mixed_edit_candidate_matrix(
+                    graph,
+                    candidates,
+                    time_fraction,
+                    feature_profile=feature_profile,
+                ),
+                dtype=np.float32,
+            )
+        )
+        candidate_improvements.append(
+            np.asarray(
+                [
+                    edit_distance_improvement(graph, source, candidate)
+                    for candidate in candidates
+                ],
+                dtype=np.float32,
+            )
+        )
+        targets.append(target)
+        trajectory_ids.append(trajectory_id)
+
     for trajectory_id in range(int(trajectories)):
         rng = np.random.default_rng(int(seed) + 1_000_003 * trajectory_id)
+        if trajectory_id in role_corruption_targets:
+            target_graph = role_corruption_targets[trajectory_id]
+            path = exact_edit_path(source, target_graph, rng)
+            if not path:
+                raise RuntimeError(
+                    f"role corruption trajectory {trajectory_id} is identical to clean"
+                )
+            graph = source.clone()
+            requested = max(1, int(forward_steps) // int(record_every))
+            record_steps = set(
+                np.rint(np.linspace(1, len(path), min(requested, len(path))))
+                .astype(np.int64)
+                .tolist()
+            )
+            for path_step, proposal in enumerate(path, start=1):
+                apply_edit(graph, proposal)
+                if path_step in record_steps:
+                    record_example(
+                        graph,
+                        inverse_edit(proposal),
+                        rng,
+                        float(path_step) / float(len(path)),
+                        trajectory_id,
+                    )
+            if any(
+                graph.family_edge_sets[family]
+                != target_graph.family_edge_sets[family]
+                for family in graph.family_specs
+            ):
+                raise AssertionError("role corruption edit bridge missed its target")
+            continue
+
         graph = source.clone()
         recorded = 0
         for step in range(1, int(forward_steps) + 1):
@@ -936,37 +1065,13 @@ def build_mixed_edit_diffusion_dataset(
             apply_edit(graph, proposal)
             if step % int(record_every) != 0:
                 continue
-            positive = inverse_edit(proposal)
-            candidates, target = sample_edit_candidates(
+            record_example(
                 graph,
+                inverse_edit(proposal),
                 rng,
-                candidates_per_example,
-                actions=actions,
-                positive=positive,
+                float(step) / float(forward_steps),
+                trajectory_id,
             )
-            examples.append(
-                np.asarray(
-                    mixed_edit_candidate_matrix(
-                        graph,
-                        candidates,
-                        float(step) / float(forward_steps),
-                        feature_profile=feature_profile,
-                    ),
-                    dtype=np.float32,
-                )
-            )
-            improvements = np.asarray(
-                [
-                    edit_distance_improvement(graph, source, candidate)
-                    for candidate in candidates
-                ],
-                dtype=np.float32,
-            )
-            targets.append(target)
-            trajectory_ids.append(trajectory_id)
-            # Keep all reconstruction-improving switches as valid soft
-            # supervision, not only the single sampled inverse transition.
-            candidate_improvements.append(improvements)
             recorded += 1
         if recorded == 0:
             raise RuntimeError(f"trajectory {trajectory_id} produced no examples")
@@ -1207,6 +1312,7 @@ def save_mixed_edit_checkpoint(
     actions: Sequence[str] = EDIT_ACTIONS,
     feature_version: str = MIXED_EDIT_FEATURE_VERSION,
     feature_profile: str = "typed_closure_full_v2",
+    training_noise: Optional[Mapping] = None,
 ) -> None:
     payload = {
         "format": "dihug-mixed-edit-diffusion-v1",
@@ -1220,6 +1326,7 @@ def save_mixed_edit_checkpoint(
         "actions": list(actions),
         "feature_version": str(feature_version),
         "feature_profile": str(feature_profile),
+        "training_noise": dict(training_noise or {}),
         "inference_contract": prior.to_json_dict()["inference_contract"],
     }
     path = Path(path)
@@ -1247,5 +1354,6 @@ def load_mixed_edit_checkpoint(
         "actions": tuple(payload.get("actions", EDIT_ACTIONS)),
         "feature_version": str(payload.get("feature_version", "legacy_local_v1")),
         "feature_profile": str(payload.get("feature_profile", "legacy_local_v1")),
+        "training_noise": dict(payload.get("training_noise", {})),
     }
     return model, prior, metadata
