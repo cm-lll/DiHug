@@ -45,7 +45,6 @@ class ExchangeableRoleDegreePrior:
                 for type_id in range(len(graph.type_names))
             ),
         )
-
     def sample_assignment(self, node_types: np.ndarray, seed: int) -> np.ndarray:
         rng = np.random.default_rng(int(seed))
         sampled = np.empty(
@@ -99,6 +98,17 @@ class ExchangeableRoleDegreePrior:
     @classmethod
     def load(cls, path: str | Path) -> "ExchangeableRoleDegreePrior":
         return cls.from_json_dict(json.loads(Path(path).read_text(encoding="utf-8")))
+
+
+@dataclass(frozen=True)
+class RoleTargetProposalState:
+    """Per-step sampling weights shared by targeted relocation candidates."""
+
+    family_probabilities: np.ndarray
+    residuals: Mapping[str, np.ndarray]
+    old_edge_weights: Mapping[str, np.ndarray]
+    source_weights: Mapping[str, np.ndarray]
+    target_weights: Mapping[str, np.ndarray]
 
 
 def relation_degree_error(
@@ -157,6 +167,30 @@ def combine_structure_and_role_scores(
     multiplier = float(schedule_floor) + (1.0 - float(schedule_floor)) * annealed
     coefficient = float(role_weight) * multiplier
     return structure_logits + coefficient * degree_gains / float(gain_scale)
+
+
+def calibrate_role_weight(
+    structure_logits: np.ndarray,
+    degree_gains: np.ndarray,
+    *,
+    gain_scale: float,
+    target_std_ratio: float,
+    gain_quantile: float = 0.9,
+) -> float:
+    if gain_scale <= 0.0 or target_std_ratio <= 0.0:
+        raise ValueError("gain scale and target standard-deviation ratio must be positive")
+    if not 0.0 < float(gain_quantile) <= 1.0:
+        raise ValueError("gain quantile must lie in (0,1]")
+    logits = np.asarray(structure_logits, dtype=np.float64).reshape(-1)
+    gains = np.abs(np.asarray(degree_gains, dtype=np.float64).reshape(-1))
+    gains = gains[gains > 0.0]
+    if logits.size < 2 or gains.size == 0:
+        raise ValueError("automatic role calibration needs variable logits and gains")
+    logit_scale = max(float(logits.std()), 1.0e-6)
+    gain_value = max(float(np.quantile(gains, float(gain_quantile))), 1.0e-6)
+    return (
+        float(target_std_ratio) * logit_scale * float(gain_scale) / gain_value
+    )
 
 
 def role_error_per_node(role_error: float, node_count: int) -> float:
@@ -337,6 +371,153 @@ def sample_switch_refinement_candidates(
     return candidates
 
 
+def build_role_target_proposal_state(
+    graph: TypedGraph,
+    target_rows: np.ndarray,
+    family_names: Sequence[str],
+) -> RoleTargetProposalState:
+    family_to_id = {family: index for index, family in enumerate(family_names)}
+    residuals = {}
+    old_edge_weights = {}
+    source_weights = {}
+    target_weights = {}
+    family_mass = []
+    for family in family_names:
+        residual = (
+            np.asarray(target_rows[:, family_to_id[family]], dtype=np.float64)
+            - graph.family_degrees(family).astype(np.float64)
+        )
+        residuals[family] = residual
+        family_mass.append(float(np.maximum(residual, 0.0).sum()))
+        old_edge_weights[family] = np.asarray(
+            [
+                max(-residual[int(left)], 0.0)
+                + max(-residual[int(right)], 0.0)
+                for left, right in graph.family_edges[family]
+            ],
+            dtype=np.float64,
+        )
+        spec = graph.family_specs[family]
+        source_weights[family] = np.maximum(
+            residual[np.asarray(spec.src_nodes, dtype=np.int64)], 0.0
+        )
+        target_weights[family] = np.maximum(
+            residual[np.asarray(spec.dst_nodes, dtype=np.int64)], 0.0
+        )
+    mass = np.asarray(family_mass, dtype=np.float64)
+    probabilities = mass / mass.sum() if float(mass.sum()) > 0.0 else mass
+    return RoleTargetProposalState(
+        family_probabilities=probabilities,
+        residuals=residuals,
+        old_edge_weights=old_edge_weights,
+        source_weights=source_weights,
+        target_weights=target_weights,
+    )
+
+
+def propose_role_targeted_relocation(
+    graph: TypedGraph,
+    target_rows: np.ndarray,
+    family_names: Sequence[str],
+    rng: np.random.Generator,
+    max_attempts: int = 512,
+    proposal_state: Optional[RoleTargetProposalState] = None,
+) -> Optional[EditProposal]:
+    """Move one family edge from role-surplus to role-deficit endpoints."""
+
+    state = proposal_state or build_role_target_proposal_state(
+        graph, target_rows, family_names
+    )
+    if float(state.family_probabilities.sum()) <= 0.0:
+        return None
+    for _ in range(int(max_attempts)):
+        family = str(
+            rng.choice(
+                np.asarray(family_names), p=state.family_probabilities
+            )
+        )
+        spec = graph.family_specs[family]
+        residual = state.residuals[family]
+        edges = graph.family_edges[family]
+        if not edges:
+            continue
+        old_weights = state.old_edge_weights[family]
+        if float(old_weights.sum()) <= 0.0:
+            continue
+        old_edge = edges[int(rng.choice(len(edges), p=old_weights / old_weights.sum()))]
+        source_nodes = np.asarray(spec.src_nodes, dtype=np.int64)
+        target_nodes = np.asarray(spec.dst_nodes, dtype=np.int64)
+        source_weights = state.source_weights[family]
+        target_weights = state.target_weights[family]
+        old_source, old_target = graph.orient_edge(family, old_edge)
+        source = (
+            int(rng.choice(source_nodes, p=source_weights / source_weights.sum()))
+            if float(source_weights.sum()) > 0.0
+            else int(old_source)
+        )
+        target = (
+            int(rng.choice(target_nodes, p=target_weights / target_weights.sum()))
+            if float(target_weights.sum()) > 0.0
+            else int(old_target)
+        )
+        if source == target:
+            continue
+        try:
+            new_edge = graph.orient_edge(family, (source, target))
+        except ValueError:
+            continue
+        if new_edge == old_edge or graph.has_edge(*new_edge):
+            continue
+        return EditProposal("relocation", family, (old_edge,), (new_edge,))
+    return None
+
+
+def sample_role_alignment_candidates(
+    graph: TypedGraph,
+    target_rows: np.ndarray,
+    family_names: Sequence[str],
+    rng: np.random.Generator,
+    count: int,
+    targeted_fraction: float = 0.0,
+    actions: Sequence[str] = ("relocation", "switch"),
+) -> list[EditProposal]:
+    if not 0.0 <= float(targeted_fraction) <= 1.0:
+        raise ValueError("targeted role candidate fraction must lie in [0,1]")
+    if float(targeted_fraction) == 0.0:
+        return sample_edit_candidates(graph, rng, int(count), actions=actions)[0]
+    candidates = [EditProposal("noop", sorted(graph.family_specs)[0], (), ())]
+    keys = {_edit_key(candidates[0])}
+    requested = min(int(count) - 1, int(round((int(count) - 1) * targeted_fraction)))
+    proposal_state = build_role_target_proposal_state(
+        graph, target_rows, family_names
+    )
+    attempts = 0
+    while len(candidates) - 1 < requested and attempts < max(512, requested * 64):
+        attempts += 1
+        proposal = propose_role_targeted_relocation(
+            graph,
+            target_rows,
+            family_names,
+            rng,
+            proposal_state=proposal_state,
+        )
+        if proposal is not None and _edit_key(proposal) not in keys:
+            keys.add(_edit_key(proposal))
+            candidates.append(proposal)
+    attempts = 0
+    while len(candidates) < int(count) and attempts < int(count) * 512:
+        attempts += 1
+        proposal = sample_valid_edit(graph, rng, actions=actions)
+        if proposal is not None and _edit_key(proposal) not in keys:
+            keys.add(_edit_key(proposal))
+            candidates.append(proposal)
+    if len(candidates) != int(count):
+        raise RuntimeError(
+            f"sampled only {len(candidates)}/{count} role alignment candidates"
+        )
+    return candidates
+
+
 def sample_role_guided_edit_diffusion(
     prior: MarginalGraphPrior,
     model: SwitchDenoiserMLP,
@@ -359,6 +540,9 @@ def sample_role_guided_edit_diffusion(
     model_time_start_step: int = 0,
     closure_candidate_fraction: float = 0.0,
     closure_degree_bias_power: float = 0.0,
+    auto_role_balance: float = 0.0,
+    role_calibration_batches: int = 32,
+    targeted_role_candidate_fraction: float = 0.0,
 ) -> MixedEditSamplingResult:
     graph = prior.sample(seed + 71) if initial_graph is None else initial_graph.clone()
     if tuple(graph.type_names) != role_prior.type_names:
@@ -371,6 +555,47 @@ def sample_role_guided_edit_diffusion(
     rng = np.random.default_rng(int(seed))
     device = torch.device(device)
     model = model.to(device).eval()
+    effective_role_weight = float(role_weight)
+    if float(auto_role_balance) > 0.0:
+        if int(role_calibration_batches) <= 0:
+            raise ValueError("role calibration batch count must be positive")
+        calibration_rng = np.random.default_rng(int(seed) + 4_100_009)
+        calibration_logits = []
+        calibration_gains = []
+        with torch.no_grad():
+            for _ in range(int(role_calibration_batches)):
+                candidates, _ = sample_edit_candidates(
+                    graph,
+                    calibration_rng,
+                    candidates_per_step,
+                    actions=actions,
+                )
+                matrix = mixed_edit_candidate_matrix(
+                    graph,
+                    candidates,
+                    1.0,
+                    feature_profile=feature_profile,
+                )
+                matrix = align_mixed_edit_features_for_model(
+                    matrix, model, family_count=len(family_names)
+                )
+                logits = model(
+                    torch.from_numpy(matrix)[None].float().to(device)
+                ).squeeze(0)
+                gains = [
+                    proposal_relation_degree_gain(
+                        graph, proposal, target_rows, family_to_id
+                    )
+                    for proposal in candidates
+                ]
+                calibration_logits.extend(logits.cpu().tolist())
+                calibration_gains.extend(gains)
+        effective_role_weight = calibrate_role_weight(
+            np.asarray(calibration_logits),
+            np.asarray(calibration_gains),
+            gain_scale=gain_scale,
+            target_std_ratio=auto_role_balance,
+        )
     current_role_error = relation_degree_error(graph, target_rows, family_names)
     switch_refinement = role_alignment_complete(
         current_role_error,
@@ -387,6 +612,7 @@ def sample_role_guided_edit_diffusion(
             ),
             "phase": "switch_refinement" if switch_refinement else "role_alignment",
             "role_phase_transition_step": transition_step,
+            "effective_role_weight": effective_role_weight,
             **graph_metrics(graph),
         }
     ]
@@ -423,8 +649,14 @@ def sample_role_guided_edit_diffusion(
                     degree_bias_power=closure_degree_bias_power,
                 )
             else:
-                candidates, _ = sample_edit_candidates(
-                    graph, rng, candidates_per_step, actions=actions
+                candidates = sample_role_alignment_candidates(
+                    graph,
+                    target_rows,
+                    family_names,
+                    rng,
+                    candidates_per_step,
+                    targeted_fraction=targeted_role_candidate_fraction,
+                    actions=actions,
                 )
             proposed += len(candidates)
             matrix = mixed_edit_candidate_matrix(
@@ -453,7 +685,7 @@ def sample_role_guided_edit_diffusion(
                 structure_logits,
                 degree_gains,
                 time_fraction=time_fraction,
-                role_weight=role_weight,
+                role_weight=effective_role_weight,
                 gain_scale=gain_scale,
                 schedule_power=schedule_power,
                 schedule_floor=schedule_floor,
@@ -483,6 +715,7 @@ def sample_role_guided_edit_diffusion(
                             else "role_alignment"
                         ),
                         "role_phase_transition_step": transition_step,
+                        "effective_role_weight": effective_role_weight,
                         **graph_metrics(graph),
                     }
                 )

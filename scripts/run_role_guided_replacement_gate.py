@@ -42,6 +42,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--initial-graph", type=Path)
     parser.add_argument("--closure-candidate-fraction", type=float, default=0.0)
     parser.add_argument("--closure-degree-bias-power", type=float, default=0.0)
+    parser.add_argument("--auto-role-balance", type=float, default=0.0)
+    parser.add_argument("--role-calibration-batches", type=int, default=32)
+    parser.add_argument("--targeted-role-candidate-fraction", type=float, default=0.0)
     return parser.parse_args()
 
 
@@ -87,6 +90,9 @@ def main() -> None:
         model_time_start_step=args.model_time_start_step,
         closure_candidate_fraction=args.closure_candidate_fraction,
         closure_degree_bias_power=args.closure_degree_bias_power,
+        auto_role_balance=args.auto_role_balance,
+        role_calibration_batches=args.role_calibration_batches,
+        targeted_role_candidate_fraction=args.targeted_role_candidate_fraction,
     )
     final_counts = family_edge_counts(result.graph)
     if final_counts != initial_counts:
@@ -109,6 +115,9 @@ def main() -> None:
         "model_time_start_step": args.model_time_start_step,
         "closure_candidate_fraction": args.closure_candidate_fraction,
         "closure_degree_bias_power": args.closure_degree_bias_power,
+        "auto_role_balance": args.auto_role_balance,
+        "effective_role_weight": result.trace[0]["effective_role_weight"],
+        "targeted_role_candidate_fraction": args.targeted_role_candidate_fraction,
         "initial_graph_source": (
             "fixed_family_count_prior"
             if args.initial_graph is None

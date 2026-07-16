@@ -5,14 +5,17 @@ from sparse_diffusion.structure_energy.graph import FamilySpec, TypedGraph
 from sparse_diffusion.structure_energy.mixed_edit_diffusion import EditProposal, apply_edit
 from sparse_diffusion.structure_energy.role_guided_edit_diffusion import (
     ExchangeableRoleDegreePrior,
+    calibrate_role_weight,
     combine_structure_and_role_scores,
     denoising_time_fraction,
     proposal_relation_degree_gain,
+    propose_role_targeted_relocation,
     propose_wedge_seeded_switch,
     role_alignment_complete,
     role_error_per_node,
     relation_degree_error,
     sample_switch_refinement_candidates,
+    sample_role_alignment_candidates,
 )
 
 
@@ -89,6 +92,18 @@ def test_unit_schedule_floor_keeps_role_energy_constant_at_zero_time():
     assert torch.allclose(combined, torch.tensor([0.1, -0.1]))
 
 
+def test_role_weight_calibration_is_scale_invariant():
+    logits = np.asarray([-2.0, 0.0, 2.0])
+    gains = np.asarray([-10.0, 0.0, 10.0])
+    original = calibrate_role_weight(
+        logits, gains, gain_scale=10.0, target_std_ratio=0.5
+    )
+    scaled = calibrate_role_weight(
+        logits * 3.0, gains * 7.0, gain_scale=10.0, target_std_ratio=0.5
+    )
+    assert np.isclose(scaled, original * 3.0 / 7.0)
+
+
 def test_role_alignment_threshold_is_normalized_by_graph_size():
     assert role_error_per_node(80.0, 10) == 8.0
     assert role_alignment_complete(80.0, 10, 8.0)
@@ -138,3 +153,46 @@ def test_closure_mixed_candidate_sampler_preserves_count_and_legality():
         candidate = graph.clone()
         apply_edit(candidate, proposal)
         candidate.validate()
+
+
+def test_role_targeted_relocation_has_positive_degree_gain():
+    target_graph = _graph()
+    graph = target_graph.clone()
+    graph.remove_edge("AB", (0, 4))
+    graph.add_edge("AB", (3, 4))
+    family_names = tuple(sorted(graph.family_specs))
+    target_rows = np.stack(
+        [target_graph.family_degrees(family) for family in family_names], axis=1
+    )
+    proposal = propose_role_targeted_relocation(
+        graph, target_rows, family_names, np.random.default_rng(5)
+    )
+    assert proposal is not None
+    gain = proposal_relation_degree_gain(
+        graph,
+        proposal,
+        target_rows,
+        {family: index for index, family in enumerate(family_names)},
+    )
+    assert gain > 0.0
+
+
+def test_targeted_role_candidate_sampler_preserves_candidate_contract():
+    target_graph = _graph()
+    graph = target_graph.clone()
+    graph.remove_edge("AB", (0, 4))
+    graph.add_edge("AB", (3, 4))
+    family_names = tuple(sorted(graph.family_specs))
+    target_rows = np.stack(
+        [target_graph.family_degrees(family) for family in family_names], axis=1
+    )
+    candidates = sample_role_alignment_candidates(
+        graph,
+        target_rows,
+        family_names,
+        np.random.default_rng(11),
+        count=4,
+        targeted_fraction=0.5,
+    )
+    assert len(candidates) == 4
+    assert candidates[0].action == "noop"

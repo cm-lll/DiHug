@@ -876,10 +876,20 @@ def _select_mixed_edit_feature_profile(
     return np.concatenate((full[:local_width], full[-compact_width:]))
 
 
-def mixed_edit_state_vector(graph: TypedGraph, time_fraction: float) -> np.ndarray:
+def mixed_edit_state_vector(
+    graph: TypedGraph,
+    time_fraction: float,
+    *,
+    degrees: Optional[np.ndarray] = None,
+    family_degrees: Optional[Mapping[str, np.ndarray]] = None,
+) -> np.ndarray:
     """Target-free whole-graph summary shared by all edit candidates."""
 
-    degrees = graph.degrees().astype(np.float64)
+    degrees = (
+        graph.degrees().astype(np.float64)
+        if degrees is None
+        else np.asarray(degrees, dtype=np.float64)
+    )
     log_scale = max(float(np.log1p(graph.num_nodes)), 1.0)
     total_capacity = sum(family_domain_size(spec) for spec in graph.family_specs.values())
     values = [
@@ -900,7 +910,11 @@ def mixed_edit_state_vector(graph: TypedGraph, time_fraction: float) -> np.ndarr
         )
     for family in _family_names(graph):
         spec = graph.family_specs[family]
-        family_degree = graph.family_degrees(family).astype(np.float64)
+        family_degree = (
+            graph.family_degrees(family).astype(np.float64)
+            if family_degrees is None
+            else np.asarray(family_degrees[family], dtype=np.float64)
+        )
         source = family_degree[np.asarray(spec.src_nodes, dtype=np.int64)]
         target = family_degree[np.asarray(spec.dst_nodes, dtype=np.int64)]
         capacity = family_domain_size(spec)
@@ -933,7 +947,12 @@ def mixed_edit_candidate_matrix(
     }
     degree_scale = max(float(np.log1p(graph.num_nodes)), 1.0)
     common_scale = max(float(np.sqrt(graph.num_nodes)), 1.0)
-    state = mixed_edit_state_vector(graph, time_fraction)
+    state = mixed_edit_state_vector(
+        graph,
+        time_fraction,
+        degrees=degrees,
+        family_degrees=family_degrees,
+    )
     rows = []
     for proposal in candidates:
         action = np.zeros(len(SCORER_ACTIONS), dtype=np.float64)
