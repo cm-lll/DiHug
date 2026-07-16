@@ -70,6 +70,7 @@ from sparse_diffusion.structure_energy.factorized_edit_denoiser import (
     save_factorized_edit_checkpoint,
     train_factorized_edit_denoiser,
 )
+from sparse_diffusion.structure_energy.hgt_edit_denoiser import graph_node_features
 from sparse_diffusion.structure_energy.switch_chain import (
     LinearGraphletEnergy,
     graph_metrics,
@@ -96,6 +97,16 @@ from sparse_diffusion.structure_energy.switch_diffusion import (
 )
 from sparse_diffusion.structure_energy.switch_accelerator import (
     BatchedClosedTriangleKernel,
+)
+from sparse_diffusion.structure_energy.quotient_energy import (
+    TypedQuotientEnergy,
+    build_quotient_energy_dataset,
+    calibrate_minimum_energy_drop,
+    graph_energies,
+    load_quotient_energy_checkpoint,
+    sample_quotient_energy_edits,
+    save_quotient_energy_checkpoint,
+    train_quotient_energy,
 )
 
 
@@ -625,6 +636,93 @@ def test_type_orbit_bridge_preserves_structure_and_adds_clean_noop_targets():
         assert dataset.targets[first] >= 0
         assert dataset.candidate_improvements[first, dataset.targets[first]] == 0.0
         assert np.all(dataset.candidate_improvements[first] <= 0.0)
+
+
+def test_quotient_energy_is_invariant_to_typed_node_permutation():
+    import torch
+
+    source = _toy_graph()
+    permuted = permute_typed_graph_within_types(source, seed=1301)
+    node_feature_dim = graph_node_features(source, 0.0).shape[1] - 1
+    model = TypedQuotientEnergy(
+        node_feature_dim=node_feature_dim,
+        type_count=len(source.type_names),
+        family_count=len(source.family_specs),
+        hidden_dim=16,
+        heads=4,
+        layers=1,
+        dropout=0.0,
+    ).eval()
+    with torch.no_grad():
+        energies = graph_energies(model, (source, permuted), "cpu")
+    np.testing.assert_allclose(
+        energies[0].item(), energies[1].item(), atol=1.0e-6
+    )
+
+
+def test_quotient_energy_dataset_contains_degree_matched_hard_negatives():
+    source = _toy_graph()
+    prior = MarginalGraphPrior.from_training_graph(source)
+    dataset = build_quotient_energy_dataset(
+        source,
+        prior.sample,
+        trajectories=2,
+        noise_fractions=(0.1,),
+        seed=1302,
+    )
+    kinds = Counter(example.negative_kind for example in dataset.examples)
+    assert kinds == Counter(clean_orbit=2, prior=2, relocation=4, switch=4)
+    for example in dataset.examples:
+        if example.negative_kind != "switch":
+            continue
+        for family in source.family_specs:
+            source_multiset = sorted(source.family_degrees(family).tolist())
+            negative_multiset = sorted(example.graph.family_degrees(family).tolist())
+            assert negative_multiset == source_multiset
+
+
+def test_quotient_energy_checkpoint_is_target_free_and_sampling_descends():
+    source = _toy_graph()
+    prior = MarginalGraphPrior.from_training_graph(source)
+    dataset = build_quotient_energy_dataset(
+        source,
+        prior.sample,
+        trajectories=3,
+        noise_fractions=(0.1,),
+        seed=1303,
+    )
+    model, report = train_quotient_energy(
+        dataset,
+        epochs=2,
+        hidden_dim=16,
+        heads=4,
+        layers=1,
+        dropout=0.0,
+        device="cpu",
+        seed=1304,
+    )
+    with TemporaryDirectory() as directory:
+        path = Path(directory) / "energy.pt"
+        save_quotient_energy_checkpoint(path, model, report)
+        loaded, payload = load_quotient_energy_checkpoint(path)
+        assert payload["inference_contract"]["training_adjacency"] is False
+        assert "target_vector" not in payload
+        result = sample_quotient_energy_edits(
+            prior.sample(1305),
+            loaded,
+            steps=4,
+            candidates_per_step=4,
+            seed=1306,
+            device="cpu",
+            metrics_every=1,
+        )
+    energies = [row["energy"] for row in result.trace[1:]]
+    assert all(right <= left + 1.0e-6 for left, right in zip(energies, energies[1:]))
+    calibration = calibrate_minimum_energy_drop(
+        loaded, source, trials_per_action=4, seed=1307, device="cpu"
+    )
+    assert calibration["recommended_minimum_energy_drop"] >= 0.0
+    assert calibration["calibration_trials"] > 0
 
 
 def test_factorized_candidates_cover_positive_endpoint_group():
