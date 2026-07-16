@@ -46,6 +46,16 @@ def test_exchangeable_role_degree_prior_preserves_only_typewise_row_multisets():
         assert sorted(map(tuple, sampled[nodes])) == sorted(map(tuple, original[nodes]))
 
 
+def test_exchangeable_role_prior_recovers_family_counts_without_adjacency():
+    graph = _graph()
+    prior = ExchangeableRoleDegreePrior.from_training_graph(graph)
+    endpoints = {
+        family: (spec.src_type, spec.dst_type)
+        for family, spec in graph.family_specs.items()
+    }
+    assert prior.family_counts(endpoints) == {"AA": 2, "AB": 3}
+
+
 def test_proposal_role_degree_gain_matches_full_graph_recomputation():
     graph = _graph()
     family_names = tuple(sorted(graph.family_specs))

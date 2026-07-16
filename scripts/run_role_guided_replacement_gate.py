@@ -69,8 +69,7 @@ def main() -> None:
             args.model_checkpoint, device=args.device
         )
     role_path = args.output_dir / "exchangeable_role_degree_prior.json"
-    ExchangeableRoleDegreePrior.from_training_graph(source).save(role_path)
-    role_prior = ExchangeableRoleDegreePrior.load(role_path)
+    role_prior = None
     context_model = None
     if args.context_checkpoint is not None:
         context_model, context_payload = load_rooted_context_checkpoint(
@@ -78,6 +77,10 @@ def main() -> None:
         )
         embedded = context_payload["legacy_checkpoint_payload"]
         embedded_prior = MarginalGraphPrior.from_json_dict(embedded["prior"])
+        embedded_role = context_payload.get("exchangeable_role_prior")
+        if not isinstance(embedded_role, dict):
+            raise ValueError("context bundle does not contain an exchangeable role prior")
+        role_prior = ExchangeableRoleDegreePrior.from_json_dict(embedded_role)
         if model is None:
             model = context_model.joint.legacy_scorer
             marginal_prior = embedded_prior
@@ -91,6 +94,11 @@ def main() -> None:
         if args.context_scale >= 0.0:
             context_model.set_residual_scale(args.context_scale)
     assert model is not None and marginal_prior is not None and metadata is not None
+    if role_prior is None:
+        role_prior = ExchangeableRoleDegreePrior.from_training_graph(source)
+    if tuple(source.type_names) != role_prior.type_names:
+        raise ValueError("dataset schema and role prior type names disagree")
+    role_prior.save(role_path)
     if args.initial_graph is not None:
         state_path = args.initial_graph.with_name("sampling_state.json")
         if state_path.exists():
@@ -106,9 +114,12 @@ def main() -> None:
             json.loads(args.initial_graph.read_text(encoding="utf-8"))
         )
         if args.initial_graph is not None
-        else FamilyCountCondition.from_training_graph(source).sample_graph(
-            args.seed + 71, mode="fixed"
-        )
+        else FamilyCountCondition(
+            marginal=marginal_prior,
+            observed_counts=role_prior.family_counts(
+                marginal_prior.family_endpoints
+            ),
+        ).sample_graph(args.seed + 71, mode="fixed")
     )
     initial_counts = family_edge_counts(initial)
     result = sample_role_guided_edit_diffusion(

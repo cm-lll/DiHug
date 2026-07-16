@@ -58,6 +58,28 @@ class ExchangeableRoleDegreePrior:
             sampled[nodes] = source_rows[rng.permutation(len(source_rows))]
         return sampled
 
+    def family_counts(
+        self, family_endpoints: Mapping[str, Tuple[int, int]]
+    ) -> Mapping[str, int]:
+        """Recover family cardinalities from the anonymous degree-row multiset."""
+
+        counts = {}
+        for family_id, family in enumerate(self.family_names):
+            src_type, dst_type = family_endpoints[family]
+            src_sum = int(self.rows_by_type[int(src_type)][:, family_id].sum())
+            if int(src_type) == int(dst_type):
+                if src_sum % 2:
+                    raise ValueError(f"odd degree sum for homogeneous family {family}")
+                counts[family] = src_sum // 2
+                continue
+            dst_sum = int(self.rows_by_type[int(dst_type)][:, family_id].sum())
+            if src_sum != dst_sum:
+                raise ValueError(
+                    f"endpoint degree sums disagree for {family}: {src_sum} != {dst_sum}"
+                )
+            counts[family] = src_sum
+        return counts
+
     def to_json_dict(self) -> dict:
         return {
             "format": "dihug-exchangeable-role-degree-prior-v1",
