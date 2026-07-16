@@ -48,6 +48,7 @@ KERNELS = {
     "bd": ("birth", "death"),
     "bdr": ("birth", "death", "relocation"),
     "bdrs": EDIT_ACTIONS,
+    "rs": ("relocation", "switch"),
     "switch": ("switch",),
 }
 

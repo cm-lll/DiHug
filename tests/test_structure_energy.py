@@ -1798,3 +1798,67 @@ def test_hgt_listwise_scores_are_equivariant_to_same_type_node_permutation():
         original_scores = score(graph, candidates)
         permuted_scores = score(permuted, permuted_candidates)
     torch.testing.assert_close(original_scores, permuted_scores, rtol=1e-5, atol=1e-5)
+
+
+def test_adaptive_profile_detects_schema_motifs_and_scales_training_budget():
+    from sparse_diffusion.structure_energy.adaptive_profile import (
+        build_adaptive_mixed_edit_profile,
+        schema_supports_triangle,
+    )
+
+    triangle_graph = _toy_graph()
+    assert schema_supports_triangle(triangle_graph)
+
+    bipartite = TypedGraph(
+        triangle_graph.node_types,
+        triangle_graph.type_names,
+        {"AB": triangle_graph.family_specs["AB"]},
+        {"AB": triangle_graph.family_edges["AB"]},
+    )
+    assert not schema_supports_triangle(bipartite)
+
+    small = build_adaptive_mixed_edit_profile(triangle_graph)
+    repeated = TypedGraph(
+        np.asarray([0] * 24 + [1] * 16, dtype=np.int64),
+        triangle_graph.type_names,
+        {
+            "AA": FamilySpec("AA", 0, 0, tuple(range(24)), tuple(range(24))),
+            "AB": FamilySpec("AB", 0, 1, tuple(range(24)), tuple(range(24, 40))),
+        },
+        {
+            "AA": [
+                (4 * u + offset, 4 * v + offset)
+                for u, v in triangle_graph.family_edges["AA"]
+                for offset in range(4)
+            ],
+            "AB": [
+                (4 * u + offset, 24 + 4 * (v - 6) + offset)
+                for u, v in triangle_graph.family_edges["AB"]
+                for offset in range(4)
+            ],
+        },
+    )
+    large = build_adaptive_mixed_edit_profile(repeated)
+    assert large.forward_steps >= small.forward_steps
+    assert large.training_examples >= small.training_examples
+    assert small.kernel == large.kernel == "rs"
+    assert small.sample_actions == large.sample_actions == "checkpoint"
+
+
+def test_adaptive_role_component_budget_is_bounded_and_deterministic():
+    from sparse_diffusion.structure_energy.adaptive_profile import (
+        select_role_component_budget,
+    )
+
+    graph = _toy_graph()
+    first = select_role_component_budget(graph, coverage=0.95)
+    second = select_role_component_budget(graph, coverage=0.95)
+    assert first == second
+    assert 4 <= first <= 512
+    assert first & (first - 1) == 0
+
+
+def test_relocation_switch_kernel_matches_terminal_sampling_actions():
+    from scripts.run_mixed_edit_diffusion import KERNELS
+
+    assert KERNELS["rs"] == ("relocation", "switch")
