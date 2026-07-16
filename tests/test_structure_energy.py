@@ -1539,6 +1539,51 @@ def test_low_noise_switch_continuation_preserves_initial_role_plan():
     assert result.trace[0]["edges"] == result.trace[-1]["edges"]
 
 
+def test_terminal_refinement_keeps_the_original_reverse_schedule_prefix():
+    from sparse_diffusion.structure_energy.mixed_edit_diffusion import (
+        mixed_edit_feature_width,
+        sample_mixed_edit_diffusion,
+    )
+
+    initial = _toy_graph()
+    prior = MarginalGraphPrior.from_training_graph(initial)
+    model = SwitchDenoiserMLP(
+        input_dim=mixed_edit_feature_width(
+            "typed_closure_full_v2",
+            family_count=len(initial.family_specs),
+            type_count=len(initial.type_names),
+        ),
+        hidden_dim=8,
+        layers=1,
+        dropout=0.0,
+    )
+    short = sample_mixed_edit_diffusion(
+        prior,
+        model,
+        steps=4,
+        candidates_per_step=4,
+        seed=223,
+        device="cpu",
+        actions=("switch",),
+        initial_graph=initial,
+        metrics_every=1,
+    )
+    extended = sample_mixed_edit_diffusion(
+        prior,
+        model,
+        steps=8,
+        time_schedule_steps=4,
+        candidates_per_step=4,
+        seed=223,
+        device="cpu",
+        actions=("switch",),
+        initial_graph=initial,
+        metrics_every=1,
+    )
+
+    assert extended.trace[: len(short.trace)] == short.trace
+
+
 def test_systematic_role_sampling_is_unbiased_and_variance_reduced():
     from sparse_diffusion.structure_energy.exchangeable_role_prior import (
         TypeRoleMixture,

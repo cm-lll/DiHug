@@ -1095,6 +1095,7 @@ def sample_mixed_edit_diffusion(
     actions: Sequence[str] = EDIT_ACTIONS,
     initial_graph: Optional[TypedGraph] = None,
     fixed_time_fraction: Optional[float] = None,
+    time_schedule_steps: Optional[int] = None,
 ) -> MixedEditSamplingResult:
     graph = (
         prior.sample(seed=int(seed) + 71)
@@ -1108,6 +1109,9 @@ def sample_mixed_edit_diffusion(
         raise ValueError("initial graph and sampling prior schemas disagree")
     if fixed_time_fraction is not None and not 0.0 <= float(fixed_time_fraction) <= 1.0:
         raise ValueError("fixed time fraction must be in [0, 1]")
+    schedule_steps = int(steps if time_schedule_steps is None else time_schedule_steps)
+    if schedule_steps <= 0:
+        raise ValueError("time schedule steps must be positive")
     rng = np.random.default_rng(int(seed))
     device = torch.device(device)
     generator = torch.Generator(device=device).manual_seed(int(seed))
@@ -1118,8 +1122,9 @@ def sample_mixed_edit_diffusion(
     proposed = 0
     applied = 0
     for reverse_step in range(int(steps), 0, -1):
+        completed_before = int(steps) - reverse_step
         time_fraction = (
-            float(reverse_step) / float(steps)
+            max(float(schedule_steps - completed_before) / float(schedule_steps), 0.0)
             if fixed_time_fraction is None
             else float(fixed_time_fraction)
         )

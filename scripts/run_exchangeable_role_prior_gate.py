@@ -110,6 +110,15 @@ def parse_args() -> argparse.Namespace:
         help="Target-free transform applied to a learned full-graph prior sample.",
     )
     parser.add_argument("--fixed-time-fraction", type=float)
+    parser.add_argument(
+        "--time-schedule-steps",
+        type=int,
+        help=(
+            "Number of initial sampling steps used to anneal t from one to zero. "
+            "Any remaining --sample-steps continue at t=0. Defaults to the full "
+            "sampling horizon."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -304,6 +313,7 @@ def main() -> None:
         actions=sample_actions,
         initial_graph=initial_graph,
         fixed_time_fraction=args.fixed_time_fraction,
+        time_schedule_steps=args.time_schedule_steps,
     )
     if (
         terminal_count_preserving_subset
@@ -344,6 +354,7 @@ def main() -> None:
                 else None
             ),
             "fixed_time_fraction": args.fixed_time_fraction,
+            "time_schedule_steps": args.time_schedule_steps,
         },
     }
     write_json(args.output_dir / "sampling_report.json", payload)
