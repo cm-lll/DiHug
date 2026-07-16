@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+source "${CONDA_SH:-/data2/lyh/miniconda3/etc/profile.d/conda.sh}"
+conda activate "${CONDA_ENV:-sparse_block}"
+
 ROOT="${ROOT:-results/rooted_context_end_to_end_0717}"
 LOG_ROOT="${LOG_ROOT:-logs/rooted_context_end_to_end_0717}"
 PYTHON="${PYTHON:-python}"
