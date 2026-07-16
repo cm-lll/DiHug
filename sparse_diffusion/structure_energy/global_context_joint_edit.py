@@ -73,6 +73,85 @@ def decode_queries_in_chunks(
     return decoded[restore]
 
 
+def decode_edit_edge_slots_in_chunks(
+    model: nn.Module,
+    *,
+    encoded: dict,
+    candidate_endpoints: torch.Tensor,
+    edge_slot_attr: torch.Tensor,
+    candidate_family_ids: torch.Tensor,
+    batch: torch.Tensor,
+    chunk_size: int,
+    chunk_order: Optional[Sequence[int]] = None,
+) -> torch.Tensor:
+    """Lazily encode the four edge slots of every joint edit proposal.
+
+    Missing/new edges are ordinary decoder-only queries: callers encode their
+    current state as the NULL class in ``edge_slot_attr``. They never enter
+    ``encode_context`` or alter message passing. Removed edges can carry their
+    current subtype in the same tensor.
+    """
+
+    if candidate_endpoints.ndim != 2 or candidate_endpoints.shape[-1] != 8:
+        raise ValueError("candidate_endpoints must have shape [C,8]")
+    candidate_count = int(candidate_endpoints.shape[0])
+    if edge_slot_attr.shape[:2] != (candidate_count, 4):
+        raise ValueError("edge_slot_attr must have shape [C,4,D]")
+    if candidate_family_ids.shape != (candidate_count,):
+        raise ValueError("candidate_family_ids must have shape [C]")
+    if chunk_size <= 0:
+        raise ValueError("chunk_size must be positive")
+
+    endpoints = candidate_endpoints.reshape(candidate_count, 4, 2)
+    valid = (endpoints[..., 0] >= 0) & (endpoints[..., 1] >= 0)
+    flat_positions = torch.nonzero(valid.reshape(-1), as_tuple=False).flatten()
+    repr_dim = int(getattr(model, "query_edge_repr_dim", 0))
+    if flat_positions.numel() == 0:
+        return edge_slot_attr.new_zeros((candidate_count, 4, repr_dim))
+
+    flat_endpoints = endpoints.reshape(-1, 2)[flat_positions]
+    flat_attr = edge_slot_attr.reshape(-1, edge_slot_attr.shape[-1])[flat_positions]
+    flat_family = candidate_family_ids[:, None].expand(-1, 4).reshape(-1)[
+        flat_positions
+    ]
+    spans = [
+        (start, min(start + int(chunk_size), int(flat_positions.numel())))
+        for start in range(0, int(flat_positions.numel()), int(chunk_size))
+    ]
+    order = list(range(len(spans))) if chunk_order is None else [int(i) for i in chunk_order]
+    if sorted(order) != list(range(len(spans))):
+        raise ValueError("chunk_order must be a permutation of all slot chunks")
+
+    values = []
+    value_positions = []
+    for chunk_id in order:
+        start, end = spans[chunk_id]
+        pairs = flat_endpoints[start:end]
+        query_index = pairs.t().contiguous()
+        model.decode_queries(
+            encoded=encoded,
+            query_edge_attr=flat_attr[start:end],
+            query_edge_index=query_index,
+            batch=batch,
+            query_edge_family_ids=flat_family[start:end],
+        )
+        query_repr = getattr(model, "last_query_edge_repr", None)
+        if query_repr is None or query_repr.shape[0] != end - start:
+            raise RuntimeError("query decoder did not expose last_query_edge_repr")
+        if repr_dim == 0:
+            repr_dim = int(query_repr.shape[-1])
+        elif int(query_repr.shape[-1]) != repr_dim:
+            raise RuntimeError("query representation width changed between chunks")
+        values.append(query_repr)
+        value_positions.append(flat_positions[start:end])
+
+    decoded = torch.cat(values, dim=0)
+    decoded_positions = torch.cat(value_positions, dim=0)
+    output = decoded.new_zeros((candidate_count * 4, repr_dim))
+    output[decoded_positions] = decoded
+    return output.reshape(candidate_count, 4, repr_dim)
+
+
 class GlobalContextJointEditResidual(nn.Module):
     """Zero-initialized HSD residual around a legacy listwise edit scorer.
 

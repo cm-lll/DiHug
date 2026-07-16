@@ -6,6 +6,7 @@ model is allowed to participate in graph construction.
 """
 
 from .checkpoint import StructureEnergyCheckpoint
+from .cardinality_conditioned_edit import FamilyCountCondition
 from .features import GraphletFeatureExtractor
 from .factorized_edit_denoiser import FactorizedEditDenoiser
 from .graph import FamilySpec, TypedGraph, load_typed_graph
@@ -22,6 +23,7 @@ from .switch_diffusion import SwitchDenoiserMLP
 __all__ = [
     "FamilySpec",
     "FactorizedEditDenoiser",
+    "FamilyCountCondition",
     "GraphletFeatureExtractor",
     "GlobalContextJointEditResidual",
     "MarginalGraphPrior",

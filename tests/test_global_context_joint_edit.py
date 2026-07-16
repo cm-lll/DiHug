@@ -3,6 +3,7 @@ from torch import nn
 
 from sparse_diffusion.structure_energy.global_context_joint_edit import (
     GlobalContextJointEditResidual,
+    decode_edit_edge_slots_in_chunks,
     decode_queries_in_chunks,
 )
 from sparse_diffusion.structure_energy.switch_diffusion import SwitchDenoiserMLP
@@ -28,6 +29,9 @@ class _ToyQueryDecoder(nn.Module):
             query_edge_attr.new_zeros((query_edge_attr.shape[0], 1))
             if query_edge_family_ids is None
             else query_edge_family_ids[:, None].to(query_edge_attr.dtype)
+        )
+        self.last_query_edge_repr = torch.cat(
+            (src, dst, query_edge_attr[:, :1], family), dim=-1
         )
         return torch.cat((src + dst, query_edge_attr[:, :1], family), dim=-1)
 
@@ -100,6 +104,49 @@ def test_zero_initialized_global_context_residual_exactly_recovers_legacy_mlp():
             edge_slot_hidden=edge_hidden,
         )
     assert torch.equal(expected, actual)
+
+
+def test_lazy_null_edge_slot_decode_is_chunk_order_invariant():
+    torch.manual_seed(11)
+    model = _ToyQueryDecoder()
+    model.query_edge_repr_dim = 10
+    encoded = {"h": torch.randn(8, 4)}
+    endpoints = torch.tensor(
+        [
+            [0, 1, -1, -1, 2, 3, 4, 5],
+            [1, 2, 3, 4, 5, 6, -1, -1],
+        ]
+    )
+    # Slots 0-1 are current edges; slots 2-3 are additions and therefore use
+    # an explicit NULL token in the first coordinate.
+    attrs = torch.zeros(2, 4, 3)
+    attrs[:, :2, 1] = 1.0
+    attrs[:, 2:, 0] = 1.0
+    families = torch.tensor([0, 2])
+    batch = torch.zeros(8, dtype=torch.long)
+    forward = decode_edit_edge_slots_in_chunks(
+        model,
+        encoded=encoded,
+        candidate_endpoints=endpoints,
+        edge_slot_attr=attrs,
+        candidate_family_ids=families,
+        batch=batch,
+        chunk_size=2,
+    )
+    reverse = decode_edit_edge_slots_in_chunks(
+        model,
+        encoded=encoded,
+        candidate_endpoints=endpoints,
+        edge_slot_attr=attrs,
+        candidate_family_ids=families,
+        batch=batch,
+        chunk_size=2,
+        chunk_order=(2, 1, 0),
+    )
+    assert torch.equal(forward, reverse)
+    assert torch.equal(forward[0, 1], torch.zeros_like(forward[0, 1]))
+    assert torch.equal(forward[1, 3], torch.zeros_like(forward[1, 3]))
+    assert not torch.equal(forward[0, 0], forward[0, 2])
 
 
 def test_joint_residual_can_learn_from_all_removed_and_added_slots():
