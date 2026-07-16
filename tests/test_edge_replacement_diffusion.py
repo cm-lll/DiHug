@@ -5,7 +5,11 @@ from sparse_diffusion.structure_energy.edge_replacement_diffusion import (
     apply_replacement_transition,
     build_family_domains,
     replacement_log_probability,
+    relation_degree_role_features,
+    sample_exchangeable_role_features,
+    sample_checkpoint_role_features,
     sample_replacement_transition,
+    select_x0_replacement,
     EdgeReplacementDenoiser,
 )
 from sparse_diffusion.structure_energy.graph import FamilySpec, TypedGraph
@@ -90,3 +94,56 @@ def test_replacement_denoiser_scores_present_and_null_edges():
     assert deleted.shape == (3,)
     assert added.shape == (3,)
     assert not torch.equal(deleted, added)
+
+
+def test_x0_replacement_removes_low_scores_and_adds_only_score_improvements():
+    selected = select_x0_replacement(
+        ((0, 1), (1, 2), (2, 3)),
+        (0.9, -0.4, 0.2),
+        ((0, 2), (0, 3), (1, 3)),
+        (0.1, 1.2, -0.7),
+        budget=2,
+    )
+    assert selected.removed == ((1, 2),)
+    assert selected.added == ((0, 3),)
+
+
+def test_x0_replacement_stops_when_no_absent_edge_improves_the_set():
+    selected = select_x0_replacement(
+        ((0, 1), (1, 2)),
+        (0.8, 0.7),
+        ((0, 2), (0, 3)),
+        (0.6, 0.5),
+        budget=2,
+    )
+    assert selected.removed == ()
+    assert selected.added == ()
+
+
+def test_exchangeable_role_assignment_preserves_rows_only_within_node_type():
+    graph = _graph()
+    original = relation_degree_role_features(graph)
+    sampled = sample_exchangeable_role_features(graph, seed=17)
+    for type_id in range(len(graph.type_names)):
+        nodes = np.flatnonzero(graph.node_types == type_id)
+        assert sorted(map(tuple, sampled[nodes])) == sorted(map(tuple, original[nodes]))
+
+
+def test_checkpoint_role_sampling_needs_no_training_graph_adjacency():
+    graph = _graph()
+    model = EdgeReplacementDenoiser(
+        node_feature_dim=6,
+        type_count=2,
+        family_count=2,
+        hidden_dim=16,
+        heads=4,
+        layers=1,
+        dropout=0.0,
+        role_residual_features=True,
+    )
+    rows = relation_degree_role_features(graph)
+    model.set_role_prior(rows, graph.node_types)
+    sampled = sample_checkpoint_role_features(model, graph.node_types, seed=23)
+    for type_id in range(len(graph.type_names)):
+        nodes = np.flatnonzero(graph.node_types == type_id)
+        assert sorted(map(tuple, sampled[nodes])) == sorted(map(tuple, rows[nodes]))
