@@ -543,6 +543,8 @@ def sample_role_guided_edit_diffusion(
     auto_role_balance: float = 0.0,
     role_calibration_batches: int = 32,
     targeted_role_candidate_fraction: float = 0.0,
+    context_model: Optional[torch.nn.Module] = None,
+    context_refresh_steps: int = 20,
 ) -> MixedEditSamplingResult:
     graph = prior.sample(seed + 71) if initial_graph is None else initial_graph.clone()
     if tuple(graph.type_names) != role_prior.type_names:
@@ -555,6 +557,10 @@ def sample_role_guided_edit_diffusion(
     rng = np.random.default_rng(int(seed))
     device = torch.device(device)
     model = model.to(device).eval()
+    if context_model is not None:
+        if int(context_refresh_steps) <= 0:
+            raise ValueError("context refresh interval must be positive")
+        context_model = context_model.to(device).eval()
     effective_role_weight = float(role_weight)
     if float(auto_role_balance) > 0.0:
         if int(role_calibration_batches) <= 0:
@@ -628,6 +634,8 @@ def sample_role_guided_edit_diffusion(
         raise ValueError("model time horizon must be positive")
     if int(model_time_start_step) < 0:
         raise ValueError("model time start step must be non-negative")
+    context_hidden = None
+    last_context_refresh = -int(context_refresh_steps)
     with torch.no_grad():
         for completed in range(1, int(steps) + 1):
             time_fraction = denoising_time_fraction(
@@ -659,18 +667,36 @@ def sample_role_guided_edit_diffusion(
                     actions=actions,
                 )
             proposed += len(candidates)
-            matrix = mixed_edit_candidate_matrix(
-                graph,
-                candidates,
-                time_fraction,
-                feature_profile=feature_profile,
-            )
-            matrix = align_mixed_edit_features_for_model(
-                matrix, model, family_count=len(family_names)
-            )
-            structure_logits = model(
-                torch.from_numpy(matrix)[None].float().to(device)
-            ).squeeze(0)
+            if context_model is not None and switch_refinement:
+                if (
+                    context_hidden is None
+                    or completed - last_context_refresh >= int(context_refresh_steps)
+                ):
+                    context_hidden = context_model.encode_graph(
+                        graph, time_fraction, device
+                    )
+                    last_context_refresh = completed
+                structure_logits, _ = context_model.score_graph_candidates(
+                    graph,
+                    candidates,
+                    time_fraction,
+                    feature_profile,
+                    device,
+                    encoded=context_hidden,
+                )
+            else:
+                matrix = mixed_edit_candidate_matrix(
+                    graph,
+                    candidates,
+                    time_fraction,
+                    feature_profile=feature_profile,
+                )
+                matrix = align_mixed_edit_features_for_model(
+                    matrix, model, family_count=len(family_names)
+                )
+                structure_logits = model(
+                    torch.from_numpy(matrix)[None].float().to(device)
+                ).squeeze(0)
             degree_gains = torch.tensor(
                 [
                     proposal_relation_degree_gain(

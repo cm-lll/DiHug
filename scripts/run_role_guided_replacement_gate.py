@@ -19,6 +19,9 @@ from sparse_diffusion.structure_energy.role_guided_edit_diffusion import (
     ExchangeableRoleDegreePrior,
     sample_role_guided_edit_diffusion,
 )
+from sparse_diffusion.structure_energy.rooted_context_edit import (
+    load_rooted_context_checkpoint,
+)
 from sparse_diffusion.structure_energy.switch_chain import graph_metrics
 
 
@@ -45,6 +48,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--auto-role-balance", type=float, default=0.0)
     parser.add_argument("--role-calibration-batches", type=int, default=32)
     parser.add_argument("--targeted-role-candidate-fraction", type=float, default=0.0)
+    parser.add_argument("--context-checkpoint", type=Path)
+    parser.add_argument("--context-refresh-steps", type=int, default=20)
     return parser.parse_args()
 
 
@@ -58,6 +63,11 @@ def main() -> None:
     role_path = args.output_dir / "exchangeable_role_degree_prior.json"
     ExchangeableRoleDegreePrior.from_training_graph(source).save(role_path)
     role_prior = ExchangeableRoleDegreePrior.load(role_path)
+    context_model = None
+    if args.context_checkpoint is not None:
+        context_model, _ = load_rooted_context_checkpoint(
+            args.context_checkpoint, model, device=args.device
+        )
     initial = (
         TypedGraph.from_json_dict(
             json.loads(args.initial_graph.read_text(encoding="utf-8"))
@@ -93,6 +103,8 @@ def main() -> None:
         auto_role_balance=args.auto_role_balance,
         role_calibration_batches=args.role_calibration_batches,
         targeted_role_candidate_fraction=args.targeted_role_candidate_fraction,
+        context_model=context_model,
+        context_refresh_steps=args.context_refresh_steps,
     )
     final_counts = family_edge_counts(result.graph)
     if final_counts != initial_counts:
@@ -118,6 +130,10 @@ def main() -> None:
         "auto_role_balance": args.auto_role_balance,
         "effective_role_weight": result.trace[0]["effective_role_weight"],
         "targeted_role_candidate_fraction": args.targeted_role_candidate_fraction,
+        "context_checkpoint": (
+            None if args.context_checkpoint is None else str(args.context_checkpoint)
+        ),
+        "context_refresh_steps": args.context_refresh_steps,
         "initial_graph_source": (
             "fixed_family_count_prior"
             if args.initial_graph is None
