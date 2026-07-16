@@ -56,6 +56,7 @@ from sparse_diffusion.structure_energy.mixed_edit_diffusion import (
     inverse_edit,
     marginal_log_probability,
     mixed_transition_probability,
+    permute_typed_graph_within_types,
     run_edit_distance_oracle,
     sample_mixed_forward_transition,
     sample_valid_edit,
@@ -598,6 +599,32 @@ def test_mixed_edit_dataset_accepts_exact_weak_role_corruption_bridge():
     assert np.isfinite(dataset.candidate_improvements).all()
     assert np.all(dataset.targets >= 0)
     assert np.all(dataset.targets < 8)
+
+
+def test_type_orbit_bridge_preserves_structure_and_adds_clean_noop_targets():
+    source = _toy_graph()
+    permuted = permute_typed_graph_within_types(source, seed=1205)
+    assert graph_metrics(permuted) == graph_metrics(source)
+    assert edge_edit_distance(permuted, source) > 0
+
+    terminal = MarginalGraphPrior.from_training_graph(source).sample(seed=1206)
+    dataset = build_mixed_edit_diffusion_dataset(
+        source,
+        trajectories=2,
+        forward_steps=8,
+        record_every=2,
+        candidates_per_example=8,
+        seed=1207,
+        role_corruption_targets={0: terminal, 1: terminal},
+        clean_targets={0: permuted, 1: source},
+        clean_noop_examples_per_trajectory=1,
+    )
+
+    for trajectory_id in (0, 1):
+        first = int(np.flatnonzero(dataset.trajectory_ids == trajectory_id)[0])
+        assert dataset.targets[first] >= 0
+        assert dataset.candidate_improvements[first, dataset.targets[first]] == 0.0
+        assert np.all(dataset.candidate_improvements[first] <= 0.0)
 
 
 def test_factorized_candidates_cover_positive_endpoint_group():

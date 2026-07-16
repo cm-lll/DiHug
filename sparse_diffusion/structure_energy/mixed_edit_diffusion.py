@@ -497,6 +497,39 @@ def exact_edit_path(
     return tuple(proposals)
 
 
+def permute_typed_graph_within_types(
+    graph: TypedGraph,
+    seed: int,
+) -> TypedGraph:
+    """Return a typed-isomorphic copy with node identities randomized.
+
+    The permutation acts only within each node type, so the schema and every
+    isomorphism-invariant graph statistic are unchanged.  This supplies clean
+    orbit representatives without exposing one privileged node-ID alignment.
+    """
+
+    rng = np.random.default_rng(int(seed))
+    permutation = np.arange(graph.num_nodes, dtype=np.int64)
+    for type_id in range(len(graph.type_names)):
+        nodes = np.flatnonzero(graph.node_types == type_id)
+        permutation[nodes] = rng.permutation(nodes)
+    family_edges = {
+        family: [
+            (int(permutation[left]), int(permutation[right]))
+            for left, right in edges
+        ]
+        for family, edges in graph.family_edges.items()
+    }
+    permuted = TypedGraph(
+        graph.node_types.copy(),
+        graph.type_names,
+        graph.family_specs,
+        family_edges,
+    )
+    permuted.validate()
+    return permuted
+
+
 def edit_distance_improvement(
     graph: TypedGraph, clean: TypedGraph, proposal: EditProposal
 ) -> int:
@@ -952,6 +985,8 @@ def build_mixed_edit_diffusion_dataset(
     actions: Sequence[str] = EDIT_ACTIONS,
     feature_profile: str = "typed_closure_full_v2",
     role_corruption_targets: Optional[Mapping[int, TypedGraph]] = None,
+    clean_targets: Optional[Mapping[int, TypedGraph]] = None,
+    clean_noop_examples_per_trajectory: int = 0,
 ) -> SwitchDiffusionDataset:
     if int(trajectories) < 2:
         raise ValueError("mixed edit training needs at least two trajectories")
@@ -960,6 +995,9 @@ def build_mixed_edit_diffusion_dataset(
     prior = MarginalGraphPrior.from_training_graph(source)
     schedule = schedule or MixedKernelSchedule()
     role_corruption_targets = dict(role_corruption_targets or {})
+    clean_targets = dict(clean_targets or {})
+    if int(clean_noop_examples_per_trajectory) < 0:
+        raise ValueError("clean noop example count must be non-negative")
     if role_corruption_targets and not {
         "birth",
         "death",
@@ -975,6 +1013,26 @@ def build_mixed_edit_diffusion_dataset(
     )
     if invalid_ids:
         raise ValueError(f"invalid role corruption trajectory ids: {invalid_ids}")
+    invalid_clean_ids = sorted(
+        trajectory_id
+        for trajectory_id in clean_targets
+        if trajectory_id < 0 or trajectory_id >= int(trajectories)
+    )
+    if invalid_clean_ids:
+        raise ValueError(f"invalid clean target trajectory ids: {invalid_clean_ids}")
+
+    def validate_schema(candidate: TypedGraph, label: str) -> None:
+        if candidate.type_names != source.type_names or not np.array_equal(
+            candidate.node_types, source.node_types
+        ):
+            raise ValueError(f"{label} uses a different typed node schema")
+        if set(candidate.family_specs) != set(source.family_specs):
+            raise ValueError(f"{label} uses a different family schema")
+
+    for trajectory_id, candidate in clean_targets.items():
+        validate_schema(candidate, f"clean target {trajectory_id}")
+    for trajectory_id, candidate in role_corruption_targets.items():
+        validate_schema(candidate, f"role corruption target {trajectory_id}")
     examples = []
     candidate_improvements = []
     targets = []
@@ -982,6 +1040,7 @@ def build_mixed_edit_diffusion_dataset(
 
     def record_example(
         graph: TypedGraph,
+        clean_graph: TypedGraph,
         positive: EditProposal,
         rng: np.random.Generator,
         time_fraction: float,
@@ -1008,7 +1067,7 @@ def build_mixed_edit_diffusion_dataset(
         candidate_improvements.append(
             np.asarray(
                 [
-                    edit_distance_improvement(graph, source, candidate)
+                    edit_distance_improvement(graph, clean_graph, candidate)
                     for candidate in candidates
                 ],
                 dtype=np.float32,
@@ -1019,14 +1078,24 @@ def build_mixed_edit_diffusion_dataset(
 
     for trajectory_id in range(int(trajectories)):
         rng = np.random.default_rng(int(seed) + 1_000_003 * trajectory_id)
+        clean_graph = clean_targets.get(trajectory_id, source)
+        for _ in range(int(clean_noop_examples_per_trajectory)):
+            record_example(
+                clean_graph,
+                clean_graph,
+                EditProposal("noop", _family_names(clean_graph)[0], (), ()),
+                rng,
+                0.0,
+                trajectory_id,
+            )
         if trajectory_id in role_corruption_targets:
             target_graph = role_corruption_targets[trajectory_id]
-            path = exact_edit_path(source, target_graph, rng)
+            path = exact_edit_path(clean_graph, target_graph, rng)
             if not path:
                 raise RuntimeError(
                     f"role corruption trajectory {trajectory_id} is identical to clean"
                 )
-            graph = source.clone()
+            graph = clean_graph.clone()
             requested = max(1, int(forward_steps) // int(record_every))
             record_steps = set(
                 np.rint(np.linspace(1, len(path), min(requested, len(path))))
@@ -1038,6 +1107,7 @@ def build_mixed_edit_diffusion_dataset(
                 if path_step in record_steps:
                     record_example(
                         graph,
+                        clean_graph,
                         inverse_edit(proposal),
                         rng,
                         float(path_step) / float(len(path)),
@@ -1051,7 +1121,7 @@ def build_mixed_edit_diffusion_dataset(
                 raise AssertionError("role corruption edit bridge missed its target")
             continue
 
-        graph = source.clone()
+        graph = clean_graph.clone()
         recorded = 0
         for step in range(1, int(forward_steps) + 1):
             proposal = sample_mixed_forward_transition(
@@ -1067,6 +1137,7 @@ def build_mixed_edit_diffusion_dataset(
                 continue
             record_example(
                 graph,
+                clean_graph,
                 inverse_edit(proposal),
                 rng,
                 float(step) / float(forward_steps),

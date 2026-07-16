@@ -36,6 +36,7 @@ from sparse_diffusion.structure_energy.mixed_edit_diffusion import (
     evaluate_fixed_t_denoising,
     load_mixed_edit_checkpoint,
     mixed_edit_feature_width,
+    permute_typed_graph_within_types,
     run_edit_distance_oracle,
     sample_mixed_edit_diffusion,
     save_mixed_edit_checkpoint,
@@ -124,6 +125,17 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--role-prior-components", type=int, default=64)
     parser.add_argument("--role-prior-randomization-steps-per-edge", type=float, default=10.0)
+    parser.add_argument(
+        "--type-orbit-augmentation",
+        action="store_true",
+        help="Use an independent within-type node permutation as each clean target.",
+    )
+    parser.add_argument(
+        "--clean-noop-examples-per-trajectory",
+        type=int,
+        default=0,
+        help="Number of clean-orbit noop examples added per trajectory.",
+    )
     return parser.parse_args()
 
 
@@ -189,6 +201,21 @@ def main() -> None:
             raise ValueError("role corruption requires the reversible bdrs edit kernel")
         if args.role_corruption_fraction > 0.0 and args.dataset_cache is not None:
             raise ValueError("role corruption cannot reuse an unlabelled dataset cache")
+        if args.type_orbit_augmentation and args.role_corruption_fraction != 1.0:
+            raise ValueError(
+                "type-orbit augmentation requires role-corruption-fraction=1 so "
+                "the training terminal distribution matches the sampling prior"
+            )
+
+        clean_targets = {}
+        if args.type_orbit_augmentation:
+            clean_targets = {
+                trajectory_id: permute_typed_graph_within_types(
+                    source,
+                    args.seed + 20_000_033 + trajectory_id,
+                )
+                for trajectory_id in range(int(args.trajectories))
+            }
 
         role_corruption_targets = {}
         role_corruption_metadata = {
@@ -304,6 +331,10 @@ def main() -> None:
                 actions=KERNELS[args.kernel],
                 feature_profile=args.feature_profile,
                 role_corruption_targets=role_corruption_targets,
+                clean_targets=clean_targets,
+                clean_noop_examples_per_trajectory=(
+                    args.clean_noop_examples_per_trajectory
+                ),
             )
         dataset_path = args.output_dir / "mixed_edit_dataset.npz"
         np.savez_compressed(
@@ -315,6 +346,10 @@ def main() -> None:
             feature_profile=np.asarray(args.feature_profile),
             kernel=np.asarray(args.kernel),
             role_corruption=np.asarray(json.dumps(role_corruption_metadata)),
+            type_orbit_augmentation=np.asarray(args.type_orbit_augmentation),
+            clean_noop_examples_per_trajectory=np.asarray(
+                args.clean_noop_examples_per_trajectory
+            ),
         )
         if args.dataset_cache is not None and not args.dataset_cache.exists():
             args.dataset_cache.parent.mkdir(parents=True, exist_ok=True)
