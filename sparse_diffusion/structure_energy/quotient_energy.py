@@ -428,7 +428,7 @@ def calibrate_minimum_energy_drop(
     trials_per_action: int,
     seed: int,
     device: str | torch.device = "cuda",
-    quantile: float = 0.95,
+    quantile: float = 1.0,
 ) -> Mapping[str, float]:
     """Calibrate a target-free trust threshold on held-out clean-orbit neighbors."""
 
