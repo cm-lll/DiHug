@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, Optional, Sequence, Tuple
@@ -553,6 +554,11 @@ def sample_role_guided_edit_diffusion(
     if family_names != role_prior.family_names:
         raise ValueError("role prior and graph families disagree")
     target_rows = role_prior.sample_assignment(graph.node_types, seed + 91_919)
+    role_assignment_seed = int(seed) + 91_919
+    role_assignment_hash = hashlib.sha256(
+        "|".join(family_names).encode("utf-8")
+        + np.ascontiguousarray(target_rows).tobytes()
+    ).hexdigest()
     family_to_id = {family: index for index, family in enumerate(family_names)}
     rng = np.random.default_rng(int(seed))
     device = torch.device(device)
@@ -619,6 +625,8 @@ def sample_role_guided_edit_diffusion(
             "phase": "switch_refinement" if switch_refinement else "role_alignment",
             "role_phase_transition_step": transition_step,
             "effective_role_weight": effective_role_weight,
+            "role_assignment_seed": role_assignment_seed,
+            "role_assignment_hash": role_assignment_hash,
             **graph_metrics(graph),
         }
     ]

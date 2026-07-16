@@ -376,6 +376,12 @@ class RootedContextEditResidual(nn.Module):
         )
         for parameter in self.joint.legacy_scorer.parameters():
             parameter.requires_grad_(False)
+        self.register_buffer("residual_scale", torch.tensor(1.0))
+
+    def set_residual_scale(self, value: float) -> None:
+        if not 0.0 <= float(value) <= 1.0:
+            raise ValueError("residual scale must lie in [0,1]")
+        self.residual_scale.fill_(float(value))
 
     def encode(
         self,
@@ -396,11 +402,13 @@ class RootedContextEditResidual(nn.Module):
         candidate_features: torch.Tensor,
         candidate_endpoints: torch.Tensor,
     ) -> torch.Tensor:
-        return self.joint(
+        base = self.joint.legacy_scorer(candidate_features)
+        fused = self.joint(
             candidate_features,
             node_hidden=hidden,
             candidate_endpoints=candidate_endpoints,
         )
+        return base + self.residual_scale * (fused - base)
 
     def forward(
         self,
@@ -550,9 +558,7 @@ def train_rooted_context_residual(
         print(f"[ROOTED-CONTEXT-EPOCH] epoch={epoch} loss={final_loss:.6f}", flush=True)
 
     model.eval()
-    base_values = []
-    residual_values = []
-    oracle_values = []
+    validation_rows = []
     with torch.no_grad():
         for start in range(0, len(validation_ids), int(batch_size)):
             indices = validation_ids[start : start + int(batch_size)]
@@ -560,10 +566,24 @@ def train_rooted_context_residual(
             logits = model(*batch[:-1])
             base = model.joint.legacy_scorer(batch[-3])
             utility = batch[-1]
-            rows = torch.arange(len(indices), device=device)
-            base_values.extend(utility[rows, base.argmax(dim=1)].cpu().tolist())
-            residual_values.extend(utility[rows, logits.argmax(dim=1)].cpu().tolist())
-            oracle_values.extend(utility.max(dim=1).values.cpu().tolist())
+            validation_rows.append((base.cpu(), logits.cpu(), utility.cpu()))
+    base_logits = torch.cat([row[0] for row in validation_rows])
+    fused_logits = torch.cat([row[1] for row in validation_rows])
+    validation_utility = torch.cat([row[2] for row in validation_rows])
+    rows = torch.arange(validation_utility.shape[0])
+    scale_utilities = {}
+    for scale in (0.0, 0.25, 0.5, 0.75, 1.0):
+        blended = base_logits + float(scale) * (fused_logits - base_logits)
+        selected = validation_utility[rows, blended.argmax(dim=1)]
+        scale_utilities[float(scale)] = float(selected.mean())
+    selected_scale = max(scale_utilities, key=scale_utilities.get)
+    model.set_residual_scale(selected_scale)
+    base_values = validation_utility[rows, base_logits.argmax(dim=1)].tolist()
+    residual_values = validation_utility[
+        rows,
+        (base_logits + selected_scale * (fused_logits - base_logits)).argmax(dim=1),
+    ].tolist()
+    oracle_values = validation_utility.max(dim=1).values.tolist()
     report = {
         "train_loss": final_loss,
         "train_examples": float(len(train_ids)),
@@ -580,6 +600,10 @@ def train_rooted_context_residual(
             np.mean(residual_values)
             / max(abs(float(np.mean(oracle_values))), 1.0e-12)
         ),
+        "residual_scale": float(selected_scale),
+        "scale_utilities": {
+            str(scale): float(value) for scale, value in scale_utilities.items()
+        },
         "non_regression": float(np.mean(residual_values) >= np.mean(base_values) - 1.0e-9),
     }
     return model, report
@@ -590,9 +614,16 @@ def save_rooted_context_checkpoint(
     model: RootedContextEditResidual,
     report: Mapping[str, float],
     legacy_checkpoint: str | Path,
+    role_prior: Mapping | None = None,
+    subtype_schema: Mapping | None = None,
 ) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_payload = torch.load(
+        legacy_checkpoint, map_location="cpu", weights_only=False
+    )
+    if legacy_payload.get("format") != "dihug-mixed-edit-diffusion-v1":
+        raise ValueError("rooted context bundle needs a mixed-edit legacy checkpoint")
     torch.save(
         {
             "format": "dihug-rooted-context-edit-residual-v1",
@@ -600,6 +631,9 @@ def save_rooted_context_checkpoint(
             "state_dict": model.state_dict(),
             "report": dict(report),
             "legacy_checkpoint": str(legacy_checkpoint),
+            "legacy_checkpoint_payload": legacy_payload,
+            "exchangeable_role_prior": None if role_prior is None else dict(role_prior),
+            "subtype_schema": None if subtype_schema is None else dict(subtype_schema),
             "inference_contract": {
                 "training_adjacency": False,
                 "graph_metric_target": False,
@@ -612,7 +646,7 @@ def save_rooted_context_checkpoint(
 
 def load_rooted_context_checkpoint(
     path: str | Path,
-    legacy_scorer: SwitchDenoiserMLP,
+    legacy_scorer: SwitchDenoiserMLP | None = None,
     device: str | torch.device = "cpu",
 ) -> tuple[RootedContextEditResidual, Mapping]:
     payload = torch.load(path, map_location="cpu", weights_only=False)
@@ -626,6 +660,21 @@ def load_rooted_context_checkpoint(
     )
     if any(contract.get(key) is not False for key in forbidden):
         raise ValueError(f"unsafe rooted context inference contract: {contract}")
+    if legacy_scorer is None:
+        legacy = payload.get("legacy_checkpoint_payload")
+        if not isinstance(legacy, Mapping):
+            raise ValueError("rooted context checkpoint is not self-contained")
+        legacy_scorer = SwitchDenoiserMLP(
+            input_dim=int(legacy["input_dim"]),
+            hidden_dim=int(legacy["hidden_dim"]),
+            layers=int(legacy["layers"]),
+            dropout=float(legacy["dropout"]),
+        )
+        legacy_scorer.load_state_dict(legacy["state_dict"])
     model = RootedContextEditResidual(legacy_scorer, **payload["model_config"])
-    model.load_state_dict(payload["state_dict"])
+    missing, unexpected = model.load_state_dict(payload["state_dict"], strict=False)
+    if set(missing) - {"residual_scale"} or unexpected:
+        raise ValueError(
+            f"rooted context state mismatch: missing={missing}, unexpected={unexpected}"
+        )
     return model.to(device).eval(), payload

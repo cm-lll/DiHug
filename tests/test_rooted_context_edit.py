@@ -91,6 +91,46 @@ def test_zero_context_residual_is_exact_legacy_and_legacy_is_frozen():
     assert all(not parameter.requires_grad for parameter in model.joint.legacy_scorer.parameters())
 
 
+def test_residual_scale_zero_is_exact_legacy_after_context_changes():
+    torch.manual_seed(11)
+    legacy = SwitchDenoiserMLP(input_dim=9, hidden_dim=16, layers=2, dropout=0.0)
+    model = RootedContextEditResidual(
+        legacy,
+        node_feature_dim=4,
+        candidate_feature_dim=9,
+        type_count=1,
+        family_count=1,
+        hidden_dim=16,
+        heads=4,
+        layers=1,
+        dropout=0.0,
+    ).eval()
+    with torch.no_grad():
+        for name, parameter in model.named_parameters():
+            if not name.startswith("joint.legacy_scorer"):
+                parameter.normal_(mean=0.0, std=0.2)
+    model.set_residual_scale(0.0)
+    node_features = torch.randn(1, 6, 4)
+    node_types = torch.zeros(1, 6, dtype=torch.long)
+    edge_index = torch.tensor([[0, 1, 1, 2], [1, 0, 2, 1]])
+    edge_types = torch.zeros(4, dtype=torch.long)
+    candidate_features = torch.randn(1, 3, 9)
+    endpoints = torch.tensor(
+        [[[0, 1, 2, 3, 0, 2, 1, 3], [1, 2, 3, 4, 1, 3, 2, 4], [0, 1, 2, 3, 0, 3, 1, 2]]]
+    )
+    with torch.no_grad():
+        expected = legacy(candidate_features)
+        actual = model(
+            node_features,
+            node_types,
+            edge_index,
+            edge_types,
+            candidate_features,
+            endpoints,
+        )
+    assert torch.equal(expected, actual)
+
+
 def test_triangle_incapable_typed_schema_is_detected():
     node_types = np.asarray([0, 0, 1, 2], dtype=np.int64)
     specs = {

@@ -13,6 +13,7 @@ from sparse_diffusion.structure_energy.cardinality_conditioned_edit import (
 )
 from sparse_diffusion.structure_energy.graph import TypedGraph, load_typed_graph
 from sparse_diffusion.structure_energy.mixed_edit_diffusion import (
+    MarginalGraphPrior,
     load_mixed_edit_checkpoint,
 )
 from sparse_diffusion.structure_energy.role_guided_edit_diffusion import (
@@ -28,7 +29,7 @@ from sparse_diffusion.structure_energy.switch_chain import graph_metrics
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset-dir", type=Path, required=True)
-    parser.add_argument("--model-checkpoint", type=Path, required=True)
+    parser.add_argument("--model-checkpoint", type=Path)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--device", default="cuda")
@@ -50,6 +51,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--targeted-role-candidate-fraction", type=float, default=0.0)
     parser.add_argument("--context-checkpoint", type=Path)
     parser.add_argument("--context-refresh-steps", type=int, default=20)
+    parser.add_argument("--context-scale", type=float, default=-1.0)
     return parser.parse_args()
 
 
@@ -57,17 +59,48 @@ def main() -> None:
     args = parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
     source = load_typed_graph(args.dataset_dir, active_only=True)
-    model, marginal_prior, metadata = load_mixed_edit_checkpoint(
-        args.model_checkpoint, device=args.device
-    )
+    if args.model_checkpoint is None and args.context_checkpoint is None:
+        raise ValueError("provide --model-checkpoint or a self-contained --context-checkpoint")
+    model = None
+    marginal_prior = None
+    metadata = None
+    if args.model_checkpoint is not None:
+        model, marginal_prior, metadata = load_mixed_edit_checkpoint(
+            args.model_checkpoint, device=args.device
+        )
     role_path = args.output_dir / "exchangeable_role_degree_prior.json"
     ExchangeableRoleDegreePrior.from_training_graph(source).save(role_path)
     role_prior = ExchangeableRoleDegreePrior.load(role_path)
     context_model = None
     if args.context_checkpoint is not None:
-        context_model, _ = load_rooted_context_checkpoint(
-            args.context_checkpoint, model, device=args.device
+        context_model, context_payload = load_rooted_context_checkpoint(
+            args.context_checkpoint, legacy_scorer=None, device=args.device
         )
+        embedded = context_payload["legacy_checkpoint_payload"]
+        embedded_prior = MarginalGraphPrior.from_json_dict(embedded["prior"])
+        if model is None:
+            model = context_model.joint.legacy_scorer
+            marginal_prior = embedded_prior
+            metadata = {
+                "feature_profile": str(
+                    embedded.get("feature_profile", "legacy_local_v1")
+                )
+            }
+        elif embedded_prior.to_json_dict() != marginal_prior.to_json_dict():
+            raise ValueError("context bundle and model checkpoint use different priors")
+        if args.context_scale >= 0.0:
+            context_model.set_residual_scale(args.context_scale)
+    assert model is not None and marginal_prior is not None and metadata is not None
+    if args.initial_graph is not None:
+        state_path = args.initial_graph.with_name("sampling_state.json")
+        if state_path.exists():
+            previous_state = json.loads(state_path.read_text(encoding="utf-8"))
+            previous_seed = int(previous_state["generation_seed"])
+            if previous_seed != int(args.seed):
+                raise RuntimeError(
+                    "continuation seed would change the anonymous role assignment: "
+                    f"previous={previous_seed}, requested={args.seed}"
+                )
     initial = (
         TypedGraph.from_json_dict(
             json.loads(args.initial_graph.read_text(encoding="utf-8"))
@@ -134,6 +167,11 @@ def main() -> None:
             None if args.context_checkpoint is None else str(args.context_checkpoint)
         ),
         "context_refresh_steps": args.context_refresh_steps,
+        "context_scale": (
+            None
+            if context_model is None
+            else float(context_model.residual_scale.item())
+        ),
         "initial_graph_source": (
             "fixed_family_count_prior"
             if args.initial_graph is None
@@ -154,6 +192,24 @@ def main() -> None:
     (args.output_dir / "final_graph.json").write_text(
         json.dumps(result.graph.to_json_dict(), indent=2, sort_keys=True),
         encoding="utf-8",
+    )
+    sampling_state = {
+        "format": "dihug-role-guided-sampling-state-v1",
+        "generation_seed": int(args.seed),
+        "role_assignment_seed": int(result.trace[0]["role_assignment_seed"]),
+        "role_assignment_hash": str(result.trace[0]["role_assignment_hash"]),
+        "family_counts": final_counts,
+        "context_checkpoint": (
+            None if args.context_checkpoint is None else str(args.context_checkpoint)
+        ),
+        "context_scale": (
+            None
+            if context_model is None
+            else float(context_model.residual_scale.item())
+        ),
+    }
+    (args.output_dir / "sampling_state.json").write_text(
+        json.dumps(sampling_state, indent=2, sort_keys=True), encoding="utf-8"
     )
     for row in result.trace:
         print(

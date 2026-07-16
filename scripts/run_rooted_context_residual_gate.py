@@ -16,6 +16,10 @@ from sparse_diffusion.structure_energy.rooted_context_edit import (
     schema_supports_triangles,
     train_rooted_context_residual,
 )
+from sparse_diffusion.structure_energy.role_guided_edit_diffusion import (
+    ExchangeableRoleDegreePrior,
+)
+from sparse_diffusion.structure_energy.subtype_decoder import load_subtype_schema
 
 
 def parse_args() -> argparse.Namespace:
@@ -43,6 +47,7 @@ def main() -> None:
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
     source = load_typed_graph(args.dataset_dir, active_only=True)
+    subtype_schema = load_subtype_schema(args.dataset_dir)
     legacy, _, metadata = load_mixed_edit_checkpoint(args.legacy_checkpoint, device="cpu")
     legacy.eval()
     profile = str(metadata.get("feature_profile", "typed_closure_compact_v2"))
@@ -95,6 +100,10 @@ def main() -> None:
         model,
         report,
         args.legacy_checkpoint,
+        role_prior=ExchangeableRoleDegreePrior.from_training_graph(
+            source
+        ).to_json_dict(),
+        subtype_schema=subtype_schema.to_json_dict(),
     )
     payload = {
         "format": "dihug-rooted-context-residual-gate-v1",
@@ -103,6 +112,8 @@ def main() -> None:
         "feature_profile": profile,
         "nodes": source.num_nodes,
         "edges": source.num_edges,
+        "subtype_prediction_enabled": subtype_schema.prediction_enabled,
+        "subtype_schema": subtype_schema.to_json_dict(),
         **report,
     }
     (args.output_dir / "gate_report.json").write_text(
