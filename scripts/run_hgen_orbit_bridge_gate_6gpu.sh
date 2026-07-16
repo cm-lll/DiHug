@@ -52,9 +52,9 @@ run_variant() {
   local gpu="$1" key="$2" seed="$3" variant="$4"
   local out="$OUT_ROOT/$key/seed${seed}/$variant"
   local log="$LOG_ROOT/${key}_s${seed}_${variant}.log"
-  local orbit_args=()
+  local orbit_flag=""
   if [[ "$variant" == "orbit" ]]; then
-    orbit_args+=(--type-orbit-augmentation)
+    orbit_flag="--type-orbit-augmentation"
   fi
   mkdir -p "$out"
 
@@ -71,7 +71,7 @@ run_variant() {
     --role-prior-components "$ROLE_COMPONENTS" \
     --role-prior-randomization-steps-per-edge "$RANDOMIZATION" \
     --clean-noop-examples-per-trajectory "$NOOP_EXAMPLES" \
-    "${orbit_args[@]}" > "$log" 2>&1
+    ${orbit_flag:+"$orbit_flag"} > "$log" 2>&1
 
   CUDA_VISIBLE_DEVICES="$gpu" "$PYTHON" scripts/run_exchangeable_role_prior_gate.py \
     --mode sample --output-dir "$out/sample" \
