@@ -44,6 +44,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model-time-horizon-steps", type=int, default=0)
     parser.add_argument("--model-time-start-step", type=int, default=0)
     parser.add_argument("--initial-graph", type=Path)
+    parser.add_argument(
+        "--family-count-mode",
+        choices=("fixed", "binomial"),
+        default="fixed",
+        help=(
+            "fixed evaluates p(G|N,M); binomial samples each M_f from the "
+            "checkpoint marginal before drawing a uniform schema-valid graph"
+        ),
+    )
     parser.add_argument("--closure-candidate-fraction", type=float, default=0.0)
     parser.add_argument("--closure-degree-bias-power", type=float, default=0.0)
     parser.add_argument("--auto-role-balance", type=float, default=0.0)
@@ -119,7 +128,7 @@ def main() -> None:
             observed_counts=role_prior.family_counts(
                 marginal_prior.family_endpoints
             ),
-        ).sample_graph(args.seed + 71, mode="fixed")
+        ).sample_graph(args.seed + 71, mode=args.family_count_mode)
     )
     initial_counts = family_edge_counts(initial)
     result = sample_role_guided_edit_diffusion(
@@ -174,6 +183,7 @@ def main() -> None:
         "auto_role_balance": args.auto_role_balance,
         "effective_role_weight": result.trace[0]["effective_role_weight"],
         "targeted_role_candidate_fraction": args.targeted_role_candidate_fraction,
+        "family_count_mode": args.family_count_mode,
         "context_checkpoint": (
             None if args.context_checkpoint is None else str(args.context_checkpoint)
         ),
@@ -184,7 +194,7 @@ def main() -> None:
             else float(context_model.residual_scale.item())
         ),
         "initial_graph_source": (
-            "fixed_family_count_prior"
+            f"{args.family_count_mode}_family_count_prior"
             if args.initial_graph is None
             else str(args.initial_graph)
         ),

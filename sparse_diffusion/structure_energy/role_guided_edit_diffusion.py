@@ -58,6 +58,98 @@ class ExchangeableRoleDegreePrior:
             sampled[nodes] = source_rows[rng.permutation(len(source_rows))]
         return sampled
 
+    @staticmethod
+    def _apportion_degrees(
+        weights: np.ndarray,
+        total: int,
+        capacity: int,
+        rng: np.random.Generator,
+    ) -> np.ndarray:
+        """Project anonymous role weights onto an exact endpoint degree sum.
+
+        The projection is identity when ``total`` equals the learned degree sum.
+        Otherwise it uses capped largest-remainder apportionment with random
+        tie-breaking.  It never associates a learned row with an original node
+        identity; the rows have already been permuted within type.
+        """
+
+        weights = np.asarray(weights, dtype=np.float64).reshape(-1)
+        total = int(total)
+        capacity = int(capacity)
+        if total < 0 or capacity < 0 or total > len(weights) * capacity:
+            raise ValueError(
+                f"unrealizable endpoint degree sum: total={total}, "
+                f"nodes={len(weights)}, capacity={capacity}"
+            )
+        if total == 0:
+            return np.zeros(len(weights), dtype=np.int64)
+        if np.any(weights < 0.0) or not np.isfinite(weights).all():
+            raise ValueError("role weights must be finite and non-negative")
+
+        if float(weights.sum()) == 0.0:
+            scaled = np.full(len(weights), total / max(len(weights), 1), dtype=np.float64)
+        else:
+            scaled = weights * (float(total) / float(weights.sum()))
+        base = np.minimum(np.floor(scaled).astype(np.int64), capacity)
+        remaining = total - int(base.sum())
+        if remaining < 0:
+            raise RuntimeError("capped degree apportionment exceeded its target")
+
+        tie_break = rng.random(len(weights))
+        while remaining:
+            eligible = np.flatnonzero(base < capacity)
+            if eligible.size == 0:
+                raise RuntimeError("degree apportionment exhausted endpoint capacity")
+            residual = scaled[eligible] - base[eligible]
+            order = eligible[np.lexsort((tie_break[eligible], -residual))]
+            take = min(remaining, len(order))
+            base[order[:take]] += 1
+            remaining -= take
+        return base
+
+    def sample_assignment_for_graph(
+        self,
+        graph: TypedGraph,
+        seed: int,
+    ) -> np.ndarray:
+        """Sample anonymous roles conditioned only on this graph's family counts.
+
+        This is needed when ``M_f`` is drawn from the learned Binomial marginal:
+        relocation/switch edits preserve ``M_f``, so the role target must have
+        the same endpoint sums.  Conditioning uses family counts and schema only,
+        never the sampled adjacency or clean node identities.
+        """
+
+        if tuple(graph.type_names) != self.type_names:
+            raise ValueError("role prior and graph type schemas disagree")
+        family_names = tuple(sorted(graph.family_specs))
+        if family_names != self.family_names:
+            raise ValueError("role prior and graph family schemas disagree")
+
+        sampled = self.sample_assignment(graph.node_types, seed)
+        conditioned = np.zeros_like(sampled)
+        rng = np.random.default_rng(int(seed) + 2_654_435_761)
+        for family_id, family in enumerate(family_names):
+            spec = graph.family_specs[family]
+            edge_count = len(graph.family_edges[family])
+            src_nodes = np.asarray(spec.src_nodes, dtype=np.int64)
+            if spec.bipartite:
+                dst_nodes = np.asarray(spec.dst_nodes, dtype=np.int64)
+                conditioned[src_nodes, family_id] = self._apportion_degrees(
+                    sampled[src_nodes, family_id], edge_count, len(dst_nodes), rng
+                )
+                conditioned[dst_nodes, family_id] = self._apportion_degrees(
+                    sampled[dst_nodes, family_id], edge_count, len(src_nodes), rng
+                )
+            else:
+                conditioned[src_nodes, family_id] = self._apportion_degrees(
+                    sampled[src_nodes, family_id],
+                    2 * edge_count,
+                    max(len(src_nodes) - 1, 0),
+                    rng,
+                )
+        return conditioned
+
     def family_counts(
         self, family_endpoints: Mapping[str, Tuple[int, int]]
     ) -> Mapping[str, int]:
@@ -575,7 +667,7 @@ def sample_role_guided_edit_diffusion(
     family_names = tuple(sorted(graph.family_specs))
     if family_names != role_prior.family_names:
         raise ValueError("role prior and graph families disagree")
-    target_rows = role_prior.sample_assignment(graph.node_types, seed + 91_919)
+    target_rows = role_prior.sample_assignment_for_graph(graph, seed + 91_919)
     role_assignment_seed = int(seed) + 91_919
     role_assignment_hash = hashlib.sha256(
         "|".join(family_names).encode("utf-8")

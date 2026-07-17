@@ -2049,3 +2049,41 @@ def test_closed_form_free_candidate_dataset_and_role_condition_are_aligned():
         feature_profile="typed_closure_role_v3",
         role_condition=graph.all_family_degrees(),
     ).shape[-1]
+
+
+def test_exchangeable_role_rows_condition_on_binomial_family_counts():
+    from sparse_diffusion.structure_energy.cardinality_conditioned_edit import (
+        FamilyCountCondition,
+    )
+    from sparse_diffusion.structure_energy.role_guided_edit_diffusion import (
+        ExchangeableRoleDegreePrior,
+    )
+
+    source = _toy_graph()
+    condition = FamilyCountCondition.from_training_graph(source)
+    sampled = condition.sample_graph(seed=917, mode="binomial")
+    prior = ExchangeableRoleDegreePrior.from_training_graph(source)
+    rows = prior.sample_assignment_for_graph(sampled, seed=313)
+    family_to_id = {name: index for index, name in enumerate(prior.family_names)}
+
+    for family, spec in sampled.family_specs.items():
+        family_id = family_to_id[family]
+        edge_count = len(sampled.family_edges[family])
+        src_sum = int(rows[np.asarray(spec.src_nodes), family_id].sum())
+        if spec.bipartite:
+            dst_sum = int(rows[np.asarray(spec.dst_nodes), family_id].sum())
+            assert src_sum == dst_sum == edge_count
+        else:
+            assert src_sum == 2 * edge_count
+
+
+def test_role_count_conditioning_is_identity_for_learned_family_counts():
+    from sparse_diffusion.structure_energy.role_guided_edit_diffusion import (
+        ExchangeableRoleDegreePrior,
+    )
+
+    source = _toy_graph()
+    prior = ExchangeableRoleDegreePrior.from_training_graph(source)
+    direct = prior.sample_assignment(source.node_types, seed=811)
+    conditioned = prior.sample_assignment_for_graph(source, seed=811)
+    np.testing.assert_array_equal(conditioned, direct)
