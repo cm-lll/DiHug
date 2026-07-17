@@ -69,6 +69,18 @@ run_seed() {
   while IFS= read -r -d '' value; do args+=("$value"); done < <(common_args "$key" "$seed" "$steps")
   mkdir -p "$base"
 
+  if [[ "$key" == dblp ]]; then
+    if [[ -f "$base/legacy/gate_report.json" ]]; then
+      echo "[SKIP] gpu=$gpu dataset=$key seed=$seed existing=legacy" \
+        | tee -a "$LOG_ROOT/driver.log"
+      return
+    fi
+  elif [[ -f "$base/legacy/gate_report.json" && -f "$base/context/gate_report.json" ]]; then
+    echo "[SKIP] gpu=$gpu dataset=$key seed=$seed existing=paired" \
+      | tee -a "$LOG_ROOT/driver.log"
+    return
+  fi
+
   echo "[START] gpu=$gpu dataset=$key seed=$seed steps=$steps prior=binomial" \
     | tee -a "$LOG_ROOT/driver.log"
   if [[ "$key" == dblp ]]; then
@@ -98,29 +110,25 @@ for path in "${required[@]}"; do
   [[ -f "$path" ]] || { echo "missing checkpoint: $path" >&2; exit 2; }
 done
 
-# Two workers per dataset keep the large DBLP jobs balanced while all eight GPUs
-# remain occupied. Each worker processes alternating seeds sequentially.
+# One worker owns one seed. Small synthetic evaluations run first, then every
+# worker reaches one DBLP job so the expensive 50k-step stage uses all GPUs.
 worker() {
-  local gpu="$1" key="$2" parity="$3"
-  local seed
-  for seed in $(seq "$SEED_START" "$SEED_END"); do
-    if (( (seed - SEED_START) % 2 == parity )); then
-      run_seed "$gpu" "$key" "$seed"
-    fi
+  local gpu="$1" seed="$2"
+  local key
+  for key in syn100 syn200 syn500 dblp; do
+    run_seed "$gpu" "$key" "$seed"
   done
 }
 
 echo "[CROSS-DATASET] commit=$(git rev-parse HEAD) seeds=$SEED_START-$SEED_END" \
   | tee -a "$LOG_ROOT/driver.log"
 pids=()
-for item in \
-  "0 dblp 0" "1 dblp 1" \
-  "2 syn100 0" "3 syn100 1" \
-  "4 syn200 0" "5 syn200 1" \
-  "6 syn500 0" "7 syn500 1"; do
-  read -r gpu key parity <<< "$item"
-  worker "$gpu" "$key" "$parity" &
+gpu=0
+for seed in $(seq "$SEED_START" "$SEED_END"); do
+  worker "$gpu" "$seed" &
   pids+=("$!")
+  gpu=$((gpu + 1))
+  if (( gpu == 8 )); then gpu=0; fi
   sleep 3
 done
 failed=0
