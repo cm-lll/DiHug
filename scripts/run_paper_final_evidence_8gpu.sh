@@ -79,11 +79,12 @@ run_main() {
         context)
           # D: MLP + rooted-context residual
           CUDA_VISIBLE_DEVICES="$gpu" python scripts/run_rooted_context_residual_gate.py \
-            --mode sample --dataset-dir "$(dataset_path "$name")" \
+            --dataset-dir "$(dataset_path "$name")" \
             --legacy-checkpoint "$legacy_ckpt" \
             --context-checkpoint "$ctx_ckpt" \
             --output-dir "$base/context" --seed "$seed" --device cuda \
             --steps "$steps" --candidates 16 --metrics-every "$(( steps / 10 ))" \
+            --role-weight 0.05 --gain-scale 10 --schedule-power 1 --schedule-floor 1 \
             > "$LOG_ROOT/${tag}.log" 2>&1 &
           ;;
       esac
