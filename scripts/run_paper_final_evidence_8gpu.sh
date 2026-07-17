@@ -29,6 +29,8 @@ IMDB_LEGACY="results/imdb_exchangeable_compact_s0_3/model/mixed_edit_diffusion.p
 PUBMED_LEGACY="results/pubmed_role_corruption_gate_0716/f100_all/model/mixed_edit_diffusion.pt"
 IMDB_CTX="results/rooted_context_freeze/imdb/rooted_context_residual.pt"
 PUBMED_CTX="results/rooted_context_freeze/pubmed/rooted_context_residual.pt"
+IMDB_PRIOR="results/imdb_exchangeable_role_prior_gate_v2/exchangeable_role_prior.json"
+PUBMED_PRIOR="results/pubmed_exchangeable_compact_switch_gate_0716/prior/exchangeable_role_prior.json"
 
 echo "[FINAL-EVIDENCE] commit=$COMMIT machine=$MACHINE_TAG seeds=$SEED_START-$SEED_END gpus=$GPU_LIST"
 echo "[FINAL-EVIDENCE] started at $(date)"
