@@ -661,6 +661,10 @@ def sample_role_guided_edit_diffusion(
     context_model: Optional[torch.nn.Module] = None,
     context_refresh_steps: int = 20,
     sampling_backend: str = "cpu",
+    gpu_proposal_pool_size: int = 0,
+    gpu_proposal_chunk_size: int = 1024,
+    gpu_metric_edge_chunk_size: int = 2048,
+    gpu_phase_check_interval: int = 32,
 ) -> MixedEditSamplingResult:
     graph = prior.sample(seed + 71) if initial_graph is None else initial_graph.clone()
     if tuple(graph.type_names) != role_prior.type_names:
@@ -710,6 +714,10 @@ def sample_role_guided_edit_diffusion(
             role_calibration_batches=role_calibration_batches,
             context_model=context_model,
             context_refresh_steps=context_refresh_steps,
+            proposal_pool_size=gpu_proposal_pool_size,
+            proposal_chunk_size=gpu_proposal_chunk_size,
+            metric_edge_chunk_size=gpu_metric_edge_chunk_size,
+            phase_check_interval=gpu_phase_check_interval,
         )
         result.trace[0]["role_assignment_seed"] = role_assignment_seed
         result.trace[0]["role_assignment_hash"] = role_assignment_hash

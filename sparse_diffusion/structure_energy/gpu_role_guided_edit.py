@@ -14,7 +14,6 @@ from .mixed_edit_diffusion import (
     MixedEditSamplingResult,
     mixed_edit_feature_width,
 )
-from .switch_chain import graph_metrics
 
 
 NOOP_ID = SCORER_ACTIONS.index("noop")
@@ -458,6 +457,82 @@ class GpuTypedGraphState:
         selected.new_valid &= selected_valid[:, None]
         return selected
 
+    def _stream_pick(
+        self,
+        *,
+        kind: str,
+        total_pool_size: int,
+        chunk_size: int,
+        count: int,
+        generator: torch.Generator,
+        priority: str,
+    ) -> GpuEditBatch:
+        """Keep a fixed-size GPU shortlist while streaming a large proposal pool."""
+
+        if int(total_pool_size) < int(count):
+            raise ValueError("proposal pool must be at least the shortlist size")
+        if int(chunk_size) < int(count):
+            raise ValueError("proposal chunk must be at least the shortlist size")
+        best_batch = None
+        best_valid = None
+        best_score = None
+        generated = 0
+        while generated < int(total_pool_size):
+            current = min(int(chunk_size), int(total_pool_size) - generated)
+            if kind == "relocation":
+                batch, valid = self._random_relocation_pool(current, generator)
+            elif kind == "targeted_relocation":
+                batch, valid = self._targeted_relocation_pool(current, generator)
+            elif kind == "switch":
+                batch, valid = self._random_switch_pool(current, generator)
+            elif kind == "mixed":
+                relocation_count = current // 2
+                switch_count = current - relocation_count
+                relocation, relocation_valid = self._random_relocation_pool(
+                    relocation_count, generator
+                )
+                switch, switch_valid = self._random_switch_pool(
+                    switch_count, generator
+                )
+                batch = self._concat((relocation, switch))
+                valid = torch.cat((relocation_valid, switch_valid))
+            else:
+                raise ValueError(f"unknown GPU proposal stream {kind!r}")
+            if priority == "random":
+                score = torch.rand(current, device=self.device, generator=generator)
+            elif priority == "role_gain":
+                score = self.degree_gains(batch)
+                valid &= score > 0
+            elif priority == "closure":
+                score = self._closure_components(batch)[0].sum(dim=1)
+                # Random tie-breaking matters when a sparse state has many
+                # zero-delta switches.
+                score = score + 1.0e-5 * torch.rand(
+                    current, device=self.device, generator=generator
+                )
+            else:
+                raise ValueError(f"unknown GPU proposal priority {priority!r}")
+            score = score.masked_fill(~valid, -torch.inf)
+            if best_batch is not None:
+                batch = self._concat((best_batch, batch))
+                valid = torch.cat((best_valid, valid))
+                score = torch.cat((best_score, score))
+            keep = min(int(count), score.shape[0])
+            indices = torch.topk(score, k=keep, largest=True).indices
+            best_batch = batch.index_select(indices)
+            best_valid = valid[indices]
+            best_score = score[indices]
+            generated += current
+        assert best_batch is not None and best_valid is not None
+        best_batch.action = torch.where(
+            best_valid,
+            best_batch.action,
+            torch.full_like(best_batch.action, NOOP_ID),
+        )
+        best_batch.old_valid &= best_valid[:, None]
+        best_batch.new_valid &= best_valid[:, None]
+        return best_batch
+
     def random_candidates(
         self,
         count: int,
@@ -466,11 +541,75 @@ class GpuTypedGraphState:
         role_phase: bool,
         targeted_fraction: float,
         closure_fraction: float,
+        proposal_pool_size: int = 0,
+        proposal_chunk_size: int = 1024,
     ) -> GpuEditBatch:
         if int(count) < 2:
             raise ValueError("candidate count must be at least two")
         requested = int(count) - 1
-        pool_size = max(256, requested * 32)
+        pool_size = (
+            max(256, requested * 32)
+            if int(proposal_pool_size) <= 0
+            else int(proposal_pool_size)
+        )
+        if int(proposal_pool_size) > 0:
+            if role_phase:
+                targeted = min(
+                    requested, int(round(requested * float(targeted_fraction)))
+                )
+                random_count = requested - targeted
+                pieces = [self._noop()]
+                if targeted:
+                    pieces.append(
+                        self._stream_pick(
+                            kind="targeted_relocation",
+                            total_pool_size=pool_size,
+                            chunk_size=proposal_chunk_size,
+                            count=targeted,
+                            generator=generator,
+                            priority="role_gain",
+                        )
+                    )
+                if random_count:
+                    pieces.append(
+                        self._stream_pick(
+                            kind="mixed",
+                            total_pool_size=pool_size,
+                            chunk_size=proposal_chunk_size,
+                            count=random_count,
+                            generator=generator,
+                            priority="random",
+                        )
+                    )
+                return self._concat(pieces)
+            closure = min(
+                requested, int(round(requested * float(closure_fraction)))
+            )
+            random_count = requested - closure
+            pieces = [self._noop()]
+            if closure:
+                pieces.append(
+                    self._stream_pick(
+                        kind="switch",
+                        total_pool_size=pool_size,
+                        chunk_size=proposal_chunk_size,
+                        count=closure,
+                        generator=generator,
+                        priority="closure",
+                    )
+                )
+            if random_count:
+                pieces.append(
+                    self._stream_pick(
+                        kind="switch",
+                        total_pool_size=pool_size,
+                        chunk_size=proposal_chunk_size,
+                        count=random_count,
+                        generator=generator,
+                        priority="random",
+                    )
+                )
+            return self._concat(pieces)
         relocations, relocation_valid = self._random_relocation_pool(
             pool_size, generator
         )
@@ -751,6 +890,99 @@ class GpuTypedGraphState:
         directed = torch.cat(edges, dim=0)
         return directed.transpose(0, 1), torch.cat(relations)
 
+    def undirected_edges(self) -> torch.Tensor:
+        return torch.cat(
+            [
+                self.edge_tables[index, : self.family_edge_count_values[index]]
+                for index in range(self.family_count)
+            ],
+            dim=0,
+        )
+
+    def gpu_graph_metrics(self, edge_chunk_size: int = 2048) -> dict[str, float]:
+        """Compute the paper trace metrics from the resident CUDA state."""
+
+        edges = self.undirected_edges()
+        triangles_per_node = torch.zeros(
+            self.num_nodes, dtype=torch.float64, device=self.device
+        )
+        common_total = torch.zeros((), dtype=torch.float64, device=self.device)
+        for start in range(0, edges.shape[0], int(edge_chunk_size)):
+            chunk = edges[start : start + int(edge_chunk_size)]
+            common = self.adjacency[chunk[:, 0]] & self.adjacency[chunk[:, 1]]
+            common_float = common.to(torch.float64)
+            common_total += common_float.sum()
+            # Every triangle has exactly one edge opposite each participating
+            # node, so summing common-neighbor indicators gives exact local
+            # triangle counts without endpoint correction.
+            triangles_per_node += common_float.sum(dim=0)
+        triangles = common_total / 3.0
+        degree = self.total_degree.to(torch.float64)
+        denominator = degree * (degree - 1.0) / 2.0
+        local_clustering = torch.where(
+            denominator > 0,
+            triangles_per_node / denominator.clamp_min(1.0),
+            torch.zeros_like(degree),
+        )
+        wedges = denominator.sum()
+        transitivity = torch.where(
+            wedges > 0,
+            3.0 * triangles / wedges.clamp_min(1.0),
+            torch.zeros_like(wedges),
+        )
+
+        endpoint_degree = degree[edges]
+        left = torch.cat((endpoint_degree[:, 0], endpoint_degree[:, 1]))
+        right = torch.cat((endpoint_degree[:, 1], endpoint_degree[:, 0]))
+        left_centered = left - left.mean()
+        right_centered = right - right.mean()
+        covariance = (left_centered * right_centered).sum()
+        scale = torch.sqrt(
+            left_centered.square().sum() * right_centered.square().sum()
+        )
+        assortativity = torch.where(
+            scale > 0, covariance / scale.clamp_min(1.0e-12), torch.zeros_like(scale)
+        )
+
+        # GPU label propagation is only called at sparse trace points.  The
+        # one-scalar convergence check does not reintroduce hot-loop traffic.
+        labels = torch.arange(self.num_nodes, dtype=torch.long, device=self.device)
+        for _ in range(self.num_nodes):
+            old = labels
+            low = torch.minimum(labels[edges[:, 0]], labels[edges[:, 1]])
+            updated = labels.clone()
+            updated.scatter_reduce_(0, edges[:, 0], low, reduce="amin", include_self=True)
+            updated.scatter_reduce_(0, edges[:, 1], low, reduce="amin", include_self=True)
+            updated = updated[updated]
+            labels = updated
+            if bool(torch.equal(labels, old)):
+                break
+        component_size = torch.bincount(labels, minlength=self.num_nodes)
+        lcc = component_size.max().to(torch.float64)
+        packed = torch.stack(
+            (
+                torch.tensor(float(edges.shape[0]), dtype=torch.float64, device=self.device),
+                triangles,
+                local_clustering.mean(),
+                transitivity,
+                lcc,
+                assortativity,
+                degree.square().sum(),
+                degree.max(),
+            )
+        ).cpu().tolist()
+        names = (
+            "edges",
+            "triangles",
+            "clustering",
+            "transitivity",
+            "lcc",
+            "assortativity",
+            "sum_degree_sq",
+            "max_degree",
+        )
+        return {name: float(value) for name, value in zip(names, packed)}
+
     @staticmethod
     def candidate_endpoints(batch: GpuEditBatch) -> torch.Tensor:
         return torch.cat((batch.old_edges, batch.new_edges), dim=1).reshape(
@@ -842,11 +1074,17 @@ def sample_gpu_role_guided_edit_diffusion(
     role_calibration_batches: int = 32,
     context_model: torch.nn.Module | None = None,
     context_refresh_steps: int = 20,
+    proposal_pool_size: int = 0,
+    proposal_chunk_size: int = 1024,
+    metric_edge_chunk_size: int = 2048,
+    phase_check_interval: int = 32,
 ) -> MixedEditSamplingResult:
     """Run fixed-count role-guided edit diffusion without hot-loop host traffic."""
 
     if int(steps) <= 0 or int(model_time_horizon_steps) <= 0:
         raise ValueError("steps and model time horizon must be positive")
+    if int(phase_check_interval) <= 0:
+        raise ValueError("GPU phase check interval must be positive")
     state = GpuTypedGraphState(initial_graph, target_rows, device)
     model = model.to(state.device).eval()
     if context_model is not None:
@@ -869,6 +1107,7 @@ def sample_gpu_role_guided_edit_diffusion(
                     role_phase=True,
                     targeted_fraction=0.0,
                     closure_fraction=0.0,
+                    proposal_pool_size=0,
                 )
                 matrix = state.compact_features(candidates, 1.0, model_input_dim)
                 logits.append(model(matrix[None]).squeeze(0))
@@ -892,28 +1131,28 @@ def sample_gpu_role_guided_edit_diffusion(
 
         role_error = state.relation_degree_error()
         threshold = float(role_error_per_node_threshold) * state.num_nodes
-        role_phase = role_error > threshold
-        initial_snapshot = state.to_graph(initial_graph)
+        role_phase = bool((role_error > threshold).cpu())
+        initial_metrics = state.gpu_graph_metrics(metric_edge_chunk_size)
         trace = [
             {
                 "step": 0.0,
                 "relation_degree_error": float(role_error.cpu()),
                 "relation_degree_error_per_node": float(role_error.cpu())
                 / state.num_nodes,
-                "phase": "role_alignment" if bool(role_phase.cpu()) else "switch_refinement",
+                "phase": "role_alignment" if role_phase else "switch_refinement",
                 "role_phase_transition_step": (
-                    None if bool(role_phase.cpu()) else 0
+                    None if role_phase else 0
                 ),
                 "effective_role_weight": effective_role_weight,
                 "sampling_backend": "gpu_resident",
-                **graph_metrics(initial_snapshot),
+                **initial_metrics,
             }
         ]
         action_counts = torch.zeros(
             len(SCORER_ACTIONS), dtype=torch.long, device=state.device
         )
         applied = torch.zeros((), dtype=torch.long, device=state.device)
-        transition_step = torch.full((), -1, dtype=torch.long, device=state.device)
+        transition_step = -1 if role_phase else 0
         context_hidden = None
 
         for completed in range(1, int(steps) + 1):
@@ -923,28 +1162,24 @@ def sample_gpu_role_guided_edit_diffusion(
                 - (int(model_time_start_step) + completed - 1)
                 / float(model_time_horizon_steps),
             )
-            role_candidates = state.random_candidates(
+            candidates = state.random_candidates(
                 candidates_per_step,
                 generator,
-                role_phase=True,
-                targeted_fraction=targeted_role_candidate_fraction,
-                closure_fraction=0.0,
-            )
-            refinement_candidates = state.random_candidates(
-                candidates_per_step,
-                generator,
-                role_phase=False,
-                targeted_fraction=0.0,
-                closure_fraction=closure_candidate_fraction,
-            )
-            candidates = state.blend(
-                role_candidates, refinement_candidates, role_phase
+                role_phase=role_phase,
+                targeted_fraction=(
+                    targeted_role_candidate_fraction if role_phase else 0.0
+                ),
+                closure_fraction=(
+                    0.0 if role_phase else closure_candidate_fraction
+                ),
+                proposal_pool_size=proposal_pool_size,
+                proposal_chunk_size=proposal_chunk_size,
             )
             features = state.compact_features(
                 candidates, time_fraction, model_input_dim
             )
             structure_logits = model(features[None]).squeeze(0)
-            if context_model is not None:
+            if context_model is not None and not role_phase:
                 if context_hidden is None or (
                     (completed - 1) % int(context_refresh_steps) == 0
                 ):
@@ -960,9 +1195,7 @@ def sample_gpu_role_guided_edit_diffusion(
                     features[None],
                     state.candidate_endpoints(candidates)[None],
                 ).squeeze(0)
-                structure_logits = torch.where(
-                    role_phase, structure_logits, context_logits
-                )
+                structure_logits = context_logits
             degree_gains = state.degree_gains(candidates)
             annealed = float(time_fraction) ** float(schedule_power)
             multiplier = float(schedule_floor) + (1.0 - float(schedule_floor)) * annealed
@@ -976,14 +1209,13 @@ def sample_gpu_role_guided_edit_diffusion(
             selected_action = candidates.action[selected]
             state.commit(candidates, selected)
             role_error = (role_error - degree_gains[selected]).clamp_min(0.0)
-            new_role_phase = role_error > threshold
-            transitioned = role_phase & ~new_role_phase & (transition_step < 0)
-            transition_step = torch.where(
-                transitioned,
-                torch.full_like(transition_step, completed),
-                transition_step,
-            )
-            role_phase = new_role_phase
+            if role_phase and (
+                completed % int(phase_check_interval) == 0
+                or completed == int(steps)
+            ):
+                if float(role_error.cpu()) <= threshold:
+                    role_phase = False
+                    transition_step = completed
             action_counts.scatter_add_(
                 0, selected_action[None], torch.ones(1, dtype=torch.long, device=state.device)
             )
@@ -992,7 +1224,6 @@ def sample_gpu_role_guided_edit_diffusion(
             if completed == int(steps) or (
                 int(metrics_every) > 0 and completed % int(metrics_every) == 0
             ):
-                snapshot = state.to_graph(initial_graph)
                 error_value = float(role_error.cpu())
                 trace.append(
                     {
@@ -1001,13 +1232,13 @@ def sample_gpu_role_guided_edit_diffusion(
                         "relation_degree_error_per_node": error_value / state.num_nodes,
                         "phase": (
                             "role_alignment"
-                            if bool(role_phase.cpu())
+                            if role_phase
                             else "switch_refinement"
                         ),
-                        "role_phase_transition_step": int(transition_step.cpu()),
+                        "role_phase_transition_step": transition_step,
                         "effective_role_weight": effective_role_weight,
                         "sampling_backend": "gpu_resident",
-                        **graph_metrics(snapshot),
+                        **state.gpu_graph_metrics(metric_edge_chunk_size),
                     }
                 )
 

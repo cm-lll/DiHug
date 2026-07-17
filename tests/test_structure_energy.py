@@ -2163,3 +2163,52 @@ def test_gpu_edit_commit_preserves_family_counts_and_cpu_graph_invariants():
             state.family_degree[family_id].cpu().numpy(),
             result.family_degrees(family),
         )
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")
+def test_gpu_graph_metrics_match_cpu_reference():
+    from sparse_diffusion.structure_energy.gpu_role_guided_edit import (
+        GpuTypedGraphState,
+    )
+
+    graph = _toy_graph()
+    family_names = tuple(sorted(graph.family_specs))
+    targets = np.stack(
+        [graph.family_degrees(name) for name in family_names], axis=1
+    )
+    state = GpuTypedGraphState(graph, targets, "cuda")
+    expected = graph_metrics(graph)
+    actual = state.gpu_graph_metrics(edge_chunk_size=4)
+    for name, value in expected.items():
+        np.testing.assert_allclose(actual[name], value, rtol=1.0e-7, atol=1.0e-7)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")
+def test_gpu_streamed_proposal_pool_is_legal_and_fixed_size():
+    from sparse_diffusion.structure_energy.gpu_role_guided_edit import (
+        GpuTypedGraphState,
+    )
+
+    graph = _toy_graph()
+    family_names = tuple(sorted(graph.family_specs))
+    targets = np.stack(
+        [graph.family_degrees(name) for name in family_names], axis=1
+    )
+    state = GpuTypedGraphState(graph, targets, "cuda")
+    generator = torch.Generator(device="cuda")
+    generator.manual_seed(727)
+    batch = state.random_candidates(
+        16,
+        generator,
+        role_phase=False,
+        targeted_fraction=0.0,
+        closure_fraction=1.0,
+        proposal_pool_size=4096,
+        proposal_chunk_size=128,
+    )
+    assert batch.action.shape == (16,)
+    assert int((batch.action == 4).sum()) == 15
+    for row in range(1, 16):
+        for edge in batch.new_edges[row].cpu().tolist():
+            assert edge[0] != edge[1]
+            assert not graph.has_edge(*edge)

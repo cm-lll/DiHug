@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
 from pathlib import Path
 
 from sparse_diffusion.structure_energy.cardinality_conditioned_edit import (
@@ -42,6 +43,15 @@ def parse_args() -> argparse.Namespace:
             "scoring, selection, and mutation resident on CUDA"
         ),
     )
+    parser.add_argument(
+        "--gpu-proposal-pool-size",
+        type=int,
+        default=0,
+        help="streamed GPU proposal count per action pool; 0 keeps the parity gate",
+    )
+    parser.add_argument("--gpu-proposal-chunk-size", type=int, default=1024)
+    parser.add_argument("--gpu-metric-edge-chunk-size", type=int, default=2048)
+    parser.add_argument("--gpu-phase-check-interval", type=int, default=32)
     parser.add_argument("--steps", type=int, default=5000)
     parser.add_argument("--candidates", type=int, default=16)
     parser.add_argument("--metrics-every", type=int, default=500)
@@ -140,6 +150,7 @@ def main() -> None:
         ).sample_graph(args.seed + 71, mode=args.family_count_mode)
     )
     initial_counts = family_edge_counts(initial)
+    sampling_started = time.perf_counter()
     result = sample_role_guided_edit_diffusion(
         marginal_prior,
         model,
@@ -168,7 +179,12 @@ def main() -> None:
         context_model=context_model,
         context_refresh_steps=args.context_refresh_steps,
         sampling_backend=args.sampling_backend,
+        gpu_proposal_pool_size=args.gpu_proposal_pool_size,
+        gpu_proposal_chunk_size=args.gpu_proposal_chunk_size,
+        gpu_metric_edge_chunk_size=args.gpu_metric_edge_chunk_size,
+        gpu_phase_check_interval=args.gpu_phase_check_interval,
     )
+    sampling_seconds = time.perf_counter() - sampling_started
     final_counts = family_edge_counts(result.graph)
     if final_counts != initial_counts:
         raise RuntimeError("role-guided sampler changed family counts")
@@ -199,6 +215,11 @@ def main() -> None:
         ),
         "context_refresh_steps": args.context_refresh_steps,
         "sampling_backend": args.sampling_backend,
+        "gpu_proposal_pool_size": args.gpu_proposal_pool_size,
+        "gpu_proposal_chunk_size": args.gpu_proposal_chunk_size,
+        "gpu_phase_check_interval": args.gpu_phase_check_interval,
+        "sampling_seconds": sampling_seconds,
+        "sampling_steps_per_second": args.steps / max(sampling_seconds, 1.0e-9),
         "context_scale": (
             None
             if context_model is None

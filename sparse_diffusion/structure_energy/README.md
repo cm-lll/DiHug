@@ -69,6 +69,43 @@ Run the complete paper queue:
 bash scripts/run_paper_final_queue.sh
 ```
 
+## GPU-Resident Streamed Screening
+
+The optional `--sampling-backend gpu` implements the reverse edit loop with a
+resident dense Boolean adjacency, fixed-length family edge tables, total
+degrees, and relation degrees.  Candidate construction, legality masks,
+typed-common-neighbor deltas, role gains, listwise scoring, selection, and the
+committed mutation stay on one CUDA device.
+
+Large proposal sets use hierarchical streamed screening.  At one sequential
+reverse step, the sampler generates `P` legal relocation or switch proposals
+in chunks of size `B`, maintains a device-side top shortlist, and evaluates
+the learned joint scorer only on the final `C` candidates.  It then commits
+exactly one edit before constructing the next proposal set.  Consequently,
+the Markov state is updated with the same one-edit micro-transition semantics;
+proposal coverage changes, but conflicting edits are never applied against a
+stale graph state.  Peak temporary memory is `O(BN)` instead of `O(PN)`, in
+addition to the `O(N^2)` Boolean adjacency and `O(E)` family edge tables.
+
+CUDA trace kernels compute triangles, clustering, transitivity, degree
+moments, assortativity, and connected components from the resident state.
+Only scalar summaries are copied to the host at trace points; final graph
+serialization remains a CPU operation.
+
+Example:
+
+```bash
+python scripts/run_role_guided_replacement_gate.py \
+  ... \
+  --sampling-backend gpu \
+  --gpu-proposal-pool-size 4096 \
+  --gpu-proposal-chunk-size 1024
+```
+
+The proposal-pool size is a method parameter and must be ablated separately
+from the CPU/GPU backend comparison.  Setting it to zero retains the smaller
+parity-gate proposal pool.
+
 ## Retained Ablations
 
 The package still includes the mixed-kernel, factorized-head, HGT-head,
