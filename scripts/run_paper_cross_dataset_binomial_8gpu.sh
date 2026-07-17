@@ -17,6 +17,9 @@ LOG_ROOT="${LOG_ROOT:-logs/paper_cross_dataset_binomial_0717}"
 SEED_START="${SEED_START:-0}"
 SEED_END="${SEED_END:-7}"
 PYTHON="${PYTHON:-python}"
+SAMPLING_BACKEND="${SAMPLING_BACKEND:-gpu}"
+GPU_PROPOSAL_POOL_SIZE="${GPU_PROPOSAL_POOL_SIZE:-0}"
+GPU_PROPOSAL_CHUNK_SIZE="${GPU_PROPOSAL_CHUNK_SIZE:-4096}"
 mkdir -p "$OUT_ROOT" "$LOG_ROOT"
 : > "$LOG_ROOT/driver.log"
 
@@ -51,7 +54,10 @@ common_args() {
   local key="$1" seed="$2" steps="$3"
   printf '%s\0' \
     --dataset-dir "$(dataset_dir "$key")" \
-    --seed "$seed" --device cuda --steps "$steps" --candidates 16 \
+    --seed "$seed" --device cuda --sampling-backend "$SAMPLING_BACKEND" \
+    --gpu-proposal-pool-size "$GPU_PROPOSAL_POOL_SIZE" \
+    --gpu-proposal-chunk-size "$GPU_PROPOSAL_CHUNK_SIZE" \
+    --steps "$steps" --candidates 16 \
     --metrics-every "$(( steps / 10 ))" --family-count-mode binomial \
     --role-weight 0.05 --gain-scale 10 --schedule-power 1 --schedule-floor 1 \
     --role-error-per-node-threshold 5.5 \
