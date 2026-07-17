@@ -14,6 +14,10 @@ cannot be launched accidentally.
 - GPU path: resident graph state, streamed proposal pools, and fused Triton
   typed-closure scoring.
 
+The unconditional paper main protocol uses `FAMILY_COUNT_MODE=binomial`.
+`FAMILY_COUNT_MODE=fixed` conditions on the clean family edge counts and is
+reported only as a conditional upper-bound/ablation, never as the main result.
+
 ## Canonical entry points
 
 - `scripts/run_paper_final_context_main_8gpu.sh`

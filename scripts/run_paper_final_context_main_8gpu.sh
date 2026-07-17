@@ -16,14 +16,19 @@ SEED_START="${SEED_START:-0}"
 SEED_END="${SEED_END:-7}"
 GPU_LIST="${GPU_LIST:-0 1 2 3 4 5 6 7}"
 MACHINE_TAG="${MACHINE_TAG:-local}"
-OUT_ROOT="${OUT_ROOT:-results/paper_final_context_${MACHINE_TAG}}"
-LOG_ROOT="${LOG_ROOT:-logs/paper_final_context_${MACHINE_TAG}}"
+FAMILY_COUNT_MODE="${FAMILY_COUNT_MODE:-binomial}"
+OUT_ROOT="${OUT_ROOT:-results/paper_final_context_${FAMILY_COUNT_MODE}_${MACHINE_TAG}}"
+LOG_ROOT="${LOG_ROOT:-logs/paper_final_context_${FAMILY_COUNT_MODE}_${MACHINE_TAG}}"
 PYTHON="${PYTHON:-python}"
 read -r -a GPUS <<< "$GPU_LIST"
 NGPU="${#GPUS[@]}"
 
 if [[ "$NGPU" -eq 0 ]]; then
   echo "GPU_LIST must contain at least one GPU" >&2
+  exit 2
+fi
+if [[ "$FAMILY_COUNT_MODE" != "fixed" && "$FAMILY_COUNT_MODE" != "binomial" ]]; then
+  echo "FAMILY_COUNT_MODE must be fixed or binomial" >&2
   exit 2
 fi
 
@@ -69,6 +74,7 @@ run_pair() {
     --steps "$steps"
     --metrics-every "$((steps / 10))"
     --model-time-horizon-steps "$((steps * 2))"
+    --family-count-mode "$FAMILY_COUNT_MODE"
     "${COMMON_ARGS[@]}"
   )
 
@@ -109,12 +115,12 @@ run_dataset() {
   fi
 }
 
-echo "[PAPER-FINAL] commit=$(git rev-parse HEAD) machine=$MACHINE_TAG seeds=$SEED_START-$SEED_END" \
+echo "[PAPER-FINAL] commit=$(git rev-parse HEAD) machine=$MACHINE_TAG family_count_mode=$FAMILY_COUNT_MODE seeds=$SEED_START-$SEED_END" \
   | tee -a "$LOG_ROOT/driver.log"
 run_dataset imdb "$IMDB_DATA" "$IMDB_CONTEXT" "${IMDB_STEPS:-10000}"
 run_dataset pubmed "$PUBMED_DATA" "$PUBMED_CONTEXT" "${PUBMED_STEPS:-10000}"
 
-"$PYTHON" - "$OUT_ROOT" "$MACHINE_TAG" "$(git rev-parse HEAD)" <<'PY'
+"$PYTHON" - "$OUT_ROOT" "$MACHINE_TAG" "$(git rev-parse HEAD)" "$FAMILY_COUNT_MODE" <<'PY'
 import csv
 import hashlib
 import json
@@ -125,6 +131,7 @@ import sys
 root = pathlib.Path(sys.argv[1])
 machine = sys.argv[2]
 commit = sys.argv[3]
+family_count_mode = sys.argv[4]
 rows = []
 
 for context_path in sorted(root.glob("*/seed*/context/gate_report.json")):
@@ -135,6 +142,13 @@ for context_path in sorted(root.glob("*/seed*/context/gate_report.json")):
     legacy = json.loads(legacy_path.read_text())
     if context["initial"] != legacy["initial"]:
         raise RuntimeError(f"paired initial mismatch: {dataset}/seed{seed}")
+    expected_source = f"{family_count_mode}_family_count_prior"
+    for report in (legacy, context):
+        if report.get("initial_graph_source") != expected_source:
+            raise RuntimeError(
+                f"initialization protocol mismatch: {dataset}/seed{seed}: "
+                f"{report.get('initial_graph_source')} != {expected_source}"
+            )
     for mode, report in (("legacy", legacy), ("context", context)):
         final = report["final"]
         initial = report["initial"]
@@ -146,6 +160,8 @@ for context_path in sorted(root.glob("*/seed*/context/gate_report.json")):
             "mode": mode,
             "steps": int(report["steps"]),
             "context_scale": float(report.get("context_scale") or 0.0),
+            "family_count_mode": family_count_mode,
+            "initial_graph_source": report["initial_graph_source"],
         }
         for prefix, metrics in (("initial", initial), ("final", final), ("real", real)):
             for key in (
@@ -179,6 +195,12 @@ for dataset in sorted({row["dataset"] for row in rows}):
     "format": "dihug-paper-final-context-v1",
     "commit": commit,
     "machine": machine,
+    "family_count_mode": family_count_mode,
+    "initial_graph_source": f"{family_count_mode}_family_count_prior",
+    "generation_scope": (
+        "unconditional-family-count" if family_count_mode == "binomial"
+        else "conditional-fixed-family-count"
+    ),
     "paired_initials_verified": True,
     "aggregates": aggregates,
 }, indent=2, sort_keys=True))

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Generate unified paper tables from frozen final results."""
-import json, pathlib, csv, statistics, sys, hashlib, datetime
+import json, pathlib, csv, statistics, sys, hashlib, datetime, os
 
 ROOT = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else pathlib.Path("results")
 OUT = pathlib.Path("paper_tables")
@@ -10,6 +10,30 @@ COMMIT = sys.argv[2] if len(sys.argv) > 2 else "unknown"
 def load_json(p):
     try: return json.loads(pathlib.Path(p).read_text())
     except: return None
+
+main_candidates = []
+if os.environ.get("MAIN_AGGREGATE"):
+    main_candidates.append(pathlib.Path(os.environ["MAIN_AGGREGATE"]))
+main_candidates.extend([
+    ROOT / "paper_final_context_binomial_xiaob/aggregate.json",
+    ROOT / "paper_final_context_xiaob/aggregate.json",
+])
+main_path = next((p for p in main_candidates if p.is_file()), None)
+main_agg = load_json(main_path) if main_path is not None else None
+family_count_mode = (
+    str(main_agg.get("family_count_mode", "fixed")) if main_agg else "unknown"
+)
+generation_scope = (
+    str(main_agg.get("generation_scope"))
+    if main_agg and main_agg.get("generation_scope")
+    else (
+        "conditional-fixed-family-count"
+        if family_count_mode == "fixed"
+        else "unconditional-family-count"
+        if family_count_mode == "binomial"
+        else "unknown"
+    )
+)
 
 # ═══════════════════════════════════════════
 # Manifest
@@ -22,7 +46,13 @@ manifest = {
         "pubmed": {"nodes": 1565, "edges": 12284, "triangles": 61137, "clustering": 0.335},
         "dblp": {"nodes": 5733, "edges": 36645, "triangles": 0, "clustering": 0},
     },
-    "protocol": "exchangeable-role-prior + learned-listwise-relocation-switch + optional-frozen-context-residual",
+    "protocol": {
+        "family_count_mode": family_count_mode,
+        "generation_scope": generation_scope,
+        "denoiser": "learned-listwise-relocation-switch",
+        "optional_residual": "frozen-rooted-context",
+        "source_aggregate": str(main_path) if main_path is not None else None,
+    },
 }
 with open(OUT / "manifest.json", "w") as f:
     json.dump(manifest, f, indent=2)
@@ -30,7 +60,6 @@ with open(OUT / "manifest.json", "w") as f:
 # ═══════════════════════════════════════════
 # Main fullgraph table
 # ═══════════════════════════════════════════
-main_agg = load_json(ROOT / "paper_final_context_xiaob/aggregate.json")
 rows = []
 if main_agg:
     for g in main_agg.get("aggregates", []):
@@ -39,6 +68,8 @@ if main_agg:
         rows.append({
             "dataset": ds,
             "method": g["mode"],
+            "family_count_mode": family_count_mode,
+            "generation_scope": generation_scope,
             "n": g["n"],
             "edges_mean": g["edges_mean"],
             "lcc_mean": g["lcc_mean"],
