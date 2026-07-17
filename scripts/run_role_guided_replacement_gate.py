@@ -33,6 +33,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--device", default="cuda")
+    parser.add_argument(
+        "--sampling-backend",
+        choices=("cpu", "gpu"),
+        default="cpu",
+        help=(
+            "gpu keeps graph state, candidate construction, compact features, "
+            "scoring, selection, and mutation resident on CUDA"
+        ),
+    )
     parser.add_argument("--steps", type=int, default=5000)
     parser.add_argument("--candidates", type=int, default=16)
     parser.add_argument("--metrics-every", type=int, default=500)
@@ -158,6 +167,7 @@ def main() -> None:
         targeted_role_candidate_fraction=args.targeted_role_candidate_fraction,
         context_model=context_model,
         context_refresh_steps=args.context_refresh_steps,
+        sampling_backend=args.sampling_backend,
     )
     final_counts = family_edge_counts(result.graph)
     if final_counts != initial_counts:
@@ -188,6 +198,7 @@ def main() -> None:
             None if args.context_checkpoint is None else str(args.context_checkpoint)
         ),
         "context_refresh_steps": args.context_refresh_steps,
+        "sampling_backend": args.sampling_backend,
         "context_scale": (
             None
             if context_model is None

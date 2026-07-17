@@ -4,6 +4,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import numpy as np
+import pytest
+import torch
 
 from sparse_diffusion.structure_energy.checkpoint import StructureEnergyCheckpoint
 from sparse_diffusion.structure_energy.diagnostics import (
@@ -2087,3 +2089,77 @@ def test_role_count_conditioning_is_identity_for_learned_family_counts():
     direct = prior.sample_assignment(source.node_types, seed=811)
     conditioned = prior.sample_assignment_for_graph(source, seed=811)
     np.testing.assert_array_equal(conditioned, direct)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")
+def test_gpu_compact_edit_features_match_cpu_exactly():
+    from sparse_diffusion.structure_energy.gpu_role_guided_edit import (
+        gpu_features_for_proposals,
+    )
+    from sparse_diffusion.structure_energy.mixed_edit_diffusion import (
+        mixed_edit_feature_width,
+    )
+
+    graph = _toy_graph()
+    rng = np.random.default_rng(991)
+    proposals = [EditProposal("noop", "AA", (), ())]
+    for action in ("relocation", "switch"):
+        proposal = sample_valid_edit(graph, rng, actions=(action,))
+        assert proposal is not None
+        proposals.append(proposal)
+    family_names = tuple(sorted(graph.family_specs))
+    targets = np.stack(
+        [graph.family_degrees(name) for name in family_names], axis=1
+    )
+    width = mixed_edit_feature_width(
+        "typed_closure_compact_v2", len(family_names), len(graph.type_names)
+    )
+    cpu = mixed_edit_candidate_matrix(
+        graph,
+        proposals,
+        0.37,
+        feature_profile="typed_closure_compact_v2",
+    )
+    gpu = gpu_features_for_proposals(
+        graph, proposals, targets, 0.37, "cuda", width
+    ).cpu().numpy()
+    np.testing.assert_allclose(gpu, cpu, rtol=1.0e-6, atol=1.0e-6)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")
+def test_gpu_edit_commit_preserves_family_counts_and_cpu_graph_invariants():
+    from sparse_diffusion.structure_energy.gpu_role_guided_edit import (
+        GpuTypedGraphState,
+    )
+
+    graph = _toy_graph()
+    family_names = tuple(sorted(graph.family_specs))
+    targets = np.stack(
+        [graph.family_degrees(name) for name in family_names], axis=1
+    )
+    state = GpuTypedGraphState(graph, targets, "cuda")
+    generator = torch.Generator(device="cuda")
+    generator.manual_seed(177)
+    before = {name: len(graph.family_edges[name]) for name in family_names}
+    for _ in range(20):
+        batch = state.random_candidates(
+            16,
+            generator,
+            role_phase=False,
+            targeted_fraction=0.0,
+            closure_fraction=1.0,
+        )
+        valid = (batch.action != 0).nonzero(as_tuple=False).flatten()
+        selected = valid[0] if valid.numel() else torch.zeros((), dtype=torch.long, device="cuda")
+        state.commit(batch, selected)
+    result = state.to_graph(graph)
+    result.validate()
+    assert {name: len(result.family_edges[name]) for name in family_names} == before
+    np.testing.assert_array_equal(
+        state.total_degree.cpu().numpy(), result.degrees()
+    )
+    for family_id, family in enumerate(family_names):
+        np.testing.assert_array_equal(
+            state.family_degree[family_id].cpu().numpy(),
+            result.family_degrees(family),
+        )

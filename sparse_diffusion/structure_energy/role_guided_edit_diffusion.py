@@ -660,6 +660,7 @@ def sample_role_guided_edit_diffusion(
     targeted_role_candidate_fraction: float = 0.0,
     context_model: Optional[torch.nn.Module] = None,
     context_refresh_steps: int = 20,
+    sampling_backend: str = "cpu",
 ) -> MixedEditSamplingResult:
     graph = prior.sample(seed + 71) if initial_graph is None else initial_graph.clone()
     if tuple(graph.type_names) != role_prior.type_names:
@@ -673,6 +674,46 @@ def sample_role_guided_edit_diffusion(
         "|".join(family_names).encode("utf-8")
         + np.ascontiguousarray(target_rows).tobytes()
     ).hexdigest()
+    sampling_backend = str(sampling_backend).strip().lower()
+    if sampling_backend not in {"cpu", "gpu"}:
+        raise ValueError("sampling backend must be cpu or gpu")
+    if sampling_backend == "gpu":
+        if tuple(actions) != ("relocation", "switch"):
+            raise ValueError(
+                "GPU-resident backend currently requires relocation/switch actions"
+            )
+        from .gpu_role_guided_edit import sample_gpu_role_guided_edit_diffusion
+
+        result = sample_gpu_role_guided_edit_diffusion(
+            graph,
+            model,
+            target_rows,
+            steps=steps,
+            candidates_per_step=candidates_per_step,
+            seed=seed,
+            device=device,
+            metrics_every=metrics_every,
+            role_weight=role_weight,
+            gain_scale=gain_scale,
+            schedule_power=schedule_power,
+            schedule_floor=schedule_floor,
+            role_error_per_node_threshold=role_error_per_node_threshold,
+            model_time_horizon_steps=(
+                int(steps)
+                if model_time_horizon_steps is None
+                else int(model_time_horizon_steps)
+            ),
+            model_time_start_step=model_time_start_step,
+            closure_candidate_fraction=closure_candidate_fraction,
+            targeted_role_candidate_fraction=targeted_role_candidate_fraction,
+            auto_role_balance=auto_role_balance,
+            role_calibration_batches=role_calibration_batches,
+            context_model=context_model,
+            context_refresh_steps=context_refresh_steps,
+        )
+        result.trace[0]["role_assignment_seed"] = role_assignment_seed
+        result.trace[0]["role_assignment_hash"] = role_assignment_hash
+        return result
     family_to_id = {family: index for index, family in enumerate(family_names)}
     rng = np.random.default_rng(int(seed))
     device = torch.device(device)
