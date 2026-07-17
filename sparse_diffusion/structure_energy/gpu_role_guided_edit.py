@@ -14,6 +14,7 @@ from .mixed_edit_diffusion import (
     MixedEditSamplingResult,
     mixed_edit_feature_width,
 )
+from .gpu_edit_triton import fused_typed_closure
 
 
 NOOP_ID = SCORER_ACTIONS.index("noop")
@@ -700,6 +701,24 @@ class GpuTypedGraphState:
     def _closure_components(
         self, batch: GpuEditBatch
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        slot_counts, normalized = fused_typed_closure(
+            self.adjacency,
+            self.node_types,
+            self.total_degree,
+            batch.action,
+            batch.old_edges,
+            batch.new_edges,
+            batch.old_valid,
+            batch.new_valid,
+            self.type_count,
+        )
+        typed = -slot_counts[:, 0] - slot_counts[:, 1]
+        typed += slot_counts[:, 2] + slot_counts[:, 3]
+        return typed, normalized
+
+    def _closure_components_eager(
+        self, batch: GpuEditBatch
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         count = batch.action.shape[0]
         typed = torch.zeros(
             (count, self.type_count), dtype=torch.float32, device=self.device
@@ -761,7 +780,18 @@ class GpuTypedGraphState:
         family = F.one_hot(batch.family, num_classes=self.family_count).to(torch.float32)
         family *= (batch.action != NOOP_ID)[:, None]
         endpoint_rows = []
-        common_rows = []
+        slot_counts, normalized_closure = fused_typed_closure(
+            self.adjacency,
+            self.node_types,
+            self.total_degree,
+            batch.action,
+            batch.old_edges,
+            batch.new_edges,
+            batch.old_valid,
+            batch.new_valid,
+            self.type_count,
+        )
+        common_by_slot = slot_counts.sum(dim=2)
         for new in (False, True):
             edges = batch.new_edges if new else batch.old_edges
             valid_slots = batch.new_valid if new else batch.old_valid
@@ -779,12 +809,8 @@ class GpuTypedGraphState:
                     dim=1,
                 )
                 endpoint_rows.append(values / self.degree_scale * valid[:, None])
-                common_rows.append(
-                    self._slot_common(batch, new=new, slot=slot).sum(dim=1).to(torch.float32)
-                    / self.common_scale
-                )
         endpoint = torch.stack(endpoint_rows, dim=1).reshape(count, 16)
-        common = torch.stack(common_rows, dim=1)
+        common = common_by_slot / self.common_scale
         density = self.family_edge_counts[batch.family].to(torch.float32) / self.family_capacities[
             batch.family
         ].clamp_min(1.0)
@@ -808,9 +834,17 @@ class GpuTypedGraphState:
                 "GPU backend supports legacy_local_v1 and typed_closure_compact_v2; "
                 f"checkpoint input width is {model_input_dim}"
             )
-        typed, normalized = self._closure_components(batch)
+        typed = -slot_counts[:, 0] - slot_counts[:, 1]
+        typed += slot_counts[:, 2] + slot_counts[:, 3]
         typed = typed / self.common_scale
-        closure = torch.cat((typed, typed.sum(dim=1, keepdim=True), normalized[:, None]), dim=1)
+        closure = torch.cat(
+            (
+                typed,
+                typed.sum(dim=1, keepdim=True),
+                normalized_closure[:, None],
+            ),
+            dim=1,
+        )
         return torch.cat((local, closure), dim=1)
 
     def commit(self, batch: GpuEditBatch, selected: torch.Tensor) -> None:

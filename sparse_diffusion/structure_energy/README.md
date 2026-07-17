@@ -92,6 +92,13 @@ moments, assortativity, and connected components from the resident state.
 Only scalar summaries are copied to the host at trace points; final graph
 serialization remains a CPU operation.
 
+The compact structural scorer uses a fused Triton typed-closure kernel.  One
+launch evaluates the four removed/added edge slots against the post-edit
+adjacency, accumulates typed common-neighbor deltas, and computes the exact
+degree-normalized closure delta.  This preserves the sequential transition
+kernel and compact-v2 feature definition while avoiding the many indexing,
+masking, and reduction launches produced by the eager implementation.
+
 Example:
 
 ```bash
