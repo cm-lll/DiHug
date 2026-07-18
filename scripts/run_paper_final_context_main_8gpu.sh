@@ -34,8 +34,8 @@ fi
 
 IMDB_DATA="data/IMDB_movie_subgraphs/subgraph_000"
 PUBMED_DATA="data/PubMed_baseline_subgraphs/subgraph_000"
-IMDB_CONTEXT="results/rooted_context_freeze/imdb/rooted_context_residual.pt"
-PUBMED_CONTEXT="results/rooted_context_freeze/pubmed/rooted_context_residual.pt"
+IMDB_CONTEXT="${IMDB_CONTEXT:-results/rooted_context_freeze/imdb/rooted_context_residual.pt}"
+PUBMED_CONTEXT="${PUBMED_CONTEXT:-results/rooted_context_freeze/pubmed/rooted_context_residual.pt}"
 
 for required in "$IMDB_CONTEXT" "$PUBMED_CONTEXT"; do
   if [[ ! -f "$required" ]]; then
