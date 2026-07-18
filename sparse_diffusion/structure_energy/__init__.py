@@ -14,6 +14,13 @@ from .global_context_joint_edit import (
     GlobalContextJointEditResidual,
     NodeContextJointEditResidual,
 )
+from .sequential_macro_context import (
+    SequentialMacroDataset,
+    SequentialMacroExample,
+    build_sequential_macro_dataset,
+    save_sequential_macro_context_checkpoint,
+    train_sequential_macro_context,
+)
 from .mixed_edit_diffusion import MarginalGraphPrior, MixedKernelSchedule
 from .markov_diagnostics import (
     audit_state_summary_aliasing,

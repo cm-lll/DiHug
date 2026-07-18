@@ -127,6 +127,23 @@ paper ablations. Their old one-off launchers are not part of the final runtime
 surface. Git history retains removed GQER, family-set, absorbing-posterior, and
 QPPR experiment configurations.
 
+### Sequential Macro Node-Context Gate
+
+`run_sequential_macro_context_gate.py` is an experimental context gate, not a
+replacement for the frozen sampler. One macro transition encodes the typed
+node state once and then executes `K` legal micro edits sequentially. Candidate
+sets and compact structural features are recomputed after every committed edit,
+while the node encoding is refreshed only at the next macro boundary. Thus a
+`100 x 20` run contains 100 reported diffusion times and 2,000 state-valid
+micro transitions. It is not the historical commuting-batch implementation,
+which scored several edits against one stale graph and applied them together.
+
+The gate supports exact-inverse supervision and training-only rooted-closure
+utility supervision. Neither target is read during generation. On the initial
+IMDB gate, rooted utility improved teacher-forced candidate ranking but did not
+materially improve the free-running graph over the legacy listwise scorer, so
+this path remains an ablation until a free-running validation gate passes.
+
 ## Guarantees and Limits
 
 Typed edits preserve graph simplicity and schema validity. Relocation and
