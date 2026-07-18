@@ -15,8 +15,14 @@ LOG_ROOT="${LOG_ROOT:-logs/hgen40_matched_pubmed}"
 HGEN_ROOT="${HGEN_ROOT:-/data2/lyh/gnn_project/HGEN}"
 HGEN_PYTHON="${HGEN_PYTHON:-/data2/lyh/miniconda3/envs/hgen_env/bin/python}"
 DATA="${PUBMED_DATA:-data/PubMed_baseline_subgraphs/subgraph_000}"
-PRIOR="${PUBMED_PRIOR:-results/pubmed_exchangeable_compact_switch_gate_0716/prior/exchangeable_role_prior.json}"
-MODEL="${PUBMED_MODEL:-results/pubmed_role_corruption_gate_0716/f100_all/model/mixed_edit_diffusion.pt}"
+# These are the artifacts used by the nested validation protocol.  Do not
+# substitute similarly named role-corruption checkpoints: their prior produces
+# a different initial-state distribution and invalidates the selected C64/320
+# contract.
+PRIOR="${PUBMED_PRIOR:-results/pubmed_exchangeable_compact_switch_gate_0716/prior_c512/exchangeable_role_prior.json}"
+MODEL="${PUBMED_MODEL:-results/pubmed_exchangeable_compact_switch_gate_0716/model/mixed_edit_diffusion.pt}"
+EXPECTED_PRIOR_SHA256="${EXPECTED_PRIOR_SHA256:-dd22f752210c00ad4960e05369ca2b387848a90874d4ac1c05eb04d23f5bc319}"
+EXPECTED_MODEL_SHA256="${EXPECTED_MODEL_SHA256:-727aa1c0e25d1276ba9c8a7bb1a135f40f728788c0585448e24de79405d23330}"
 SPLIT_SEED="${SPLIT_SEED:-481516234}"
 SAMPLE_STEPS="${SAMPLE_STEPS:-320}"
 SAMPLE_CANDIDATES="${SAMPLE_CANDIDATES:-64}"
@@ -25,6 +31,19 @@ mkdir -p "$OUT_ROOT" "$LOG_ROOT"
 for required in "$DATA" "$PRIOR" "$MODEL" "$HGEN_ROOT/hgen.py" "$HGEN_PYTHON"; do
   [[ -e "$required" ]] || { echo "missing required path: $required" >&2; exit 2; }
 done
+
+actual_prior_sha256="$(sha256sum "$PRIOR" | awk '{print $1}')"
+actual_model_sha256="$(sha256sum "$MODEL" | awk '{print $1}')"
+[[ "$actual_prior_sha256" == "$EXPECTED_PRIOR_SHA256" ]] || {
+  echo "PubMed prior SHA256 mismatch: $actual_prior_sha256" >&2
+  echo "expected nested-selected artifact: $EXPECTED_PRIOR_SHA256" >&2
+  exit 3
+}
+[[ "$actual_model_sha256" == "$EXPECTED_MODEL_SHA256" ]] || {
+  echo "PubMed model SHA256 mismatch: $actual_model_sha256" >&2
+  echo "expected nested-selected artifact: $EXPECTED_MODEL_SHA256" >&2
+  exit 3
+}
 
 python scripts/build_hgen_edge_split_target.py --dataset-dir "$DATA" \
   --generate-split --output-dir "$OUT_ROOT/target" --test-share 0.4 \
@@ -55,7 +74,8 @@ for seed in {0..7}; do generated+=("$OUT_ROOT/dihug_seed${seed}/generated_graph.
   --target "$OUT_ROOT/target/target_graph.json" --generated "${generated[@]}" \
   --output "$OUT_ROOT/dihug_metrics.json" > "$LOG_ROOT/dihug_metrics.log" 2>&1
 
-python - "$OUT_ROOT" "$SPLIT_SEED" <<'PY'
+python - "$OUT_ROOT" "$SPLIT_SEED" "$PRIOR" "$actual_prior_sha256" \
+  "$MODEL" "$actual_model_sha256" <<'PY'
 import json, pathlib, sys
 root = pathlib.Path(sys.argv[1])
 split = json.loads((root / "target/split_report.json").read_text())
@@ -71,6 +91,12 @@ payload = {
     "fingerprint_checks": checks, "directly_matched": all(checks.values()),
     "paper_comparison_rule": "direct-local-split" if all(checks.values()) else "separate-local-protocol",
     "selection_contract": "validation-selected relocation_switch C64 320 steps",
+    "artifact_contract": {
+        "prior": str(pathlib.Path(sys.argv[3])),
+        "prior_sha256": sys.argv[4],
+        "model": str(pathlib.Path(sys.argv[5])),
+        "model_sha256": sys.argv[6],
+    },
     "dihug": dihug, "hgen": hgen,
     "hgen_motif": {"available_in_local_repository": False},
 }
