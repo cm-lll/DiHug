@@ -666,6 +666,8 @@ def sample_role_guided_edit_diffusion(
     gpu_metric_edge_chunk_size: int = 2048,
     gpu_phase_check_interval: int = 32,
     gpu_use_triton: bool = True,
+    phase_policy: str = "auto",
+    selection_mode: str = "model",
 ) -> MixedEditSamplingResult:
     graph = prior.sample(seed + 71) if initial_graph is None else initial_graph.clone()
     if tuple(graph.type_names) != role_prior.type_names:
@@ -682,10 +684,23 @@ def sample_role_guided_edit_diffusion(
     sampling_backend = str(sampling_backend).strip().lower()
     if sampling_backend not in {"cpu", "gpu"}:
         raise ValueError("sampling backend must be cpu or gpu")
+    phase_policy = str(phase_policy).strip().lower()
+    if phase_policy not in {"auto", "relocation_only", "switch_only"}:
+        raise ValueError(
+            "phase policy must be auto, relocation_only, or switch_only"
+        )
+    selection_mode = str(selection_mode).strip().lower()
+    if selection_mode not in {"model", "random"}:
+        raise ValueError("selection mode must be model or random")
     if sampling_backend == "gpu":
-        if tuple(actions) != ("relocation", "switch"):
+        if (
+            tuple(actions) != ("relocation", "switch")
+            or phase_policy != "auto"
+            or selection_mode != "model"
+        ):
             raise ValueError(
-                "GPU-resident backend currently requires relocation/switch actions"
+                "GPU-resident backend currently requires the model-selected "
+                "automatic relocation/switch policy"
             )
         from .gpu_role_guided_edit import sample_gpu_role_guided_edit_diffusion
 
@@ -774,10 +789,13 @@ def sample_role_guided_edit_diffusion(
             target_std_ratio=auto_role_balance,
         )
     current_role_error = relation_degree_error(graph, target_rows, family_names)
-    switch_refinement = role_alignment_complete(
-        current_role_error,
-        graph.num_nodes,
-        role_error_per_node_threshold,
+    switch_refinement = phase_policy == "switch_only" or (
+        phase_policy == "auto"
+        and role_alignment_complete(
+            current_role_error,
+            graph.num_nodes,
+            role_error_per_node_threshold,
+        )
     )
     transition_step = 0 if switch_refinement else None
     trace = [
@@ -799,7 +817,7 @@ def sample_role_guided_edit_diffusion(
     proposed = 0
     applied = 0
     time_horizon = (
-        int(steps)
+        max(int(steps), 1)
         if model_time_horizon_steps is None
         else int(model_time_horizon_steps)
     )
@@ -814,10 +832,14 @@ def sample_role_guided_edit_diffusion(
             time_fraction = denoising_time_fraction(
                 int(model_time_start_step) + completed, time_horizon
             )
-            if not switch_refinement and role_alignment_complete(
+            if (
+                phase_policy == "auto"
+                and not switch_refinement
+                and role_alignment_complete(
                 current_role_error,
                 graph.num_nodes,
                 role_error_per_node_threshold,
+                )
             ):
                 switch_refinement = True
                 transition_step = completed
@@ -837,10 +859,14 @@ def sample_role_guided_edit_diffusion(
                     rng,
                     candidates_per_step,
                     targeted_fraction=targeted_role_candidate_fraction,
-                    actions=actions,
+                    actions=("relocation",) if phase_policy == "relocation_only" else actions,
                 )
             proposed += len(candidates)
-            if context_model is not None and switch_refinement:
+            if selection_mode == "random":
+                structure_logits = torch.zeros(
+                    len(candidates), dtype=torch.float32, device=device
+                )
+            elif context_model is not None and switch_refinement:
                 if (
                     context_hidden is None
                     or completed - last_context_refresh >= int(context_refresh_steps)
@@ -880,16 +906,19 @@ def sample_role_guided_edit_diffusion(
                 dtype=structure_logits.dtype,
                 device=device,
             )
-            scores = combine_structure_and_role_scores(
-                structure_logits,
-                degree_gains,
-                time_fraction=time_fraction,
-                role_weight=effective_role_weight,
-                gain_scale=gain_scale,
-                schedule_power=schedule_power,
-                schedule_floor=schedule_floor,
-            )
-            selected_index = int(scores.argmax().item())
+            if selection_mode == "random":
+                selected_index = int(rng.integers(len(candidates)))
+            else:
+                scores = combine_structure_and_role_scores(
+                    structure_logits,
+                    degree_gains,
+                    time_fraction=time_fraction,
+                    role_weight=effective_role_weight,
+                    gain_scale=gain_scale,
+                    schedule_power=schedule_power,
+                    schedule_floor=schedule_floor,
+                )
+                selected_index = int(scores.argmax().item())
             selected = candidates[selected_index]
             apply_edit(graph, selected)
             current_role_error = max(

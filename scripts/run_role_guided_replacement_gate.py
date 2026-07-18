@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Evaluate role-guided structural edit diffusion from a fair fixed-M prior."""
+"""Evaluate role-guided structural edit diffusion from a family-count prior."""
 
 from __future__ import annotations
 
@@ -83,6 +83,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--context-checkpoint", type=Path)
     parser.add_argument("--context-refresh-steps", type=int, default=20)
     parser.add_argument("--context-scale", type=float, default=-1.0)
+    parser.add_argument(
+        "--phase-policy",
+        choices=("auto", "relocation_only", "switch_only"),
+        default="auto",
+    )
+    parser.add_argument(
+        "--selection-mode", choices=("model", "random"), default="model"
+    )
     return parser.parse_args()
 
 
@@ -191,6 +199,8 @@ def main() -> None:
         gpu_metric_edge_chunk_size=args.gpu_metric_edge_chunk_size,
         gpu_phase_check_interval=args.gpu_phase_check_interval,
         gpu_use_triton=not args.gpu_disable_triton,
+        phase_policy=args.phase_policy,
+        selection_mode=args.selection_mode,
     )
     if cuda_benchmark:
         torch.cuda.synchronize()
@@ -244,6 +254,8 @@ def main() -> None:
             if context_model is None
             else float(context_model.residual_scale.item())
         ),
+        "phase_policy": args.phase_policy,
+        "selection_mode": args.selection_mode,
         "initial_graph_source": (
             f"{args.family_count_mode}_family_count_prior"
             if args.initial_graph is None

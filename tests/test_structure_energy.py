@@ -2091,6 +2091,67 @@ def test_role_count_conditioning_is_identity_for_learned_family_counts():
     np.testing.assert_array_equal(conditioned, direct)
 
 
+def test_role_guided_component_policies_are_action_pure_and_allow_zero_steps():
+    from sparse_diffusion.structure_energy.mixed_edit_diffusion import (
+        MarginalGraphPrior,
+        SwitchDenoiserMLP,
+        mixed_edit_feature_width,
+    )
+    from sparse_diffusion.structure_energy.role_guided_edit_diffusion import (
+        ExchangeableRoleDegreePrior,
+        sample_role_guided_edit_diffusion,
+    )
+
+    graph = _toy_graph()
+    marginal = MarginalGraphPrior.from_training_graph(graph)
+    role_prior = ExchangeableRoleDegreePrior.from_training_graph(graph)
+    model = SwitchDenoiserMLP(
+        input_dim=mixed_edit_feature_width(
+            "typed_closure_compact_v2",
+            family_count=len(graph.family_specs),
+            type_count=len(graph.type_names),
+        ),
+        hidden_dim=8,
+        layers=1,
+        dropout=0.0,
+    )
+    prior_only = sample_role_guided_edit_diffusion(
+        marginal,
+        model,
+        role_prior,
+        steps=0,
+        candidates_per_step=4,
+        seed=101,
+        device="cpu",
+        initial_graph=graph,
+    )
+    assert prior_only.graph.to_json_dict() == graph.to_json_dict()
+    assert prior_only.proposed == prior_only.applied == 0
+
+    for policy, forbidden in (
+        ("relocation_only", "switch"),
+        ("switch_only", "relocation"),
+    ):
+        result = sample_role_guided_edit_diffusion(
+            marginal,
+            model,
+            role_prior,
+            steps=4,
+            candidates_per_step=4,
+            seed=103,
+            device="cpu",
+            initial_graph=graph,
+            phase_policy=policy,
+            selection_mode="random",
+        )
+        assert result.action_counts[forbidden] == 0
+        assert 0 < result.applied <= 4
+        assert result.action_counts["noop"] + result.applied == 4
+        assert {
+            name: len(edges) for name, edges in result.graph.family_edges.items()
+        } == {name: len(edges) for name, edges in graph.family_edges.items()}
+
+
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")
 def test_gpu_compact_edit_features_match_cpu_exactly():
     from sparse_diffusion.structure_energy.gpu_role_guided_edit import (
