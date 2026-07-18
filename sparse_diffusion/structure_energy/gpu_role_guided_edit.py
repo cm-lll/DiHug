@@ -58,8 +58,11 @@ class GpuTypedGraphState:
         graph: TypedGraph,
         target_rows: np.ndarray,
         device: str | torch.device,
+        *,
+        use_triton: bool = True,
     ) -> None:
         self.device = torch.device(device)
+        self.use_triton = bool(use_triton)
         if self.device.type != "cuda":
             raise ValueError("GPU graph state requires a CUDA device")
         graph.validate_disjoint_family_domains()
@@ -701,43 +704,56 @@ class GpuTypedGraphState:
     def _closure_components(
         self, batch: GpuEditBatch
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        slot_counts, normalized = fused_typed_closure(
-            self.adjacency,
-            self.node_types,
-            self.total_degree,
-            batch.action,
-            batch.old_edges,
-            batch.new_edges,
-            batch.old_valid,
-            batch.new_valid,
-            self.type_count,
-        )
+        slot_counts, normalized = self._closure_slots(batch)
         typed = -slot_counts[:, 0] - slot_counts[:, 1]
         typed += slot_counts[:, 2] + slot_counts[:, 3]
         return typed, normalized
 
-    def _closure_components_eager(
+    def _closure_slots(
+        self, batch: GpuEditBatch
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if self.use_triton:
+            return fused_typed_closure(
+                self.adjacency,
+                self.node_types,
+                self.total_degree,
+                batch.action,
+                batch.old_edges,
+                batch.new_edges,
+                batch.old_valid,
+                batch.new_valid,
+                self.type_count,
+            )
+        return self._closure_slots_eager(batch)
+
+    def _closure_slots_eager(
         self, batch: GpuEditBatch
     ) -> tuple[torch.Tensor, torch.Tensor]:
         count = batch.action.shape[0]
-        typed = torch.zeros(
-            (count, self.type_count), dtype=torch.float32, device=self.device
+        slot_counts = torch.zeros(
+            (count, 4, self.type_count),
+            dtype=torch.float32,
+            device=self.device,
         )
         triangle_delta = torch.zeros(
             (count, self.num_nodes), dtype=torch.float32, device=self.device
         )
         candidate = torch.arange(count, device=self.device)
+        output_slot = 0
         for new, sign in ((False, -1.0), (True, 1.0)):
             edges = batch.new_edges if new else batch.old_edges
             valid_slots = batch.new_valid if new else batch.old_valid
             for slot in range(2):
                 common = self._slot_common(batch, new=new, slot=slot)
-                typed += sign * (common.to(torch.float32) @ self.node_type_one_hot)
+                slot_counts[:, output_slot] = (
+                    common.to(torch.float32) @ self.node_type_one_hot
+                )
                 counts = common.sum(dim=1).to(torch.float32) * valid_slots[:, slot]
                 safe = edges[:, slot].clamp_min(0)
                 triangle_delta[candidate, safe[:, 0]] += sign * counts
                 triangle_delta[candidate, safe[:, 1]] += sign * counts
                 triangle_delta += sign * common.to(torch.float32)
+                output_slot += 1
         denominator = self.total_degree.to(torch.float32)
         denominator = denominator * (denominator - 1.0) / 2.0
         normalized = torch.where(
@@ -746,7 +762,15 @@ class GpuTypedGraphState:
             torch.zeros_like(triangle_delta),
         ).sum(dim=1)
         degree_preserving = self._endpoint_deltas(batch).eq(0).all(dim=1)
-        return typed, normalized * degree_preserving
+        return slot_counts, normalized * degree_preserving
+
+    def _closure_components_eager(
+        self, batch: GpuEditBatch
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        slot_counts, normalized = self._closure_slots_eager(batch)
+        typed = -slot_counts[:, 0] - slot_counts[:, 1]
+        typed += slot_counts[:, 2] + slot_counts[:, 3]
+        return typed, normalized
 
     def _endpoint_deltas(self, batch: GpuEditBatch) -> torch.Tensor:
         delta = torch.zeros(
@@ -780,17 +804,7 @@ class GpuTypedGraphState:
         family = F.one_hot(batch.family, num_classes=self.family_count).to(torch.float32)
         family *= (batch.action != NOOP_ID)[:, None]
         endpoint_rows = []
-        slot_counts, normalized_closure = fused_typed_closure(
-            self.adjacency,
-            self.node_types,
-            self.total_degree,
-            batch.action,
-            batch.old_edges,
-            batch.new_edges,
-            batch.old_valid,
-            batch.new_valid,
-            self.type_count,
-        )
+        slot_counts, normalized_closure = self._closure_slots(batch)
         common_by_slot = slot_counts.sum(dim=2)
         for new in (False, True):
             edges = batch.new_edges if new else batch.old_edges
@@ -1112,6 +1126,7 @@ def sample_gpu_role_guided_edit_diffusion(
     proposal_chunk_size: int = 1024,
     metric_edge_chunk_size: int = 2048,
     phase_check_interval: int = 32,
+    use_triton: bool = True,
 ) -> MixedEditSamplingResult:
     """Run fixed-count role-guided edit diffusion without hot-loop host traffic."""
 
@@ -1119,7 +1134,9 @@ def sample_gpu_role_guided_edit_diffusion(
         raise ValueError("steps and model time horizon must be positive")
     if int(phase_check_interval) <= 0:
         raise ValueError("GPU phase check interval must be positive")
-    state = GpuTypedGraphState(initial_graph, target_rows, device)
+    state = GpuTypedGraphState(
+        initial_graph, target_rows, device, use_triton=use_triton
+    )
     model = model.to(state.device).eval()
     if context_model is not None:
         if int(context_refresh_steps) <= 0:

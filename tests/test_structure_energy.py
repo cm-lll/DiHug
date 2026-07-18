@@ -2212,3 +2212,38 @@ def test_gpu_streamed_proposal_pool_is_legal_and_fixed_size():
         for edge in batch.new_edges[row].cpu().tolist():
             assert edge[0] != edge[1]
             assert not graph.has_edge(*edge)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")
+def test_gpu_triton_and_eager_compact_features_match():
+    from sparse_diffusion.structure_energy.gpu_role_guided_edit import (
+        GpuTypedGraphState,
+    )
+    from sparse_diffusion.structure_energy.mixed_edit_diffusion import (
+        mixed_edit_feature_width,
+    )
+
+    graph = _toy_graph()
+    family_names = tuple(sorted(graph.family_specs))
+    targets = np.stack(
+        [graph.family_degrees(name) for name in family_names], axis=1
+    )
+    fused = GpuTypedGraphState(graph, targets, "cuda", use_triton=True)
+    eager = GpuTypedGraphState(graph, targets, "cuda", use_triton=False)
+    generator = torch.Generator(device="cuda")
+    generator.manual_seed(991)
+    batch = fused.random_candidates(
+        16,
+        generator,
+        role_phase=False,
+        targeted_fraction=0.0,
+        closure_fraction=1.0,
+        proposal_pool_size=128,
+        proposal_chunk_size=64,
+    )
+    feature_width = mixed_edit_feature_width(
+        "typed_closure_compact_v2", len(family_names), len(graph.type_names)
+    )
+    expected = eager.compact_features(batch, 0.5, feature_width)
+    actual = fused.compact_features(batch, 0.5, feature_width)
+    torch.testing.assert_close(actual, expected, rtol=1.0e-6, atol=1.0e-6)

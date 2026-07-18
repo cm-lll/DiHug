@@ -8,6 +8,8 @@ import json
 import time
 from pathlib import Path
 
+import torch
+
 from sparse_diffusion.structure_energy.cardinality_conditioned_edit import (
     FamilyCountCondition,
     family_edge_counts,
@@ -52,6 +54,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gpu-proposal-chunk-size", type=int, default=1024)
     parser.add_argument("--gpu-metric-edge-chunk-size", type=int, default=2048)
     parser.add_argument("--gpu-phase-check-interval", type=int, default=32)
+    parser.add_argument("--gpu-disable-triton", action="store_true")
     parser.add_argument("--steps", type=int, default=5000)
     parser.add_argument("--candidates", type=int, default=16)
     parser.add_argument("--metrics-every", type=int, default=500)
@@ -150,6 +153,10 @@ def main() -> None:
         ).sample_graph(args.seed + 71, mode=args.family_count_mode)
     )
     initial_counts = family_edge_counts(initial)
+    cuda_benchmark = args.sampling_backend == "gpu" and torch.cuda.is_available()
+    if cuda_benchmark:
+        torch.cuda.reset_peak_memory_stats()
+        torch.cuda.synchronize()
     sampling_started = time.perf_counter()
     result = sample_role_guided_edit_diffusion(
         marginal_prior,
@@ -183,7 +190,10 @@ def main() -> None:
         gpu_proposal_chunk_size=args.gpu_proposal_chunk_size,
         gpu_metric_edge_chunk_size=args.gpu_metric_edge_chunk_size,
         gpu_phase_check_interval=args.gpu_phase_check_interval,
+        gpu_use_triton=not args.gpu_disable_triton,
     )
+    if cuda_benchmark:
+        torch.cuda.synchronize()
     sampling_seconds = time.perf_counter() - sampling_started
     final_counts = family_edge_counts(result.graph)
     if final_counts != initial_counts:
@@ -218,6 +228,15 @@ def main() -> None:
         "gpu_proposal_pool_size": args.gpu_proposal_pool_size,
         "gpu_proposal_chunk_size": args.gpu_proposal_chunk_size,
         "gpu_phase_check_interval": args.gpu_phase_check_interval,
+        "gpu_use_triton": (
+            args.sampling_backend == "gpu" and not args.gpu_disable_triton
+        ),
+        "gpu_peak_memory_allocated_bytes": (
+            int(torch.cuda.max_memory_allocated()) if cuda_benchmark else 0
+        ),
+        "gpu_peak_memory_reserved_bytes": (
+            int(torch.cuda.max_memory_reserved()) if cuda_benchmark else 0
+        ),
         "sampling_seconds": sampling_seconds,
         "sampling_steps_per_second": args.steps / max(sampling_seconds, 1.0e-9),
         "context_scale": (

@@ -665,6 +665,7 @@ def sample_role_guided_edit_diffusion(
     gpu_proposal_chunk_size: int = 1024,
     gpu_metric_edge_chunk_size: int = 2048,
     gpu_phase_check_interval: int = 32,
+    gpu_use_triton: bool = True,
 ) -> MixedEditSamplingResult:
     graph = prior.sample(seed + 71) if initial_graph is None else initial_graph.clone()
     if tuple(graph.type_names) != role_prior.type_names:
@@ -718,6 +719,7 @@ def sample_role_guided_edit_diffusion(
             proposal_chunk_size=gpu_proposal_chunk_size,
             metric_edge_chunk_size=gpu_metric_edge_chunk_size,
             phase_check_interval=gpu_phase_check_interval,
+            use_triton=gpu_use_triton,
         )
         result.trace[0]["role_assignment_seed"] = role_assignment_seed
         result.trace[0]["role_assignment_hash"] = role_assignment_hash
