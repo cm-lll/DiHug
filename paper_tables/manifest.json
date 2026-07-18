@@ -1,6 +1,6 @@
 {
-  "commit": "47aab83",
-  "generated": "2026-07-18T00:46:06.284222",
+  "commit": "96f170f",
+  "generated": "2026-07-18T12:53:24.939056",
   "datasets": {
     "imdb": {
       "nodes": 1653,
@@ -21,5 +21,11 @@
       "clustering": 0
     }
   },
-  "protocol": "exchangeable-role-prior + learned-listwise-relocation-switch + optional-frozen-context-residual"
+  "protocol": {
+    "family_count_mode": "binomial",
+    "generation_scope": "unconditional-family-count",
+    "denoiser": "learned-listwise-relocation-switch",
+    "optional_residual": "frozen-rooted-context",
+    "source_aggregate": "results/paper_final_context_binomial_xiaob/aggregate.json"
+  }
 }
