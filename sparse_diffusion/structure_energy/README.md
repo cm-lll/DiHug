@@ -6,7 +6,8 @@ family-set loss, and sampler-side target-metric controllers.
 
 ## Generative Model
 
-Generation has two learned stages:
+The active method combines a learned prior, a learned reverse process, and an
+optional node-context module:
 
 1. An exchangeable joint relation-degree prior samples anonymous node roles
    within each node type. The prior stores mixture parameters and type/family
@@ -14,7 +15,12 @@ Generation has two learned stages:
 2. A learned edit-space reverse process scores legal typed graph edits. The
    complete training kernel contains birth, death, relocation, and 2-switch
    transitions. Each candidate is represented by its action, relation family,
-   anonymous endpoint roles, diffusion time, and typed closure deltas.
+   endpoint total/family degrees, diffusion time, and typed closure deltas. An
+   anonymous relation-degree gain is added analytically during role alignment.
+3. An optional node-context residual runs sparse typed message passing on the
+   current graph and fuses the resulting endpoint node states into the joint
+   edit score. Typed edges remain encoder relations, but neither existing edges
+   nor NULL candidate pairs maintain persistent hidden vectors.
 
 The known forward process starts at a training graph and applies a
 time-inhomogeneous mixture of the same edits. Birth/death is a Bernoulli

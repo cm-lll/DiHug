@@ -153,12 +153,14 @@ def decode_edit_edge_slots_in_chunks(
 
 
 class GlobalContextJointEditResidual(nn.Module):
-    """Zero-initialized HSD residual around a legacy listwise edit scorer.
+    """Zero-initialized context residual around a legacy listwise edit scorer.
 
     The four endpoint slots are ordered as two removed edges followed by two
     added edges. Pooling removed and added slots separately preserves the
     semantics of relocation and switch operations while remaining invariant
-    to the order of edges inside either set.
+    to the order of edges inside either set. ``edge_slot_dim`` is retained for
+    historical edge-query ablations; the paper method uses the node-only
+    specialization below.
     """
 
     def __init__(
@@ -259,3 +261,46 @@ class GlobalContextJointEditResidual(nn.Module):
             (candidate_features, removed, added, graph_context), dim=-1
         )
         return legacy_logits + self.residual(residual_input).squeeze(-1)
+
+
+class NodeContextJointEditResidual(GlobalContextJointEditResidual):
+    """Joint edit scorer that consumes node context without edge hidden state.
+
+    Existing typed edges are used only by the graph encoder for relation-aware
+    message passing. Candidate removals and additions are represented on demand
+    from their endpoint node states and compact edit features, so NULL pairs do
+    not require persistent representations. The zero-initialized residual keeps
+    the exact legacy listwise scorer in the function class.
+    """
+
+    uses_persistent_edge_state = False
+
+    def __init__(
+        self,
+        legacy_scorer: nn.Module,
+        *,
+        node_hidden_dim: int,
+        candidate_feature_dim: int,
+        hidden_dim: int = 128,
+    ) -> None:
+        super().__init__(
+            legacy_scorer,
+            node_hidden_dim=node_hidden_dim,
+            candidate_feature_dim=candidate_feature_dim,
+            edge_slot_dim=0,
+            hidden_dim=hidden_dim,
+        )
+
+    def forward(
+        self,
+        candidate_features: torch.Tensor,
+        *,
+        node_hidden: torch.Tensor,
+        candidate_endpoints: torch.Tensor,
+    ) -> torch.Tensor:
+        return super().forward(
+            candidate_features,
+            node_hidden=node_hidden,
+            candidate_endpoints=candidate_endpoints,
+            edge_slot_hidden=None,
+        )

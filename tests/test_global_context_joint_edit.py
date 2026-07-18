@@ -3,6 +3,7 @@ from torch import nn
 
 from sparse_diffusion.structure_energy.global_context_joint_edit import (
     GlobalContextJointEditResidual,
+    NodeContextJointEditResidual,
     decode_edit_edge_slots_in_chunks,
     decode_queries_in_chunks,
 )
@@ -172,3 +173,41 @@ def test_joint_residual_can_learn_from_all_removed_and_added_slots():
     )
     assert logits.shape == (1, 2)
     assert not torch.equal(logits[:, 0], logits[:, 1])
+
+
+def test_node_context_joint_scorer_has_no_persistent_edge_state():
+    torch.manual_seed(17)
+    legacy = SwitchDenoiserMLP(input_dim=9, hidden_dim=12, layers=1, dropout=0.0)
+    model = NodeContextJointEditResidual(
+        legacy,
+        node_hidden_dim=6,
+        candidate_feature_dim=9,
+        hidden_dim=12,
+    )
+    assert model.edge_slot_dim == 0
+    assert model.uses_persistent_edge_state is False
+
+    features = torch.zeros(1, 2, 9)
+    endpoints = torch.tensor(
+        [[[0, 1, 2, 3, 4, 5, 6, 7], [0, 1, 2, 3, 4, 5, -1, -1]]]
+    )
+    first_context = torch.randn(1, 8, 6)
+    second_context = first_context.clone()
+    second_context[:, 6:] += 3.0
+
+    with torch.no_grad():
+        final = model.residual[-1]
+        assert isinstance(final, nn.Linear)
+        final.weight.normal_(std=0.1)
+        first = model(
+            features,
+            node_hidden=first_context,
+            candidate_endpoints=endpoints,
+        )
+        second = model(
+            features,
+            node_hidden=second_context,
+            candidate_endpoints=endpoints,
+        )
+    assert first.shape == (1, 2)
+    assert not torch.equal(first, second)

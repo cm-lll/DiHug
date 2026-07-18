@@ -1,6 +1,9 @@
 import numpy as np
 import torch
 
+from sparse_diffusion.structure_energy.global_context_joint_edit import (
+    NodeContextJointEditResidual,
+)
 from sparse_diffusion.structure_energy.graph import FamilySpec, TypedGraph
 from sparse_diffusion.structure_energy.mixed_edit_diffusion import EditProposal
 from sparse_diffusion.structure_energy.rooted_context_edit import (
@@ -88,6 +91,8 @@ def test_zero_context_residual_is_exact_legacy_and_legacy_is_frozen():
             endpoints,
         )
     assert torch.equal(expected, actual)
+    assert isinstance(model.joint, NodeContextJointEditResidual)
+    assert model.joint.uses_persistent_edge_state is False
     assert all(not parameter.requires_grad for parameter in model.joint.legacy_scorer.parameters())
 
 

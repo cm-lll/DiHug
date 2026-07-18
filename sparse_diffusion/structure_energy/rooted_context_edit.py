@@ -11,7 +11,7 @@ from torch import nn
 
 from sparse_diffusion.models.pyhgt_denoiser import HGTConv
 
-from .global_context_joint_edit import GlobalContextJointEditResidual
+from .global_context_joint_edit import NodeContextJointEditResidual
 from .graph import TypedGraph
 from .hgt_edit_denoiser import (
     candidate_endpoint_matrix,
@@ -323,7 +323,12 @@ def build_rooted_context_dataset(
 
 
 class RootedContextEditResidual(nn.Module):
-    """Frozen legacy listwise scorer plus zero-initialized sparse-HGT residual."""
+    """Frozen listwise scorer plus a node-only sparse-HGT context residual.
+
+    Typed edges participate in message passing through ``edge_index`` and
+    ``edge_types``. No existing or candidate edge owns a persistent hidden
+    vector; complete edit candidates are decoded from endpoint node states.
+    """
 
     def __init__(
         self,
@@ -368,7 +373,7 @@ class RootedContextEditResidual(nn.Module):
             )
             for _ in range(int(layers))
         )
-        self.joint = GlobalContextJointEditResidual(
+        self.joint = NodeContextJointEditResidual(
             legacy_scorer,
             node_hidden_dim=hidden_dim,
             candidate_feature_dim=candidate_feature_dim,
@@ -638,6 +643,8 @@ def save_rooted_context_checkpoint(
                 "training_adjacency": False,
                 "graph_metric_target": False,
                 "rooted_closure_target_at_inference": False,
+                "persistent_edge_hidden_state": False,
+                "candidate_context": "typed_endpoint_node_states",
             },
         },
         path,
@@ -660,6 +667,8 @@ def load_rooted_context_checkpoint(
     )
     if any(contract.get(key) is not False for key in forbidden):
         raise ValueError(f"unsafe rooted context inference contract: {contract}")
+    if contract.get("persistent_edge_hidden_state", False) is not False:
+        raise ValueError("rooted context checkpoint requires persistent edge state")
     if legacy_scorer is None:
         legacy = payload.get("legacy_checkpoint_payload")
         if not isinstance(legacy, Mapping):

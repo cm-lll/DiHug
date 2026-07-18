@@ -11,6 +11,9 @@ cannot be launched accidentally.
 - Denoising: learned role-guided relocation and typed switch edits.
 - Optional frozen context residual: selected and reported as a paired ablation;
   it must not read clean adjacency or evaluation targets at sampling time.
+- Context fusion is node-only: typed edges drive sparse message passing, while
+  complete edit candidates are decoded from endpoint node states. The active
+  method does not maintain hidden states for existing or NULL candidate edges.
 - GPU path: resident graph state, streamed proposal pools, and fused Triton
   typed-closure scoring.
 
