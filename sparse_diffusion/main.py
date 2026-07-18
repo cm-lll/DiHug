@@ -2,6 +2,12 @@ import io
 import os
 import sys
 
+# Ensure the project root is on sys.path so that `sparse_diffusion` is importable
+# as a top-level package when this script is run directly.
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 import pathlib
 
@@ -99,7 +105,16 @@ class TrustedTorchCheckpointIO(TorchCheckpointIO):
     """Checkpoint IO for local trusted Lightning checkpoints under PyTorch 2.6."""
 
     def load_checkpoint(self, path, map_location=lambda storage, loc: storage, weights_only=None):
-        return super().load_checkpoint(path, map_location=map_location, weights_only=False)
+        try:
+            return super().load_checkpoint(
+                path,
+                map_location=map_location,
+                weights_only=False,
+            )
+        except TypeError as exc:
+            if "weights_only" not in str(exc):
+                raise
+            return super().load_checkpoint(path, map_location=map_location)
 
 
 def _load_ckpt_avoid_ddp(ckpt_path):
@@ -146,7 +161,7 @@ def main(cfg: DictConfig):
     pl.seed_everything(cfg.train.seed)
 
     print("creating datasets")
-    if dataset_config["name"] in ["sbm", "comm20", "planar", "ego", "acm_subgraphs", "imdb_subgraphs", "pubmed_subgraphs", "pubmed_baseline_subgraphs", "pubmed_pgb_subgraphs", "dblp_subgraphs", "hghg_subgraphs", "dblp_single"]:
+    if dataset_config["name"] in ["sbm", "comm20", "planar", "ego", "acm_subgraphs", "imdb_subgraphs", "imdb_movie_subgraphs", "pubmed_subgraphs", "pubmed_baseline_subgraphs", "pubmed_pgb_subgraphs", "dblp_subgraphs", "dblp_four_area_subgraphs", "hghg_subgraphs", "dblp_single"]:
         from datasets.spectre_dataset_pyg import (
             SBMDataModule,
             Comm20DataModule,
@@ -154,7 +169,7 @@ def main(cfg: DictConfig):
             PlanarDataModule,
             SpectreDatasetInfos,
         )
-        if dataset_config["name"] in ["acm_subgraphs", "imdb_subgraphs", "pubmed_subgraphs", "pubmed_baseline_subgraphs", "pubmed_pgb_subgraphs", "dblp_subgraphs"]:
+        if dataset_config["name"] in ["acm_subgraphs", "imdb_subgraphs", "imdb_movie_subgraphs", "pubmed_subgraphs", "pubmed_baseline_subgraphs", "pubmed_pgb_subgraphs", "dblp_subgraphs", "dblp_four_area_subgraphs"]:
             from datasets.acm_subgraphs_dataset import ACMSubgraphsDataModule, ACMSubgraphsInfos
             datamodule = ACMSubgraphsDataModule(cfg)
             dataset_infos = ACMSubgraphsInfos(datamodule)

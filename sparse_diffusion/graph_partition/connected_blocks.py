@@ -398,6 +398,9 @@ def _refine_blocks_by_degree_load(
     n: int,
     node_type_local: Optional[Tensor] = None,
     max_iter: int = 200,
+    preserve_high_high: bool = False,
+    preserve_high_quantile: float = 0.8,
+    preserve_penalty_weight: float = 0.0,
 ) -> List[List[int]]:
     """Balance hub/degree mass by same-type swaps after METIS.
 
@@ -434,6 +437,66 @@ def _refine_blocks_by_degree_load(
         return refined
     loads = [float(deg[torch.tensor(b, dtype=torch.long)].sum().item()) if b else 0.0 for b in refined]
 
+    preserve_high_high = bool(preserve_high_high) and float(preserve_penalty_weight) > 0.0
+    preserve_penalty_weight = max(0.0, float(preserve_penalty_weight))
+    preserve_high_quantile = min(max(float(preserve_high_quantile), 0.0), 1.0)
+    protected_adj: list[set[int]] = [set() for _ in range(n)]
+    if preserve_high_high:
+        high = torch.zeros(n, dtype=torch.bool)
+        for type_id in torch.unique(types).tolist():
+            mask = types == int(type_id)
+            vals = deg[mask]
+            vals = vals[vals > 0]
+            if vals.numel() == 0:
+                continue
+            threshold = torch.quantile(vals, preserve_high_quantile).item()
+            high |= mask & (deg >= float(threshold)) & (deg > 0)
+        for u, v in zip(ei[0].tolist(), ei[1].tolist()):
+            u = int(u)
+            v = int(v)
+            if (
+                u == v
+                or not (0 <= u < n and 0 <= v < n)
+                or int(types[u].item()) != int(types[v].item())
+                or not bool(high[u].item())
+                or not bool(high[v].item())
+            ):
+                continue
+            protected_adj[u].add(v)
+            protected_adj[v].add(u)
+
+    block_of = [-1] * n
+    for block_idx, block in enumerate(refined):
+        for node in block:
+            if 0 <= int(node) < n:
+                block_of[int(node)] = int(block_idx)
+
+    def protected_delta_for_swap(u: int, v: int, hi: int, lo: int) -> int:
+        """Change in protected intra-block edge count if u and v are swapped."""
+        if not preserve_high_high:
+            return 0
+        touched: set[tuple[int, int]] = set()
+        for a in (int(u), int(v)):
+            for b in protected_adj[a]:
+                x, y = (a, int(b)) if a < int(b) else (int(b), a)
+                touched.add((x, y))
+        if not touched:
+            return 0
+
+        def after_block(x: int) -> int:
+            if x == int(u):
+                return int(lo)
+            if x == int(v):
+                return int(hi)
+            return int(block_of[x])
+
+        before = 0
+        after = 0
+        for a, b in touched:
+            before += int(block_of[a] == block_of[b])
+            after += int(after_block(a) == after_block(b))
+        return int(after - before)
+
     # Keep candidate search bounded. The highest-degree nodes in the overloaded
     # block and lowest-degree nodes in the underloaded block matter most.
     cand_limit = 64
@@ -457,6 +520,8 @@ def _refine_blocks_by_degree_load(
 
         best = None
         best_gap = current_gap
+        best_score = float("inf")
+        penalty_scale = max(1.0, float(deg.mean().item()))
         for t, hs in hi_by_type.items():
             ls = lo_by_type.get(t)
             if not ls:
@@ -472,8 +537,20 @@ def _refine_blocks_by_degree_load(
                     new_hi = loads[hi] - du + dv
                     new_lo = loads[lo] - dv + du
                     new_gap = abs(new_hi - new_lo)
-                    if new_gap + 1e-6 < best_gap:
+                    if new_gap + 1e-6 >= current_gap:
+                        continue
+                    protected_delta = protected_delta_for_swap(int(u), int(v), int(hi), int(lo))
+                    protected_loss = max(0, -int(protected_delta))
+                    score = float(new_gap) + preserve_penalty_weight * penalty_scale * float(protected_loss)
+                    if (
+                        score + 1e-6 < best_score
+                        or (
+                            abs(score - best_score) <= 1e-6
+                            and new_gap + 1e-6 < best_gap
+                        )
+                    ):
                         best_gap = new_gap
+                        best_score = score
                         best = (u, v, du, dv, new_hi, new_lo)
         if best is None:
             break
@@ -484,6 +561,8 @@ def _refine_blocks_by_degree_load(
         refined[lo].sort()
         loads[hi] = float(new_hi)
         loads[lo] = float(new_lo)
+        block_of[int(u)] = int(lo)
+        block_of[int(v)] = int(hi)
     return [sorted(b) for b in refined if b]
 
 def hetero_metis_blocks_from_graph(
@@ -496,6 +575,11 @@ def hetero_metis_blocks_from_graph(
     node_type_local: Optional[Tensor] = None,
     refine_degree_balance: bool = False,
     refine_max_iter: int = 200,
+    refine_preserve_high_high: bool = False,
+    refine_preserve_high_quantile: float = 0.8,
+    refine_preserve_penalty_weight: float = 0.0,
+    partition_seed: int = 0,
+    backend: str = "pymetis",
 ) -> List[List[int]]:
     """Hard, disjoint blocks for heterogeneous graphs.
 
@@ -519,8 +603,17 @@ def hetero_metis_blocks_from_graph(
     if sum(len(x) for x in adjacency) == 0:
         return _strip_blocks(n, target_size)
 
-    try:
-        import pymetis  # type: ignore
+    backend = str(backend or "pymetis").lower()
+    if backend == "deterministic_kl":
+        blocks = _recursive_weighted_kl_blocks(adjacency, eweights, n, num_parts)
+    elif backend == "pymetis":
+        try:
+            import pymetis  # type: ignore
+        except ImportError as exc:
+            raise ImportError(
+                "hetero_metis_backend='pymetis' requires pymetis; use "
+                "hetero_metis_backend='deterministic_kl' for the portable backend"
+            ) from exc
         xadj = [0]
         adjncy: list[int] = []
         ewgt: list[int] = []
@@ -528,13 +621,23 @@ def hetero_metis_blocks_from_graph(
             adjncy.extend(nbrs)
             ewgt.extend(ws)
             xadj.append(len(adjncy))
-        _edgecuts, membership = pymetis.part_graph(num_parts, xadj=xadj, adjncy=adjncy, eweights=ewgt)
+        options = pymetis.Options(seed=int(partition_seed))
+        _edgecuts, membership = pymetis.part_graph(
+            num_parts,
+            xadj=xadj,
+            adjncy=adjncy,
+            eweights=ewgt,
+            options=options,
+        )
         buckets: list[list[int]] = [[] for _ in range(num_parts)]
         for node_idx, part_idx in enumerate(membership):
             buckets[int(part_idx)].append(node_idx)
         blocks = [sorted(block) for block in buckets if block]
-    except Exception:
-        blocks = _recursive_weighted_kl_blocks(adjacency, eweights, n, num_parts)
+    else:
+        raise ValueError(
+            f"Unknown heterogeneous partition backend {backend!r}; expected "
+            "'deterministic_kl' or 'pymetis'"
+        )
     blocks = blocks or [list(range(n))]
     if bool(refine_degree_balance):
         blocks = _refine_blocks_by_degree_load(
@@ -543,6 +646,9 @@ def hetero_metis_blocks_from_graph(
             n,
             node_type_local=node_type_local,
             max_iter=int(refine_max_iter),
+            preserve_high_high=bool(refine_preserve_high_high),
+            preserve_high_quantile=float(refine_preserve_high_quantile),
+            preserve_penalty_weight=float(refine_preserve_penalty_weight),
         )
     return blocks or [list(range(n))]
 

@@ -1,0 +1,1694 @@
+from __future__ import annotations
+
+import json
+import math
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+
+import numpy as np
+import torch
+
+from .graph import Edge, FamilySpec, TypedGraph
+from .switch_chain import SwitchProposal, graph_metrics, propose_switch
+from .switch_diffusion import (
+    SwitchDenoiserMLP,
+    SwitchDiffusionDataset,
+    SwitchDiffusionTrainReport,
+)
+
+
+EDIT_ACTIONS = ("birth", "death", "relocation", "switch")
+SCORER_ACTIONS = ("noop",) + EDIT_ACTIONS
+MIXED_EDIT_FEATURE_VERSION = "typed_closure_v2"
+MIXED_EDIT_FEATURE_PROFILES = (
+    "legacy_local_v1",
+    "typed_closure_compact_v2",
+    "typed_closure_full_v2",
+    "typed_closure_role_v3",
+)
+ROLE_CONDITION_FEATURE_WIDTH = 6
+
+
+@dataclass(frozen=True)
+class MarginalGraphPrior:
+    """Learned marginal prior without exact edge counts or node roles."""
+
+    type_names: Tuple[str, ...]
+    type_counts: Tuple[int, ...]
+    family_names: Tuple[str, ...]
+    family_endpoints: Mapping[str, Tuple[int, int]]
+    family_probabilities: Mapping[str, float]
+
+    @classmethod
+    def from_training_graph(cls, graph: TypedGraph) -> "MarginalGraphPrior":
+        graph.validate_disjoint_family_domains()
+        family_names = tuple(sorted(graph.family_specs))
+        probabilities = {}
+        endpoints = {}
+        for family in family_names:
+            spec = graph.family_specs[family]
+            capacity = family_domain_size(spec)
+            probabilities[family] = float(len(graph.family_edges[family])) / max(
+                capacity, 1
+            )
+            endpoints[family] = (int(spec.src_type), int(spec.dst_type))
+        return cls(
+            type_names=tuple(graph.type_names),
+            type_counts=tuple(
+                int(np.count_nonzero(graph.node_types == type_id))
+                for type_id in range(len(graph.type_names))
+            ),
+            family_names=family_names,
+            family_endpoints=endpoints,
+            family_probabilities=probabilities,
+        )
+
+    def schema_graph(self) -> TypedGraph:
+        offsets = np.cumsum((0,) + self.type_counts)
+        node_types = np.concatenate(
+            [
+                np.full(count, type_id, dtype=np.int64)
+                for type_id, count in enumerate(self.type_counts)
+            ]
+        )
+        nodes_by_type = {
+            type_id: tuple(range(int(offsets[type_id]), int(offsets[type_id + 1])))
+            for type_id in range(len(self.type_names))
+        }
+        specs = {
+            family: FamilySpec(
+                family,
+                int(self.family_endpoints[family][0]),
+                int(self.family_endpoints[family][1]),
+                nodes_by_type[int(self.family_endpoints[family][0])],
+                nodes_by_type[int(self.family_endpoints[family][1])],
+            )
+            for family in self.family_names
+        }
+        return TypedGraph(
+            node_types,
+            self.type_names,
+            specs,
+            {family: [] for family in self.family_names},
+        )
+
+    def sample(self, seed: int) -> TypedGraph:
+        """Sample independent family edges, equivalently M_f ~ Binomial(C_f,p_f)."""
+
+        graph = self.schema_graph()
+        rng = np.random.default_rng(int(seed))
+        for family in self.family_names:
+            spec = graph.family_specs[family]
+            capacity = family_domain_size(spec)
+            probability = float(self.family_probabilities[family])
+            count = int(rng.binomial(capacity, probability))
+            if count == 0:
+                continue
+            ranks = rng.choice(capacity, size=count, replace=False)
+            for rank in np.sort(ranks).tolist():
+                graph.add_edge(family, domain_edge_from_rank(spec, int(rank)))
+        graph.validate()
+        return graph
+
+    def to_json_dict(self) -> dict:
+        return {
+            "format": "dihug-marginal-graph-prior-v1",
+            "type_names": list(self.type_names),
+            "type_counts": list(self.type_counts),
+            "family_names": list(self.family_names),
+            "family_endpoints": {
+                family: list(self.family_endpoints[family])
+                for family in self.family_names
+            },
+            "family_probabilities": {
+                family: float(self.family_probabilities[family])
+                for family in self.family_names
+            },
+            "inference_contract": {
+                "node_type_counts": True,
+                "family_schema": True,
+                "family_marginal_probabilities": True,
+                "exact_family_edge_counts": False,
+                "relation_degree_rows": False,
+                "graphlet_target": False,
+                "training_adjacency": False,
+            },
+        }
+
+    @classmethod
+    def from_json_dict(cls, payload: Mapping) -> "MarginalGraphPrior":
+        if payload.get("format") != "dihug-marginal-graph-prior-v1":
+            raise ValueError("unsupported marginal graph prior format")
+        forbidden = {
+            "family_edge_counts",
+            "role_rows_by_type",
+            "selection",
+            "target_vector",
+            "weights",
+        }
+        leaked = forbidden.intersection(payload)
+        if leaked:
+            raise ValueError(f"marginal prior contains forbidden fields: {leaked}")
+        contract = payload.get("inference_contract", {})
+        required_false = (
+            "exact_family_edge_counts",
+            "relation_degree_rows",
+            "graphlet_target",
+            "training_adjacency",
+        )
+        if any(contract.get(key) is not False for key in required_false):
+            raise ValueError(f"unsafe marginal prior contract: {contract}")
+        return cls(
+            type_names=tuple(str(value) for value in payload["type_names"]),
+            type_counts=tuple(int(value) for value in payload["type_counts"]),
+            family_names=tuple(str(value) for value in payload["family_names"]),
+            family_endpoints={
+                str(family): (int(value[0]), int(value[1]))
+                for family, value in payload["family_endpoints"].items()
+            },
+            family_probabilities={
+                str(family): float(value)
+                for family, value in payload["family_probabilities"].items()
+            },
+        )
+
+    def save(self, path: str | Path) -> None:
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(self.to_json_dict(), indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+
+    @classmethod
+    def load(cls, path: str | Path) -> "MarginalGraphPrior":
+        return cls.from_json_dict(json.loads(Path(path).read_text(encoding="utf-8")))
+
+
+@dataclass(frozen=True)
+class EditProposal:
+    action: str
+    family: str
+    old_edges: Tuple[Edge, ...]
+    new_edges: Tuple[Edge, ...]
+
+    def __post_init__(self) -> None:
+        expected = {
+            "noop": (0, 0),
+            "birth": (0, 1),
+            "death": (1, 0),
+            "relocation": (1, 1),
+            "switch": (2, 2),
+        }
+        if self.action not in expected:
+            raise ValueError(f"unknown edit action {self.action!r}")
+        if (len(self.old_edges), len(self.new_edges)) != expected[self.action]:
+            raise ValueError(f"malformed {self.action} proposal")
+
+
+@dataclass(frozen=True)
+class MixedKernelSchedule:
+    """Time-inhomogeneous mixture; every component preserves the terminal prior."""
+
+    resample_floor: float = 0.05
+    relocation_floor: float = 0.05
+    switch_floor: float = 0.05
+
+    def weights(self, time_fraction: float) -> Mapping[str, float]:
+        t = float(np.clip(time_fraction, 0.0, 1.0))
+        raw = {
+            "resample": self.resample_floor + t * t,
+            "relocation": self.relocation_floor + 2.0 * t * (1.0 - t),
+            "switch": self.switch_floor + (1.0 - t) * (1.0 - t),
+        }
+        total = sum(raw.values())
+        return {key: value / total for key, value in raw.items()}
+
+
+@dataclass(frozen=True)
+class MixedEditSamplingResult:
+    graph: TypedGraph
+    trace: Sequence[Mapping[str, float]]
+    action_counts: Mapping[str, int]
+    proposed: int
+    applied: int
+
+
+def family_domain_size(spec: FamilySpec) -> int:
+    if spec.bipartite:
+        return len(spec.src_nodes) * len(spec.dst_nodes)
+    return len(spec.src_nodes) * (len(spec.src_nodes) - 1) // 2
+
+
+def domain_edge_from_rank(spec: FamilySpec, rank: int) -> Edge:
+    capacity = family_domain_size(spec)
+    if rank < 0 or rank >= capacity:
+        raise IndexError(f"domain rank {rank} outside [0,{capacity})")
+    if spec.bipartite:
+        width = len(spec.dst_nodes)
+        return int(spec.src_nodes[rank // width]), int(spec.dst_nodes[rank % width])
+    n = len(spec.src_nodes)
+    starts = np.arange(n, dtype=np.int64)
+    starts = starts * (2 * n - starts - 1) // 2
+    left_index = int(np.searchsorted(starts, rank, side="right") - 1)
+    offset = int(rank - starts[left_index])
+    right_index = left_index + 1 + offset
+    left = int(spec.src_nodes[left_index])
+    right = int(spec.src_nodes[right_index])
+    return (left, right) if left < right else (right, left)
+
+
+def sample_domain_edge(spec: FamilySpec, rng: np.random.Generator) -> Edge:
+    return domain_edge_from_rank(spec, int(rng.integers(family_domain_size(spec))))
+
+
+def domain_rank_from_edge(spec: FamilySpec, edge: Edge) -> int:
+    """Inverse of :func:`domain_edge_from_rank` for one typed family domain."""
+
+    left, right = int(edge[0]), int(edge[1])
+    if spec.bipartite:
+        left_index = {int(node): index for index, node in enumerate(spec.src_nodes)}
+        right_index = {int(node): index for index, node in enumerate(spec.dst_nodes)}
+        if left not in left_index or right not in right_index:
+            left, right = right, left
+        return int(left_index[left] * len(spec.dst_nodes) + right_index[right])
+    positions = {int(node): index for index, node in enumerate(spec.src_nodes)}
+    i, j = sorted((positions[left], positions[right]))
+    n = len(spec.src_nodes)
+    return int(i * (2 * n - i - 1) // 2 + (j - i - 1))
+
+
+def sample_closed_form_marginal_noise(
+    clean: TypedGraph,
+    prior: MarginalGraphPrior,
+    alpha_bar: float,
+    seed: int,
+) -> TypedGraph:
+    """Sample q-bar(G_t|G_0) without simulating a slowly mixing edit chain.
+
+    Every typed edge is retained from ``clean`` with probability ``alpha_bar``;
+    otherwise it is redrawn from the learned family Bernoulli marginal.  At
+    alpha=0 this is exactly ``prior.sample`` in distribution, and at alpha=1
+    it is exactly the clean graph.
+    """
+
+    alpha = float(alpha_bar)
+    if not 0.0 <= alpha <= 1.0:
+        raise ValueError("alpha_bar must be in [0, 1]")
+    graph = prior.schema_graph()
+    if tuple(graph.type_names) != tuple(clean.type_names) or not np.array_equal(
+        graph.node_types, clean.node_types
+    ):
+        raise ValueError("clean graph and marginal prior schemas differ")
+    rng = np.random.default_rng(int(seed))
+    for family in prior.family_names:
+        spec = graph.family_specs[family]
+        capacity = family_domain_size(spec)
+        probability = float(prior.family_probabilities[family])
+        clean_ranks = {
+            domain_rank_from_edge(spec, edge) for edge in clean.family_edges[family]
+        }
+        clean_probability = alpha + (1.0 - alpha) * probability
+        for rank in clean_ranks:
+            if rng.random() < clean_probability:
+                graph.add_edge(family, domain_edge_from_rank(spec, rank))
+        nonclean_probability = (1.0 - alpha) * probability
+        desired = int(rng.binomial(capacity - len(clean_ranks), nonclean_probability))
+        selected = set()
+        while len(selected) < desired:
+            draw_count = max(32, 2 * (desired - len(selected)))
+            for rank in rng.integers(0, capacity, size=draw_count).tolist():
+                rank = int(rank)
+                if rank not in clean_ranks:
+                    selected.add(rank)
+                    if len(selected) == desired:
+                        break
+        for rank in selected:
+            graph.add_edge(family, domain_edge_from_rank(spec, rank))
+    graph.validate()
+    return graph
+
+
+def inverse_edit(proposal: EditProposal) -> EditProposal:
+    inverse_action = {
+        "noop": "noop",
+        "birth": "death",
+        "death": "birth",
+        "relocation": "relocation",
+        "switch": "switch",
+    }[proposal.action]
+    return EditProposal(
+        inverse_action,
+        proposal.family,
+        proposal.new_edges,
+        proposal.old_edges,
+    )
+
+
+def apply_edit(graph: TypedGraph, proposal: EditProposal) -> None:
+    old_canonical = {graph.canonical_edge(*edge) for edge in proposal.old_edges}
+    for edge in proposal.old_edges:
+        if graph.family_of(*edge) != proposal.family:
+            raise ValueError(f"missing old edge {proposal.family}:{edge}")
+    seen_new = set()
+    for edge in proposal.new_edges:
+        oriented = graph.orient_edge(proposal.family, edge)
+        canonical = graph.canonical_edge(*oriented)
+        if canonical in seen_new:
+            raise ValueError("proposal creates duplicate edges")
+        seen_new.add(canonical)
+        existing = graph.family_of(*oriented)
+        if existing is not None and canonical not in old_canonical:
+            raise ValueError(f"new edge already exists: {oriented}")
+    removed = []
+    try:
+        for edge in proposal.old_edges:
+            removed.append(graph.remove_edge(proposal.family, edge))
+        for edge in proposal.new_edges:
+            graph.add_edge(proposal.family, edge)
+    except Exception:
+        for edge in tuple(proposal.new_edges):
+            if graph.family_of(*edge) == proposal.family:
+                graph.remove_edge(proposal.family, edge)
+        for edge in removed:
+            if graph.family_of(*edge) is None:
+                graph.add_edge(proposal.family, edge)
+        raise
+
+
+def marginal_log_probability(graph: TypedGraph, prior: MarginalGraphPrior) -> float:
+    """Log probability under the independent typed-edge terminal prior."""
+
+    value = 0.0
+    for family in prior.family_names:
+        probability = float(prior.family_probabilities[family])
+        count = len(graph.family_edges[family])
+        capacity = family_domain_size(graph.family_specs[family])
+        if probability <= 0.0:
+            if count:
+                return -math.inf
+            continue
+        if probability >= 1.0:
+            if count != capacity:
+                return -math.inf
+            continue
+        value += count * math.log(probability)
+        value += (capacity - count) * math.log1p(-probability)
+    return float(value)
+
+
+def mixed_transition_probability(
+    graph: TypedGraph,
+    prior: MarginalGraphPrior,
+    proposal: EditProposal,
+    time_fraction: float,
+    schedule: MixedKernelSchedule,
+) -> float:
+    """Probability of one specific non-null proposal in the forward kernel."""
+
+    weights = schedule.weights(time_fraction)
+    if proposal.action == "noop":
+        raise ValueError("noop probability is an aggregate over rejected micro moves")
+    family_factor = 1.0 / max(len(prior.family_names), 1)
+    family = proposal.family
+    capacity = family_domain_size(graph.family_specs[family])
+    if proposal.action == "birth":
+        return (
+            float(weights["resample"])
+            * family_factor
+            / capacity
+            * float(prior.family_probabilities[family])
+        )
+    if proposal.action == "death":
+        return (
+            float(weights["resample"])
+            * family_factor
+            / capacity
+            * (1.0 - float(prior.family_probabilities[family]))
+        )
+    if proposal.action == "relocation":
+        edge_count = len(graph.family_edges[family])
+        if edge_count <= 0:
+            return 0.0
+        return (
+            float(weights["relocation"])
+            * family_factor
+            / edge_count
+            / capacity
+        )
+    edge_count = len(graph.family_edges[family])
+    if edge_count < 2:
+        return 0.0
+    pairing_factor = 1.0 if graph.family_specs[family].bipartite else 0.5
+    return (
+        float(weights["switch"])
+        * family_factor
+        / math.comb(edge_count, 2)
+        * pairing_factor
+    )
+
+
+def _family_names(graph: TypedGraph) -> Tuple[str, ...]:
+    return tuple(sorted(graph.family_specs))
+
+
+def sample_mixed_forward_transition(
+    graph: TypedGraph,
+    prior: MarginalGraphPrior,
+    rng: np.random.Generator,
+    time_fraction: float,
+    schedule: MixedKernelSchedule,
+    actions: Sequence[str] = EDIT_ACTIONS,
+) -> EditProposal:
+    """One exact micro transition of the known forward kernel.
+
+    Edge resampling is a Bernoulli heat-bath update. Relocation and switch are
+    symmetric within a fixed family edge count. Therefore every component, and
+    any time-dependent mixture of them, leaves the marginal prior invariant.
+    """
+
+    actions = tuple(str(action) for action in actions)
+    if ("birth" in actions) != ("death" in actions):
+        raise ValueError("birth and death must be enabled together")
+    components = []
+    if "birth" in actions:
+        components.append("resample")
+    if "relocation" in actions:
+        components.append("relocation")
+    if "switch" in actions:
+        components.append("switch")
+    if not components:
+        raise ValueError("forward kernel has no enabled component")
+    all_weights = schedule.weights(time_fraction)
+    total = sum(all_weights[name] for name in components)
+    weights = {name: all_weights[name] / total for name in components}
+    component = str(
+        rng.choice(tuple(weights), p=np.asarray(tuple(weights.values())))
+    )
+    family = str(rng.choice(_family_names(graph)))
+    spec = graph.family_specs[family]
+    if component == "resample":
+        edge = sample_domain_edge(spec, rng)
+        exists = graph.family_of(*edge) == family
+        desired = bool(rng.random() < float(prior.family_probabilities[family]))
+        if exists == desired:
+            return EditProposal("noop", family, (), ())
+        return EditProposal(
+            "birth" if desired else "death",
+            family,
+            () if desired else (edge,),
+            (edge,) if desired else (),
+        )
+    if component == "relocation":
+        edges = graph.family_edges[family]
+        if not edges:
+            return EditProposal("noop", family, (), ())
+        old_edge = edges[int(rng.integers(len(edges)))]
+        new_edge = sample_domain_edge(spec, rng)
+        if graph.has_edge(*new_edge):
+            return EditProposal("noop", family, (), ())
+        return EditProposal("relocation", family, (old_edge,), (new_edge,))
+    proposal = propose_switch(graph, family, rng)
+    if proposal is None:
+        return EditProposal("noop", family, (), ())
+    return EditProposal("switch", family, proposal.old_edges, proposal.new_edges)
+
+
+def edge_edit_distance(graph: TypedGraph, clean: TypedGraph) -> int:
+    if set(graph.family_specs) != set(clean.family_specs):
+        raise ValueError("graphs use different family schemas")
+    return sum(
+        len(graph.family_edge_sets[family] ^ clean.family_edge_sets[family])
+        for family in graph.family_specs
+    )
+
+
+def exact_edit_path(
+    source: TypedGraph,
+    target: TypedGraph,
+    rng: np.random.Generator,
+) -> Tuple[EditProposal, ...]:
+    """Construct a randomized legal edit bridge from source to target."""
+    if source.type_names != target.type_names or not np.array_equal(
+        source.node_types, target.node_types
+    ):
+        raise ValueError("edit bridge graphs use different typed node schemas")
+    if set(source.family_specs) != set(target.family_specs):
+        raise ValueError("edit bridge graphs use different family schemas")
+
+    proposals: List[EditProposal] = []
+    for family in sorted(source.family_specs):
+        old_only = sorted(
+            source.family_edge_sets[family] - target.family_edge_sets[family]
+        )
+        new_only = sorted(
+            target.family_edge_sets[family] - source.family_edge_sets[family]
+        )
+        rng.shuffle(old_only)
+        rng.shuffle(new_only)
+        paired = min(len(old_only), len(new_only))
+        proposals.extend(
+            EditProposal("relocation", family, (old_only[index],), (new_only[index],))
+            for index in range(paired)
+        )
+        proposals.extend(
+            EditProposal("death", family, (edge,), ())
+            for edge in old_only[paired:]
+        )
+        proposals.extend(
+            EditProposal("birth", family, (), (edge,))
+            for edge in new_only[paired:]
+        )
+    if proposals:
+        order = rng.permutation(len(proposals))
+        proposals = [proposals[index] for index in order.tolist()]
+    return tuple(proposals)
+
+
+def permute_typed_graph_within_types(
+    graph: TypedGraph,
+    seed: int,
+) -> TypedGraph:
+    """Return a typed-isomorphic copy with node identities randomized.
+
+    The permutation acts only within each node type, so the schema and every
+    isomorphism-invariant graph statistic are unchanged.  This supplies clean
+    orbit representatives without exposing one privileged node-ID alignment.
+    """
+
+    rng = np.random.default_rng(int(seed))
+    permutation = np.arange(graph.num_nodes, dtype=np.int64)
+    for type_id in range(len(graph.type_names)):
+        nodes = np.flatnonzero(graph.node_types == type_id)
+        permutation[nodes] = rng.permutation(nodes)
+    family_edges = {
+        family: [
+            (int(permutation[left]), int(permutation[right]))
+            for left, right in edges
+        ]
+        for family, edges in graph.family_edges.items()
+    }
+    permuted = TypedGraph(
+        graph.node_types.copy(),
+        graph.type_names,
+        graph.family_specs,
+        family_edges,
+    )
+    permuted.validate()
+    return permuted
+
+
+def edit_distance_improvement(
+    graph: TypedGraph, clean: TypedGraph, proposal: EditProposal
+) -> int:
+    clean_edges = clean.family_edge_sets[proposal.family]
+    improvement = 0
+    for edge in proposal.old_edges:
+        oriented = graph.orient_edge(proposal.family, edge)
+        improvement += -1 if oriented in clean_edges else 1
+    for edge in proposal.new_edges:
+        oriented = graph.orient_edge(proposal.family, edge)
+        improvement += 1 if oriented in clean_edges else -1
+    return int(improvement)
+
+
+def _sample_absent_edge(
+    graph: TypedGraph,
+    family: str,
+    rng: np.random.Generator,
+    max_attempts: int = 256,
+) -> Optional[Edge]:
+    spec = graph.family_specs[family]
+    if len(graph.family_edges[family]) >= family_domain_size(spec):
+        return None
+    for _ in range(int(max_attempts)):
+        edge = sample_domain_edge(spec, rng)
+        if not graph.has_edge(*edge):
+            return graph.orient_edge(family, edge)
+    start = int(rng.integers(family_domain_size(spec)))
+    for offset in range(family_domain_size(spec)):
+        edge = domain_edge_from_rank(spec, (start + offset) % family_domain_size(spec))
+        if not graph.has_edge(*edge):
+            return graph.orient_edge(family, edge)
+    return None
+
+
+def sample_valid_edit(
+    graph: TypedGraph,
+    rng: np.random.Generator,
+    actions: Sequence[str] = EDIT_ACTIONS,
+    family: Optional[str] = None,
+) -> Optional[EditProposal]:
+    actions = tuple(str(action) for action in actions)
+    unknown = set(actions) - set(EDIT_ACTIONS)
+    if unknown:
+        raise ValueError(f"unknown edit actions: {sorted(unknown)}")
+    if family is not None and str(family) not in graph.family_specs:
+        raise ValueError(f"unknown family {family!r}")
+    for _ in range(max(64, 16 * len(actions))):
+        action = str(rng.choice(actions))
+        selected_family = (
+            str(family)
+            if family is not None
+            else str(rng.choice(_family_names(graph)))
+        )
+        edges = graph.family_edges[selected_family]
+        if action == "birth":
+            new_edge = _sample_absent_edge(graph, selected_family, rng)
+            if new_edge is not None:
+                return EditProposal("birth", selected_family, (), (new_edge,))
+        elif action == "death":
+            if edges:
+                old_edge = edges[int(rng.integers(len(edges)))]
+                return EditProposal("death", selected_family, (old_edge,), ())
+        elif action == "relocation":
+            if edges:
+                old_edge = edges[int(rng.integers(len(edges)))]
+                new_edge = _sample_absent_edge(graph, selected_family, rng)
+                if new_edge is not None:
+                    return EditProposal(
+                        "relocation", selected_family, (old_edge,), (new_edge,)
+                    )
+        else:
+            proposal = propose_switch(graph, selected_family, rng)
+            if proposal is not None:
+                return EditProposal(
+                    "switch",
+                    selected_family,
+                    proposal.old_edges,
+                    proposal.new_edges,
+                )
+    return None
+
+
+def sample_edit_candidates(
+    graph: TypedGraph,
+    rng: np.random.Generator,
+    count: int,
+    actions: Sequence[str] = EDIT_ACTIONS,
+    positive: Optional[EditProposal] = None,
+) -> Tuple[List[EditProposal], int]:
+    if int(count) < 2:
+        raise ValueError("candidate count must be at least two")
+    candidates: List[EditProposal] = []
+    keys = set()
+
+    def add(proposal: EditProposal) -> None:
+        key = (
+            proposal.action,
+            "" if proposal.action == "noop" else proposal.family,
+            tuple(sorted(proposal.old_edges)),
+            tuple(sorted(proposal.new_edges)),
+        )
+        if key not in keys:
+            keys.add(key)
+            candidates.append(proposal)
+
+    if positive is not None:
+        add(positive)
+    add(EditProposal("noop", _family_names(graph)[0], (), ()))
+    attempts = 0
+    while len(candidates) < int(count) and attempts < int(count) * 256:
+        attempts += 1
+        proposal = sample_valid_edit(graph, rng, actions=actions)
+        if proposal is not None:
+            add(proposal)
+    if len(candidates) != int(count):
+        raise RuntimeError(f"sampled only {len(candidates)}/{count} legal edits")
+    target = 0
+    if positive is not None:
+        order = rng.permutation(len(candidates))
+        candidates = [candidates[index] for index in order.tolist()]
+        target = int(np.flatnonzero(order == 0)[0])
+    return candidates, target
+
+
+def _edge_slots(proposal: EditProposal) -> Tuple[Optional[Edge], ...]:
+    old = tuple(proposal.old_edges) + (None,) * (2 - len(proposal.old_edges))
+    new = tuple(proposal.new_edges) + (None,) * (2 - len(proposal.new_edges))
+    return old + new
+
+
+def _typed_common_neighbor_counts(graph: TypedGraph, edge: Edge) -> np.ndarray:
+    """Count common neighbors by type for one candidate edge.
+
+    For endpoint types A and B, coordinate C is the exact increment of the
+    typed A-C-B closed graphlet when the edge is added.  The vocabulary is
+    therefore inferred from the schema instead of a hand-written meta-path
+    list.
+    """
+
+    common = graph.adjacency[int(edge[0])] & graph.adjacency[int(edge[1])]
+    counts = np.zeros(len(graph.type_names), dtype=np.float64)
+    for node in common:
+        counts[int(graph.node_types[node])] += 1.0
+    return counts
+
+
+def _neighbors_after_edit(
+    graph: TypedGraph, node: int, proposal: EditProposal
+) -> set[int]:
+    neighbors = set(graph.adjacency[int(node)])
+    for left, right in proposal.old_edges:
+        if int(left) == int(node):
+            neighbors.discard(int(right))
+        elif int(right) == int(node):
+            neighbors.discard(int(left))
+    for left, right in proposal.new_edges:
+        if int(left) == int(node):
+            neighbors.add(int(right))
+        elif int(right) == int(node):
+            neighbors.add(int(left))
+    return neighbors
+
+
+def _typed_common_neighbor_counts_after_edit(
+    graph: TypedGraph, edge: Edge, proposal: EditProposal
+) -> np.ndarray:
+    common = _neighbors_after_edit(graph, int(edge[0]), proposal) & _neighbors_after_edit(
+        graph, int(edge[1]), proposal
+    )
+    counts = np.zeros(len(graph.type_names), dtype=np.float64)
+    for node in common:
+        counts[int(graph.node_types[node])] += 1.0
+    return counts
+
+
+def typed_closure_delta(graph: TypedGraph, proposal: EditProposal) -> np.ndarray:
+    """Exact typed triangle-count delta of a legal edit in the pre-edit graph."""
+
+    delta = np.zeros(len(graph.type_names), dtype=np.float64)
+    for edge in proposal.old_edges:
+        delta -= _typed_common_neighbor_counts(graph, edge)
+    for edge in proposal.new_edges:
+        delta += _typed_common_neighbor_counts_after_edit(graph, edge, proposal)
+    return delta
+
+
+def degree_normalized_closure_delta(
+    graph: TypedGraph, proposal: EditProposal
+) -> float:
+    """Exact change in summed local clustering for degree-preserving edits.
+
+    A triangle contributes ``1 / choose(deg(v), 2)`` to each participating
+    node's local clustering.  Weighting exact triangle deltas this way favors
+    closure around low-degree roles without defining dataset-specific degree
+    buckets or meta-paths.
+    """
+
+    degree_change: Dict[int, int] = {}
+    for edge in proposal.old_edges:
+        for node in edge:
+            degree_change[int(node)] = degree_change.get(int(node), 0) - 1
+    for edge in proposal.new_edges:
+        for node in edge:
+            degree_change[int(node)] = degree_change.get(int(node), 0) + 1
+    if any(value != 0 for value in degree_change.values()):
+        return 0.0
+
+    triangle_delta: Dict[int, int] = {}
+
+    def accumulate(edge: Edge, common: Iterable[int], sign: int) -> None:
+        for node in (int(edge[0]), int(edge[1])):
+            triangle_delta[node] = triangle_delta.get(node, 0) + int(sign) * len(
+                common
+            )
+        for node in common:
+            triangle_delta[int(node)] = triangle_delta.get(int(node), 0) + int(sign)
+
+    for edge in proposal.old_edges:
+        common = graph.adjacency[int(edge[0])] & graph.adjacency[int(edge[1])]
+        accumulate(edge, common, -1)
+    for edge in proposal.new_edges:
+        common = _neighbors_after_edit(
+            graph, int(edge[0]), proposal
+        ) & _neighbors_after_edit(graph, int(edge[1]), proposal)
+        accumulate(edge, common, 1)
+
+    degrees = graph.degrees()
+    value = 0.0
+    for node, delta in triangle_delta.items():
+        degree = int(degrees[node])
+        denominator = degree * (degree - 1) / 2
+        if denominator > 0:
+            value += float(delta) / denominator
+    return float(value)
+
+
+def _mixed_edit_local_width(family_count: int) -> int:
+    return len(SCORER_ACTIONS) + int(family_count) + 16 + 4 + 4
+
+
+def mixed_edit_feature_width(
+    profile: str, family_count: int, type_count: int
+) -> int:
+    profile = str(profile).strip().lower()
+    if profile not in MIXED_EDIT_FEATURE_PROFILES:
+        raise ValueError(f"unknown mixed edit feature profile {profile!r}")
+    local_width = _mixed_edit_local_width(family_count)
+    if profile == "legacy_local_v1":
+        return local_width
+    if profile == "typed_closure_compact_v2":
+        return local_width + int(type_count) + 2
+    full_width = local_width + 5 + 13 * int(family_count) + 9 * int(type_count)
+    return (
+        full_width + ROLE_CONDITION_FEATURE_WIDTH
+        if profile == "typed_closure_role_v3"
+        else full_width
+    )
+
+
+def _select_mixed_edit_feature_profile(
+    full: np.ndarray,
+    profile: str,
+    family_count: int,
+    type_count: int,
+) -> np.ndarray:
+    profile = str(profile).strip().lower()
+    mixed_edit_feature_width(profile, family_count, type_count)
+    if profile in {"typed_closure_full_v2", "typed_closure_role_v3"}:
+        return full
+    local_width = _mixed_edit_local_width(family_count)
+    if profile == "legacy_local_v1":
+        return full[:local_width]
+    compact_width = int(type_count) + 2
+    return np.concatenate((full[:local_width], full[-compact_width:]))
+
+
+def mixed_edit_state_vector(
+    graph: TypedGraph,
+    time_fraction: float,
+    *,
+    degrees: Optional[np.ndarray] = None,
+    family_degrees: Optional[Mapping[str, np.ndarray]] = None,
+) -> np.ndarray:
+    """Target-free whole-graph summary shared by all edit candidates."""
+
+    degrees = (
+        graph.degrees().astype(np.float64)
+        if degrees is None
+        else np.asarray(degrees, dtype=np.float64)
+    )
+    log_scale = max(float(np.log1p(graph.num_nodes)), 1.0)
+    total_capacity = sum(family_domain_size(spec) for spec in graph.family_specs.values())
+    values = [
+        float(time_fraction),
+        float(graph.num_edges) / max(total_capacity, 1),
+        float(np.log1p(graph.num_edges)) / log_scale,
+    ]
+    for type_id in range(len(graph.type_names)):
+        selected = degrees[graph.node_types == type_id]
+        logged = np.log1p(selected) / log_scale
+        values.extend(
+            (
+                float(logged.mean()) if logged.size else 0.0,
+                float(logged.std()) if logged.size else 0.0,
+                float(logged.max()) if logged.size else 0.0,
+                float(np.mean(selected == 0)) if selected.size else 0.0,
+            )
+        )
+    for family in _family_names(graph):
+        spec = graph.family_specs[family]
+        family_degree = (
+            graph.family_degrees(family).astype(np.float64)
+            if family_degrees is None
+            else np.asarray(family_degrees[family], dtype=np.float64)
+        )
+        source = family_degree[np.asarray(spec.src_nodes, dtype=np.int64)]
+        target = family_degree[np.asarray(spec.dst_nodes, dtype=np.int64)]
+        capacity = family_domain_size(spec)
+        values.extend(
+            (
+                len(graph.family_edges[family]) / max(capacity, 1),
+                float(np.log1p(source).mean() / log_scale),
+                float(np.log1p(target).mean() / log_scale),
+                float(np.log1p(source.max(initial=0.0)) / log_scale),
+                float(np.log1p(target.max(initial=0.0)) / log_scale),
+            )
+        )
+    return np.asarray(values, dtype=np.float32)
+
+
+def mixed_edit_candidate_matrix(
+    graph: TypedGraph,
+    candidates: Sequence[EditProposal],
+    time_fraction: float,
+    feature_profile: str = "typed_closure_full_v2",
+    role_condition: Optional[Mapping[str, np.ndarray]] = None,
+) -> np.ndarray:
+    family_names = _family_names(graph)
+    family_to_id = {name: index for index, name in enumerate(family_names)}
+    action_to_id = {name: index for index, name in enumerate(SCORER_ACTIONS)}
+    degrees = graph.degrees().astype(np.float64)
+    family_degrees = {
+        family: graph.family_degrees(family).astype(np.float64)
+        for family in family_names
+    }
+    degree_scale = max(float(np.log1p(graph.num_nodes)), 1.0)
+    common_scale = max(float(np.sqrt(graph.num_nodes)), 1.0)
+    state = mixed_edit_state_vector(
+        graph,
+        time_fraction,
+        degrees=degrees,
+        family_degrees=family_degrees,
+    )
+    rows = []
+    for proposal in candidates:
+        action = np.zeros(len(SCORER_ACTIONS), dtype=np.float64)
+        action[action_to_id[proposal.action]] = 1.0
+        family = np.zeros(len(family_names), dtype=np.float64)
+        if proposal.action != "noop":
+            family[family_to_id[proposal.family]] = 1.0
+        endpoint = []
+        common = []
+        endpoint_roles = []
+        typed_common = []
+        for slot, edge in enumerate(_edge_slots(proposal)):
+            if edge is None:
+                endpoint.extend((0.0, 0.0, 0.0, 0.0))
+                common.append(0.0)
+                endpoint_roles.extend((0.0,) * (2 * len(family_names)))
+                typed_common.extend((0.0,) * len(graph.type_names))
+                continue
+            u, v = int(edge[0]), int(edge[1])
+            endpoint.extend(
+                (
+                    np.log1p(degrees[u]) / degree_scale,
+                    np.log1p(degrees[v]) / degree_scale,
+                    np.log1p(family_degrees[proposal.family][u]) / degree_scale,
+                    np.log1p(family_degrees[proposal.family][v]) / degree_scale,
+                )
+            )
+            typed_counts = (
+                _typed_common_neighbor_counts(graph, edge)
+                if slot < 2
+                else _typed_common_neighbor_counts_after_edit(graph, edge, proposal)
+            )
+            common.append(float(typed_counts.sum()) / common_scale)
+            endpoint_roles.extend(
+                np.log1p(
+                    np.asarray(
+                        [family_degrees[name][u] for name in family_names]
+                        + [family_degrees[name][v] for name in family_names],
+                        dtype=np.float64,
+                    )
+                )
+                / degree_scale
+            )
+            typed_common.extend(typed_counts / common_scale)
+        closure_delta = typed_closure_delta(graph, proposal) / common_scale
+        closure_features = np.concatenate(
+            (
+                closure_delta,
+                np.asarray(
+                    [
+                        closure_delta.sum(),
+                        degree_normalized_closure_delta(graph, proposal),
+                    ],
+                    dtype=np.float64,
+                ),
+            )
+        )
+        scalar = np.asarray(
+            [
+                float(time_fraction),
+                0.0
+                if proposal.action == "noop"
+                else len(graph.family_edges[proposal.family])
+                / max(family_domain_size(graph.family_specs[proposal.family]), 1),
+                float(len(proposal.old_edges)),
+                float(len(proposal.new_edges)),
+            ],
+            dtype=np.float64,
+        )
+        role_features = np.zeros(ROLE_CONDITION_FEATURE_WIDTH, dtype=np.float64)
+        if feature_profile == "typed_closure_role_v3":
+            if role_condition is None:
+                raise ValueError("typed_closure_role_v3 requires a role condition")
+            if proposal.action != "noop":
+                target = np.asarray(role_condition[proposal.family], dtype=np.float64)
+                current = family_degrees[proposal.family]
+                affected = sorted(
+                    {int(node) for edge in _edge_slots(proposal) if edge for node in edge}
+                )
+                after = current[affected].copy()
+                positions = {node: index for index, node in enumerate(affected)}
+                for edge in proposal.old_edges:
+                    for node in edge:
+                        after[positions[int(node)]] -= 1.0
+                for edge in proposal.new_edges:
+                    for node in edge:
+                        after[positions[int(node)]] += 1.0
+                before_residual = target[affected] - current[affected]
+                after_residual = target[affected] - after
+                role_features = np.asarray(
+                    [
+                        (np.abs(before_residual).sum() - np.abs(after_residual).sum())
+                        / max(len(affected), 1),
+                        (np.square(before_residual).sum() - np.square(after_residual).sum())
+                        / max(len(affected), 1),
+                        np.abs(before_residual).mean() / degree_scale,
+                        np.abs(before_residual).max(initial=0.0) / degree_scale,
+                        np.mean(before_residual > 0.0),
+                        np.mean(before_residual < 0.0),
+                    ],
+                    dtype=np.float64,
+                )
+        full = np.concatenate(
+            (action, family, endpoint, np.asarray(common), scalar, state)
+            + (np.asarray(endpoint_roles), np.asarray(typed_common), closure_features)
+            + ((role_features,) if feature_profile == "typed_closure_role_v3" else ())
+        )
+        rows.append(
+            _select_mixed_edit_feature_profile(
+                full,
+                feature_profile,
+                family_count=len(family_names),
+                type_count=len(graph.type_names),
+            )
+        )
+    return np.asarray(rows, dtype=np.float32)
+
+
+def align_mixed_edit_features_for_model(
+    matrix: np.ndarray,
+    model: SwitchDenoiserMLP,
+    family_count: int,
+) -> np.ndarray:
+    """Load pre-state-summary MLP checkpoints without hiding other mismatches."""
+
+    expected = int(model.input_dim)
+    if matrix.shape[-1] == expected:
+        return matrix
+    local_width = _mixed_edit_local_width(family_count)
+    if expected == local_width and matrix.shape[-1] > local_width:
+        return matrix[..., :local_width]
+    # State-summary checkpoints predate typed closure and endpoint-role
+    # features, but are otherwise semantically compatible.
+    type_count = (matrix.shape[-1] - local_width - 5 - 13 * int(family_count)) // 9
+    state_width = 3 + 4 * int(type_count) + 5 * int(family_count)
+    if type_count >= 1 and expected == local_width + state_width:
+        return matrix[..., :expected]
+    compact_width = int(type_count) + 2
+    if type_count >= 1 and expected == local_width + compact_width:
+        return np.concatenate(
+            (matrix[..., :local_width], matrix[..., -compact_width:]), axis=-1
+        )
+    raise ValueError(
+        f"mixed edit feature width {matrix.shape[-1]} is incompatible with "
+        f"checkpoint width {expected}; only known legacy local/state feature "
+        "checkpoints are supported"
+    )
+
+
+def build_mixed_edit_diffusion_dataset(
+    source: TypedGraph,
+    trajectories: int,
+    forward_steps: int,
+    record_every: int,
+    candidates_per_example: int,
+    seed: int,
+    schedule: Optional[MixedKernelSchedule] = None,
+    actions: Sequence[str] = EDIT_ACTIONS,
+    feature_profile: str = "typed_closure_full_v2",
+    role_corruption_targets: Optional[Mapping[int, TypedGraph]] = None,
+    clean_targets: Optional[Mapping[int, TypedGraph]] = None,
+    clean_noop_examples_per_trajectory: int = 0,
+    forward_mode: str = "micro",
+    closed_form_noise_fractions: Sequence[float] = (0.05, 0.2, 0.5, 0.8, 1.0),
+    use_role_condition: bool = False,
+) -> SwitchDiffusionDataset:
+    if int(trajectories) < 2:
+        raise ValueError("mixed edit training needs at least two trajectories")
+    if int(forward_steps) <= 0 or int(record_every) <= 0:
+        raise ValueError("forward_steps and record_every must be positive")
+    prior = MarginalGraphPrior.from_training_graph(source)
+    schedule = schedule or MixedKernelSchedule()
+    role_corruption_targets = dict(role_corruption_targets or {})
+    clean_targets = dict(clean_targets or {})
+    if int(clean_noop_examples_per_trajectory) < 0:
+        raise ValueError("clean noop example count must be non-negative")
+    forward_mode = str(forward_mode).strip().lower()
+    if forward_mode not in {"micro", "closed_form"}:
+        raise ValueError("forward mode must be micro or closed_form")
+    noise_fractions = tuple(float(value) for value in closed_form_noise_fractions)
+    if forward_mode == "closed_form" and (
+        not noise_fractions or any(not 0.0 < value <= 1.0 for value in noise_fractions)
+    ):
+        raise ValueError("closed-form noise fractions must be in (0, 1]")
+    if bool(use_role_condition) != (feature_profile == "typed_closure_role_v3"):
+        raise ValueError(
+            "role conditioning requires the typed_closure_role_v3 feature profile"
+        )
+    if role_corruption_targets and not {
+        "birth",
+        "death",
+        "relocation",
+    }.issubset(set(actions)):
+        raise ValueError(
+            "role corruption bridges require birth, death, and relocation actions"
+        )
+    invalid_ids = sorted(
+        trajectory_id
+        for trajectory_id in role_corruption_targets
+        if trajectory_id < 0 or trajectory_id >= int(trajectories)
+    )
+    if invalid_ids:
+        raise ValueError(f"invalid role corruption trajectory ids: {invalid_ids}")
+    invalid_clean_ids = sorted(
+        trajectory_id
+        for trajectory_id in clean_targets
+        if trajectory_id < 0 or trajectory_id >= int(trajectories)
+    )
+    if invalid_clean_ids:
+        raise ValueError(f"invalid clean target trajectory ids: {invalid_clean_ids}")
+
+    def validate_schema(candidate: TypedGraph, label: str) -> None:
+        if candidate.type_names != source.type_names or not np.array_equal(
+            candidate.node_types, source.node_types
+        ):
+            raise ValueError(f"{label} uses a different typed node schema")
+        if set(candidate.family_specs) != set(source.family_specs):
+            raise ValueError(f"{label} uses a different family schema")
+
+    for trajectory_id, candidate in clean_targets.items():
+        validate_schema(candidate, f"clean target {trajectory_id}")
+    for trajectory_id, candidate in role_corruption_targets.items():
+        validate_schema(candidate, f"role corruption target {trajectory_id}")
+    examples = []
+    candidate_improvements = []
+    targets = []
+    trajectory_ids = []
+
+    def record_example(
+        graph: TypedGraph,
+        clean_graph: TypedGraph,
+        positive: EditProposal,
+        rng: np.random.Generator,
+        time_fraction: float,
+        trajectory_id: int,
+        role_condition: Optional[Mapping[str, np.ndarray]] = None,
+        inject_positive: bool = True,
+    ) -> None:
+        candidates, target = sample_edit_candidates(
+            graph,
+            rng,
+            candidates_per_example,
+            actions=actions,
+            positive=positive if inject_positive else None,
+        )
+        examples.append(
+            np.asarray(
+                mixed_edit_candidate_matrix(
+                    graph,
+                    candidates,
+                    time_fraction,
+                    feature_profile=feature_profile,
+                    role_condition=role_condition,
+                ),
+                dtype=np.float32,
+            )
+        )
+        candidate_improvements.append(
+            np.asarray(
+                [
+                    edit_distance_improvement(graph, clean_graph, candidate)
+                    for candidate in candidates
+                ],
+                dtype=np.float32,
+            )
+        )
+        if not inject_positive:
+            target = int(candidate_improvements[-1].argmax())
+        targets.append(target)
+        trajectory_ids.append(trajectory_id)
+
+    for trajectory_id in range(int(trajectories)):
+        rng = np.random.default_rng(int(seed) + 1_000_003 * trajectory_id)
+        clean_graph = clean_targets.get(trajectory_id, source)
+        role_condition = (
+            clean_graph.all_family_degrees() if use_role_condition else None
+        )
+        for _ in range(int(clean_noop_examples_per_trajectory)):
+            record_example(
+                clean_graph,
+                clean_graph,
+                EditProposal("noop", _family_names(clean_graph)[0], (), ()),
+                rng,
+                0.0,
+                trajectory_id,
+                role_condition=role_condition,
+            )
+        if forward_mode == "closed_form":
+            for level_index, fraction in enumerate(noise_fractions):
+                graph = sample_closed_form_marginal_noise(
+                    clean_graph,
+                    prior,
+                    alpha_bar=(1.0 - float(fraction)) ** 2,
+                    seed=(
+                        int(seed)
+                        + 70_000_087 * trajectory_id
+                        + 1_000_003 * level_index
+                    ),
+                )
+                record_example(
+                    graph,
+                    clean_graph,
+                    EditProposal("noop", _family_names(graph)[0], (), ()),
+                    rng,
+                    float(fraction),
+                    trajectory_id,
+                    role_condition=role_condition,
+                    inject_positive=False,
+                )
+            continue
+        if trajectory_id in role_corruption_targets:
+            target_graph = role_corruption_targets[trajectory_id]
+            path = exact_edit_path(clean_graph, target_graph, rng)
+            if not path:
+                raise RuntimeError(
+                    f"role corruption trajectory {trajectory_id} is identical to clean"
+                )
+            graph = clean_graph.clone()
+            requested = max(1, int(forward_steps) // int(record_every))
+            record_steps = set(
+                np.rint(np.linspace(1, len(path), min(requested, len(path))))
+                .astype(np.int64)
+                .tolist()
+            )
+            for path_step, proposal in enumerate(path, start=1):
+                apply_edit(graph, proposal)
+                if path_step in record_steps:
+                    record_example(
+                        graph,
+                        clean_graph,
+                        inverse_edit(proposal),
+                        rng,
+                        float(path_step) / float(len(path)),
+                        trajectory_id,
+                        role_condition=role_condition,
+                    )
+            if any(
+                graph.family_edge_sets[family]
+                != target_graph.family_edge_sets[family]
+                for family in graph.family_specs
+            ):
+                raise AssertionError("role corruption edit bridge missed its target")
+            continue
+
+        graph = clean_graph.clone()
+        recorded = 0
+        for step in range(1, int(forward_steps) + 1):
+            proposal = sample_mixed_forward_transition(
+                graph,
+                prior,
+                rng,
+                float(step) / float(forward_steps),
+                schedule,
+                actions=actions,
+            )
+            apply_edit(graph, proposal)
+            if step % int(record_every) != 0:
+                continue
+            record_example(
+                graph,
+                clean_graph,
+                inverse_edit(proposal),
+                rng,
+                float(step) / float(forward_steps),
+                trajectory_id,
+                role_condition=role_condition,
+            )
+            recorded += 1
+        if recorded == 0:
+            raise RuntimeError(f"trajectory {trajectory_id} produced no examples")
+    return SwitchDiffusionDataset(
+        candidate_features=np.stack(examples),
+        candidate_improvements=np.stack(candidate_improvements),
+        targets=np.asarray(targets, dtype=np.int64),
+        trajectory_ids=np.asarray(trajectory_ids, dtype=np.int64),
+    )
+
+
+def sample_mixed_edit_diffusion(
+    prior: MarginalGraphPrior,
+    model: SwitchDenoiserMLP,
+    steps: int,
+    candidates_per_step: int,
+    seed: int,
+    device: str | torch.device = "cpu",
+    temperature: float = 0.0,
+    metrics_every: int = 100,
+    actions: Sequence[str] = EDIT_ACTIONS,
+    initial_graph: Optional[TypedGraph] = None,
+    fixed_time_fraction: Optional[float] = None,
+    time_schedule_steps: Optional[int] = None,
+    feature_profile: str = "typed_closure_full_v2",
+    role_condition: Optional[Mapping[str, np.ndarray]] = None,
+) -> MixedEditSamplingResult:
+    graph = (
+        prior.sample(seed=int(seed) + 71)
+        if initial_graph is None
+        else initial_graph.clone()
+    )
+    prior_type_names = (
+        prior.marginal.type_names if hasattr(prior, "marginal") else prior.type_names
+    )
+    if tuple(graph.type_names) != tuple(prior_type_names):
+        raise ValueError("initial graph and sampling prior schemas disagree")
+    if fixed_time_fraction is not None and not 0.0 <= float(fixed_time_fraction) <= 1.0:
+        raise ValueError("fixed time fraction must be in [0, 1]")
+    schedule_steps = int(steps if time_schedule_steps is None else time_schedule_steps)
+    if schedule_steps <= 0:
+        raise ValueError("time schedule steps must be positive")
+    rng = np.random.default_rng(int(seed))
+    device = torch.device(device)
+    generator = torch.Generator(device=device).manual_seed(int(seed))
+    model = model.to(device).eval()
+    trace = [{"step": 0.0, **graph_metrics(graph)}]
+    action_counts = {action: 0 for action in EDIT_ACTIONS}
+    action_counts["noop"] = 0
+    proposed = 0
+    applied = 0
+    for reverse_step in range(int(steps), 0, -1):
+        completed_before = int(steps) - reverse_step
+        time_fraction = (
+            max(float(schedule_steps - completed_before) / float(schedule_steps), 0.0)
+            if fixed_time_fraction is None
+            else float(fixed_time_fraction)
+        )
+        candidates, _ = sample_edit_candidates(
+            graph, rng, candidates_per_step, actions=actions
+        )
+        proposed += len(candidates)
+        matrix = mixed_edit_candidate_matrix(
+            graph,
+            candidates,
+            time_fraction,
+            feature_profile=feature_profile,
+            role_condition=role_condition,
+        )
+        matrix = align_mixed_edit_features_for_model(
+            matrix, model, family_count=len(graph.family_specs)
+        )
+        with torch.no_grad():
+            logits = model(torch.from_numpy(matrix)[None].to(device)).squeeze(0)
+        if float(temperature) <= 0.0:
+            chosen = int(logits.argmax().item())
+        else:
+            probabilities = torch.softmax(logits / float(temperature), dim=0)
+            chosen = int(
+                torch.multinomial(probabilities, 1, generator=generator).item()
+            )
+        proposal = candidates[chosen]
+        apply_edit(graph, proposal)
+        action_counts[proposal.action] += 1
+        applied += int(proposal.action != "noop")
+        completed = int(steps) - reverse_step + 1
+        if completed == int(steps) or (
+            int(metrics_every) > 0 and completed % int(metrics_every) == 0
+        ):
+            trace.append({"step": float(completed), **graph_metrics(graph)})
+    graph.validate()
+    return MixedEditSamplingResult(
+        graph=graph,
+        trace=trace,
+        action_counts=action_counts,
+        proposed=proposed,
+        applied=applied,
+    )
+
+
+def evaluate_fixed_t_denoising(
+    source: TypedGraph,
+    model: SwitchDenoiserMLP,
+    time_fractions: Sequence[float],
+    trials_per_time: int,
+    forward_steps: int,
+    candidates_per_example: int,
+    seed: int,
+    device: str | torch.device = "cpu",
+    schedule: Optional[MixedKernelSchedule] = None,
+    actions: Sequence[str] = EDIT_ACTIONS,
+) -> Mapping[str, Mapping[str, float]]:
+    """Diagnostic only: identify a known inverse at fixed forward noise levels."""
+
+    prior = MarginalGraphPrior.from_training_graph(source)
+    schedule = schedule or MixedKernelSchedule()
+    device = torch.device(device)
+    model = model.to(device).eval()
+    report = {}
+    for time_index, fraction in enumerate(time_fractions):
+        fraction = float(fraction)
+        if not 0.0 < fraction <= 1.0:
+            raise ValueError("fixed-t fractions must be in (0,1]")
+        correct = 0
+        top5 = 0
+        margins = []
+        action_correct = 0
+        completed = 0
+        for trial in range(int(trials_per_time)):
+            rng = np.random.default_rng(
+                int(seed) + 10_000_019 * time_index + 1_000_003 * trial
+            )
+            graph = source.clone()
+            last = None
+            steps = max(1, int(round(fraction * int(forward_steps))))
+            for step in range(1, steps + 1):
+                proposal = sample_mixed_forward_transition(
+                    graph,
+                    prior,
+                    rng,
+                    float(step) / float(forward_steps),
+                    schedule,
+                    actions=actions,
+                )
+                apply_edit(graph, proposal)
+                last = proposal
+            if last is None:
+                continue
+            positive = inverse_edit(last)
+            candidates, target = sample_edit_candidates(
+                graph,
+                rng,
+                candidates_per_example,
+                actions=actions,
+                positive=positive,
+            )
+            matrix = mixed_edit_candidate_matrix(graph, candidates, fraction)
+            matrix = align_mixed_edit_features_for_model(
+                matrix, model, family_count=len(graph.family_specs)
+            )
+            with torch.no_grad():
+                logits = model(torch.from_numpy(matrix)[None].to(device)).squeeze(0)
+            order = torch.argsort(logits, descending=True)
+            selected = int(order[0].item())
+            correct += int(selected == target)
+            top5 += int(target in order[: min(5, len(candidates))].tolist())
+            action_correct += int(candidates[selected].action == positive.action)
+            negative = torch.cat((logits[:target], logits[target + 1 :]))
+            margins.append(float((logits[target] - negative.max()).item()))
+            completed += 1
+        if completed == 0:
+            raise RuntimeError(f"fixed-t={fraction} produced no valid trials")
+        report[f"{fraction:.3f}"] = {
+            "trials": float(completed),
+            "top1": float(correct) / completed,
+            "top5": float(top5) / completed,
+            "action_top1": float(action_correct) / completed,
+            "margin": float(np.mean(margins)),
+        }
+    return report
+
+
+def evaluate_closed_form_policy(
+    source: TypedGraph,
+    model: SwitchDenoiserMLP,
+    time_fractions: Sequence[float],
+    trials_per_time: int,
+    candidates_per_example: int,
+    seed: int,
+    device: str | torch.device = "cpu",
+    actions: Sequence[str] = EDIT_ACTIONS,
+    feature_profile: str = "typed_closure_full_v2",
+    use_role_condition: bool = False,
+) -> Mapping[str, Mapping[str, float]]:
+    """Evaluate free-candidate utility regret under the exact q-bar noise law."""
+
+    prior = MarginalGraphPrior.from_training_graph(source)
+    rng = np.random.default_rng(int(seed))
+    device = torch.device(device)
+    model = model.to(device).eval()
+    report = {}
+    for fraction in time_fractions:
+        selected_values = []
+        oracle_values = []
+        random_values = []
+        positive = []
+        for trial in range(int(trials_per_time)):
+            clean = permute_typed_graph_within_types(
+                source, int(seed) + 90_000_119 + 1009 * trial
+            )
+            graph = sample_closed_form_marginal_noise(
+                clean,
+                prior,
+                alpha_bar=(1.0 - float(fraction)) ** 2,
+                seed=int(seed) + 91_000_123 + 1013 * trial,
+            )
+            candidates, _ = sample_edit_candidates(
+                graph,
+                rng,
+                int(candidates_per_example),
+                actions=actions,
+            )
+            improvements = np.asarray(
+                [edit_distance_improvement(graph, clean, item) for item in candidates],
+                dtype=np.float32,
+            )
+            role_condition = clean.all_family_degrees() if use_role_condition else None
+            matrix = mixed_edit_candidate_matrix(
+                graph,
+                candidates,
+                float(fraction),
+                feature_profile=feature_profile,
+                role_condition=role_condition,
+            )
+            with torch.no_grad():
+                logits = model(torch.from_numpy(matrix)[None].to(device)).squeeze(0)
+            selected_values.append(float(improvements[int(logits.argmax().item())]))
+            oracle_values.append(float(improvements.max()))
+            random_values.append(float(improvements[int(rng.integers(len(candidates)))]))
+            positive.append(float(improvements.max() > 0.0))
+        oracle_mean = float(np.mean(oracle_values))
+        selected_mean = float(np.mean(selected_values))
+        random_mean = float(np.mean(random_values))
+        denominator = max(oracle_mean - random_mean, 1.0e-8)
+        report[f"t={float(fraction):.3f}"] = {
+            "selected_utility": selected_mean,
+            "oracle_utility": oracle_mean,
+            "random_utility": random_mean,
+            "normalized_regret": float(
+                np.clip((oracle_mean - selected_mean) / denominator, 0.0, 2.0)
+            ),
+            "positive_candidate_coverage": float(np.mean(positive)),
+        }
+    return report
+
+
+def run_edit_distance_oracle(
+    prior: MarginalGraphPrior,
+    clean: TypedGraph,
+    steps: int,
+    candidates_per_step: int,
+    seed: int,
+    actions: Sequence[str] = EDIT_ACTIONS,
+    metrics_every: int = 100,
+) -> MixedEditSamplingResult:
+    """Candidate-coverage diagnostic. Clean edges never enter main sampling."""
+
+    graph = prior.sample(seed=int(seed) + 71)
+    rng = np.random.default_rng(int(seed))
+    trace = [
+        {
+            "step": 0.0,
+            "edge_edit_distance": float(edge_edit_distance(graph, clean)),
+            **graph_metrics(graph),
+        }
+    ]
+    action_counts = {action: 0 for action in EDIT_ACTIONS}
+    action_counts["noop"] = 0
+    applied = 0
+    proposed = 0
+    for step in range(1, int(steps) + 1):
+        candidates, _ = sample_edit_candidates(
+            graph, rng, candidates_per_step, actions=actions
+        )
+        proposed += len(candidates)
+        improvements = np.asarray(
+            [edit_distance_improvement(graph, clean, item) for item in candidates]
+        )
+        best = int(np.argmax(improvements))
+        if int(improvements[best]) > 0:
+            proposal = candidates[best]
+            apply_edit(graph, proposal)
+            action_counts[proposal.action] += 1
+            applied += 1
+        if step == int(steps) or (
+            int(metrics_every) > 0 and step % int(metrics_every) == 0
+        ):
+            trace.append(
+                {
+                    "step": float(step),
+                    "edge_edit_distance": float(edge_edit_distance(graph, clean)),
+                    **graph_metrics(graph),
+                }
+            )
+        if edge_edit_distance(graph, clean) == 0:
+            break
+    graph.validate()
+    return MixedEditSamplingResult(
+        graph=graph,
+        trace=trace,
+        action_counts=action_counts,
+        proposed=proposed,
+        applied=applied,
+    )
+
+
+def save_mixed_edit_checkpoint(
+    path: str | Path,
+    model: SwitchDenoiserMLP,
+    prior: MarginalGraphPrior,
+    hidden_dim: int,
+    layers: int,
+    dropout: float,
+    report: SwitchDiffusionTrainReport,
+    actions: Sequence[str] = EDIT_ACTIONS,
+    feature_version: str = MIXED_EDIT_FEATURE_VERSION,
+    feature_profile: str = "typed_closure_full_v2",
+    training_noise: Optional[Mapping] = None,
+) -> None:
+    payload = {
+        "format": "dihug-mixed-edit-diffusion-v1",
+        "prior": prior.to_json_dict(),
+        "input_dim": int(model.input_dim),
+        "hidden_dim": int(hidden_dim),
+        "layers": int(layers),
+        "dropout": float(dropout),
+        "state_dict": model.state_dict(),
+        "train_report": report.to_json_dict(),
+        "actions": list(actions),
+        "feature_version": str(feature_version),
+        "feature_profile": str(feature_profile),
+        "training_noise": dict(training_noise or {}),
+        "inference_contract": prior.to_json_dict()["inference_contract"],
+    }
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(payload, path)
+
+
+def load_mixed_edit_checkpoint(
+    path: str | Path, device: str | torch.device = "cpu"
+) -> Tuple[SwitchDenoiserMLP, MarginalGraphPrior, Mapping]:
+    payload = torch.load(path, map_location="cpu", weights_only=False)
+    if payload.get("format") != "dihug-mixed-edit-diffusion-v1":
+        raise ValueError("unsupported mixed edit diffusion checkpoint")
+    prior = MarginalGraphPrior.from_json_dict(payload["prior"])
+    model = SwitchDenoiserMLP(
+        input_dim=int(payload["input_dim"]),
+        hidden_dim=int(payload["hidden_dim"]),
+        layers=int(payload["layers"]),
+        dropout=float(payload["dropout"]),
+    )
+    model.load_state_dict(payload["state_dict"])
+    model.to(device)
+    metadata = {
+        "train_report": payload.get("train_report", {}),
+        "actions": tuple(payload.get("actions", EDIT_ACTIONS)),
+        "feature_version": str(payload.get("feature_version", "legacy_local_v1")),
+        "feature_profile": str(payload.get("feature_profile", "legacy_local_v1")),
+        "training_noise": dict(payload.get("training_noise", {})),
+    }
+    return model, prior, metadata

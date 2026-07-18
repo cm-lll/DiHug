@@ -16,6 +16,8 @@ class TrainLossDiscrete(nn.Module):
         exist_loss_type="bce",
         exist_focal_gamma=2.0,
         exist_focal_alpha=0.75,
+        edge_exist_weight=1.0,
+        edge_subtype_weight=1.2,
         edge_neg_weight=1.0,
         relation_matrix_loss_weight=1.0,
         relation_matrix_loss_normalize=True,
@@ -46,8 +48,8 @@ class TrainLossDiscrete(nn.Module):
         self.lambda_train[0] = self.lambda_train[0] / edge_fraction
 
         # Loss weights (λ1, λ2)
-        self.edge_exist_weight = 1.0
-        self.edge_subtype_weight = 1.2
+        self.edge_exist_weight = float(edge_exist_weight)
+        self.edge_subtype_weight = float(edge_subtype_weight)
         # Existence loss: BCE by default; optional focal BCE for highly imbalanced query edges.
         self.exist_pos_weight = exist_pos_weight
         self.exist_loss_type = str(exist_loss_type).lower()
@@ -871,7 +873,66 @@ class TrainLossDiscrete(nn.Module):
             return pred.edge_attr.sum() * 0.0
 
         pred_edge_flat = pred_edge.reshape(-1, pred_edge.shape[-1])
+        if pred_edge_flat.numel() > 0 and not torch.isfinite(pred_edge_flat).all():
+            pred_edge_flat = torch.nan_to_num(
+                pred_edge_flat,
+                nan=0.0,
+                posinf=1.0e4,
+                neginf=-1.0e10,
+            )
         true_labels = target.reshape(-1).long().clamp(min=0, max=pred_edge_flat.shape[-1] - 1)
+
+        if getattr(self, "exist_loss_type", "bce") in ("ce", "cross_entropy", "multiclass_ce"):
+            loss_ce = F.cross_entropy(pred_edge_flat, true_labels, reduction="mean")
+            total_loss = float(self.edge_exist_weight) * loss_ce
+
+            pred_labels = pred_edge_flat.argmax(dim=-1)
+            pred_exist = pred_labels > 0
+            true_exist = true_labels > 0
+            tp = (pred_exist & true_exist).sum()
+            tn = ((~pred_exist) & (~true_exist)).sum()
+            fp = (pred_exist & (~true_exist)).sum()
+            fn = ((~pred_exist) & true_exist).sum()
+            pos = true_exist.sum().clamp(min=1)
+            neg = (~true_exist).sum().clamp(min=1)
+            pos_acc = tp.float() / pos.float()
+            neg_acc = tn.float() / neg.float()
+            if log:
+                to_log = {
+                    "train_loss/batch_CE": total_loss.detach(),
+                    "train_loss/edge_multiclass_CE": loss_ce.detach(),
+                    "train_loss/edge_exist_loss": loss_ce.detach(),
+                    "train_loss/edge_subtype_loss": torch.as_tensor(0.0, device=pred_edge_flat.device),
+                    "train_loss/edge_pos_ratio": true_exist.float().mean().detach(),
+                    "train_loss/edge_pos_acc": pos_acc.detach(),
+                    "train_loss/edge_neg_acc": neg_acc.detach(),
+                    "train_loss/edge_pred_pos_ratio": pred_exist.float().mean().detach(),
+                }
+                if wandb.run:
+                    wandb.log(to_log, commit=True)
+            device = pred_edge_flat.device
+            if self._epoch_exist_loss_sum is None:
+                self._epoch_exist_loss_sum = torch.tensor(0.0, device=device)
+                self._epoch_exist_loss_count = torch.tensor(0.0, device=device)
+                self._epoch_subtype_loss_sum = torch.tensor(0.0, device=device)
+                self._epoch_subtype_loss_count = torch.tensor(0.0, device=device)
+                self._epoch_tp = torch.tensor(0.0, device=device)
+                self._epoch_pos = torch.tensor(0.0, device=device)
+                self._epoch_tn = torch.tensor(0.0, device=device)
+                self._epoch_neg = torch.tensor(0.0, device=device)
+                self._epoch_subtype_correct_on_tp = torch.tensor(0.0, device=device)
+                self._epoch_subtype_tp = torch.tensor(0.0, device=device)
+                self._epoch_nll_sum = torch.tensor(0.0, device=device)
+                self._epoch_nll_count = torch.tensor(0.0, device=device)
+            self._epoch_nll_sum += total_loss.detach()
+            self._epoch_nll_count += 1.0
+            self._epoch_exist_loss_sum += loss_ce.detach()
+            self._epoch_exist_loss_count += 1.0
+            self._epoch_tp += tp.detach().float()
+            self._epoch_pos += pos.detach().float()
+            self._epoch_tn += tn.detach().float()
+            self._epoch_neg += neg.detach().float()
+            return total_loss
 
         # Existence head (binary) derived from multi-class logits: logit = logsumexp(pos) - logit(no-edge)
         exist_logits = torch.logsumexp(pred_edge_flat[:, 1:], dim=-1) - pred_edge_flat[:, 0]

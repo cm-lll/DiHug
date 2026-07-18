@@ -8,6 +8,7 @@ resume: null            # 从 checkpoint 恢复训练 If resume, path to ckpt fi
 resume_full: false      # true=Lightning 原生完整恢复 epoch/optimizer；false=仅 strict=False warm-start 权重
 test_only: null         # 只做测试、不训练 Use absolute path
 test_variance: 1        # 测试时重复采样次数；最终测样可设为 >1（如 3）做多轮采样取均/方差
+test_sampling_seeds: null  # 可选显式逐样本采样 seed，例如 [0,1,2]；要求单卡且 final_model_samples_to_generate=1
 generated_path: null    # path of generated samples, this file should be of pickle type
 
 check_val_every_n_epochs: 50  # 每 N 个 epoch 做一次验证
@@ -24,6 +25,9 @@ chains_to_save: 1  # 保存多少条“从噪声到图”的完整链（常做�
 enable_visualization: false  # 是否执行采样后的图像/gif可视化与保存（false=完全跳过Visualizing chains/molecules步骤）
 log_every_steps: 50  # 每 N 个 step 打印一次日志
 log_every_n_steps: 50  # Trainer 的 log_every_n_steps；单 batch/epoch 时建议设为 1
+# 可选的 block 训练分段计时/峰值显存诊断。开启后会插入 CUDA synchronize，仅用于 profiling。
+profile_training_efficiency: false
+profile_training_efficiency_every_n_epochs: 1
 number_chain_steps: 50  # Number of frames in each gif
 
 final_model_samples_to_generate: 1  # 训练结束后最终采样生成的图数量	训练
@@ -38,14 +42,28 @@ run_test_after_train: true  # 训练结束后是否自动跑 trainer.test()（�
 skip: 1
 # 仅采样时使用的步长，null 表示用 skip；设为 10 即 10 步去噪（跳步实验）
 sampling_skip: null
+# Optional explicit reverse-time path, including both T and 0, for example:
+# [100, 75, 60, 45, 30, 15, 0]. When set during test sampling, this overrides
+# sampling_skip and test_sampling_full_steps.
+sampling_time_schedule: null
 # 测试采样时强制逐时间步去噪；true 时忽略 sampling_skip/skip，使用 step=1。
 test_sampling_full_steps: true
 # 测试采样时每隔多少个去噪步记录一次中间图采样指标；0=关闭。
 test_sampling_metrics_every: 0
 # 是否在采样时每步打印详情：模型预测、后验、结果评估（边数、连通分量数）
 verbose_sampling: false
+# Diagnostic only: compare calibrated clean-edge logits against the real test
+# graph and structural edge features at every reverse transition.
+edge_score_structure_diag: false
+# Maximum sampled legal non-edges used by the structural score diagnostic.
+edge_score_structure_diag_max_negatives: 100000
 # 记录采样过程中每个 t 步的全图三角形数量及增量，并写入 sampling_log.json
 log_sampling_triangle_trace: false
+# Record hard-graph typed degree and degree-2 closure roles at reverse steps.
+# Diagnostic only; it never reads clean/reference edges.
+log_sampling_population_role_trace: false
+# Reverse-step interval for population-role trace records when enabled.
+sampling_population_role_trace_every: 1
 # 记录采样时“模型预测 argmax / 解析后验后 argmax / 最终采样结果”的三角形差异，用于判断后验是否压低三角形
 log_sampling_posterior_triangle_gap: false
 # 采样时是否使用解析后验（p(z_s|z_t,z_0)）；false 则仅用模型预测采样（等价于后验为单位阵）
@@ -57,3 +75,27 @@ use_analytic_posterior: true
 cond_edge_gen_fixed_nodes: false
 cond_edge_gen_sample_nodes: false
 cond_edge_gen_use_test_graph: true
+# Optional full-pipeline equivariance stress test: synchronously relabel nodes
+# within each node type before fixed-node generation.
+fixed_node_type_permutation_seed: null
+# Layer-1/2 equivariance diagnostics. The graph itself is not permuted: the
+# paired branch synchronously maps the fixed computation graph and candidates.
+forward_equivariance_diag: false
+forward_equivariance_permutation_seed: 0
+exactk_equivariance_diag: false
+# Layer-3 full-pipeline diagnostics. These options are diagnostic-only and
+# require fixed_node_type_permutation_seed on the relabelled member of a pair.
+# current: rebuild pseudo-blocks in the current node numbering.
+# mapped_reference: construct pseudo-blocks in the reference numbering, then
+# transport them through the within-type permutation.
+equivariance_partition_mode: current
+# Keep this mapped_reference in paired layer-3 tests so both branches begin
+# from the same semantic z_T. It is separate from partition_mode in order to
+# isolate the effect of rebuilding the partition.
+equivariance_initial_noise_mode: current
+# position: current production behavior, one IID draw per canonical array slot.
+# mapped_reference: one IID draw per reference-coordinate edge, transported by
+# the supplied permutation (common random numbers for paired diagnostics).
+# independent: as position, with equivariance_gumbel_seed_offset added.
+equivariance_gumbel_mode: position
+equivariance_gumbel_seed_offset: 0

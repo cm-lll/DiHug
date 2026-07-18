@@ -64,6 +64,17 @@ class HeterogeneousTransformerConv(MessagePassing):
         edge_family_offsets: Optional[Dict[str, int]] = None,  # 关系族offset映射
         use_type_modulation: bool = True,  # 是否使用类别调制子类别（True: Q=(1+γ(T))⊙W^Q_t X+β(T), False: Q=W^Q_t X）
         edge_only: bool = False,  # 若 True：只更新边 E=f(QK,E)，节点 X 保持不变（用于「E=QK+E 重复多次」）
+        use_family_film: bool = False,  # 若 True：E->attention FiLM 参数按 relation family 隔离
+        use_relation_attention_matrix: bool = False,  # 若 True：K_j 先经过 per-family R_att 再与 Q_i 计算注意力
+        use_relation_message_matrix: bool = False,  # 若 True：V_j 先经过 per-family R_msg 再聚合到目标节点
+        use_relation_pri: bool = False,  # 若 True：按 family 学习 HGT-style attention prior
+        use_hgt_node_update: bool = False,  # 若 True：GELU + per-target-type A-Linear + gated residual/norm
+        use_hgt_edge_update: bool = False,  # 若 True：GELU + per-family A-Linear + gated residual/norm for E
+        use_family_y_in_node_film: bool = False,
+        edge_struct_feature_dim: int = 0,
+        use_family_y_film: bool = False,  # 若 True：y->E FiLM 参数按 relation family 隔离
+        use_family_y_in_edge_film: bool = False,
+        family_y_dim: int = 0,
         **kwargs,
     ):
         kwargs.setdefault("aggr", "add")
@@ -80,6 +91,34 @@ class HeterogeneousTransformerConv(MessagePassing):
         self.heterogeneous = heterogeneous
         self.edge_only = edge_only
         self.edge_family_offsets = edge_family_offsets or {}
+        self.num_edge_families = len(self.edge_family_offsets)
+        self.use_family_film = bool(use_family_film and self.num_edge_families > 0)
+        self.use_relation_attention_matrix = bool(
+            use_relation_attention_matrix and self.num_edge_families > 0
+        )
+        self.use_relation_message_matrix = bool(
+            use_relation_message_matrix and self.num_edge_families > 0
+        )
+        self.use_relation_pri = bool(
+            use_relation_pri and self.num_edge_families > 0
+        )
+        self.use_hgt_node_update = bool(
+            use_hgt_node_update and self.heterogeneous and num_node_types > 0
+        )
+        self.use_hgt_edge_update = bool(
+            use_hgt_edge_update and self.heterogeneous and self.num_edge_families > 0
+        )
+        self.family_y_dim = max(int(family_y_dim or 0), 0)
+        self.use_family_y_in_node_film = bool(
+            use_family_y_in_node_film and self.family_y_dim > 0
+        )
+        self.edge_struct_feature_dim = max(int(edge_struct_feature_dim or 0), 0)
+        self.use_family_y_film = bool(
+            use_family_y_film and self.num_edge_families > 0
+        )
+        self.use_family_y_in_edge_film = bool(
+            use_family_y_in_edge_film and self.family_y_dim > 0
+        )
         self.use_type_modulation = use_type_modulation  # 是否使用类别调制
         self.type_embed_dim = type_embed_dim  # 保存类别嵌入维度
         self.subtype_embed_dim = subtype_embed_dim  # 保存子类别嵌入维度
@@ -94,6 +133,37 @@ class HeterogeneousTransformerConv(MessagePassing):
             self.lin_skip = Linear(dx, heads * self.df, bias=bias)
         else:
             self.lin_skip = Linear(dx, self.df, bias=bias)
+
+        self.hgt_node_a_linears = nn.ModuleList()
+        self.hgt_node_norms = nn.ModuleList()
+        if self.use_hgt_node_update:
+            node_update_dim = heads * self.df if concat else self.df
+            self.hgt_node_a_linears = nn.ModuleList(
+                [Linear(node_update_dim, node_update_dim) for _ in range(num_node_types)]
+            )
+            self.hgt_node_skip = nn.Parameter(torch.ones(num_node_types))
+            self.hgt_node_norms = nn.ModuleList(
+                [nn.LayerNorm(node_update_dim) for _ in range(num_node_types)]
+            )
+            self.hgt_node_drop = nn.Dropout(dropout)
+        else:
+            self.register_parameter("hgt_node_skip", None)
+            self.hgt_node_drop = nn.Identity()
+
+        self.hgt_edge_a_linears = nn.ModuleList()
+        self.hgt_edge_norms = nn.ModuleList()
+        if self.use_hgt_edge_update:
+            self.hgt_edge_a_linears = nn.ModuleList(
+                [Linear(de, de) for _ in range(self.num_edge_families)]
+            )
+            self.hgt_edge_skip = nn.Parameter(torch.ones(self.num_edge_families))
+            self.hgt_edge_norms = nn.ModuleList(
+                [nn.LayerNorm(de) for _ in range(self.num_edge_families)]
+            )
+            self.hgt_edge_drop = nn.Dropout(dropout)
+        else:
+            self.register_parameter("hgt_edge_skip", None)
+            self.hgt_edge_drop = nn.Identity()
 
         # 异质图相关嵌入和层
         if self.heterogeneous:
@@ -171,14 +241,43 @@ class HeterogeneousTransformerConv(MessagePassing):
         # FiLM E to X: de = dx here as defined in lin_edge
         self.e_add = Linear(de, heads)
         self.e_mul = Linear(de, heads)
+        if self.use_family_film:
+            self.family_e_add = nn.ModuleList(
+                [Linear(de, heads) for _ in range(self.num_edge_families)]
+            )
+            self.family_e_mul = nn.ModuleList(
+                [Linear(de, heads) for _ in range(self.num_edge_families)]
+            )
+        else:
+            self.family_e_add = nn.ModuleList()
+            self.family_e_mul = nn.ModuleList()
 
         # FiLM y to E
         self.y_e_mul = Linear(dy, de)
         self.y_e_add = Linear(dy, de)
+        if self.use_family_y_film:
+            self.family_y_e_add = nn.ModuleList(
+                [Linear(dy, de) for _ in range(self.num_edge_families)]
+            )
+            self.family_y_e_mul = nn.ModuleList(
+                [Linear(dy, de) for _ in range(self.num_edge_families)]
+            )
+        else:
+            self.family_y_e_add = nn.ModuleList()
+            self.family_y_e_mul = nn.ModuleList()
 
-        # FiLM y to X
+        # FiLM y/G to X and to flattened edge interaction states.
         self.y_x_mul = Linear(dy, dx)
         self.y_x_add = Linear(dy, dx)
+        self.y_edge_hidden_mul = Linear(dy, dx)
+        self.y_edge_hidden_add = Linear(dy, dx)
+        if self.edge_struct_feature_dim > 0:
+            self.edge_struct_hidden = nn.Sequential(
+                nn.LayerNorm(self.edge_struct_feature_dim),
+                nn.Linear(self.edge_struct_feature_dim, 2 * dx),
+            )
+        else:
+            self.edge_struct_hidden = None
 
         # Process y
         if self.last_layer:
@@ -190,6 +289,25 @@ class HeterogeneousTransformerConv(MessagePassing):
         # Output layers
         self.x_out = Linear(dx, dx)
         self.e_out = Linear(dx, de)
+
+        if self.use_relation_attention_matrix:
+            self.relation_att_matrix = nn.Parameter(
+                torch.empty(self.num_edge_families, heads, self.df, self.df)
+            )
+            self._init_relation_matrix(self.relation_att_matrix)
+        else:
+            self.register_parameter("relation_att_matrix", None)
+        if self.use_relation_pri:
+            self.relation_pri = nn.Parameter(torch.ones(self.num_edge_families, heads))
+        else:
+            self.register_parameter("relation_pri", None)
+        if self.use_relation_message_matrix:
+            self.relation_msg_matrix = nn.Parameter(
+                torch.empty(self.num_edge_families, heads, self.df, self.df)
+            )
+            self._init_relation_matrix(self.relation_msg_matrix)
+        else:
+            self.register_parameter("relation_msg_matrix", None)
 
     def forward(
         self,
@@ -203,6 +321,8 @@ class HeterogeneousTransformerConv(MessagePassing):
         node_subtype_ids: OptTensor = None,  # (N,) 子类别ID
         relation_type_ids: OptTensor = None,  # (E,) 关系类型ID (src_type, dst_type的组合)
         edge_family_ids: OptTensor = None,  # (E,) 关系族ID
+        family_y_hidden: Optional[Tensor] = None,  # (B, F, dy)
+        edge_struct_features: Optional[Tensor] = None,
         type_offsets: Optional[Dict[str, int]] = None,  # 节点类型offset映射
     ):
         r"""Runs the forward pass of the module.
@@ -248,6 +368,9 @@ class HeterogeneousTransformerConv(MessagePassing):
             key=key,
             value=value,
             edge_attr=edge_attr,
+            edge_family_y=self._edge_family_y(
+                family_y_hidden, batch, edge_index, edge_family_ids
+            ),
             index=edge_index[1],
             size=None,
             relation_type_ids=relation_type_ids,
@@ -261,25 +384,42 @@ class HeterogeneousTransformerConv(MessagePassing):
         else:
             out = out.mean(dim=1)
 
-        x_r = self.lin_skip(x)
-        out = out + x_r
-
-        # Incorporate y to edge_attr
         batch = batch.long()
         batchE = batch[edge_index[0]]
-        # Output _edge_attr
-        new_edge_attr = new_edge_attr.flatten(start_dim=1)  # M, h * df (dx)
-        new_edge_attr = self.e_out(new_edge_attr)  # M, de
-        ye1 = self.y_e_add(y)  # M, de
-        ye2 = self.y_e_mul(y)  # M, de
-        new_edge_attr = ye1[batchE] + (ye2[batchE] + 1) * new_edge_attr  # M, de
 
-        # Incorporate y to X
-        yx1 = self.y_x_add(y)
-        yx2 = self.y_x_mul(y)
-        new_x = yx1[batch] + (yx2[batch] + 1) * out
-        # Output X
-        new_x = self.x_out(new_x)
+        if self.use_hgt_node_update and node_type_ids is not None:
+            out = self._apply_node_condition_film(out, y, batch, family_y_hidden)
+            skip_x = x if x.shape[-1] == out.shape[-1] else self.lin_skip(x)
+            new_x = self._apply_hgt_node_update(out, skip_x, node_type_ids)
+        else:
+            x_r = self.lin_skip(x)
+            out = out + x_r
+            yx1 = self.y_x_add(y)
+            yx2 = self.y_x_mul(y)
+            new_x = yx1[batch] + (yx2[batch] + 1) * out
+            new_x = self.x_out(new_x)
+
+        # Output _edge_attr. Y is the flattened head-wise edge interaction state.
+        edge_interaction = new_edge_attr.flatten(start_dim=1)  # M, h * df (dx)
+        if self.use_hgt_edge_update and edge_family_ids is not None:
+            edge_hidden = self._apply_edge_condition_film(
+                edge_interaction,
+                y,
+                batchE,
+                edge_family_ids,
+                family_y_hidden,
+                edge_struct_features,
+            )
+            edge_msg = self.e_out(edge_hidden)
+            new_edge_attr = self._apply_hgt_edge_update(
+                edge_msg, edge_attr, edge_family_ids
+            )
+        else:
+            new_edge_attr = self.e_out(edge_interaction)  # M, de
+            ye1, ye2 = self._apply_family_y_edge_film(
+                y, batchE, edge_family_ids, family_y_hidden
+            )
+            new_edge_attr = ye1 + (ye2 + 1) * new_edge_attr  # M, de
 
         if self.last_layer:
             new_y = self.predict_graph(y, x, edge_index, edge_attr, batch)
@@ -290,6 +430,127 @@ class HeterogeneousTransformerConv(MessagePassing):
             new_x = x
 
         return (new_x, new_edge_attr, new_y)
+
+    def _node_condition_y(
+        self,
+        y: Tensor,
+        family_y_hidden: Optional[Tensor],
+    ) -> Tensor:
+        if self.use_family_y_in_node_film and family_y_hidden is not None:
+            return y + family_y_hidden.mean(dim=1).to(dtype=y.dtype, device=y.device)
+        return y
+
+    def _apply_node_condition_film(
+        self,
+        node_state: Tensor,
+        y: Tensor,
+        batch: Tensor,
+        family_y_hidden: Optional[Tensor],
+    ) -> Tensor:
+        y_node = self._node_condition_y(y, family_y_hidden)
+        add = self.y_x_add(y_node)[batch]
+        mul = self.y_x_mul(y_node)[batch]
+        return add + (mul + 1.0) * node_state
+
+    def _apply_edge_condition_film(
+        self,
+        edge_state: Tensor,
+        y: Tensor,
+        edge_batch: Tensor,
+        edge_family_ids: OptTensor,
+        family_y_hidden: Optional[Tensor],
+        edge_struct_features: Optional[Tensor],
+    ) -> Tensor:
+        y_edge = y[edge_batch]
+        fam_y = self._edge_family_y(
+            family_y_hidden,
+            edge_batch,
+            None,
+            edge_family_ids,
+            edge_batch_is_graph=True,
+        )
+        if self.use_family_y_in_edge_film and fam_y is not None:
+            y_edge = y_edge + fam_y
+        add = self.y_edge_hidden_add(y_edge)
+        mul = self.y_edge_hidden_mul(y_edge)
+        if (
+            self.edge_struct_hidden is not None
+            and edge_struct_features is not None
+            and edge_struct_features.numel() > 0
+            and edge_struct_features.shape[0] == edge_state.shape[0]
+        ):
+            struct_input = edge_struct_features.to(
+                device=edge_state.device, dtype=edge_state.dtype
+            )
+            if struct_input.size(-1) != self.edge_struct_feature_dim:
+                if struct_input.size(-1) > self.edge_struct_feature_dim:
+                    struct_input = struct_input[:, : self.edge_struct_feature_dim]
+                else:
+                    pad = struct_input.new_zeros(
+                        struct_input.size(0),
+                        self.edge_struct_feature_dim - struct_input.size(-1),
+                    )
+                    struct_input = torch.cat([struct_input, pad], dim=-1)
+            struct_add, struct_mul = self.edge_struct_hidden(struct_input).chunk(2, dim=-1)
+            add = add + struct_add
+            mul = mul + struct_mul
+        return add + (mul + 1.0) * edge_state
+
+    def _apply_hgt_node_update(
+        self,
+        aggr_out: Tensor,
+        skip_x: Tensor,
+        node_type_ids: Tensor,
+    ) -> Tensor:
+        if (
+            not self.use_hgt_node_update
+            or node_type_ids is None
+            or len(self.hgt_node_a_linears) == 0
+            or aggr_out.numel() == 0
+        ):
+            return aggr_out + skip_x
+        transformed = F.gelu(aggr_out)
+        out = skip_x.clone()
+        node_type = node_type_ids.long().clamp(0, len(self.hgt_node_a_linears) - 1)
+        for type_id in torch.unique(node_type).tolist():
+            idx = (node_type == int(type_id)).nonzero(as_tuple=True)[0]
+            if idx.numel() == 0:
+                continue
+            trans = self.hgt_node_drop(
+                self.hgt_node_a_linears[int(type_id)](transformed[idx])
+            )
+            alpha = torch.sigmoid(self.hgt_node_skip[int(type_id)])
+            mixed = trans * alpha + skip_x[idx] * (1.0 - alpha)
+            out[idx] = self.hgt_node_norms[int(type_id)](mixed)
+        return out
+
+    def _apply_hgt_edge_update(
+        self,
+        edge_msg: Tensor,
+        edge_attr: Tensor,
+        edge_family_ids: OptTensor,
+    ) -> Tensor:
+        if (
+            not self.use_hgt_edge_update
+            or edge_family_ids is None
+            or len(self.hgt_edge_a_linears) == 0
+            or edge_msg.numel() == 0
+        ):
+            return edge_msg + edge_attr
+        transformed = F.gelu(edge_msg)
+        out = edge_attr.clone()
+        fam = edge_family_ids.long().clamp(0, len(self.hgt_edge_a_linears) - 1)
+        for fam_id in torch.unique(fam).tolist():
+            idx = (fam == int(fam_id)).nonzero(as_tuple=True)[0]
+            if idx.numel() == 0:
+                continue
+            trans = self.hgt_edge_drop(
+                self.hgt_edge_a_linears[int(fam_id)](transformed[idx])
+            )
+            alpha = torch.sigmoid(self.hgt_edge_skip[int(fam_id)])
+            mixed = trans * alpha + edge_attr[idx] * (1.0 - alpha)
+            out[idx] = self.hgt_edge_norms[int(fam_id)](mixed)
+        return out
 
     def _compute_qkv_heterogeneous(
         self,
@@ -372,6 +633,88 @@ class HeterogeneousTransformerConv(MessagePassing):
 
         return query, key, value
 
+    def _apply_family_edge_linear(
+        self,
+        edge_attr: Tensor,
+        edge_family_ids: OptTensor,
+        family_layers: nn.ModuleList,
+        fallback_layer: nn.Module,
+    ) -> Tensor:
+        out = fallback_layer(edge_attr)
+        if (
+            edge_family_ids is None
+            or len(family_layers) == 0
+            or edge_attr.numel() == 0
+        ):
+            return out
+        fam = edge_family_ids.long().clamp(0, len(family_layers) - 1)
+        for fam_id in torch.unique(fam).tolist():
+            idx = (fam == int(fam_id)).nonzero(as_tuple=True)[0]
+            if idx.numel() == 0:
+                continue
+            out[idx] = family_layers[int(fam_id)](edge_attr[idx])
+        return out
+
+    def _apply_family_y_edge_film(
+        self,
+        y: Tensor,
+        edge_batch: Tensor,
+        edge_family_ids: OptTensor,
+        family_y_hidden: Optional[Tensor] = None,
+    ) -> Tuple[Tensor, Tensor]:
+        y_edge = y[edge_batch]
+        fam_y = self._edge_family_y(
+            family_y_hidden,
+            edge_batch,
+            None,
+            edge_family_ids,
+            edge_batch_is_graph=True,
+        )
+        if self.use_family_y_in_edge_film and fam_y is not None:
+            y_edge = y_edge + fam_y
+        add = self.y_e_add(y_edge)
+        mul = self.y_e_mul(y_edge)
+        if (
+            not self.use_family_y_film
+            or edge_family_ids is None
+            or len(self.family_y_e_add) == 0
+            or edge_batch.numel() == 0
+        ):
+            return add, mul
+        fam = edge_family_ids.long().clamp(0, len(self.family_y_e_add) - 1)
+        for fam_id in torch.unique(fam).tolist():
+            idx = (fam == int(fam_id)).nonzero(as_tuple=True)[0]
+            if idx.numel() == 0:
+                continue
+            y_local = y_edge[idx]
+            add[idx] = self.family_y_e_add[int(fam_id)](y_local)
+            mul[idx] = self.family_y_e_mul[int(fam_id)](y_local)
+        return add, mul
+
+    def _edge_family_y(
+        self,
+        family_y_hidden: Optional[Tensor],
+        batch: Tensor,
+        edge_index: Optional[Tensor],
+        edge_family_ids: OptTensor,
+        edge_batch_is_graph: bool = False,
+    ) -> Optional[Tensor]:
+        if (
+            family_y_hidden is None
+            or edge_family_ids is None
+            or family_y_hidden.numel() == 0
+            or edge_family_ids.numel() == 0
+        ):
+            return None
+        fam = edge_family_ids.long().clamp(0, family_y_hidden.size(1) - 1)
+        if edge_batch_is_graph:
+            graph_idx = batch.long()
+        else:
+            if edge_index is None or edge_index.numel() == 0:
+                return None
+            graph_idx = batch[edge_index[0].long()].long()
+        return family_y_hidden[graph_idx, fam]
+
     def propagate(self, edge_index: Adj, size: Size = None, **kwargs):
         r"""The initial call to start propagating messages."""
         size = self._check_input(edge_index, size)
@@ -395,6 +738,7 @@ class HeterogeneousTransformerConv(MessagePassing):
         key_j: Tensor,
         value_j: Tensor,
         edge_attr: OptTensor,
+        edge_family_y: OptTensor,
         index: Tensor,
         ptr: OptTensor,
         size_i: Optional[int],
@@ -404,6 +748,15 @@ class HeterogeneousTransformerConv(MessagePassing):
         """计算消息，实现relation-aware边嵌入和per-relation-family softmax"""
         M = query_i.shape[0]  # 边数
         H, C = self.heads, self.df
+
+        if self.relation_att_matrix is not None and edge_family_ids is not None:
+            key_j = self._apply_relation_matrix(
+                key_j, edge_family_ids, self.relation_att_matrix
+            )
+        if self.relation_msg_matrix is not None and edge_family_ids is not None:
+            value_j = self._apply_relation_matrix(
+                value_j, edge_family_ids, self.relation_msg_matrix
+            )
 
         # 1. 计算基础注意力分数 d(<Q_u, K_v>)
         Y = (query_i * key_j) / math.sqrt(self.df)  # (M, H, C)
@@ -422,11 +775,27 @@ class HeterogeneousTransformerConv(MessagePassing):
                 edge_attr_enhanced = self.relation_emb_to_de(relation_emb)
             else:
                 edge_attr_enhanced = edge_attr
-            edge_attr_mul = self.e_mul(edge_attr_enhanced)
-            edge_attr_add = self.e_add(edge_attr_enhanced)
+            if self.use_family_film and edge_family_ids is not None:
+                edge_attr_mul = self._apply_family_edge_linear(
+                    edge_attr_enhanced, edge_family_ids, self.family_e_mul, self.e_mul
+                )
+                edge_attr_add = self._apply_family_edge_linear(
+                    edge_attr_enhanced, edge_family_ids, self.family_e_add, self.e_add
+                )
+            else:
+                edge_attr_mul = self.e_mul(edge_attr_enhanced)
+                edge_attr_add = self.e_add(edge_attr_enhanced)
         else:
-            edge_attr_mul = self.e_mul(edge_attr)
-            edge_attr_add = self.e_add(edge_attr)
+            if self.use_family_film and edge_family_ids is not None:
+                edge_attr_mul = self._apply_family_edge_linear(
+                    edge_attr, edge_family_ids, self.family_e_mul, self.e_mul
+                )
+                edge_attr_add = self._apply_family_edge_linear(
+                    edge_attr, edge_family_ids, self.family_e_add, self.e_add
+                )
+            else:
+                edge_attr_mul = self.e_mul(edge_attr)
+                edge_attr_add = self.e_add(edge_attr)
 
         # luv = (1 + γ_α(e)) ⊙ d(<Q_u, K_v>) + β_α(e)
         if int(os.environ.get("SPARSEDIFF_MEM_DEBUG", "0")):
@@ -447,6 +816,9 @@ class HeterogeneousTransformerConv(MessagePassing):
             except Exception:
                 pass
         Y = Y * (edge_attr_mul.unsqueeze(-1) + 1) + edge_attr_add.unsqueeze(-1)  # (M, H, C)
+        if self.relation_pri is not None and edge_family_ids is not None:
+            fam = edge_family_ids.long().clamp(0, self.relation_pri.size(0) - 1)
+            Y = Y * self.relation_pri[fam].unsqueeze(-1)
 
         # 3. Per-relation-family softmax + 外层归一化
         if self.heterogeneous and edge_family_ids is not None:
@@ -461,6 +833,32 @@ class HeterogeneousTransformerConv(MessagePassing):
         out = out * alpha.view(-1, H, 1)  # (M, H, C), out = weighted_V
 
         return (out, Y)
+
+    @staticmethod
+    def _init_relation_matrix(param: nn.Parameter) -> None:
+        with torch.no_grad():
+            param.zero_()
+            eye = torch.eye(param.size(-1), device=param.device, dtype=param.dtype)
+            param.copy_(eye.view(1, 1, param.size(-1), param.size(-1)))
+
+    @staticmethod
+    def _apply_relation_matrix(
+        tensor: Tensor,
+        edge_family_ids: Tensor,
+        matrices: Tensor,
+    ) -> Tensor:
+        if tensor.numel() == 0 or edge_family_ids is None or edge_family_ids.numel() == 0:
+            return tensor
+        fam = edge_family_ids.long().clamp(0, matrices.size(0) - 1)
+        out = tensor.clone()
+        for fam_id in torch.unique(fam).tolist():
+            idx = (fam == int(fam_id)).nonzero(as_tuple=True)[0]
+            if idx.numel() == 0:
+                continue
+            out[idx] = torch.einsum(
+                "mhc,hcd->mhd", tensor[idx], matrices[int(fam_id)]
+            )
+        return out
 
     def _softmax_per_relation_family(
         self,
