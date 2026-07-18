@@ -10,6 +10,7 @@ export PYTHONPATH="$PWD${PYTHONPATH:+:$PYTHONPATH}"
 export PYTHONUNBUFFERED=1
 
 GPU="${GPU:-0}"
+GPU_LIST="${GPU_LIST:-$GPU}"
 OUT_ROOT="${OUT_ROOT:-results/hgen40_matched_pubmed}"
 LOG_ROOT="${LOG_ROOT:-logs/hgen40_matched_pubmed}"
 HGEN_ROOT="${HGEN_ROOT:-/data2/lyh/gnn_project/HGEN}"
@@ -28,6 +29,8 @@ SAMPLE_STEPS="${SAMPLE_STEPS:-320}"
 SAMPLE_CANDIDATES="${SAMPLE_CANDIDATES:-64}"
 HGEN_EPOCHS="${HGEN_EPOCHS:-5}"
 mkdir -p "$OUT_ROOT" "$LOG_ROOT"
+read -r -a GPUS <<< "$GPU_LIST"
+[[ "${#GPUS[@]}" -gt 0 ]] || { echo "GPU_LIST is empty" >&2; exit 2; }
 for required in "$DATA" "$PRIOR" "$MODEL" "$HGEN_ROOT/hgen.py" "$HGEN_PYTHON"; do
   [[ -e "$required" ]] || { echo "missing required path: $required" >&2; exit 2; }
 done
@@ -50,19 +53,28 @@ python scripts/build_hgen_edge_split_target.py --dataset-dir "$DATA" \
   --split-seed "$SPLIT_SEED" > "$LOG_ROOT/build_target.log" 2>&1
 edge_count="$(python -c "import json; print(json.load(open('$OUT_ROOT/target/split_report.json'))['generation_budget']['num_edges'])")"
 
+pids=()
 for seed in {0..7}; do
-  CUDA_VISIBLE_DEVICES="$GPU" python -u scripts/run_exchangeable_role_prior_gate.py \
-    --mode sample --output-dir "$OUT_ROOT/dihug_seed${seed}" \
-    --prior "$PRIOR" --checkpoint "$MODEL" --device cuda --seed "$seed" \
-    --edge-view-count "$edge_count" --edge-view-source hgen_split \
-    --sample-steps "$SAMPLE_STEPS" --sample-candidates "$SAMPLE_CANDIDATES" \
-    --sample-actions relocation_switch --motif-refinement-stage \
-    --metrics-every "$SAMPLE_STEPS" > "$LOG_ROOT/dihug_seed${seed}.log" 2>&1
+  report="$OUT_ROOT/dihug_seed${seed}/sampling_report.json"
+  [[ -f "$report" ]] && continue
+  worker="${GPUS[$((seed % ${#GPUS[@]}))]}"
+  (
+    CUDA_VISIBLE_DEVICES="$worker" python -u scripts/run_exchangeable_role_prior_gate.py \
+      --mode sample --output-dir "$OUT_ROOT/dihug_seed${seed}" \
+      --prior "$PRIOR" --checkpoint "$MODEL" --device cuda --seed "$seed" \
+      --edge-view-count "$edge_count" --edge-view-source hgen_split \
+      --sample-steps "$SAMPLE_STEPS" --sample-candidates "$SAMPLE_CANDIDATES" \
+      --sample-actions relocation_switch --motif-refinement-stage \
+      --metrics-every "$SAMPLE_STEPS" > "$LOG_ROOT/dihug_seed${seed}.log" 2>&1
+  ) &
+  pids+=("$!")
+  sleep 2
 done
+for pid in "${pids[@]}"; do wait "$pid"; done
 
 (
   cd "$HGEN_ROOT"
-  CUDA_VISIBLE_DEVICES="$GPU" "$HGEN_PYTHON" -u hgen.py \
+  CUDA_VISIBLE_DEVICES="${GPUS[0]}" "$HGEN_PYTHON" -u hgen.py \
     --dataset PubMed --n-epochs "$HGEN_EPOCHS"
 ) > "$LOG_ROOT/hgen.log" 2>&1
 python scripts/parse_hgen_baseline_log.py --log "$LOG_ROOT/hgen.log" \
