@@ -32,11 +32,19 @@ data_path() {
 
 context_path() {
   case "$1" in
-    imdb) echo "results/rooted_context_freeze/imdb/rooted_context_residual.pt" ;;
-    pubmed) echo "results/rooted_context_freeze/pubmed/rooted_context_residual.pt" ;;
+    imdb) echo "${IMDB_CONTEXT:-/data2/lyh/gnn_project/DiHug/results/rooted_context_freeze/imdb/rooted_context_residual.pt}" ;;
+    pubmed) echo "${PUBMED_CONTEXT:-/data2/lyh/gnn_project/DiHug/results/rooted_context_freeze/pubmed/rooted_context_residual.pt}" ;;
     *) return 2 ;;
   esac
 }
+
+for dataset in imdb pubmed; do
+  checkpoint="$(context_path "$dataset")"
+  [[ -f "$checkpoint" ]] || {
+    echo "missing context checkpoint: $checkpoint" >&2
+    exit 2
+  }
+done
 
 run_mode() {
   local gpu="$1" dataset="$2" seed="$3" mode="$4"

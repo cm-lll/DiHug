@@ -30,7 +30,13 @@ SMOKE_ONLY=1 GPU=0 \
   LOG_ROOT=logs/acm_target_free_smoke_0719 \
   bash scripts/run_acm_target_free_main.sh
 
-echo "[QUEUE] ACM smoke passed; starting the formal 8-seed protocol"
+echo "[QUEUE] ACM smoke passed; starting strict target-free component ablation"
+GPU_LIST="0 1 2 3 4 5 6 7" SEED_START=0 SEED_END=3 \
+  OUT_ROOT=results/paper_target_free_component_ablation_0719 \
+  LOG_ROOT=logs/paper_target_free_component_ablation_0719 \
+  bash scripts/run_paper_component_ablation_8gpu.sh
+
+echo "[QUEUE] target-free ablation passed; starting the ACM formal protocol"
 OUT_ROOT=results/acm_target_free_main_0719 \
 LOG_ROOT=logs/acm_target_free_main_0719 \
 GPU_LIST="0 1 2 3 4 5 6 7" \
