@@ -16,6 +16,7 @@ export MKL_NUM_THREADS="${MKL_NUM_THREADS:-2}"
 
 GPU_LIST="${GPU_LIST:-0 1 2 3 4 5 6 7}"
 CANDIDATE_COUNTS="${CANDIDATE_COUNTS:-8 16 32 64}"
+DATASETS="${DATASETS:-imdb pubmed}"
 GEN_SEED="${GEN_SEED:-0}"
 STEPS="${STEPS:-10000}"
 OUT_ROOT="${OUT_ROOT:-results/candidate_count_canonical_gate}"
@@ -26,6 +27,7 @@ IMDB_CONTEXT="${IMDB_CONTEXT:-/data2/lyh/gnn_project/DiHug/results/rooted_contex
 PUBMED_CONTEXT="${PUBMED_CONTEXT:-/data2/lyh/gnn_project/DiHug/results/rooted_context_freeze/pubmed/rooted_context_residual.pt}"
 read -r -a GPUS <<< "$GPU_LIST"
 read -r -a WIDTHS <<< "$CANDIDATE_COUNTS"
+read -r -a DATASET_NAMES <<< "$DATASETS"
 
 [[ "${#GPUS[@]}" -ge 1 ]] || { echo "GPU_LIST is empty" >&2; exit 2; }
 [[ -f "$IMDB_CONTEXT" ]] || { echo "missing IMDB checkpoint: $IMDB_CONTEXT" >&2; exit 2; }
@@ -34,7 +36,11 @@ mkdir -p "$OUT_ROOT" "$LOG_ROOT"
 : > "$LOG_ROOT/driver.log"
 
 tasks=()
-for dataset in imdb pubmed; do
+for dataset in "${DATASET_NAMES[@]}"; do
+  [[ "$dataset" == "imdb" || "$dataset" == "pubmed" ]] || {
+    echo "unsupported dataset: $dataset" >&2
+    exit 2
+  }
   for candidates in "${WIDTHS[@]}"; do
     tasks+=("$dataset $candidates")
   done
