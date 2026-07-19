@@ -328,6 +328,7 @@ def compare_heterogeneous_graphs(
         },
         "edge_identity_diagnostic": {
             "target_edge_recall": overlap / max(len(target_edges), 1),
+            "edge_overlap_percent": 100.0 * overlap / max(len(target_edges), 1),
             "generated_edge_novelty": 1.0 - overlap / max(len(sample_edges), 1),
             "exact_training_graph_match": target_edges == sample_edges,
         },
@@ -379,7 +380,11 @@ def aggregate_comparisons(rows: Sequence[Mapping]) -> dict:
         },
         "edge_identity_diagnostic": {
             key: summarize(row["edge_identity_diagnostic"][key] for row in rows)
-            for key in ("target_edge_recall", "generated_edge_novelty")
+            for key in (
+                "target_edge_recall",
+                "edge_overlap_percent",
+                "generated_edge_novelty",
+            )
         },
         "uniqueness_percent": 100.0
         * len({row["generated_fingerprint"] for row in rows})

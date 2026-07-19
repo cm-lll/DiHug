@@ -17,7 +17,11 @@ from sparse_diffusion.structure_energy.heterogeneous_metrics import (
 DATASETS = {
     "imdb": Path("data/IMDB_movie_subgraphs/subgraph_000"),
     "pubmed": Path("data/PubMed_baseline_subgraphs/subgraph_000"),
+    "dblp": Path("data/DBLP_four_area_subgraphs/subgraph_000"),
     "acm": Path("data/ACM_subgraphs/subgraph_000"),
+    "syn100": Path("data/HGEN_syn_100_subgraphs/subgraph_000"),
+    "syn200": Path("data/HGEN_syn_200_subgraphs/subgraph_000"),
+    "syn500": Path("data/HGEN_syn_500_subgraphs/subgraph_000"),
 }
 
 
@@ -37,6 +41,7 @@ def _flatten(dataset: str, mode: str, payload: dict) -> dict:
         "typed_triangle_tv": aggregate["typed_triangles"]["tv"]["mean"],
         "typed_triangle_jsd": aggregate["typed_triangles"]["jsd"]["mean"],
         "edge_recall": aggregate["edge_identity_diagnostic"]["target_edge_recall"]["mean"],
+        "edge_overlap_percent": aggregate["edge_identity_diagnostic"]["edge_overlap_percent"]["mean"],
         "edge_novelty": aggregate["edge_identity_diagnostic"]["generated_edge_novelty"]["mean"],
     }
     for metric in (

@@ -72,6 +72,7 @@ def test_comparison_reports_family_and_identity_metrics():
     assert row["typed_triangles"]["tv"] == 0.0
     assert row["edge_identity_diagnostic"]["exact_training_graph_match"] is False
     assert row["edge_identity_diagnostic"]["generated_edge_novelty"] > 0.0
+    assert row["edge_identity_diagnostic"]["edge_overlap_percent"] < 100.0
     aggregate = aggregate_comparisons([row, row])
     assert aggregate["samples"] == 2
     assert aggregate["uniqueness_percent"] == 50.0
