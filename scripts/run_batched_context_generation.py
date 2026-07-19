@@ -50,6 +50,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--role-weight", type=float, default=0.05)
     parser.add_argument("--gain-scale", type=float, default=10.0)
     parser.add_argument("--role-error-per-node-threshold", type=float, default=5.5)
+    parser.add_argument("--relative-role-error-threshold", type=float)
     parser.add_argument("--context-refresh-steps", type=int, default=20)
     parser.add_argument("--gpu-candidate-mode", choices=("legacy_pool", "canonical_ordered"), default="canonical_ordered")
     return parser.parse_args()
@@ -105,6 +106,7 @@ def main() -> None:
         schedule_power=1.0,
         schedule_floor=1.0,
         role_error_per_node_threshold=args.role_error_per_node_threshold,
+        relative_role_error_threshold=args.relative_role_error_threshold,
         model_time_horizon_steps=args.model_time_horizon_steps,
         model_time_start_step=0,
         closure_candidate_fraction=1.0,
@@ -154,6 +156,8 @@ def main() -> None:
             "gpu_candidate_mode": args.gpu_candidate_mode,
             "context_checkpoint": str(args.context_checkpoint),
             "context_refresh_steps": args.context_refresh_steps,
+            "role_error_per_node_threshold": args.role_error_per_node_threshold,
+            "relative_role_error_threshold": args.relative_role_error_threshold,
             "initial": graph_metrics(initial),
             "final": graph_metrics(result.graph),
             "trace": result.trace,

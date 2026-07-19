@@ -1473,6 +1473,7 @@ def sample_gpu_role_guided_edit_diffusion(
     model_time_start_step: int,
     closure_candidate_fraction: float,
     targeted_role_candidate_fraction: float,
+    relative_role_error_threshold: float | None = None,
     auto_role_balance: float = 0.0,
     role_calibration_batches: int = 32,
     context_model: torch.nn.Module | None = None,
@@ -1490,6 +1491,10 @@ def sample_gpu_role_guided_edit_diffusion(
         raise ValueError("steps and model time horizon must be positive")
     if int(phase_check_interval) <= 0:
         raise ValueError("GPU phase check interval must be positive")
+    if relative_role_error_threshold is not None and not (
+        0.0 <= float(relative_role_error_threshold) <= 1.0
+    ):
+        raise ValueError("relative role-error threshold must be in [0, 1]")
     state = GpuTypedGraphState(
         initial_graph, target_rows, device, use_triton=use_triton
     )
@@ -1538,7 +1543,12 @@ def sample_gpu_role_guided_edit_diffusion(
             )
 
         role_error = state.relation_degree_error()
-        threshold = float(role_error_per_node_threshold) * state.num_nodes
+        initial_role_error = float(role_error.cpu())
+        threshold = (
+            initial_role_error * float(relative_role_error_threshold)
+            if relative_role_error_threshold is not None
+            else float(role_error_per_node_threshold) * state.num_nodes
+        )
         role_phase = bool((role_error > threshold).cpu())
         initial_metrics = state.gpu_graph_metrics(metric_edge_chunk_size)
         trace = [
@@ -1547,6 +1557,8 @@ def sample_gpu_role_guided_edit_diffusion(
                 "relation_degree_error": float(role_error.cpu()),
                 "relation_degree_error_per_node": float(role_error.cpu())
                 / state.num_nodes,
+                "relation_degree_error_threshold": threshold,
+                "relative_role_error_threshold": relative_role_error_threshold,
                 "phase": "role_alignment" if role_phase else "switch_refinement",
                 "role_phase_transition_step": (
                     None if role_phase else 0
@@ -1724,6 +1736,7 @@ def sample_gpu_role_guided_edit_diffusion_batched(
     schedule_power: float = 1.0,
     schedule_floor: float = 0.0,
     role_error_per_node_threshold: float = 0.0,
+    relative_role_error_threshold: float | None = None,
     model_time_horizon_steps: int = 1,
     model_time_start_step: int = 0,
     closure_candidate_fraction: float = 0.0,
@@ -1756,6 +1769,10 @@ def sample_gpu_role_guided_edit_diffusion_batched(
         raise ValueError("steps and model time horizon must be positive")
     if int(phase_check_interval) <= 0:
         raise ValueError("GPU phase check interval must be positive")
+    if relative_role_error_threshold is not None and not (
+        0.0 <= float(relative_role_error_threshold) <= 1.0
+    ):
+        raise ValueError("relative role-error threshold must be in [0, 1]")
     if context_model is not None and int(context_refresh_steps) <= 0:
         raise ValueError("context refresh interval must be positive")
 
@@ -1826,9 +1843,14 @@ def sample_gpu_role_guided_edit_diffusion_batched(
             effective_role_weights.append(effective)
 
         role_errors = [state.relation_degree_error() for state in states]
+        initial_role_errors = [float(error.cpu()) for error in role_errors]
         thresholds = [
-            float(role_error_per_node_threshold) * state.num_nodes
-            for state in states
+            (
+                initial_error * float(relative_role_error_threshold)
+                if relative_role_error_threshold is not None
+                else float(role_error_per_node_threshold) * state.num_nodes
+            )
+            for state, initial_error in zip(states, initial_role_errors)
         ]
         role_phases = [
             bool((error > threshold).cpu())
@@ -1836,12 +1858,13 @@ def sample_gpu_role_guided_edit_diffusion_batched(
         ]
         transition_steps = [-1 if phase else 0 for phase in role_phases]
         traces = []
-        for state, error, phase, transition, effective in zip(
+        for state, error, phase, transition, effective, threshold in zip(
             states,
             role_errors,
             role_phases,
             transition_steps,
             effective_role_weights,
+            thresholds,
         ):
             error_value = float(error.cpu())
             traces.append(
@@ -1851,6 +1874,8 @@ def sample_gpu_role_guided_edit_diffusion_batched(
                         "relation_degree_error": error_value,
                         "relation_degree_error_per_node": error_value
                         / state.num_nodes,
+                        "relation_degree_error_threshold": threshold,
+                        "relative_role_error_threshold": relative_role_error_threshold,
                         "phase": (
                             "role_alignment" if phase else "switch_refinement"
                         ),

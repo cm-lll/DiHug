@@ -213,3 +213,30 @@ def test_rooted_context_teacher_is_scale_invariant_for_large_graph_utilities():
     tiny = _teacher_distribution(utilities * 1.0e-8, temperature=0.5)
     assert torch.allclose(reference[0], tiny[0], atol=1.0e-6, rtol=1.0e-6)
     assert torch.allclose(tiny[1], torch.full((4,), 0.25))
+
+
+def test_relative_role_error_threshold_is_validated_before_cuda_state_build():
+    graph = _toy_graph()
+    family_names = tuple(sorted(graph.family_specs))
+    target_rows = np.stack(
+        [graph.family_degrees(family) for family in family_names], axis=1
+    ).astype(np.float32)
+    input_dim = mixed_edit_feature_width(
+        "typed_closure_compact_v2",
+        family_count=len(family_names),
+        type_count=len(graph.type_names),
+    )
+    model = SwitchDenoiserMLP(
+        input_dim=input_dim, hidden_dim=8, layers=1, dropout=0.0
+    )
+    with pytest.raises(ValueError, match="relative role-error threshold"):
+        sample_gpu_role_guided_edit_diffusion_batched(
+            [graph],
+            model,
+            [target_rows],
+            steps=1,
+            candidates_per_step=2,
+            seeds=[0],
+            device="cpu",
+            relative_role_error_threshold=1.01,
+        )
