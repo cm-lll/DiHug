@@ -1205,6 +1205,16 @@ def sample_gpu_role_guided_edit_diffusion(
         applied = torch.zeros((), dtype=torch.long, device=state.device)
         transition_step = -1 if role_phase else 0
         context_hidden = None
+        context_role_conditions = None
+        if context_model is not None and getattr(
+            context_model, "role_condition_dim", 0
+        ) > 0:
+            context_role_conditions = context_model.normalize_role_rows(
+                torch.from_numpy(np.asarray(target_rows))[None]
+                .float()
+                .to(state.device),
+                state.node_types[None],
+            )
 
         for completed in range(1, int(steps) + 1):
             time_fraction = max(
@@ -1240,6 +1250,7 @@ def sample_gpu_role_guided_edit_diffusion(
                         state.node_types[None],
                         edge_index,
                         edge_types,
+                        role_conditions=context_role_conditions,
                     )
                 context_logits = context_model.score_encoded(
                     context_hidden,

@@ -872,7 +872,10 @@ def sample_role_guided_edit_diffusion(
                     or completed - last_context_refresh >= int(context_refresh_steps)
                 ):
                     context_hidden = context_model.encode_graph(
-                        graph, time_fraction, device
+                        graph,
+                        time_fraction,
+                        device,
+                        role_rows=target_rows,
                     )
                     last_context_refresh = completed
                 structure_logits, _ = context_model.score_graph_candidates(
@@ -882,6 +885,7 @@ def sample_role_guided_edit_diffusion(
                     feature_profile,
                     device,
                     encoded=context_hidden,
+                    role_rows=target_rows,
                 )
             else:
                 matrix = mixed_edit_candidate_matrix(

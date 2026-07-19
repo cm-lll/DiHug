@@ -8,11 +8,16 @@ from sparse_diffusion.structure_energy.graph import FamilySpec, TypedGraph
 from sparse_diffusion.structure_energy.mixed_edit_diffusion import EditProposal
 from sparse_diffusion.structure_energy.rooted_context_edit import (
     RootedContextEditResidual,
+    build_rooted_context_dataset,
+    initialize_context_encoder_from_alignment,
     rooted_closure_signature,
     rooted_closure_utility,
     schema_supports_triangles,
 )
 from sparse_diffusion.structure_energy.switch_diffusion import SwitchDenoiserMLP
+from sparse_diffusion.structure_energy.mixed_edit_diffusion import (
+    mixed_edit_feature_width,
+)
 
 
 def _graph(edges):
@@ -145,3 +150,86 @@ def test_triangle_incapable_typed_schema_is_detected():
     graph = TypedGraph(node_types, ("A", "B", "C"), specs, {name: [] for name in specs})
     assert not schema_supports_triangles(graph)
     assert schema_supports_triangles(_graph([]))
+
+
+def test_closed_form_context_dataset_carries_fixed_role_conditions():
+    graph = _graph([(0, 1), (1, 2), (0, 2), (2, 3), (3, 4)])
+    width = mixed_edit_feature_width(
+        "typed_closure_compact_v2", family_count=1, type_count=1
+    )
+    legacy = SwitchDenoiserMLP(
+        input_dim=width, hidden_dim=16, layers=1, dropout=0.0
+    )
+    dataset = build_rooted_context_dataset(
+        graph,
+        legacy,
+        trajectories=2,
+        examples_per_trajectory=2,
+        candidates_per_example=4,
+        seed=23,
+        state_protocol="closed_form_marginal",
+        noise_levels=(0.5, 1.0),
+    )
+    assert dataset.role_conditions.shape == (4, graph.num_nodes, 1)
+    assert dataset.node_features.shape[0] == 4
+    assert np.isfinite(dataset.role_conditions).all()
+    assert np.allclose(dataset.role_conditions[0], dataset.role_conditions[1])
+
+
+def test_alignment_initialization_copies_encoder_only(tmp_path):
+    torch.manual_seed(31)
+    source_legacy = SwitchDenoiserMLP(
+        input_dim=9, hidden_dim=16, layers=1, dropout=0.0
+    )
+    source = RootedContextEditResidual(
+        source_legacy,
+        node_feature_dim=4,
+        candidate_feature_dim=9,
+        type_count=1,
+        family_count=1,
+        hidden_dim=16,
+        heads=4,
+        layers=1,
+        dropout=0.0,
+        role_condition_dim=1,
+    )
+    with torch.no_grad():
+        for name, parameter in source.named_parameters():
+            if name.startswith(("node_input.", "layers.", "role_input.")):
+                parameter.fill_(0.125)
+    checkpoint = tmp_path / "alignment.pt"
+    torch.save(
+        {
+            "format": "dihug-role-conditioned-latent-alignment-v1",
+            "model_state": source.state_dict(),
+            "report": {"passed": True},
+        },
+        checkpoint,
+    )
+    target_legacy = SwitchDenoiserMLP(
+        input_dim=9, hidden_dim=16, layers=1, dropout=0.0
+    )
+    target = RootedContextEditResidual(
+        target_legacy,
+        node_feature_dim=4,
+        candidate_feature_dim=9,
+        type_count=1,
+        family_count=1,
+        hidden_dim=16,
+        heads=4,
+        layers=1,
+        dropout=0.0,
+        role_condition_dim=1,
+    )
+    legacy_before = {
+        key: value.detach().clone()
+        for key, value in target.joint.legacy_scorer.state_dict().items()
+    }
+    report = initialize_context_encoder_from_alignment(target, checkpoint)
+    assert report["alignment_passed"]
+    assert report["loaded_encoder_keys"] > 0
+    assert torch.allclose(target.node_input[0].weight, source.node_input[0].weight)
+    assert torch.allclose(target.role_input[0].weight, source.role_input[0].weight)
+    for key, value in target.joint.legacy_scorer.state_dict().items():
+        assert torch.equal(value, legacy_before[key])
+    assert torch.count_nonzero(target.joint.residual[-1].weight) == 0

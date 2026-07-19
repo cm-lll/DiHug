@@ -20,11 +20,18 @@ from .hgt_edit_denoiser import (
 )
 from .mixed_edit_diffusion import (
     EditProposal,
+    MarginalGraphPrior,
+    _family_names,
     align_mixed_edit_features_for_model,
     apply_edit,
     mixed_edit_candidate_matrix,
+    sample_closed_form_marginal_noise,
+    sample_edit_candidates,
 )
-from .role_guided_edit_diffusion import sample_switch_refinement_candidates
+from .role_guided_edit_diffusion import (
+    sample_role_alignment_candidates,
+    sample_switch_refinement_candidates,
+)
 from .roles import permuted_witness, sample_role_plan
 from .switch_diffusion import SwitchDenoiserMLP
 
@@ -224,8 +231,11 @@ class RootedContextDataset:
     node_features: np.ndarray
     edge_indices: Tuple[np.ndarray, ...]
     edge_types: Tuple[np.ndarray, ...]
+    role_conditions: np.ndarray
     trajectory_ids: np.ndarray
     node_types: np.ndarray
+    role_means: np.ndarray
+    role_scales: np.ndarray
     type_count: int
     family_count: int
 
@@ -239,6 +249,43 @@ class RootedContextDataset:
             raise ValueError("node feature shape mismatch")
         if len(self.edge_indices) != examples or len(self.edge_types) != examples:
             raise ValueError("edge snapshot count mismatch")
+        if self.role_conditions.shape != (
+            examples,
+            self.node_types.shape[0],
+            self.family_count,
+        ):
+            raise ValueError("role-condition shape mismatch")
+        if self.role_means.shape != (self.type_count, self.family_count):
+            raise ValueError("role-mean shape mismatch")
+        if self.role_scales.shape != (self.type_count, self.family_count):
+            raise ValueError("role-scale shape mismatch")
+
+
+def _role_normalizer(
+    role_rows: np.ndarray, node_types: np.ndarray, type_count: int
+) -> tuple[np.ndarray, np.ndarray]:
+    transformed = np.log1p(np.asarray(role_rows, dtype=np.float32))
+    means = np.zeros((int(type_count), transformed.shape[1]), dtype=np.float32)
+    scales = np.ones_like(means)
+    for type_id in range(int(type_count)):
+        values = transformed[np.asarray(node_types) == type_id]
+        if not len(values):
+            continue
+        means[type_id] = values.mean(axis=0)
+        scales[type_id] = np.maximum(values.std(axis=0), 0.1)
+    return means, scales
+
+
+def _normalize_role_rows(
+    role_rows: np.ndarray,
+    node_types: np.ndarray,
+    means: np.ndarray,
+    scales: np.ndarray,
+) -> np.ndarray:
+    transformed = np.log1p(np.asarray(role_rows, dtype=np.float32))
+    return (
+        transformed - means[np.asarray(node_types, dtype=np.int64)]
+    ) / scales[np.asarray(node_types, dtype=np.int64)]
 
 
 def build_rooted_context_dataset(
@@ -252,34 +299,86 @@ def build_rooted_context_dataset(
     closure_fraction: float = 1.0,
     seed: int = 0,
     feature_profile: str = "typed_closure_compact_v2",
+    state_protocol: str = "legacy_switch_chain",
+    noise_levels: Sequence[float] = (0.25, 0.5, 0.75, 1.0),
+    targeted_role_candidate_fraction: float = 0.0,
 ) -> RootedContextDataset:
     if int(trajectories) < 2:
         raise ValueError("rooted context training needs at least two trajectories")
+    state_protocol = str(state_protocol).strip().lower()
+    if state_protocol not in {"legacy_switch_chain", "closed_form_marginal"}:
+        raise ValueError(
+            "state protocol must be legacy_switch_chain or closed_form_marginal"
+        )
+    levels = tuple(float(level) for level in noise_levels)
+    if not levels or any(not 0.0 < level <= 1.0 for level in levels):
+        raise ValueError("noise levels must lie in (0,1]")
+    if not 0.0 <= float(targeted_role_candidate_fraction) <= 1.0:
+        raise ValueError("targeted role candidate fraction must lie in [0,1]")
     target = rooted_closure_signature(source)
+    family_names = tuple(_family_names(source))
+    reference_plan = sample_role_plan(source, int(seed) + 17)
+    reference_rows = np.stack(
+        [reference_plan.family_degrees[family] for family in family_names], axis=1
+    ).astype(np.float32)
+    role_means, role_scales = _role_normalizer(
+        reference_rows, source.node_types, len(source.type_names)
+    )
+    prior = MarginalGraphPrior.from_training_graph(source)
     features = []
     endpoints = []
     utilities = []
     node_features = []
     edge_indices = []
     edge_types = []
+    role_conditions = []
     trajectory_ids = []
     for trajectory_id in range(int(trajectories)):
         trajectory_seed = int(seed) + 1_000_003 * trajectory_id
         rng = np.random.default_rng(trajectory_seed)
-        graph = permuted_witness(source, sample_role_plan(source, trajectory_seed + 17))
+        plan = sample_role_plan(source, trajectory_seed + 17)
+        clean = permuted_witness(source, plan)
+        role_rows = np.stack(
+            [plan.family_degrees[family] for family in family_names], axis=1
+        ).astype(np.float32)
+        normalized_roles = _normalize_role_rows(
+            role_rows, source.node_types, role_means, role_scales
+        )
+        graph = clean.clone()
         for example_id in range(int(examples_per_trajectory)):
-            for _ in range(int(switches_per_example)):
-                proposal = sample_switch_refinement_candidates(
-                    graph, rng, 2, closure_fraction=0.0
-                )[1]
-                apply_edit(graph, proposal)
-            fraction = 1.0 - (example_id + 1) / float(examples_per_trajectory + 1)
-            candidates = sample_switch_refinement_candidates(
-                graph,
-                rng,
-                int(candidates_per_example),
-                closure_fraction=float(closure_fraction),
-            )
+            if state_protocol == "legacy_switch_chain":
+                for _ in range(int(switches_per_example)):
+                    proposal = sample_switch_refinement_candidates(
+                        graph, rng, 2, closure_fraction=0.0
+                    )[1]
+                    apply_edit(graph, proposal)
+                fraction = 1.0 - (example_id + 1) / float(
+                    examples_per_trajectory + 1
+                )
+                candidates = sample_switch_refinement_candidates(
+                    graph,
+                    rng,
+                    int(candidates_per_example),
+                    closure_fraction=float(closure_fraction),
+                )
+            else:
+                fraction = levels[example_id % len(levels)]
+                alpha_bar = (1.0 - float(fraction)) ** 2
+                graph = sample_closed_form_marginal_noise(
+                    clean,
+                    prior,
+                    alpha_bar=alpha_bar,
+                    seed=trajectory_seed + 97_409 * (example_id + 1),
+                )
+                candidates = sample_role_alignment_candidates(
+                    graph,
+                    role_rows,
+                    family_names,
+                    rng,
+                    int(candidates_per_example),
+                    targeted_fraction=float(targeted_role_candidate_fraction),
+                    actions=("relocation", "switch"),
+                )
             matrix = mixed_edit_candidate_matrix(
                 graph,
                 candidates,
@@ -307,6 +406,7 @@ def build_rooted_context_dataset(
             node_features.append(graph_node_features(graph, fraction))
             edge_indices.append(edge_index)
             edge_types.append(relations)
+            role_conditions.append(normalized_roles)
             trajectory_ids.append(trajectory_id)
     return RootedContextDataset(
         candidate_features=np.stack(features).astype(np.float32),
@@ -315,8 +415,11 @@ def build_rooted_context_dataset(
         node_features=np.stack(node_features).astype(np.float32),
         edge_indices=tuple(edge_indices),
         edge_types=tuple(edge_types),
+        role_conditions=np.stack(role_conditions).astype(np.float32),
         trajectory_ids=np.asarray(trajectory_ids, dtype=np.int64),
         node_types=source.node_types.copy(),
+        role_means=role_means,
+        role_scales=role_scales,
         type_count=len(source.type_names),
         family_count=len(source.family_specs),
     )
@@ -342,6 +445,7 @@ class RootedContextEditResidual(nn.Module):
         heads: int = 4,
         layers: int = 2,
         dropout: float = 0.1,
+        role_condition_dim: int = 0,
     ) -> None:
         super().__init__()
         if hidden_dim % heads:
@@ -355,12 +459,30 @@ class RootedContextEditResidual(nn.Module):
             "heads": int(heads),
             "layers": int(layers),
             "dropout": float(dropout),
+            "role_condition_dim": int(role_condition_dim),
         }
+        self.type_count = int(type_count)
+        self.role_condition_dim = int(role_condition_dim)
         self.node_input = nn.Sequential(
             nn.Linear(node_feature_dim, hidden_dim),
             nn.LayerNorm(hidden_dim),
             nn.SiLU(),
         )
+        self.role_input = None
+        if self.role_condition_dim > 0:
+            self.role_input = nn.Sequential(
+                nn.Linear(self.role_condition_dim, hidden_dim),
+                nn.LayerNorm(hidden_dim),
+                nn.SiLU(),
+            )
+            self.register_buffer(
+                "role_means",
+                torch.zeros(self.type_count, self.role_condition_dim),
+            )
+            self.register_buffer(
+                "role_scales",
+                torch.ones(self.type_count, self.role_condition_dim),
+            )
         self.layers = nn.ModuleList(
             HGTConv(
                 hidden_dim,
@@ -388,15 +510,50 @@ class RootedContextEditResidual(nn.Module):
             raise ValueError("residual scale must lie in [0,1]")
         self.residual_scale.fill_(float(value))
 
+    def set_role_normalizer(
+        self, means: np.ndarray | torch.Tensor, scales: np.ndarray | torch.Tensor
+    ) -> None:
+        if self.role_input is None:
+            return
+        means_tensor = torch.as_tensor(
+            means, dtype=self.role_means.dtype, device=self.role_means.device
+        )
+        scales_tensor = torch.as_tensor(
+            scales, dtype=self.role_scales.dtype, device=self.role_scales.device
+        )
+        if means_tensor.shape != self.role_means.shape:
+            raise ValueError("role normalizer mean shape mismatch")
+        if scales_tensor.shape != self.role_scales.shape or torch.any(scales_tensor <= 0):
+            raise ValueError("role normalizer scale mismatch")
+        self.role_means.copy_(means_tensor)
+        self.role_scales.copy_(scales_tensor)
+
+    def normalize_role_rows(
+        self, role_rows: torch.Tensor, node_types: torch.Tensor
+    ) -> torch.Tensor:
+        if self.role_input is None:
+            raise RuntimeError("role conditioning is disabled")
+        transformed = torch.log1p(role_rows.float())
+        return (
+            transformed - self.role_means[node_types]
+        ) / self.role_scales[node_types]
+
     def encode(
         self,
         node_features: torch.Tensor,
         node_types: torch.Tensor,
         edge_index: torch.Tensor,
         edge_types: torch.Tensor,
+        role_conditions: torch.Tensor | None = None,
     ) -> torch.Tensor:
         batch_size, node_count, _ = node_features.shape
         hidden = self.node_input(node_features.reshape(batch_size * node_count, -1))
+        if self.role_input is not None:
+            if role_conditions is None:
+                raise ValueError("role-conditioned context needs role conditions")
+            hidden = hidden + self.role_input(
+                role_conditions.reshape(batch_size * node_count, -1)
+            )
         for layer in self.layers:
             hidden = layer(hidden, node_types.reshape(-1), edge_index, edge_types)
         return hidden.reshape(batch_size, node_count, -1)
@@ -423,8 +580,15 @@ class RootedContextEditResidual(nn.Module):
         edge_types: torch.Tensor,
         candidate_features: torch.Tensor,
         candidate_endpoints: torch.Tensor,
+        role_conditions: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        hidden = self.encode(node_features, node_types, edge_index, edge_types)
+        hidden = self.encode(
+            node_features,
+            node_types,
+            edge_index,
+            edge_types,
+            role_conditions=role_conditions,
+        )
         return self.score_encoded(hidden, candidate_features, candidate_endpoints)
 
     def encode_graph(
@@ -432,8 +596,16 @@ class RootedContextEditResidual(nn.Module):
         graph: TypedGraph,
         time_fraction: float,
         device: torch.device,
+        role_rows: np.ndarray | None = None,
     ) -> torch.Tensor:
         edge_index, edge_types = graph_edge_tensors(graph)
+        role_conditions = None
+        if self.role_input is not None:
+            if role_rows is None:
+                raise ValueError("role-conditioned context needs sampled role rows")
+            raw_roles = torch.from_numpy(np.asarray(role_rows))[None].float().to(device)
+            node_types = torch.from_numpy(graph.node_types)[None].long().to(device)
+            role_conditions = self.normalize_role_rows(raw_roles, node_types)
         return self.encode(
             torch.from_numpy(graph_node_features(graph, time_fraction))[None]
             .float()
@@ -441,6 +613,7 @@ class RootedContextEditResidual(nn.Module):
             torch.from_numpy(graph.node_types)[None].long().to(device),
             torch.from_numpy(edge_index).long().to(device),
             torch.from_numpy(edge_types).long().to(device),
+            role_conditions=role_conditions,
         )
 
     def score_graph_candidates(
@@ -451,9 +624,10 @@ class RootedContextEditResidual(nn.Module):
         feature_profile: str,
         device: torch.device,
         encoded: torch.Tensor | None = None,
+        role_rows: np.ndarray | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         hidden = (
-            self.encode_graph(graph, time_fraction, device)
+            self.encode_graph(graph, time_fraction, device, role_rows=role_rows)
             if encoded is None
             else encoded
         )
@@ -494,6 +668,7 @@ def _batch(
         torch.cat(relation_parts).to(device),
         torch.from_numpy(dataset.candidate_features[indices]).float().to(device),
         torch.from_numpy(dataset.candidate_endpoints[indices]).long().to(device),
+        torch.from_numpy(dataset.role_conditions[indices]).float().to(device),
         torch.from_numpy(dataset.candidate_utilities[indices]).float().to(device),
     )
 
@@ -502,6 +677,50 @@ def _teacher_distribution(utilities: torch.Tensor, temperature: float) -> torch.
     centered = utilities - utilities.mean(dim=1, keepdim=True)
     scale = utilities.std(dim=1, keepdim=True).clamp(min=1.0e-6)
     return torch.softmax(centered / scale / float(temperature), dim=1)
+
+
+def initialize_context_encoder_from_alignment(
+    model: RootedContextEditResidual,
+    checkpoint: str | Path,
+) -> Mapping[str, object]:
+    payload = torch.load(checkpoint, map_location="cpu", weights_only=False)
+    if payload.get("format") != "dihug-role-conditioned-latent-alignment-v1":
+        raise ValueError("unsupported latent-alignment checkpoint")
+    source = payload.get("model_state")
+    if not isinstance(source, Mapping):
+        raise ValueError("latent-alignment checkpoint has no model state")
+    target = model.state_dict()
+    prefixes = ("node_input.", "layers.", "role_input.")
+    expected = {key for key in target if key.startswith(prefixes)}
+    copied = {}
+    incompatible = []
+    for key in sorted(expected):
+        value = source.get(key)
+        if value is None or tuple(value.shape) != tuple(target[key].shape):
+            incompatible.append(key)
+            continue
+        copied[key] = value
+    if incompatible:
+        raise ValueError(
+            "latent-alignment encoder is incompatible with context model: "
+            + ", ".join(incompatible[:8])
+        )
+    target.update(copied)
+    model.load_state_dict(target)
+    return {
+        "alignment_checkpoint": str(checkpoint),
+        "loaded_encoder_keys": len(copied),
+        "alignment_passed": bool(payload.get("report", {}).get("passed", False)),
+    }
+
+
+def _set_context_encoder_trainable(
+    model: RootedContextEditResidual, trainable: bool
+) -> None:
+    prefixes = ("node_input.", "layers.", "role_input.")
+    for name, parameter in model.named_parameters():
+        if name.startswith(prefixes):
+            parameter.requires_grad_(bool(trainable))
 
 
 def train_rooted_context_residual(
@@ -516,6 +735,8 @@ def train_rooted_context_residual(
     trust_weight: float = 0.05,
     device: str | torch.device = "cuda",
     seed: int = 0,
+    alignment_checkpoint: str | Path | None = None,
+    freeze_context_encoder: bool = False,
     **model_kwargs,
 ) -> tuple[RootedContextEditResidual, Mapping[str, float]]:
     torch.manual_seed(int(seed))
@@ -532,6 +753,14 @@ def train_rooted_context_residual(
         family_count=dataset.family_count,
         **model_kwargs,
     ).to(device)
+    model.set_role_normalizer(dataset.role_means, dataset.role_scales)
+    initialization_report: Mapping[str, object] = {}
+    if alignment_checkpoint is not None:
+        initialization_report = initialize_context_encoder_from_alignment(
+            model, alignment_checkpoint
+        )
+    if freeze_context_encoder:
+        _set_context_encoder_trainable(model, False)
     trainable = [parameter for parameter in model.parameters() if parameter.requires_grad]
     optimizer = torch.optim.AdamW(trainable, lr=learning_rate, weight_decay=weight_decay)
     final_loss = float("nan")
@@ -543,9 +772,19 @@ def train_rooted_context_residual(
             indices = shuffled[start : start + int(batch_size)]
             batch = _batch(dataset, indices, device)
             optimizer.zero_grad(set_to_none=True)
-            logits = model(*batch[:-1])
+            logits = model(
+                batch[0],
+                batch[1],
+                batch[2],
+                batch[3],
+                batch[4],
+                batch[5],
+                role_conditions=(
+                    batch[6] if model.role_condition_dim > 0 else None
+                ),
+            )
             with torch.no_grad():
-                base = model.joint.legacy_scorer(batch[-3])
+                base = model.joint.legacy_scorer(batch[4])
                 teacher = _teacher_distribution(batch[-1], teacher_temperature)
                 base_distribution = torch.softmax(base, dim=1)
             task = -(teacher * torch.log_softmax(logits, dim=1)).sum(dim=1).mean()
@@ -568,8 +807,18 @@ def train_rooted_context_residual(
         for start in range(0, len(validation_ids), int(batch_size)):
             indices = validation_ids[start : start + int(batch_size)]
             batch = _batch(dataset, indices, device)
-            logits = model(*batch[:-1])
-            base = model.joint.legacy_scorer(batch[-3])
+            logits = model(
+                batch[0],
+                batch[1],
+                batch[2],
+                batch[3],
+                batch[4],
+                batch[5],
+                role_conditions=(
+                    batch[6] if model.role_condition_dim > 0 else None
+                ),
+            )
+            base = model.joint.legacy_scorer(batch[4])
             utility = batch[-1]
             validation_rows.append((base.cpu(), logits.cpu(), utility.cpu()))
     base_logits = torch.cat([row[0] for row in validation_rows])
@@ -610,6 +859,8 @@ def train_rooted_context_residual(
             str(scale): float(value) for scale, value in scale_utilities.items()
         },
         "non_regression": float(np.mean(residual_values) >= np.mean(base_values) - 1.0e-9),
+        "context_encoder_frozen": bool(freeze_context_encoder),
+        **dict(initialization_report),
     }
     return model, report
 

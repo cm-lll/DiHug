@@ -39,7 +39,34 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--hidden-dim", type=int, default=64)
     parser.add_argument("--layers", type=int, default=2)
     parser.add_argument("--heads", type=int, default=4)
+    parser.add_argument("--alignment-checkpoint", type=Path)
+    parser.add_argument(
+        "--state-protocol",
+        choices=("legacy_switch_chain", "closed_form_marginal"),
+        default="legacy_switch_chain",
+    )
+    parser.add_argument("--noise-levels", default="0.25,0.5,0.75,1.0")
+    parser.add_argument("--targeted-role-candidate-fraction", type=float, default=0.0)
+    parser.add_argument("--freeze-context-encoder", action="store_true")
     return parser.parse_args()
+
+
+def alignment_model_shape(path: Path) -> dict[str, int]:
+    payload = torch.load(path, map_location="cpu", weights_only=False)
+    if payload.get("format") != "dihug-role-conditioned-latent-alignment-v1":
+        raise ValueError("unsupported latent-alignment checkpoint")
+    state = payload.get("model_state", {})
+    hidden_dim, role_dim = state["role_input.0.weight"].shape
+    layer_ids = {
+        int(key.split(".")[1]) for key in state if key.startswith("layers.")
+    }
+    heads = int(state["layers.0.relation_pri"].shape[1])
+    return {
+        "hidden_dim": int(hidden_dim),
+        "role_condition_dim": int(role_dim),
+        "layers": len(layer_ids),
+        "heads": heads,
+    }
 
 
 def main() -> None:
@@ -51,6 +78,9 @@ def main() -> None:
     legacy, _, metadata = load_mixed_edit_checkpoint(args.legacy_checkpoint, device="cpu")
     legacy.eval()
     profile = str(metadata.get("feature_profile", "typed_closure_compact_v2"))
+    noise_levels = tuple(
+        float(value) for value in str(args.noise_levels).split(",") if value.strip()
+    )
     if not schema_supports_triangles(source):
         args.output_dir.mkdir(parents=True, exist_ok=True)
         payload = {
@@ -82,7 +112,18 @@ def main() -> None:
         closure_fraction=args.closure_fraction,
         seed=args.seed,
         feature_profile=profile,
+        state_protocol=args.state_protocol,
+        noise_levels=noise_levels,
+        targeted_role_candidate_fraction=args.targeted_role_candidate_fraction,
     )
+    model_shape = {
+        "hidden_dim": args.hidden_dim,
+        "layers": args.layers,
+        "heads": args.heads,
+        "role_condition_dim": 0,
+    }
+    if args.alignment_checkpoint is not None:
+        model_shape = alignment_model_shape(args.alignment_checkpoint)
     model, report = train_rooted_context_residual(
         dataset,
         legacy,
@@ -90,9 +131,9 @@ def main() -> None:
         batch_size=args.batch_size,
         device=args.device,
         seed=args.seed,
-        hidden_dim=args.hidden_dim,
-        layers=args.layers,
-        heads=args.heads,
+        alignment_checkpoint=args.alignment_checkpoint,
+        freeze_context_encoder=args.freeze_context_encoder,
+        **model_shape,
     )
     args.output_dir.mkdir(parents=True, exist_ok=True)
     save_rooted_context_checkpoint(
@@ -114,6 +155,13 @@ def main() -> None:
         "edges": source.num_edges,
         "subtype_prediction_enabled": subtype_schema.prediction_enabled,
         "subtype_schema": subtype_schema.to_json_dict(),
+        "state_protocol": args.state_protocol,
+        "alignment_checkpoint": (
+            None
+            if args.alignment_checkpoint is None
+            else str(args.alignment_checkpoint)
+        ),
+        "noise_levels": list(noise_levels),
         **report,
     }
     (args.output_dir / "gate_report.json").write_text(
