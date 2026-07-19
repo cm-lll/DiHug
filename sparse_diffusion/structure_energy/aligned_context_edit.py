@@ -138,6 +138,7 @@ def train_aligned_context_edit_denoiser(
     scorer = copy.deepcopy(legacy_scorer)
     if legacy_init == "random":
         scorer.apply(_reset_parameters)
+    reference_scorer = copy.deepcopy(scorer).to(device).eval()
     model = RootedContextEditResidual(
         scorer,
         node_feature_dim=dataset.node_features.shape[-1],
@@ -241,6 +242,7 @@ def train_aligned_context_edit_denoiser(
     role_teacher_rows = []
     role_bias_rows = []
     base_rows = []
+    reference_rows = []
     with torch.no_grad():
         for start in range(0, len(validation_indices), int(batch_size)):
             indices = validation_indices[start : start + int(batch_size)]
@@ -257,6 +259,9 @@ def train_aligned_context_edit_denoiser(
             )
             logits_rows.append(model(*batch[:-1]).cpu())
             base_rows.append(model.joint.base_score(batch[4]).cpu())
+            reference_rows.append(
+                reference_scorer(batch[4] * model.joint.feature_mask).cpu()
+            )
             role_bias_rows.append(role_bias.cpu())
             role_teacher_rows.append(role_teacher.cpu())
             target_rows.append(batch[-1].cpu())
@@ -265,6 +270,7 @@ def train_aligned_context_edit_denoiser(
             )
     fused_structure_logits = torch.cat(logits_rows)
     base_logits = torch.cat(base_rows)
+    reference_logits = torch.cat(reference_rows)
     role_bias = torch.cat(role_bias_rows)
     role_teacher = torch.cat(role_teacher_rows)
     targets = torch.cat(target_rows)
@@ -282,21 +288,32 @@ def train_aligned_context_edit_denoiser(
                 torch.arange(chosen.numel()), chosen
             ].mean()
         )
+    reference_with_role = reference_logits + role_bias
+    reference_selected = reference_with_role.argmax(dim=1)
+    reference_utility = float(
+        teacher_signal[
+            torch.arange(reference_selected.numel()), reference_selected
+        ].mean()
+    )
     best_scale = max(scale_utilities, key=scale_utilities.get)
-    residual_utility_gain = (
-        float(scale_utilities[best_scale]) - float(scale_utilities[0.0])
+    residual_utility_gain = float(scale_utilities[best_scale]) - reference_utility
+    joint_update_accepted = (
+        residual_utility_gain >= float(residual_min_utility_gain)
     )
-    selected_scale = (
-        float(best_scale)
-        if residual_utility_gain >= float(residual_min_utility_gain)
-        else 0.0
-    )
+    if joint_update_accepted:
+        selected_scale = float(best_scale)
+        logits = base_logits + selected_scale * residual + role_bias
+    else:
+        selected_scale = 0.0
+        model.joint.legacy_scorer.load_state_dict(reference_scorer.state_dict())
+        logits = reference_with_role
     model.set_residual_scale(selected_scale)
-    logits = base_logits + float(selected_scale) * residual + role_bias
-    base_logits = base_logits + role_bias
+    joint_base_logits = base_logits + role_bias
+    base_logits = reference_with_role
     rows = torch.arange(targets.numel())
     selected = logits.argmax(dim=1)
     base_selected = base_logits.argmax(dim=1)
+    joint_base_selected = joint_base_logits.argmax(dim=1)
     positive = logits[rows, targets]
     negative = logits.clone()
     negative[rows, targets] = -torch.inf
@@ -321,13 +338,20 @@ def train_aligned_context_edit_denoiser(
         "validation_base_top1": float(
             (base_selected == targets).float().mean()
         ),
+        "validation_joint_base_top1": float(
+            (joint_base_selected == targets).float().mean()
+        ),
         "validation_selected_utility": float(teacher_signal[rows, selected].mean()),
-        "validation_base_utility": float(teacher_signal[rows, base_selected].mean()),
+        "validation_base_utility": float(reference_utility),
+        "validation_joint_base_utility": float(
+            teacher_signal[rows, joint_base_selected].mean()
+        ),
         "validation_oracle_utility": float(teacher_signal.max(dim=1).values.mean()),
         "residual_scale": float(selected_scale),
         "best_residual_scale_before_gate": float(best_scale),
         "residual_utility_gain": float(residual_utility_gain),
         "residual_min_utility_gain": float(residual_min_utility_gain),
+        "joint_update_accepted": bool(joint_update_accepted),
         "scale_utilities": scale_utilities,
         "role_weight": float(role_weight),
         "role_gain_scale": float(role_gain_scale),

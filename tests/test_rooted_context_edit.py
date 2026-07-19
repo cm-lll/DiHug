@@ -269,6 +269,8 @@ def test_closed_form_unified_dataset_aligns_structure_role_and_noop():
 
 
 def test_role_aware_utility_accepts_role_only_schema():
+    import copy
+
     from sparse_diffusion.structure_energy.aligned_context_edit import (
         train_aligned_context_edit_denoiser,
     )
@@ -294,6 +296,7 @@ def test_role_aware_utility_accepts_role_only_schema():
         layers=2,
         dropout=0.0,
     )
+    reference = copy.deepcopy(scorer.state_dict())
     model, report = train_aligned_context_edit_denoiser(
         dataset,
         scorer,
@@ -304,6 +307,7 @@ def test_role_aware_utility_accepts_role_only_schema():
         legacy_unfreeze_epoch=0,
         training_objective="utility_role_kl",
         role_teacher_weight=1.0,
+        residual_min_utility_gain=1.0e6,
         device="cpu",
         seed=41,
         hidden_dim=16,
@@ -313,7 +317,10 @@ def test_role_aware_utility_accepts_role_only_schema():
         role_conditioning=True,
     )
     assert report["validation_oracle_utility"] > 0.0
-    assert 0.0 <= report["residual_scale"] <= 1.0
+    assert report["residual_scale"] == 0.0
+    assert report["joint_update_accepted"] is False
+    for name, value in model.joint.legacy_scorer.state_dict().items():
+        assert torch.equal(value.cpu(), reference[name])
     assert any(
         parameter.grad is not None
         for parameter in model.joint.legacy_scorer.parameters()

@@ -43,24 +43,36 @@ CACHE="$OUT_ROOT/aligned_role_query_dataset.pt"
 BASE="$OUT_ROOT/paired_explicit_mlp.pt"
 JOINT_DIR="$OUT_ROOT/role_query_joint"
 JOINT="$JOINT_DIR/aligned_context_edit.pt"
+PREP_SOURCE_ROOT="${PREP_SOURCE_ROOT:-}"
 
-echo "[PREPARE] role-exchangeable trajectories and paired explicit MLP" \
-  | tee -a "$LOG_ROOT/driver.log"
-CUDA_VISIBLE_DEVICES="$PREP_GPU" python -u scripts/run_aligned_context_edit_gate.py \
-  --mode prepare --dataset-dir "$DATA" --output-dir "$OUT_ROOT" \
-  --dataset-cache "$CACHE" --seed "$SEED" --device cuda \
-  --trajectories "${TRAJECTORIES:-16}" \
-  --forward-steps "${FORWARD_STEPS:-1000}" \
-  --record-every "${RECORD_EVERY:-10}" \
-  --candidates "${CANDIDATES:-16}" \
-  --feature-profile typed_closure_compact_v2 \
-  --supervision rooted_utility --forward-mode closed_form \
-  --candidate-mode unified \
-  --targeted-role-candidate-fraction "$TARGETED_FRACTION" \
-  --closure-candidate-fraction "$CLOSURE_FRACTION" \
-  --base-epochs "${BASE_EPOCHS:-100}" \
-  --role-conditioned-hgt --query-edges-per-family "$QUERY_EDGES_PER_FAMILY" \
-  > "$LOG_ROOT/prepare.log" 2>&1
+if [[ -n "$PREP_SOURCE_ROOT" ]]; then
+  CACHE="$PREP_SOURCE_ROOT/aligned_role_query_dataset.pt"
+  BASE="$PREP_SOURCE_ROOT/paired_explicit_mlp.pt"
+  if [[ ! -f "$CACHE" || ! -f "$BASE" ]]; then
+    echo "missing reusable prepare artifacts under $PREP_SOURCE_ROOT" >&2
+    exit 2
+  fi
+  echo "[REUSE-PREPARE] cache=$CACHE checkpoint=$BASE" \
+    | tee -a "$LOG_ROOT/driver.log"
+else
+  echo "[PREPARE] closed-form trajectories and paired explicit MLP" \
+    | tee -a "$LOG_ROOT/driver.log"
+  CUDA_VISIBLE_DEVICES="$PREP_GPU" python -u scripts/run_aligned_context_edit_gate.py \
+    --mode prepare --dataset-dir "$DATA" --output-dir "$OUT_ROOT" \
+    --dataset-cache "$CACHE" --seed "$SEED" --device cuda \
+    --trajectories "${TRAJECTORIES:-16}" \
+    --forward-steps "${FORWARD_STEPS:-1000}" \
+    --record-every "${RECORD_EVERY:-10}" \
+    --candidates "${CANDIDATES:-16}" \
+    --feature-profile typed_closure_compact_v2 \
+    --supervision rooted_utility --forward-mode closed_form \
+    --candidate-mode unified \
+    --targeted-role-candidate-fraction "$TARGETED_FRACTION" \
+    --closure-candidate-fraction "$CLOSURE_FRACTION" \
+    --base-epochs "${BASE_EPOCHS:-100}" \
+    --role-conditioned-hgt --query-edges-per-family "$QUERY_EDGES_PER_FAMILY" \
+    > "$LOG_ROOT/prepare.log" 2>&1
+fi
 
 echo "[JOINT-TRAIN] HGT and MLP unfrozen from epoch 0 under role-aware utility" \
   | tee -a "$LOG_ROOT/driver.log"

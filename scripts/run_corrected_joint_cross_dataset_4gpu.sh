@@ -12,6 +12,7 @@ IMDB_DATA="${IMDB_DATA:-data/IMDB_movie_subgraphs/subgraph_000}"
 PUBMED_DATA="${PUBMED_DATA:-data/PubMed_baseline_subgraphs/subgraph_000}"
 DBLP_DATA="${DBLP_DATA:-data/DBLP_four_area_subgraphs/subgraph_000}"
 SYN200_DATA="${SYN200_DATA:-data/HGEN_syn_200_subgraphs/subgraph_000}"
+REUSE_PREP_ROOT="${REUSE_PREP_ROOT:-}"
 mkdir -p "$OUT_ROOT" "$LOG_ROOT"
 : > "$LOG_ROOT/driver.log"
 
@@ -29,6 +30,7 @@ launch() {
     SEED="$SEED" \
     PREP_GPU="$gpu" SAMPLE_BASE_GPU="$gpu" SAMPLE_JOINT_GPU="$gpu" \
     SERIAL_SAMPLING=1 \
+    PREP_SOURCE_ROOT="${REUSE_PREP_ROOT:+$REUSE_PREP_ROOT/$name}" \
     "$@" \
     bash scripts/run_corrected_joint_dataset_gate.sh \
     > "$LOG_ROOT/${name}_worker.log" 2>&1 &
