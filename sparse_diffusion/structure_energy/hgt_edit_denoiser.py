@@ -24,8 +24,10 @@ from .mixed_edit_diffusion import (
     inverse_edit,
     mixed_edit_candidate_matrix,
     sample_edit_candidates,
+    sample_closed_form_marginal_noise,
     sample_mixed_forward_transition,
 )
+from .roles import permuted_witness, sample_role_plan
 from .switch_chain import graph_metrics
 from .switch_diffusion import SwitchDiffusionDataset, SwitchDenoiserMLP, train_switch_denoiser
 
@@ -43,6 +45,10 @@ class HGTEditDataset:
     node_types: np.ndarray
     type_count: int
     family_count: int
+    edge_subtypes: Optional[Tuple[np.ndarray, ...]] = None
+    role_features: Optional[np.ndarray] = None
+    candidate_role_gains: Optional[np.ndarray] = None
+    time_fractions: Optional[np.ndarray] = None
 
     def __post_init__(self) -> None:
         count, candidates, _ = self.candidate_features.shape
@@ -54,6 +60,20 @@ class HGTEditDataset:
             raise ValueError("node feature snapshots have incompatible shape")
         if len(self.edge_indices) != count or len(self.edge_types) != count:
             raise ValueError("edge snapshot count does not match examples")
+        if self.edge_subtypes is not None and len(self.edge_subtypes) != count:
+            raise ValueError("edge subtype snapshot count does not match examples")
+        if self.role_features is not None and self.role_features.shape[:2] != (
+            count,
+            self.node_types.shape[0],
+        ):
+            raise ValueError("role feature snapshots have incompatible shape")
+        if self.candidate_role_gains is not None and self.candidate_role_gains.shape != (
+            count,
+            candidates,
+        ):
+            raise ValueError("candidate role gains must have shape [N,C]")
+        if self.time_fractions is not None and self.time_fractions.shape != (count,):
+            raise ValueError("time fractions must have shape [N]")
         if self.targets.shape != (count,) or self.trajectory_ids.shape != (count,):
             raise ValueError("target or trajectory shape does not match examples")
 
@@ -102,6 +122,74 @@ def graph_edge_tensors(graph: TypedGraph) -> Tuple[np.ndarray, np.ndarray]:
     )
 
 
+def graph_role_features(graph: TypedGraph, target_rows: np.ndarray) -> np.ndarray:
+    """Normalized anonymous target degrees and signed current-to-target gaps."""
+
+    family_names = tuple(_family_names(graph))
+    target = np.asarray(target_rows, dtype=np.float32)
+    expected = (graph.num_nodes, len(family_names))
+    if target.shape != expected:
+        raise ValueError(f"target role rows have shape {target.shape}, expected {expected}")
+    current = np.stack(
+        [graph.family_degrees(family) for family in family_names], axis=1
+    ).astype(np.float32)
+    scale = max(float(np.log1p(graph.num_nodes)), 1.0)
+    return np.concatenate(
+        (np.log1p(target) / scale, np.arcsinh(target - current) / scale), axis=1
+    ).astype(np.float32)
+
+
+def sample_typed_query_edges(
+    graph: TypedGraph,
+    *,
+    seed: int,
+    edges_per_family: int,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Sample sparse schema-valid NULL links without consulting a clean graph."""
+
+    requested = int(edges_per_family)
+    if requested < 0:
+        raise ValueError("query edges per family must be non-negative")
+    if requested == 0:
+        return np.empty((2, 0), dtype=np.int64), np.empty(0, dtype=np.int64)
+    rng = np.random.default_rng(int(seed))
+    sources: List[int] = []
+    targets: List[int] = []
+    relations: List[int] = []
+    for relation, family in enumerate(_family_names(graph)):
+        spec = graph.family_specs[family]
+        existing = {
+            (min(int(u), int(v)), max(int(u), int(v)))
+            for u, v in graph.family_edges[family]
+        }
+        sampled: set[tuple[int, int]] = set()
+        maximum = (
+            len(spec.src_nodes) * len(spec.dst_nodes)
+            if spec.bipartite
+            else len(spec.src_nodes) * max(len(spec.src_nodes) - 1, 0) // 2
+        ) - len(existing)
+        target_count = min(requested, max(maximum, 0))
+        attempts = 0
+        while len(sampled) < target_count and attempts < max(256, requested * 64):
+            attempts += 1
+            u = int(rng.choice(spec.src_nodes))
+            v = int(rng.choice(spec.dst_nodes))
+            if u == v:
+                continue
+            edge = (min(u, v), max(u, v))
+            if edge in existing or edge in sampled:
+                continue
+            sampled.add(edge)
+        for u, v in sorted(sampled):
+            sources.extend((u, v))
+            targets.extend((v, u))
+            relations.extend((relation, relation))
+    return (
+        np.asarray((sources, targets), dtype=np.int64),
+        np.asarray(relations, dtype=np.int64),
+    )
+
+
 def candidate_endpoint_matrix(candidates: Sequence[EditProposal]) -> np.ndarray:
     rows = []
     for proposal in candidates:
@@ -122,25 +210,224 @@ def build_hgt_edit_dataset(
     schedule: Optional[MixedKernelSchedule] = None,
     actions: Sequence[str] = EDIT_ACTIONS,
     supervision: str = "exact_inverse",
+    feature_profile: str = "typed_closure_full_v2",
+    role_conditioning: bool = False,
+    query_edges_per_family: int = 0,
+    forward_mode: str = "stepwise",
+    candidate_mode: str = "random",
+    targeted_role_candidate_fraction: float = 0.5,
+    closure_candidate_fraction: float = 0.5,
 ) -> HGTEditDataset:
     if int(trajectories) < 2:
         raise ValueError("HGT edit training needs at least two trajectories")
     prior = MarginalGraphPrior.from_training_graph(source)
     schedule = schedule or MixedKernelSchedule()
     supervision = str(supervision).strip().lower()
-    if supervision not in {"exact_inverse", "free_x0"}:
-        raise ValueError("HGT edit supervision must be exact_inverse or free_x0")
+    if supervision not in {"exact_inverse", "free_x0", "rooted_utility"}:
+        raise ValueError(
+            "HGT edit supervision must be exact_inverse, free_x0, or rooted_utility"
+        )
+    forward_mode = str(forward_mode).strip().lower()
+    if forward_mode not in {"stepwise", "closed_form"}:
+        raise ValueError("HGT edit forward mode must be stepwise or closed_form")
+    candidate_mode = str(candidate_mode).strip().lower()
+    if candidate_mode not in {"random", "unified"}:
+        raise ValueError("HGT edit candidate mode must be random or unified")
+    if candidate_mode == "unified" and not role_conditioning:
+        raise ValueError("unified candidates require role conditioning")
     candidate_features = []
     candidate_endpoints = []
     candidate_improvements = []
     node_features = []
     edge_indices = []
     edge_types = []
+    edge_subtypes = []
+    role_features = []
+    candidate_role_gains = []
+    time_fractions = []
     targets = []
     trajectory_ids = []
     for trajectory_id in range(int(trajectories)):
         rng = np.random.default_rng(int(seed) + 1_000_003 * trajectory_id)
-        graph = source.clone()
+        if role_conditioning:
+            role_plan = sample_role_plan(
+                source, int(seed) + 1_000_003 * trajectory_id + 17
+            )
+            graph = permuted_witness(source, role_plan)
+            target_rows = np.stack(
+                [
+                    role_plan.family_degrees[family]
+                    for family in sorted(source.family_specs)
+                ],
+                axis=1,
+            ).astype(np.int64)
+            clean_target = graph.clone()
+        else:
+            graph = source.clone()
+            target_rows = None
+            clean_target = source
+        rooted_target_signature = None
+        if supervision == "rooted_utility":
+            from .rooted_context_edit import (
+                rooted_closure_signature,
+                schema_supports_triangles,
+            )
+
+            if schema_supports_triangles(clean_target):
+                rooted_target_signature = rooted_closure_signature(clean_target)
+
+        def record_example(
+            graph: TypedGraph,
+            fraction: float,
+            step: int,
+            proposal: EditProposal | None,
+        ) -> None:
+            if supervision == "exact_inverse":
+                if proposal is None:
+                    raise ValueError("exact inverse supervision requires a forward edit")
+                candidates, target = sample_edit_candidates(
+                    graph,
+                    rng,
+                    candidates_per_example,
+                    actions=actions,
+                    positive=inverse_edit(proposal),
+                )
+                improvements = np.zeros(len(candidates), dtype=np.float32)
+            else:
+                if candidate_mode == "unified":
+                    from .role_guided_edit_diffusion import (
+                        sample_unified_edit_candidates,
+                    )
+
+                    candidates, _ = sample_unified_edit_candidates(
+                        graph,
+                        target_rows,
+                        tuple(sorted(graph.family_specs)),
+                        rng,
+                        candidates_per_example,
+                        targeted_fraction=float(targeted_role_candidate_fraction),
+                        closure_fraction=float(closure_candidate_fraction),
+                    )
+                else:
+                    candidates, _ = sample_edit_candidates(
+                        graph, rng, candidates_per_example, actions=actions
+                    )
+                if supervision == "free_x0":
+                    raw_improvements = np.asarray(
+                        [
+                            edit_distance_improvement(graph, clean_target, item)
+                            for item in candidates
+                        ],
+                        dtype=np.float32,
+                    )
+                else:
+                    from .rooted_context_edit import rooted_closure_signature, rooted_closure_utility
+
+                    target_signature = rooted_target_signature
+                    if target_signature is None:
+                        raw_improvements = np.zeros(
+                            len(candidates), dtype=np.float32
+                        )
+                    else:
+                        current_signature = rooted_closure_signature(
+                            graph, target_signature.boundaries
+                        )
+                        raw_improvements = np.asarray(
+                            [
+                                (
+                                    rooted_closure_utility(
+                                        graph,
+                                        item,
+                                        target_signature,
+                                        current=current_signature,
+                                    )
+                                    if item.action in {"switch", "noop"}
+                                    else 0.0
+                                )
+                                for item in candidates
+                            ],
+                            dtype=np.float32,
+                        )
+                centered = raw_improvements - float(raw_improvements.mean())
+                scale = max(float(raw_improvements.std()), 1.0e-8)
+                improvements = (centered / scale).astype(np.float32)
+                target = int(improvements.argmax())
+            edges, relations = graph_edge_tensors(graph)
+            subtypes = np.ones(relations.shape[0], dtype=np.int64)
+            if int(query_edges_per_family) > 0:
+                query_edges, query_relations = sample_typed_query_edges(
+                    graph,
+                    seed=(
+                        int(seed)
+                        + 1_000_003 * trajectory_id
+                        + 97_409 * step
+                    ),
+                    edges_per_family=int(query_edges_per_family),
+                )
+                if query_relations.size:
+                    edges = np.concatenate((edges, query_edges), axis=1)
+                    relations = np.concatenate((relations, query_relations))
+                    subtypes = np.concatenate(
+                        (subtypes, np.zeros(query_relations.shape[0], dtype=np.int64))
+                    )
+            candidate_features.append(
+                mixed_edit_candidate_matrix(
+                    graph,
+                    candidates,
+                    fraction,
+                    feature_profile=feature_profile,
+                )
+            )
+            candidate_endpoints.append(candidate_endpoint_matrix(candidates))
+            candidate_improvements.append(improvements)
+            node_features.append(graph_node_features(graph, fraction))
+            edge_indices.append(edges)
+            edge_types.append(relations)
+            edge_subtypes.append(subtypes)
+            if target_rows is not None:
+                role_features.append(graph_role_features(graph, target_rows))
+                from .role_guided_edit_diffusion import proposal_relation_degree_gain
+
+                family_to_id = {
+                    family: index
+                    for index, family in enumerate(sorted(graph.family_specs))
+                }
+                candidate_role_gains.append(
+                    np.asarray(
+                        [
+                            proposal_relation_degree_gain(
+                                graph, item, target_rows, family_to_id
+                            )
+                            for item in candidates
+                        ],
+                        dtype=np.float32,
+                    )
+                )
+            else:
+                candidate_role_gains.append(
+                    np.zeros(len(candidates), dtype=np.float32)
+                )
+            time_fractions.append(float(fraction))
+            targets.append(target)
+            trajectory_ids.append(trajectory_id)
+
+        if forward_mode == "closed_form":
+            example_count = max(1, int(forward_steps) // int(record_every))
+            for example_id in range(example_count):
+                fraction = float(example_id + 1) / float(example_count)
+                graph = sample_closed_form_marginal_noise(
+                    clean_target,
+                    prior,
+                    alpha_bar=(1.0 - fraction) ** 2,
+                    seed=(
+                        int(seed)
+                        + 1_000_003 * trajectory_id
+                        + 97_409 * (example_id + 1)
+                    ),
+                )
+                record_example(graph, fraction, example_id + 1, None)
+            continue
+
         for step in range(1, int(forward_steps) + 1):
             proposal = sample_mixed_forward_transition(
                 graph,
@@ -153,36 +440,12 @@ def build_hgt_edit_dataset(
             apply_edit(graph, proposal)
             if step % int(record_every) != 0:
                 continue
-            fraction = float(step) / float(forward_steps)
-            if supervision == "exact_inverse":
-                candidates, target = sample_edit_candidates(
-                    graph,
-                    rng,
-                    candidates_per_example,
-                    actions=actions,
-                    positive=inverse_edit(proposal),
-                )
-                improvements = np.zeros(len(candidates), dtype=np.float32)
-            else:
-                candidates, _ = sample_edit_candidates(
-                    graph, rng, candidates_per_example, actions=actions
-                )
-                improvements = np.asarray(
-                    [edit_distance_improvement(graph, source, item) for item in candidates],
-                    dtype=np.float32,
-                )
-                target = int(improvements.argmax())
-            edges, relations = graph_edge_tensors(graph)
-            candidate_features.append(
-                mixed_edit_candidate_matrix(graph, candidates, fraction)
+            record_example(
+                graph,
+                float(step) / float(forward_steps),
+                step,
+                proposal,
             )
-            candidate_endpoints.append(candidate_endpoint_matrix(candidates))
-            candidate_improvements.append(improvements)
-            node_features.append(graph_node_features(graph, fraction))
-            edge_indices.append(edges)
-            edge_types.append(relations)
-            targets.append(target)
-            trajectory_ids.append(trajectory_id)
     return HGTEditDataset(
         candidate_features=np.stack(candidate_features).astype(np.float32),
         candidate_endpoints=np.stack(candidate_endpoints),
@@ -195,6 +458,14 @@ def build_hgt_edit_dataset(
         node_types=source.node_types.copy(),
         type_count=len(source.type_names),
         family_count=len(source.family_specs),
+        edge_subtypes=tuple(edge_subtypes),
+        role_features=(
+            np.stack(role_features).astype(np.float32)
+            if role_conditioning
+            else None
+        ),
+        candidate_role_gains=np.stack(candidate_role_gains).astype(np.float32),
+        time_fractions=np.asarray(time_fractions, dtype=np.float32),
     )
 
 
@@ -266,14 +537,25 @@ class HGTListwiseEditDenoiser(nn.Module):
         edge_types: torch.Tensor,
         candidate_features: torch.Tensor,
         candidate_endpoints: torch.Tensor,
+        edge_subtypes: Optional[torch.Tensor] = None,
+        role_features: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         if node_features.ndim != 3 or candidate_features.ndim != 3:
             raise ValueError("HGT listwise inputs must be batched")
         batch_size, node_count, _ = node_features.shape
         hidden = self.node_input(node_features.reshape(batch_size * node_count, -1))
         flat_types = node_types.reshape(-1)
+        if edge_subtypes is None:
+            edge_subtypes = torch.ones_like(edge_types)
         for layer in self.layers:
-            hidden = layer(hidden, flat_types, edge_index, edge_types)
+            hidden = layer(
+                hidden,
+                flat_types,
+                edge_index,
+                edge_types,
+                edge_subtype=edge_subtypes,
+                edge_family=edge_types,
+            )
         hidden = hidden.reshape(batch_size, node_count, -1)
         graph_embedding = hidden.mean(dim=1)
         slots = []
@@ -298,12 +580,24 @@ def _make_batch(dataset: HGTEditDataset, indices: np.ndarray, device: torch.devi
     node_count = dataset.node_types.shape[0]
     edge_parts = []
     type_parts = []
+    subtype_parts = []
     for batch_index, example_index in enumerate(indices.tolist()):
         edge_parts.append(
             torch.from_numpy(dataset.edge_indices[example_index]).long()
             + batch_index * node_count
         )
         type_parts.append(torch.from_numpy(dataset.edge_types[example_index]).long())
+        subtype = (
+            np.ones(dataset.edge_types[example_index].shape[0], dtype=np.int64)
+            if dataset.edge_subtypes is None
+            else dataset.edge_subtypes[example_index]
+        )
+        subtype_parts.append(torch.from_numpy(subtype).long())
+    role = (
+        np.empty((batch_size, node_count, 0), dtype=np.float32)
+        if dataset.role_features is None
+        else dataset.role_features[indices]
+    )
     return (
         torch.from_numpy(dataset.node_features[indices]).float().to(device),
         torch.from_numpy(np.tile(dataset.node_types, (batch_size, 1))).long().to(device),
@@ -311,6 +605,8 @@ def _make_batch(dataset: HGTEditDataset, indices: np.ndarray, device: torch.devi
         torch.cat(type_parts).to(device),
         torch.from_numpy(dataset.candidate_features[indices]).float().to(device),
         torch.from_numpy(dataset.candidate_endpoints[indices]).long().to(device),
+        torch.cat(subtype_parts).to(device),
+        torch.from_numpy(role).float().to(device),
         torch.from_numpy(dataset.targets[indices]).long().to(device),
     )
 

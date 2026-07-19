@@ -1116,6 +1116,7 @@ def sample_gpu_role_guided_edit_diffusion(
     role_error_per_node_threshold: float,
     model_time_horizon_steps: int,
     model_time_start_step: int,
+    edits_per_outer_step: int = 1,
     closure_candidate_fraction: float,
     targeted_role_candidate_fraction: float,
     auto_role_balance: float = 0.0,
@@ -1127,6 +1128,7 @@ def sample_gpu_role_guided_edit_diffusion(
     metric_edge_chunk_size: int = 2048,
     phase_check_interval: int = 32,
     use_triton: bool = True,
+    unified_policy: bool = False,
 ) -> MixedEditSamplingResult:
     """Run fixed-count role-guided edit diffusion without hot-loop host traffic."""
 
@@ -1134,6 +1136,8 @@ def sample_gpu_role_guided_edit_diffusion(
         raise ValueError("steps and model time horizon must be positive")
     if int(phase_check_interval) <= 0:
         raise ValueError("GPU phase check interval must be positive")
+    if int(edits_per_outer_step) <= 0:
+        raise ValueError("edits per outer step must be positive")
     state = GpuTypedGraphState(
         initial_graph, target_rows, device, use_triton=use_triton
     )
@@ -1190,7 +1194,11 @@ def sample_gpu_role_guided_edit_diffusion(
                 "relation_degree_error": float(role_error.cpu()),
                 "relation_degree_error_per_node": float(role_error.cpu())
                 / state.num_nodes,
-                "phase": "role_alignment" if role_phase else "switch_refinement",
+                "phase": (
+                    "unified"
+                    if unified_policy
+                    else ("role_alignment" if role_phase else "switch_refinement")
+                ),
                 "role_phase_transition_step": (
                     None if role_phase else 0
                 ),
@@ -1207,30 +1215,60 @@ def sample_gpu_role_guided_edit_diffusion(
         context_hidden = None
 
         for completed in range(1, int(steps) + 1):
+            outer_completed = (completed - 1) // int(edits_per_outer_step) + 1
             time_fraction = max(
                 0.0,
                 1.0
-                - (int(model_time_start_step) + completed - 1)
+                - (int(model_time_start_step) + outer_completed - 1)
                 / float(model_time_horizon_steps),
             )
-            candidates = state.random_candidates(
-                candidates_per_step,
-                generator,
-                role_phase=role_phase,
-                targeted_fraction=(
-                    targeted_role_candidate_fraction if role_phase else 0.0
-                ),
-                closure_fraction=(
-                    0.0 if role_phase else closure_candidate_fraction
-                ),
-                proposal_pool_size=proposal_pool_size,
-                proposal_chunk_size=proposal_chunk_size,
-            )
+            if unified_policy:
+                role_count = max(2, int(candidates_per_step) // 2)
+                refinement_count = int(candidates_per_step) - role_count
+                if refinement_count < 2:
+                    raise ValueError(
+                        "GPU unified policy needs at least four candidates"
+                    )
+                role_candidates = state.random_candidates(
+                    role_count,
+                    generator,
+                    role_phase=True,
+                    targeted_fraction=targeted_role_candidate_fraction,
+                    closure_fraction=0.0,
+                    proposal_pool_size=proposal_pool_size,
+                    proposal_chunk_size=proposal_chunk_size,
+                )
+                refinement_candidates = state.random_candidates(
+                    refinement_count,
+                    generator,
+                    role_phase=False,
+                    targeted_fraction=0.0,
+                    closure_fraction=closure_candidate_fraction,
+                    proposal_pool_size=proposal_pool_size,
+                    proposal_chunk_size=proposal_chunk_size,
+                )
+                candidates = state._concat(
+                    (role_candidates, refinement_candidates)
+                )
+            else:
+                candidates = state.random_candidates(
+                    candidates_per_step,
+                    generator,
+                    role_phase=role_phase,
+                    targeted_fraction=(
+                        targeted_role_candidate_fraction if role_phase else 0.0
+                    ),
+                    closure_fraction=(
+                        0.0 if role_phase else closure_candidate_fraction
+                    ),
+                    proposal_pool_size=proposal_pool_size,
+                    proposal_chunk_size=proposal_chunk_size,
+                )
             features = state.compact_features(
                 candidates, time_fraction, model_input_dim
             )
             structure_logits = model(features[None]).squeeze(0)
-            if context_model is not None and not role_phase:
+            if context_model is not None and (unified_policy or not role_phase):
                 if context_hidden is None or (
                     (completed - 1) % int(context_refresh_steps) == 0
                 ):
@@ -1260,7 +1298,7 @@ def sample_gpu_role_guided_edit_diffusion(
             selected_action = candidates.action[selected]
             state.commit(candidates, selected)
             role_error = (role_error - degree_gains[selected]).clamp_min(0.0)
-            if role_phase and (
+            if (not unified_policy) and role_phase and (
                 completed % int(phase_check_interval) == 0
                 or completed == int(steps)
             ):
@@ -1282,9 +1320,13 @@ def sample_gpu_role_guided_edit_diffusion(
                         "relation_degree_error": error_value,
                         "relation_degree_error_per_node": error_value / state.num_nodes,
                         "phase": (
-                            "role_alignment"
-                            if role_phase
-                            else "switch_refinement"
+                            "unified"
+                            if unified_policy
+                            else (
+                                "role_alignment"
+                                if role_phase
+                                else "switch_refinement"
+                            )
                         ),
                         "role_phase_transition_step": transition_step,
                         "effective_role_weight": effective_role_weight,
