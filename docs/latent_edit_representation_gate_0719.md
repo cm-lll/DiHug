@@ -55,10 +55,37 @@ the latent geometry on all four datasets.
 
 ## Decision
 
-Proceed to the local response gate, not directly to long sampling. During
-training, one legal edit per state may be fully re-encoded to supervise a local
-response predictor. At inference, candidate edits must use the learned local
-response and periodic full refresh; no per-candidate full-graph encoding is
-allowed. The next hard criterion is paired held-out edit utility versus the old
-typed-closure MLP, followed by four-dataset free sampling only if utility
-improves.
+Do not proceed directly from representation evidence to long sampling. A local
+response gate was evaluated first: one legal edit per noisy state was fully
+re-encoded to supervise a predictor of the edit-induced change in endpoint
+distance to the fixed role prototype. At inference, all free candidates were
+scored from the pre-edit encoding; no candidate received a full-graph
+re-encoding.
+
+## Phase 3: Local Edit Response (Rejected)
+
+The initial vector-response experiment failed on all four datasets: the learned
+post-edit endpoint displacement had higher held-out MSE than the zero-change
+baseline. PubMed showed a small expected-utility improvement, but the response
+criterion itself still failed; IMDB, DBLP, and Syn-200 did not improve expected
+utility reliably.
+
+Because a single legal edit changes a normalized endpoint embedding by only
+about `1e-3`, the response target was then reduced to a scalar latent-energy
+change and scaled internally by `1000`. The response head was zero-initialized,
+so this rerun directly tested whether learning could beat the no-change
+predictor rather than a random initialization. The IMDB smoke still produced
+negative response-MSE reduction at every tested noise level:
+
+| Noise fraction | Response MSE reduction | Expected utility gain | Selected utility gain |
+|---:|---:|---:|---:|
+| `0.25` | `-0.0065` | `+0.0402` | `0.0` |
+| `0.50` | `-0.0015` | `-0.0041` | `+0.5` |
+| `0.75` | `-0.0706` | `-0.0055` | `-0.5` |
+| `1.00` | `-0.0102` | `+0.0153` | `0.0` |
+
+This rules out a mere target-scale or initialization bug. The current HGT
+representation contains useful global clean-graph information, but its
+single-edit latent response is too small and unstable to serve as an additional
+candidate-scoring signal. The response-aware path is therefore halted before
+free sampling. It is not part of the frozen generation method.
