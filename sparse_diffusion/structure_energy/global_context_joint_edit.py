@@ -169,29 +169,14 @@ class GlobalContextJointEditResidual(nn.Module):
         *,
         node_hidden_dim: int,
         candidate_feature_dim: int,
-        family_count: int = 0,
-        feature_mask: Optional[Sequence[float]] = None,
-        context_mode: str = "current",
         edge_slot_dim: int = 0,
         hidden_dim: int = 128,
     ) -> None:
         super().__init__()
-        context_mode = str(context_mode).strip().lower()
-        if context_mode not in {"none", "current", "counterfactual", "both"}:
-            raise ValueError(f"unsupported edit context mode {context_mode!r}")
         self.legacy_scorer = legacy_scorer
         self.node_hidden_dim = int(node_hidden_dim)
         self.candidate_feature_dim = int(candidate_feature_dim)
-        self.family_count = int(family_count)
-        self.context_mode = context_mode
         self.edge_slot_dim = int(edge_slot_dim)
-        if feature_mask is None:
-            mask = torch.ones(self.candidate_feature_dim, dtype=torch.float32)
-        else:
-            mask = torch.as_tensor(tuple(feature_mask), dtype=torch.float32)
-            if mask.shape != (self.candidate_feature_dim,):
-                raise ValueError("candidate feature mask has the wrong width")
-        self.register_buffer("feature_mask", mask, persistent=False)
 
         pair_width = 4 * self.node_hidden_dim
         self.endpoint_pair = nn.Sequential(
@@ -200,22 +185,7 @@ class GlobalContextJointEditResidual(nn.Module):
             nn.SiLU(),
         )
         slot_width = hidden_dim + self.edge_slot_dim
-        residual_width = self.candidate_feature_dim + self.node_hidden_dim
-        if self.context_mode in {"current", "both"}:
-            residual_width += 2 * slot_width
-        if self.context_mode in {"counterfactual", "both"}:
-            if self.family_count <= 0:
-                raise ValueError("counterfactual context needs a positive family count")
-            self.relation_context = nn.Embedding(self.family_count, node_hidden_dim)
-            self.left_message = nn.Linear(2 * node_hidden_dim, node_hidden_dim)
-            self.right_message = nn.Linear(2 * node_hidden_dim, node_hidden_dim)
-            self.virtual_update = nn.Sequential(
-                nn.Linear(2 * node_hidden_dim, node_hidden_dim),
-                nn.SiLU(),
-                nn.Linear(node_hidden_dim, node_hidden_dim),
-            )
-            self.virtual_norm = nn.LayerNorm(node_hidden_dim)
-            residual_width += 4 * self.node_hidden_dim
+        residual_width = self.candidate_feature_dim + 2 * slot_width + self.node_hidden_dim
         self.residual = nn.Sequential(
             nn.Linear(residual_width, hidden_dim),
             nn.LayerNorm(hidden_dim),
@@ -226,74 +196,6 @@ class GlobalContextJointEditResidual(nn.Module):
         assert isinstance(final, nn.Linear)
         nn.init.zeros_(final.weight)
         nn.init.zeros_(final.bias)
-
-    def base_score(self, candidate_features: torch.Tensor) -> torch.Tensor:
-        return self.legacy_scorer(candidate_features * self.feature_mask)
-
-    def _counterfactual_repr(
-        self,
-        node_hidden: torch.Tensor,
-        candidate_features: torch.Tensor,
-        candidate_endpoints: torch.Tensor,
-    ) -> torch.Tensor:
-        """Approximate endpoint states after an edit without re-encoding the graph."""
-
-        batch_size, candidate_count, _ = candidate_endpoints.shape
-        endpoints = candidate_endpoints.reshape(batch_size, candidate_count, 4, 2)
-        valid_edges = (endpoints[..., 0] >= 0) & (endpoints[..., 1] >= 0)
-        batch_ids = torch.arange(batch_size, device=node_hidden.device)[:, None, None]
-        left_ids = endpoints[..., 0].clamp(min=0)
-        right_ids = endpoints[..., 1].clamp(min=0)
-        left = node_hidden[batch_ids, left_ids]
-        right = node_hidden[batch_ids, right_ids]
-
-        family_start = 5
-        family_logits = candidate_features[
-            ..., family_start : family_start + self.family_count
-        ]
-        family_ids = family_logits.argmax(dim=-1)
-        relation = self.relation_context(family_ids)[:, :, None, :].expand(
-            -1, -1, 4, -1
-        )
-        to_left = self.left_message(torch.cat((right, relation), dim=-1))
-        to_right = self.right_message(torch.cat((left, relation), dim=-1))
-        signs = candidate_features.new_tensor((-1.0, -1.0, 1.0, 1.0))
-        signs = signs[None, None, :, None]
-        to_left = to_left * signs * valid_edges.unsqueeze(-1)
-        to_right = to_right * signs * valid_edges.unsqueeze(-1)
-
-        flat_ids = endpoints.reshape(batch_size, candidate_count, 8)
-        flat_valid = flat_ids >= 0
-        flat_safe = flat_ids.clamp(min=0)
-        current = node_hidden[
-            torch.arange(batch_size, device=node_hidden.device)[:, None, None],
-            flat_safe,
-        ]
-        contributions = torch.stack((to_left, to_right), dim=4).reshape(
-            batch_size, candidate_count, 8, self.node_hidden_dim
-        )
-        same_node = (flat_safe[..., :, None] == flat_safe[..., None, :]) & (
-            flat_valid[..., :, None] & flat_valid[..., None, :]
-        )
-        message_delta = torch.einsum(
-            "bcij,bcjh->bcih", same_node.to(contributions.dtype), contributions
-        )
-        update = self.virtual_update(torch.cat((current, message_delta), dim=-1))
-        after = self.virtual_norm(current + update)
-        delta = after - current
-
-        positions = torch.arange(8, device=node_hidden.device)
-        prior = positions[None, :] < positions[:, None]
-        duplicate_before = (same_node & prior[None, None]).any(dim=-1)
-        unique = flat_valid & ~duplicate_before
-        denominator = unique.sum(dim=-1, keepdim=True).clamp(min=1).to(current.dtype)
-
-        def pool(value: torch.Tensor) -> torch.Tensor:
-            return (value * unique.unsqueeze(-1)).sum(dim=2) / denominator
-
-        return torch.cat(
-            (pool(current), pool(after), pool(delta), pool(delta.abs())), dim=-1
-        )
 
     def _slot_repr(
         self,
@@ -346,29 +248,18 @@ class GlobalContextJointEditResidual(nn.Module):
         if candidate_features.shape[-1] != self.candidate_feature_dim:
             raise ValueError("candidate feature width does not match residual config")
 
-        masked_features = candidate_features * self.feature_mask
-        legacy_logits = self.base_score(candidate_features)
-        if self.context_mode == "none":
-            return legacy_logits
+        legacy_logits = self.legacy_scorer(candidate_features)
+        slot_repr = self._slot_repr(
+            node_hidden, candidate_endpoints, edge_slot_hidden
+        )
+        removed = slot_repr[:, :, :2].sum(dim=2)
+        added = slot_repr[:, :, 2:].sum(dim=2)
         graph_context = node_hidden.mean(dim=1)[:, None, :].expand(
             -1, candidate_features.shape[1], -1
         )
-        parts = [masked_features]
-        if self.context_mode in {"current", "both"}:
-            slot_repr = self._slot_repr(
-                node_hidden, candidate_endpoints, edge_slot_hidden
-            )
-            parts.extend(
-                (slot_repr[:, :, :2].sum(dim=2), slot_repr[:, :, 2:].sum(dim=2))
-            )
-        parts.append(graph_context)
-        if self.context_mode in {"counterfactual", "both"}:
-            parts.append(
-                self._counterfactual_repr(
-                    node_hidden, candidate_features, candidate_endpoints
-                )
-            )
-        residual_input = torch.cat(parts, dim=-1)
+        residual_input = torch.cat(
+            (candidate_features, removed, added, graph_context), dim=-1
+        )
         return legacy_logits + self.residual(residual_input).squeeze(-1)
 
 
@@ -390,18 +281,12 @@ class NodeContextJointEditResidual(GlobalContextJointEditResidual):
         *,
         node_hidden_dim: int,
         candidate_feature_dim: int,
-        family_count: int = 0,
-        feature_mask: Optional[Sequence[float]] = None,
-        context_mode: str = "current",
         hidden_dim: int = 128,
     ) -> None:
         super().__init__(
             legacy_scorer,
             node_hidden_dim=node_hidden_dim,
             candidate_feature_dim=candidate_feature_dim,
-            family_count=family_count,
-            feature_mask=feature_mask,
-            context_mode=context_mode,
             edge_slot_dim=0,
             hidden_dim=hidden_dim,
         )

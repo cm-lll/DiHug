@@ -633,107 +633,6 @@ def sample_role_alignment_candidates(
     return candidates
 
 
-def sample_unified_edit_candidates(
-    graph: TypedGraph,
-    target_rows: np.ndarray,
-    family_names: Sequence[str],
-    rng: np.random.Generator,
-    count: int,
-    *,
-    targeted_fraction: float = 0.5,
-    closure_fraction: float = 0.5,
-    degree_bias_power: float = 0.0,
-    positive: Optional[EditProposal] = None,
-) -> tuple[list[EditProposal], Optional[int]]:
-    """Sample one mixed relocation/switch pool for the unified reverse kernel.
-
-    The pool always contains a noop, role-targeted relocations, typed
-    wedge-closing switches, and generic legal fallbacks.  ``positive`` is used
-    only while constructing exact-inverse training lists; generation never
-    injects a target operation.
-    """
-
-    if int(count) < 2:
-        raise ValueError("unified candidate count must be at least two")
-    if not 0.0 <= float(targeted_fraction) <= 1.0:
-        raise ValueError("targeted fraction must lie in [0,1]")
-    if not 0.0 <= float(closure_fraction) <= 1.0:
-        raise ValueError("closure fraction must lie in [0,1]")
-    if float(targeted_fraction) + float(closure_fraction) > 1.0 + 1.0e-12:
-        raise ValueError("targeted and closure fractions may not sum above one")
-
-    noop = EditProposal("noop", sorted(graph.family_specs)[0], (), ())
-    candidates = [noop]
-    keys = {_edit_key(noop)}
-    target_key = None
-    if positive is not None:
-        target_key = _edit_key(positive)
-        if target_key not in keys:
-            candidates.append(positive)
-            keys.add(target_key)
-
-    available = int(count) - 1
-    role_target = int(round(available * float(targeted_fraction)))
-    closure_target = int(round(available * float(closure_fraction)))
-    proposal_state = build_role_target_proposal_state(
-        graph, target_rows, family_names
-    )
-
-    role_count = sum(item.action == "relocation" for item in candidates[1:])
-    attempts = 0
-    while role_count < role_target and len(candidates) < int(count):
-        attempts += 1
-        if attempts > max(512, role_target * 64):
-            break
-        proposal = propose_role_targeted_relocation(
-            graph,
-            target_rows,
-            family_names,
-            rng,
-            proposal_state=proposal_state,
-        )
-        if proposal is not None and _edit_key(proposal) not in keys:
-            keys.add(_edit_key(proposal))
-            candidates.append(proposal)
-            role_count += 1
-
-    closure_count = sum(item.action == "switch" for item in candidates[1:])
-    attempts = 0
-    while closure_count < closure_target and len(candidates) < int(count):
-        attempts += 1
-        if attempts > max(512, closure_target * 128):
-            break
-        proposal = propose_wedge_seeded_switch(
-            graph,
-            rng,
-            degree_bias_power=degree_bias_power,
-        )
-        if proposal is not None and _edit_key(proposal) not in keys:
-            keys.add(_edit_key(proposal))
-            candidates.append(proposal)
-            closure_count += 1
-
-    attempts = 0
-    while len(candidates) < int(count) and attempts < int(count) * 1024:
-        attempts += 1
-        proposal = sample_valid_edit(
-            graph, rng, actions=("relocation", "switch")
-        )
-        if proposal is not None and _edit_key(proposal) not in keys:
-            keys.add(_edit_key(proposal))
-            candidates.append(proposal)
-    if len(candidates) != int(count):
-        raise RuntimeError(
-            f"sampled only {len(candidates)}/{count} unified edit candidates"
-        )
-    target = (
-        None
-        if target_key is None
-        else next(index for index, item in enumerate(candidates) if _edit_key(item) == target_key)
-    )
-    return candidates, target
-
-
 def sample_role_guided_edit_diffusion(
     prior: MarginalGraphPrior,
     model: SwitchDenoiserMLP,
@@ -754,7 +653,6 @@ def sample_role_guided_edit_diffusion(
     role_error_per_node_threshold: float = 0.0,
     model_time_horizon_steps: Optional[int] = None,
     model_time_start_step: int = 0,
-    edits_per_outer_step: int = 1,
     closure_candidate_fraction: float = 0.0,
     closure_degree_bias_power: float = 0.0,
     auto_role_balance: float = 0.0,
@@ -787,9 +685,9 @@ def sample_role_guided_edit_diffusion(
     if sampling_backend not in {"cpu", "gpu"}:
         raise ValueError("sampling backend must be cpu or gpu")
     phase_policy = str(phase_policy).strip().lower()
-    if phase_policy not in {"auto", "unified", "relocation_only", "switch_only"}:
+    if phase_policy not in {"auto", "relocation_only", "switch_only"}:
         raise ValueError(
-            "phase policy must be auto, unified, relocation_only, or switch_only"
+            "phase policy must be auto, relocation_only, or switch_only"
         )
     selection_mode = str(selection_mode).strip().lower()
     if selection_mode not in {"model", "random"}:
@@ -797,12 +695,12 @@ def sample_role_guided_edit_diffusion(
     if sampling_backend == "gpu":
         if (
             tuple(actions) != ("relocation", "switch")
-            or phase_policy not in {"auto", "unified"}
+            or phase_policy != "auto"
             or selection_mode != "model"
         ):
             raise ValueError(
                 "GPU-resident backend currently requires the model-selected "
-                "automatic or unified relocation/switch policy"
+                "automatic relocation/switch policy"
             )
         from .gpu_role_guided_edit import sample_gpu_role_guided_edit_diffusion
 
@@ -826,7 +724,6 @@ def sample_role_guided_edit_diffusion(
                 else int(model_time_horizon_steps)
             ),
             model_time_start_step=model_time_start_step,
-            edits_per_outer_step=edits_per_outer_step,
             closure_candidate_fraction=closure_candidate_fraction,
             targeted_role_candidate_fraction=targeted_role_candidate_fraction,
             auto_role_balance=auto_role_balance,
@@ -838,7 +735,6 @@ def sample_role_guided_edit_diffusion(
             metric_edge_chunk_size=gpu_metric_edge_chunk_size,
             phase_check_interval=gpu_phase_check_interval,
             use_triton=gpu_use_triton,
-            unified_policy=phase_policy == "unified",
         )
         result.trace[0]["role_assignment_seed"] = role_assignment_seed
         result.trace[0]["role_assignment_hash"] = role_assignment_hash
@@ -893,7 +789,6 @@ def sample_role_guided_edit_diffusion(
             target_std_ratio=auto_role_balance,
         )
     current_role_error = relation_degree_error(graph, target_rows, family_names)
-    unified_policy = phase_policy == "unified"
     switch_refinement = phase_policy == "switch_only" or (
         phase_policy == "auto"
         and role_alignment_complete(
@@ -910,11 +805,7 @@ def sample_role_guided_edit_diffusion(
             "relation_degree_error_per_node": role_error_per_node(
                 current_role_error, graph.num_nodes
             ),
-            "phase": (
-                "unified"
-                if unified_policy
-                else ("switch_refinement" if switch_refinement else "role_alignment")
-            ),
+            "phase": "switch_refinement" if switch_refinement else "role_alignment",
             "role_phase_transition_step": transition_step,
             "effective_role_weight": effective_role_weight,
             "role_assignment_seed": role_assignment_seed,
@@ -934,15 +825,12 @@ def sample_role_guided_edit_diffusion(
         raise ValueError("model time horizon must be positive")
     if int(model_time_start_step) < 0:
         raise ValueError("model time start step must be non-negative")
-    if int(edits_per_outer_step) <= 0:
-        raise ValueError("edits per outer step must be positive")
     context_hidden = None
     last_context_refresh = -int(context_refresh_steps)
     with torch.no_grad():
         for completed in range(1, int(steps) + 1):
-            outer_completed = (completed - 1) // int(edits_per_outer_step) + 1
             time_fraction = denoising_time_fraction(
-                int(model_time_start_step) + outer_completed, time_horizon
+                int(model_time_start_step) + completed, time_horizon
             )
             if (
                 phase_policy == "auto"
@@ -955,18 +843,7 @@ def sample_role_guided_edit_diffusion(
             ):
                 switch_refinement = True
                 transition_step = completed
-            if unified_policy:
-                candidates, _ = sample_unified_edit_candidates(
-                    graph,
-                    target_rows,
-                    family_names,
-                    rng,
-                    candidates_per_step,
-                    targeted_fraction=targeted_role_candidate_fraction,
-                    closure_fraction=closure_candidate_fraction,
-                    degree_bias_power=closure_degree_bias_power,
-                )
-            elif switch_refinement:
+            if switch_refinement:
                 candidates = sample_switch_refinement_candidates(
                     graph,
                     rng,
@@ -989,21 +866,13 @@ def sample_role_guided_edit_diffusion(
                 structure_logits = torch.zeros(
                     len(candidates), dtype=torch.float32, device=device
                 )
-            elif context_model is not None and (
-                switch_refinement
-                or unified_policy
-                or bool(getattr(context_model, "role_conditioning", False))
-            ):
+            elif context_model is not None and switch_refinement:
                 if (
                     context_hidden is None
                     or completed - last_context_refresh >= int(context_refresh_steps)
                 ):
                     context_hidden = context_model.encode_graph(
-                        graph,
-                        time_fraction,
-                        device,
-                        target_rows=target_rows,
-                        query_seed=int(seed) + 4_294_967 * int(outer_completed),
+                        graph, time_fraction, device
                     )
                     last_context_refresh = completed
                 structure_logits, _ = context_model.score_graph_candidates(
@@ -1013,8 +882,6 @@ def sample_role_guided_edit_diffusion(
                     feature_profile,
                     device,
                     encoded=context_hidden,
-                    target_rows=target_rows,
-                    query_seed=int(seed) + 4_294_967 * int(outer_completed),
                 )
             else:
                 matrix = mixed_edit_candidate_matrix(
@@ -1071,13 +938,9 @@ def sample_role_guided_edit_diffusion(
                             current_role_error, graph.num_nodes
                         ),
                         "phase": (
-                            "unified"
-                            if unified_policy
-                            else (
-                                "switch_refinement"
-                                if switch_refinement
-                                else "role_alignment"
-                            )
+                            "switch_refinement"
+                            if switch_refinement
+                            else "role_alignment"
                         ),
                         "role_phase_transition_step": transition_step,
                         "effective_role_weight": effective_role_weight,

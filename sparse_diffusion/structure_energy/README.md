@@ -144,17 +144,6 @@ IMDB gate, rooted utility improved teacher-forced candidate ranking but did not
 materially improve the free-running graph over the legacy listwise scorer, so
 this path remains an ablation until a free-running validation gate passes.
 
-`run_corrected_joint_cross_dataset_4gpu.sh` is the distribution-aligned fusion
-gate.  It trains on closed-form marginal corruption, so the maximum-noise state
-matches the target-free Bernoulli initialization used at inference. Relocation,
-typed 2-switch and noop candidates compete in one listwise kernel. The teacher
-combines permutation-invariant rooted closure utility with analytic anonymous
-role gain; the sparse typed graph encoder and explicit edit MLP are optimized
-jointly from epoch zero. A held-out utility gate selects the context residual
-scale and falls back exactly to the explicit scorer when the gain is too small.
-IMDB, PubMed, DBLP and syn200 use separate compute budgets and candidate mixes,
-while sharing the same objective and inference contract.
-
 ## Guarantees and Limits
 
 Typed edits preserve graph simplicity and schema validity. Relocation and

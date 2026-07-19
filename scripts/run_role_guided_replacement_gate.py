@@ -65,12 +65,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--role-error-per-node-threshold", type=float, default=0.0)
     parser.add_argument("--model-time-horizon-steps", type=int, default=0)
     parser.add_argument("--model-time-start-step", type=int, default=0)
-    parser.add_argument(
-        "--edits-per-outer-step",
-        type=int,
-        default=1,
-        help="ordered graph edits sharing one diffusion time value",
-    )
     parser.add_argument("--initial-graph", type=Path)
     parser.add_argument(
         "--family-count-mode",
@@ -91,7 +85,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--context-scale", type=float, default=-1.0)
     parser.add_argument(
         "--phase-policy",
-        choices=("auto", "unified", "relocation_only", "switch_only"),
+        choices=("auto", "relocation_only", "switch_only"),
         default="auto",
     )
     parser.add_argument(
@@ -192,7 +186,6 @@ def main() -> None:
             None if args.model_time_horizon_steps <= 0 else args.model_time_horizon_steps
         ),
         model_time_start_step=args.model_time_start_step,
-        edits_per_outer_step=args.edits_per_outer_step,
         closure_candidate_fraction=args.closure_candidate_fraction,
         closure_degree_bias_power=args.closure_degree_bias_power,
         auto_role_balance=args.auto_role_balance,
@@ -225,7 +218,6 @@ def main() -> None:
         "schedule_power": args.schedule_power,
         "schedule_floor": args.schedule_floor,
         "role_error_per_node_threshold": args.role_error_per_node_threshold,
-        "edits_per_outer_step": args.edits_per_outer_step,
         "model_time_horizon_steps": (
             args.steps
             if args.model_time_horizon_steps <= 0

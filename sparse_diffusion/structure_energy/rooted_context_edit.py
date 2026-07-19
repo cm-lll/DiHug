@@ -17,8 +17,6 @@ from .hgt_edit_denoiser import (
     candidate_endpoint_matrix,
     graph_edge_tensors,
     graph_node_features,
-    graph_role_features,
-    sample_typed_query_edges,
 )
 from .mixed_edit_diffusion import (
     EditProposal,
@@ -32,56 +30,6 @@ from .switch_diffusion import SwitchDenoiserMLP
 
 
 DEFAULT_DEGREE_BUCKETS = (0, 1, 2, 4, 8, 16, 32)
-
-
-def compact_edit_feature_mask(
-    mode: str,
-    *,
-    candidate_feature_dim: int,
-    family_count: int,
-    type_count: int,
-) -> np.ndarray:
-    """Feature-group masks for ``typed_closure_compact_v2`` candidates."""
-
-    mode = str(mode).strip().lower()
-    supported = {
-        "full",
-        "no_degree",
-        "no_common",
-        "no_closure",
-        "no_time",
-        "minimal",
-    }
-    if mode not in supported:
-        raise ValueError(f"unsupported explicit feature mode {mode!r}")
-    if mode == "full":
-        return np.ones(int(candidate_feature_dim), dtype=np.float32)
-    action = slice(0, 5)
-    family = slice(action.stop, action.stop + int(family_count))
-    degree = slice(family.stop, family.stop + 16)
-    common = slice(degree.stop, degree.stop + 4)
-    scalar = slice(common.stop, common.stop + 4)
-    closure = slice(scalar.stop, scalar.stop + int(type_count) + 2)
-    if closure.stop != int(candidate_feature_dim):
-        raise ValueError(
-            "feature ablation currently requires typed_closure_compact_v2; "
-            f"computed width {closure.stop}, received {candidate_feature_dim}"
-        )
-    mask = np.ones(int(candidate_feature_dim), dtype=np.float32)
-    if mode == "no_degree":
-        mask[degree] = 0.0
-    elif mode == "no_common":
-        mask[common] = 0.0
-    elif mode == "no_closure":
-        mask[closure] = 0.0
-    elif mode == "no_time":
-        mask[scalar.start] = 0.0
-    elif mode == "minimal":
-        mask[:] = 0.0
-        mask[action] = 1.0
-        mask[family] = 1.0
-        mask[scalar.start] = 1.0
-    return mask
 
 
 def schema_supports_triangles(graph: TypedGraph) -> bool:
@@ -394,11 +342,6 @@ class RootedContextEditResidual(nn.Module):
         heads: int = 4,
         layers: int = 2,
         dropout: float = 0.1,
-        context_mode: str = "current",
-        explicit_feature_mode: str = "full",
-        role_conditioning: bool = False,
-        query_edges_per_family: int = 0,
-        query_context_gate_init: float = 0.2,
     ) -> None:
         super().__init__()
         if hidden_dim % heads:
@@ -412,27 +355,9 @@ class RootedContextEditResidual(nn.Module):
             "heads": int(heads),
             "layers": int(layers),
             "dropout": float(dropout),
-            "context_mode": str(context_mode),
-            "explicit_feature_mode": str(explicit_feature_mode),
-            "role_conditioning": bool(role_conditioning),
-            "query_edges_per_family": int(query_edges_per_family),
-            "query_context_gate_init": float(query_context_gate_init),
         }
-        feature_mask = compact_edit_feature_mask(
-            explicit_feature_mode,
-            candidate_feature_dim=candidate_feature_dim,
-            family_count=family_count,
-            type_count=type_count,
-        )
-        self.role_conditioning = bool(role_conditioning)
-        self.query_edges_per_family = int(query_edges_per_family)
-        if self.query_edges_per_family < 0:
-            raise ValueError("query edges per family must be non-negative")
-        encoded_node_width = int(node_feature_dim) + (
-            2 * int(family_count) if self.role_conditioning else 0
-        )
         self.node_input = nn.Sequential(
-            nn.Linear(encoded_node_width, hidden_dim),
+            nn.Linear(node_feature_dim, hidden_dim),
             nn.LayerNorm(hidden_dim),
             nn.SiLU(),
         )
@@ -445,8 +370,6 @@ class RootedContextEditResidual(nn.Module):
                 n_heads=heads,
                 dropout=dropout,
                 use_norm=True,
-                use_query_context_gate=self.query_edges_per_family > 0,
-                query_context_gate_init=float(query_context_gate_init),
             )
             for _ in range(int(layers))
         )
@@ -454,9 +377,6 @@ class RootedContextEditResidual(nn.Module):
             legacy_scorer,
             node_hidden_dim=hidden_dim,
             candidate_feature_dim=candidate_feature_dim,
-            family_count=family_count,
-            feature_mask=feature_mask,
-            context_mode=context_mode,
             hidden_dim=hidden_dim,
         )
         for parameter in self.joint.legacy_scorer.parameters():
@@ -474,28 +394,11 @@ class RootedContextEditResidual(nn.Module):
         node_types: torch.Tensor,
         edge_index: torch.Tensor,
         edge_types: torch.Tensor,
-        edge_subtypes: torch.Tensor | None = None,
-        role_features: torch.Tensor | None = None,
     ) -> torch.Tensor:
         batch_size, node_count, _ = node_features.shape
-        if self.role_conditioning:
-            if role_features is None:
-                raise ValueError("role-conditioned HGT requires role features")
-            if role_features.shape[:2] != node_features.shape[:2]:
-                raise ValueError("role features do not match node features")
-            node_features = torch.cat((node_features, role_features), dim=-1)
         hidden = self.node_input(node_features.reshape(batch_size * node_count, -1))
-        if edge_subtypes is None:
-            edge_subtypes = torch.ones_like(edge_types)
         for layer in self.layers:
-            hidden = layer(
-                hidden,
-                node_types.reshape(-1),
-                edge_index,
-                edge_types,
-                edge_subtype=edge_subtypes,
-                edge_family=edge_types,
-            )
+            hidden = layer(hidden, node_types.reshape(-1), edge_index, edge_types)
         return hidden.reshape(batch_size, node_count, -1)
 
     def score_encoded(
@@ -504,7 +407,7 @@ class RootedContextEditResidual(nn.Module):
         candidate_features: torch.Tensor,
         candidate_endpoints: torch.Tensor,
     ) -> torch.Tensor:
-        base = self.joint.base_score(candidate_features)
+        base = self.joint.legacy_scorer(candidate_features)
         fused = self.joint(
             candidate_features,
             node_hidden=hidden,
@@ -520,17 +423,8 @@ class RootedContextEditResidual(nn.Module):
         edge_types: torch.Tensor,
         candidate_features: torch.Tensor,
         candidate_endpoints: torch.Tensor,
-        edge_subtypes: torch.Tensor | None = None,
-        role_features: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        hidden = self.encode(
-            node_features,
-            node_types,
-            edge_index,
-            edge_types,
-            edge_subtypes,
-            role_features,
-        )
+        hidden = self.encode(node_features, node_types, edge_index, edge_types)
         return self.score_encoded(hidden, candidate_features, candidate_endpoints)
 
     def encode_graph(
@@ -538,41 +432,15 @@ class RootedContextEditResidual(nn.Module):
         graph: TypedGraph,
         time_fraction: float,
         device: torch.device,
-        *,
-        target_rows: np.ndarray | None = None,
-        query_seed: int = 0,
     ) -> torch.Tensor:
         edge_index, edge_types = graph_edge_tensors(graph)
-        edge_subtypes = np.ones(edge_types.shape[0], dtype=np.int64)
-        if self.query_edges_per_family > 0:
-            query_index, query_types = sample_typed_query_edges(
-                graph,
-                seed=int(query_seed),
-                edges_per_family=self.query_edges_per_family,
-            )
-            if query_types.size:
-                edge_index = np.concatenate((edge_index, query_index), axis=1)
-                edge_types = np.concatenate((edge_types, query_types))
-                edge_subtypes = np.concatenate(
-                    (edge_subtypes, np.zeros(query_types.shape[0], dtype=np.int64))
-                )
-        role_features = None
-        if self.role_conditioning:
-            if target_rows is None:
-                raise ValueError("role-conditioned HGT requires sampled target rows")
-            role_features = graph_role_features(graph, target_rows)
-        node_features = graph_node_features(graph, time_fraction)
         return self.encode(
-            torch.from_numpy(node_features)[None].float().to(device),
+            torch.from_numpy(graph_node_features(graph, time_fraction))[None]
+            .float()
+            .to(device),
             torch.from_numpy(graph.node_types)[None].long().to(device),
             torch.from_numpy(edge_index).long().to(device),
             torch.from_numpy(edge_types).long().to(device),
-            torch.from_numpy(edge_subtypes).long().to(device),
-            (
-                None
-                if role_features is None
-                else torch.from_numpy(role_features)[None].float().to(device)
-            ),
         )
 
     def score_graph_candidates(
@@ -583,17 +451,9 @@ class RootedContextEditResidual(nn.Module):
         feature_profile: str,
         device: torch.device,
         encoded: torch.Tensor | None = None,
-        target_rows: np.ndarray | None = None,
-        query_seed: int = 0,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         hidden = (
-            self.encode_graph(
-                graph,
-                time_fraction,
-                device,
-                target_rows=target_rows,
-                query_seed=query_seed,
-            )
+            self.encode_graph(graph, time_fraction, device)
             if encoded is None
             else encoded
         )
@@ -685,7 +545,7 @@ def train_rooted_context_residual(
             optimizer.zero_grad(set_to_none=True)
             logits = model(*batch[:-1])
             with torch.no_grad():
-                base = model.joint.base_score(batch[-3])
+                base = model.joint.legacy_scorer(batch[-3])
                 teacher = _teacher_distribution(batch[-1], teacher_temperature)
                 base_distribution = torch.softmax(base, dim=1)
             task = -(teacher * torch.log_softmax(logits, dim=1)).sum(dim=1).mean()
@@ -709,7 +569,7 @@ def train_rooted_context_residual(
             indices = validation_ids[start : start + int(batch_size)]
             batch = _batch(dataset, indices, device)
             logits = model(*batch[:-1])
-            base = model.joint.base_score(batch[-3])
+            base = model.joint.legacy_scorer(batch[-3])
             utility = batch[-1]
             validation_rows.append((base.cpu(), logits.cpu(), utility.cpu()))
     base_logits = torch.cat([row[0] for row in validation_rows])

@@ -40,6 +40,12 @@ two-hop/query-gate, closure-bucket, node-closure, population quota, or old HSD
 sampling sweeps. Their historical implementations remain recoverable through
 Git history, but they are not active paper methods.
 
+The jointly unfrozen HGT + edit-MLP context experiment is also inactive. Its
+strict paired gate did not improve closure and anonymous-role alignment
+simultaneously on IMDB, PubMed, DBLP, and Syn-200. The temporary trainer and
+launchers were removed after the gate; the experiment remains available in Git
+history only.
+
 ## Reproducibility rule
 
 Every paper run must record the Git commit, dataset fingerprint, checkpoint
