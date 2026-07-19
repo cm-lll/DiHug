@@ -651,6 +651,7 @@ def sample_role_guided_edit_diffusion(
     schedule_power: float = 1.0,
     schedule_floor: float = 0.0,
     role_error_per_node_threshold: float = 0.0,
+    relative_role_error_threshold: Optional[float] = None,
     model_time_horizon_steps: Optional[int] = None,
     model_time_start_step: int = 0,
     closure_candidate_fraction: float = 0.0,
@@ -687,6 +688,10 @@ def sample_role_guided_edit_diffusion(
     sampling_backend = str(sampling_backend).strip().lower()
     if sampling_backend not in {"cpu", "gpu"}:
         raise ValueError("sampling backend must be cpu or gpu")
+    if relative_role_error_threshold is not None and not (
+        0.0 <= float(relative_role_error_threshold) <= 1.0
+    ):
+        raise ValueError("relative role-error threshold must be in [0, 1]")
     phase_policy = str(phase_policy).strip().lower()
     if phase_policy not in {"auto", "relocation_only", "switch_only"}:
         raise ValueError(
@@ -726,6 +731,7 @@ def sample_role_guided_edit_diffusion(
             schedule_power=schedule_power,
             schedule_floor=schedule_floor,
             role_error_per_node_threshold=role_error_per_node_threshold,
+            relative_role_error_threshold=relative_role_error_threshold,
             model_time_horizon_steps=(
                 int(steps)
                 if model_time_horizon_steps is None
@@ -802,13 +808,24 @@ def sample_role_guided_edit_diffusion(
             target_std_ratio=auto_role_balance,
         )
     current_role_error = relation_degree_error(graph, target_rows, family_names)
-    switch_refinement = phase_policy == "switch_only" or (
-        phase_policy == "auto"
-        and role_alignment_complete(
-            current_role_error,
+    relative_role_error_target = (
+        current_role_error * float(relative_role_error_threshold)
+        if relative_role_error_threshold is not None
+        else None
+    )
+
+    def role_alignment_is_complete(error: float) -> bool:
+        if relative_role_error_target is not None:
+            return float(error) <= float(relative_role_error_target)
+        return role_alignment_complete(
+            error,
             graph.num_nodes,
             role_error_per_node_threshold,
         )
+
+    switch_refinement = phase_policy == "switch_only" or (
+        phase_policy == "auto"
+        and role_alignment_is_complete(current_role_error)
     )
     transition_step = 0 if switch_refinement else None
     trace = [
@@ -818,6 +835,12 @@ def sample_role_guided_edit_diffusion(
             "relation_degree_error_per_node": role_error_per_node(
                 current_role_error, graph.num_nodes
             ),
+            "relation_degree_error_threshold": (
+                relative_role_error_target
+                if relative_role_error_target is not None
+                else float(role_error_per_node_threshold) * graph.num_nodes
+            ),
+            "relative_role_error_threshold": relative_role_error_threshold,
             "phase": "switch_refinement" if switch_refinement else "role_alignment",
             "role_phase_transition_step": transition_step,
             "effective_role_weight": effective_role_weight,
@@ -850,11 +873,7 @@ def sample_role_guided_edit_diffusion(
             if (
                 phase_policy == "auto"
                 and not switch_refinement
-                and role_alignment_complete(
-                current_role_error,
-                graph.num_nodes,
-                role_error_per_node_threshold,
-                )
+                and role_alignment_is_complete(current_role_error)
             ):
                 switch_refinement = True
                 transition_step = completed

@@ -92,6 +92,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--schedule-power", type=float, default=1.0)
     parser.add_argument("--schedule-floor", type=float, default=0.0)
     parser.add_argument("--role-error-per-node-threshold", type=float, default=0.0)
+    parser.add_argument("--relative-role-error-threshold", type=float)
     parser.add_argument("--model-time-horizon-steps", type=int, default=0)
     parser.add_argument("--model-time-start-step", type=int, default=0)
     parser.add_argument("--initial-graph", type=Path)
@@ -286,6 +287,7 @@ def main() -> None:
         schedule_power=args.schedule_power,
         schedule_floor=args.schedule_floor,
         role_error_per_node_threshold=args.role_error_per_node_threshold,
+        relative_role_error_threshold=args.relative_role_error_threshold,
         model_time_horizon_steps=(
             None if args.model_time_horizon_steps <= 0 else args.model_time_horizon_steps
         ),
@@ -325,6 +327,7 @@ def main() -> None:
         "schedule_power": args.schedule_power,
         "schedule_floor": args.schedule_floor,
         "role_error_per_node_threshold": args.role_error_per_node_threshold,
+        "relative_role_error_threshold": args.relative_role_error_threshold,
         "model_time_horizon_steps": (
             args.steps
             if args.model_time_horizon_steps <= 0
