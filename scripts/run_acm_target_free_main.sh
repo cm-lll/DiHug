@@ -32,26 +32,31 @@ python scripts/freeze_anonymous_role_prior.py \
   --dataset-dir "$DATASET" --output "$ROLE_PRIOR" \
   > "$LOG_ROOT/role_prior.log" 2>&1
 
-read -r TRAJECTORIES FORWARD_STEPS RECORD_EVERY EPOCHS SAMPLE_STEPS ROLE_COMPONENTS < <(
+read -r TRAJECTORIES FORWARD_STEPS RECORD_EVERY EPOCHS SAMPLE_STEPS ROLE_COMPONENTS \
+  TRAIN_CANDIDATES SAMPLE_CANDIDATES KERNEL < <(
   python - "$PROFILE" "$SMOKE_ONLY" <<'PY'
 import json, sys
 p = json.load(open(sys.argv[1]))
 if int(sys.argv[2]):
-    print(1, 1000, 10, 1, 100, min(int(p["role_components"]), 64))
+    print(2, 1000, 10, 1, 100, min(int(p["role_components"]), 64),
+          min(int(p["train_candidates"]), 16),
+          min(int(p["sample_candidates"]), 16), p["kernel"])
 else:
     print(p["trajectories"], p["forward_steps"], p["record_every"],
-          p["epochs"], p["sample_steps"], p["role_components"])
+          p["epochs"], p["sample_steps"], p["role_components"],
+          p["train_candidates"], p["sample_candidates"], p["kernel"])
 PY
 )
 
-echo "[ACM-TRAIN] smoke=$SMOKE_ONLY seed=$SEED trajectories=$TRAJECTORIES forward=$FORWARD_STEPS epochs=$EPOCHS" \
+echo "[ACM-TRAIN] smoke=$SMOKE_ONLY seed=$SEED kernel=$KERNEL trajectories=$TRAJECTORIES forward=$FORWARD_STEPS epochs=$EPOCHS candidates=$TRAIN_CANDIDATES" \
   | tee "$LOG_ROOT/driver.log"
 CUDA_VISIBLE_DEVICES="${GPU:-0}" python -u scripts/run_mixed_edit_diffusion.py \
-  --mode train --denoiser listwise --kernel bdrs \
+  --mode train --denoiser listwise --kernel "$KERNEL" \
   --dataset-dir "$DATASET" --output-dir "$MODEL_DIR" --device "$DEVICE" \
   --seed "$SEED" --trajectories "$TRAJECTORIES" \
   --forward-steps "$FORWARD_STEPS" --record-every "$RECORD_EVERY" \
-  --train-candidates 16 --feature-profile typed_closure_compact_v2 \
+  --train-candidates "$TRAIN_CANDIDATES" \
+  --feature-profile typed_closure_compact_v2 \
   --epochs "$EPOCHS" --batch-size 64 --hidden-dim 256 --layers 3 \
   --training-objective inverse_ce --fixed-t-trials 16 \
   --role-corruption-fraction 1.0 \
@@ -60,7 +65,7 @@ CUDA_VISIBLE_DEVICES="${GPU:-0}" python -u scripts/run_mixed_edit_diffusion.py \
   --role-prior-randomization-steps-per-edge 2 \
   > "$LOG_ROOT/train_seed${SEED}.log" 2>&1
 
-echo "[ACM-SAMPLE] target-free Binomial initialization, steps=$SAMPLE_STEPS" \
+echo "[ACM-SAMPLE] target-free Binomial initialization, steps=$SAMPLE_STEPS candidates=$SAMPLE_CANDIDATES" \
   | tee -a "$LOG_ROOT/driver.log"
 CUDA_VISIBLE_DEVICES="${GPU:-0}" python -u scripts/run_role_guided_replacement_gate.py \
   --dataset-dir "$DATASET" \
@@ -68,7 +73,7 @@ CUDA_VISIBLE_DEVICES="${GPU:-0}" python -u scripts/run_role_guided_replacement_g
   --role-prior "$ROLE_PRIOR" --strict-target-free \
   --output-dir "$SAMPLE_DIR" --seed "$SEED" --device "$DEVICE" \
   --sampling-backend gpu --family-count-mode binomial \
-  --steps "$SAMPLE_STEPS" --candidates 16 \
+  --steps "$SAMPLE_STEPS" --candidates "$SAMPLE_CANDIDATES" \
   --metrics-every "$(( SAMPLE_STEPS < 10 ? 1 : SAMPLE_STEPS / 10 ))" \
   --model-time-horizon-steps "$(( SAMPLE_STEPS * 2 ))" \
   --role-weight 0.05 --gain-scale 10 --schedule-power 1 --schedule-floor 1 \

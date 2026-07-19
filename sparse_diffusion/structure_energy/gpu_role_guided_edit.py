@@ -1128,9 +1128,13 @@ class GpuTypedGraphState:
         return delta
 
     def degree_gains(self, batch: GpuEditBatch) -> torch.Tensor:
-        delta = self._endpoint_deltas(batch).to(torch.float32)
-        current = self.family_degree[batch.family].to(torch.float32)
-        target = self.target_rows.transpose(0, 1)[batch.family]
+        # Degree rows are integer-valued. Keep their global squared-error
+        # ledger in float64 so large graphs do not accumulate float32 drift
+        # across many ordered edits. Neural scoring casts this gain back to the
+        # scorer dtype after the exact ledger update.
+        delta = self._endpoint_deltas(batch).to(torch.float64)
+        current = self.family_degree[batch.family].to(torch.float64)
+        target = self.target_rows.transpose(0, 1)[batch.family].to(torch.float64)
         before = current - target
         return (before.square() - (before + delta).square()).sum(dim=1)
 
@@ -1245,8 +1249,9 @@ class GpuTypedGraphState:
             self.edge_slots[edge[1], edge[0]] = slot_value
 
     def relation_degree_error(self) -> torch.Tensor:
-        current = self.family_degree.transpose(0, 1).to(torch.float32)
-        return (current - self.target_rows).square().sum()
+        current = self.family_degree.transpose(0, 1).to(torch.float64)
+        target = self.target_rows.to(torch.float64)
+        return (current - target).square().sum()
 
     def context_node_features(self, time_fraction: float) -> torch.Tensor:
         columns = [
@@ -1617,7 +1622,7 @@ def sample_gpu_role_guided_edit_diffusion(
             scores = structure_logits + (
                 float(effective_role_weight)
                 * multiplier
-                * degree_gains
+                * degree_gains.to(structure_logits.dtype)
                 / float(gain_scale)
             )
             selected = scores.argmax()
@@ -1670,3 +1675,365 @@ def sample_gpu_role_guided_edit_diffusion(
         proposed=int(steps) * int(candidates_per_step),
         applied=int(applied.cpu()),
     )
+
+
+def _encode_batched_context(
+    states: Sequence[GpuTypedGraphState],
+    context_model: torch.nn.Module,
+    role_conditions: torch.Tensor | None,
+    time_fraction: float,
+) -> torch.Tensor:
+    """Encode independent chains as one block-diagonal sparse HGT batch."""
+
+    if not states:
+        raise ValueError("batched context needs at least one graph state")
+    node_count = states[0].num_nodes
+    if any(state.num_nodes != node_count for state in states):
+        raise ValueError("batched context requires equal node counts")
+    node_features = torch.stack(
+        [state.context_node_features(time_fraction) for state in states]
+    )
+    node_types = torch.stack([state.node_types for state in states])
+    edge_parts = []
+    type_parts = []
+    for batch_id, state in enumerate(states):
+        edge_index, edge_types = state.context_edge_tensors()
+        edge_parts.append(edge_index + batch_id * node_count)
+        type_parts.append(edge_types)
+    return context_model.encode(
+        node_features,
+        node_types,
+        torch.cat(edge_parts, dim=1),
+        torch.cat(type_parts),
+        role_conditions=role_conditions,
+    )
+
+
+def sample_gpu_role_guided_edit_diffusion_batched(
+    initial_graphs: Sequence[TypedGraph],
+    model: torch.nn.Module,
+    target_rows: Sequence[np.ndarray],
+    *,
+    steps: int,
+    candidates_per_step: int,
+    seeds: Sequence[int],
+    device: str | torch.device = "cuda",
+    metrics_every: int = 100,
+    role_weight: float = 0.1,
+    gain_scale: float = 10.0,
+    schedule_power: float = 1.0,
+    schedule_floor: float = 0.0,
+    role_error_per_node_threshold: float = 0.0,
+    model_time_horizon_steps: int = 1,
+    model_time_start_step: int = 0,
+    closure_candidate_fraction: float = 0.0,
+    targeted_role_candidate_fraction: float = 0.0,
+    auto_role_balance: float = 0.0,
+    role_calibration_batches: int = 32,
+    context_model: torch.nn.Module | None = None,
+    context_refresh_steps: int = 20,
+    proposal_pool_size: int = 0,
+    proposal_chunk_size: int = 1024,
+    candidate_mode: str = "legacy_pool",
+    metric_edge_chunk_size: int = 2048,
+    phase_check_interval: int = 32,
+    use_triton: bool = True,
+) -> list[MixedEditSamplingResult]:
+    """Run independent edit chains with shared batched MLP/HGT forwards.
+
+    Candidate construction, random streams, selection, and mutation remain
+    chain-local. Only dense neural operations are batched, so no graph can send
+    messages to another graph and every chain retains the single-chain
+    transition semantics.
+    """
+
+    chain_count = len(initial_graphs)
+    if chain_count == 0:
+        raise ValueError("batched sampling needs at least one chain")
+    if len(target_rows) != chain_count or len(seeds) != chain_count:
+        raise ValueError("graphs, role rows, and seeds must have equal length")
+    if int(steps) <= 0 or int(model_time_horizon_steps) <= 0:
+        raise ValueError("steps and model time horizon must be positive")
+    if int(phase_check_interval) <= 0:
+        raise ValueError("GPU phase check interval must be positive")
+    if context_model is not None and int(context_refresh_steps) <= 0:
+        raise ValueError("context refresh interval must be positive")
+
+    reference = initial_graphs[0]
+    for graph in initial_graphs[1:]:
+        if (
+            graph.num_nodes != reference.num_nodes
+            or graph.type_names != reference.type_names
+            or tuple(sorted(graph.family_specs))
+            != tuple(sorted(reference.family_specs))
+            or not np.array_equal(graph.node_types, reference.node_types)
+        ):
+            raise ValueError(
+                "batched chains must share node count, schema, and node types"
+            )
+
+    states = [
+        GpuTypedGraphState(graph, rows, device, use_triton=use_triton)
+        for graph, rows in zip(initial_graphs, target_rows)
+    ]
+    model = model.to(states[0].device).eval()
+    if context_model is not None:
+        context_model = context_model.to(states[0].device).eval()
+    model_input_dim = int(model.input_dim)
+    generators = []
+    for seed in seeds:
+        generator = torch.Generator(device=states[0].device)
+        generator.manual_seed(int(seed))
+        generators.append(generator)
+
+    effective_role_weights = []
+    with torch.no_grad():
+        for state, generator in zip(states, generators):
+            effective = float(role_weight)
+            if float(auto_role_balance) > 0.0:
+                logits = []
+                gains = []
+                for _ in range(int(role_calibration_batches)):
+                    candidates = state.random_candidates(
+                        candidates_per_step,
+                        generator,
+                        role_phase=True,
+                        targeted_fraction=0.0,
+                        closure_fraction=0.0,
+                        proposal_pool_size=0,
+                        candidate_mode=candidate_mode,
+                    )
+                    matrix = state.compact_features(
+                        candidates, 1.0, model_input_dim
+                    )
+                    logits.append(model(matrix[None]).squeeze(0))
+                    gains.append(state.degree_gains(candidates).abs())
+                flat_logits = torch.cat(logits)
+                positive_gains = torch.cat(gains)
+                positive_gains = positive_gains[positive_gains > 0]
+                if positive_gains.numel() == 0:
+                    raise ValueError(
+                        "automatic role calibration found no nonzero gains"
+                    )
+                effective = float(
+                    (
+                        float(auto_role_balance)
+                        * flat_logits.std().clamp_min(1.0e-6)
+                        * float(gain_scale)
+                        / torch.quantile(positive_gains, 0.9).clamp_min(1.0e-6)
+                    ).cpu()
+                )
+            effective_role_weights.append(effective)
+
+        role_errors = [state.relation_degree_error() for state in states]
+        thresholds = [
+            float(role_error_per_node_threshold) * state.num_nodes
+            for state in states
+        ]
+        role_phases = [
+            bool((error > threshold).cpu())
+            for error, threshold in zip(role_errors, thresholds)
+        ]
+        transition_steps = [-1 if phase else 0 for phase in role_phases]
+        traces = []
+        for state, error, phase, transition, effective in zip(
+            states,
+            role_errors,
+            role_phases,
+            transition_steps,
+            effective_role_weights,
+        ):
+            error_value = float(error.cpu())
+            traces.append(
+                [
+                    {
+                        "step": 0.0,
+                        "relation_degree_error": error_value,
+                        "relation_degree_error_per_node": error_value
+                        / state.num_nodes,
+                        "phase": (
+                            "role_alignment" if phase else "switch_refinement"
+                        ),
+                        "role_phase_transition_step": (
+                            None if phase else transition
+                        ),
+                        "effective_role_weight": effective,
+                        "sampling_backend": "gpu_resident_batched",
+                        **state.gpu_graph_metrics(metric_edge_chunk_size),
+                    }
+                ]
+            )
+
+        action_counts = torch.zeros(
+            (chain_count, len(SCORER_ACTIONS)),
+            dtype=torch.long,
+            device=states[0].device,
+        )
+        applied = torch.zeros(
+            chain_count, dtype=torch.long, device=states[0].device
+        )
+        context_hidden = None
+        context_role_conditions = None
+        if context_model is not None and getattr(
+            context_model, "role_condition_dim", 0
+        ) > 0:
+            context_role_conditions = context_model.normalize_role_rows(
+                torch.stack([state.target_rows for state in states]),
+                torch.stack([state.node_types for state in states]),
+            )
+
+        for completed in range(1, int(steps) + 1):
+            time_fraction = max(
+                0.0,
+                1.0
+                - (int(model_time_start_step) + completed - 1)
+                / float(model_time_horizon_steps),
+            )
+            candidate_batches = [
+                state.random_candidates(
+                    candidates_per_step,
+                    generator,
+                    role_phase=phase,
+                    targeted_fraction=(
+                        targeted_role_candidate_fraction if phase else 0.0
+                    ),
+                    closure_fraction=(
+                        0.0 if phase else closure_candidate_fraction
+                    ),
+                    proposal_pool_size=proposal_pool_size,
+                    proposal_chunk_size=proposal_chunk_size,
+                    candidate_mode=candidate_mode,
+                )
+                for state, generator, phase in zip(
+                    states, generators, role_phases
+                )
+            ]
+            features = torch.stack(
+                [
+                    state.compact_features(
+                        candidates, time_fraction, model_input_dim
+                    )
+                    for state, candidates in zip(states, candidate_batches)
+                ]
+            )
+            structure_logits = model(features)
+            if context_model is not None and not all(role_phases):
+                if context_hidden is None or (
+                    (completed - 1) % int(context_refresh_steps) == 0
+                ):
+                    context_hidden = _encode_batched_context(
+                        states,
+                        context_model,
+                        context_role_conditions,
+                        time_fraction,
+                    )
+                endpoints = torch.stack(
+                    [
+                        state.candidate_endpoints(candidates)
+                        for state, candidates in zip(states, candidate_batches)
+                    ]
+                )
+                context_logits = context_model.score_encoded(
+                    context_hidden, features, endpoints
+                )
+                phase_mask = torch.tensor(
+                    role_phases, dtype=torch.bool, device=states[0].device
+                )[:, None]
+                structure_logits = torch.where(
+                    phase_mask, structure_logits, context_logits
+                )
+
+            degree_gains = torch.stack(
+                [
+                    state.degree_gains(candidates)
+                    for state, candidates in zip(states, candidate_batches)
+                ]
+            )
+            annealed = float(time_fraction) ** float(schedule_power)
+            multiplier = float(schedule_floor) + (
+                1.0 - float(schedule_floor)
+            ) * annealed
+            weights = torch.tensor(
+                effective_role_weights,
+                dtype=structure_logits.dtype,
+                device=states[0].device,
+            )[:, None]
+            scores = structure_logits + (
+                weights
+                * multiplier
+                * degree_gains.to(structure_logits.dtype)
+                / float(gain_scale)
+            )
+            selected = scores.argmax(dim=1)
+
+            for chain, (state, candidates) in enumerate(
+                zip(states, candidate_batches)
+            ):
+                selected_index = selected[chain]
+                selected_action = candidates.action[selected_index]
+                state.commit(candidates, selected_index)
+                role_errors[chain] = (
+                    role_errors[chain] - degree_gains[chain, selected_index]
+                ).clamp_min(0.0)
+                if role_phases[chain] and (
+                    completed % int(phase_check_interval) == 0
+                    or completed == int(steps)
+                ):
+                    if float(role_errors[chain].cpu()) <= thresholds[chain]:
+                        role_phases[chain] = False
+                        transition_steps[chain] = completed
+                action_counts[chain].scatter_add_(
+                    0,
+                    selected_action[None],
+                    torch.ones(1, dtype=torch.long, device=state.device),
+                )
+                applied[chain] += (selected_action != NOOP_ID).to(torch.long)
+
+            if completed == int(steps) or (
+                int(metrics_every) > 0 and completed % int(metrics_every) == 0
+            ):
+                for chain, state in enumerate(states):
+                    error_value = float(role_errors[chain].cpu())
+                    traces[chain].append(
+                        {
+                            "step": float(completed),
+                            "relation_degree_error": error_value,
+                            "relation_degree_error_per_node": error_value
+                            / state.num_nodes,
+                            "phase": (
+                                "role_alignment"
+                                if role_phases[chain]
+                                else "switch_refinement"
+                            ),
+                            "role_phase_transition_step": transition_steps[chain],
+                            "effective_role_weight": effective_role_weights[chain],
+                            "sampling_backend": "gpu_resident_batched",
+                            **state.gpu_graph_metrics(metric_edge_chunk_size),
+                        }
+                    )
+
+    results = []
+    for chain, (state, initial_graph) in enumerate(zip(states, initial_graphs)):
+        final_graph = state.to_graph(initial_graph)
+        final_graph.validate()
+        recomputed = state.relation_degree_error()
+        if not torch.isclose(
+            role_errors[chain], recomputed, rtol=0.0, atol=1.0e-4
+        ):
+            raise RuntimeError(
+                "batched GPU relation-degree error drifted from state"
+            )
+        counts = action_counts[chain].cpu().tolist()
+        results.append(
+            MixedEditSamplingResult(
+                graph=final_graph,
+                trace=traces[chain],
+                action_counts={
+                    name: int(counts[index])
+                    for index, name in enumerate(SCORER_ACTIONS)
+                },
+                proposed=int(steps) * int(candidates_per_step),
+                applied=int(applied[chain].cpu()),
+            )
+        )
+    return results

@@ -675,8 +675,15 @@ def _batch(
 
 def _teacher_distribution(utilities: torch.Tensor, temperature: float) -> torch.Tensor:
     centered = utilities - utilities.mean(dim=1, keepdim=True)
-    scale = utilities.std(dim=1, keepdim=True).clamp(min=1.0e-6)
-    return torch.softmax(centered / scale / float(temperature), dim=1)
+    scale = utilities.std(dim=1, keepdim=True)
+    # Utility is normalized by graph-level rooted statistics, so its absolute
+    # magnitude shrinks with graph size. Preserve ranking information down to
+    # floating-point resolution instead of imposing a dataset-scale floor.
+    resolved = scale > torch.finfo(utilities.dtype).tiny
+    safe_scale = torch.where(resolved, scale, torch.ones_like(scale))
+    logits = centered / safe_scale / float(temperature)
+    logits = torch.where(resolved, logits, torch.zeros_like(logits))
+    return torch.softmax(logits, dim=1)
 
 
 def initialize_context_encoder_from_alignment(
@@ -842,6 +849,18 @@ def train_rooted_context_residual(
         "train_loss": final_loss,
         "train_examples": float(len(train_ids)),
         "validation_examples": float(len(validation_ids)),
+        "candidate_nonzero_utility_fraction": float(
+            np.mean(dataset.candidate_utilities != 0.0)
+        ),
+        "candidate_positive_utility_fraction": float(
+            np.mean(dataset.candidate_utilities > 0.0)
+        ),
+        "examples_with_positive_utility_fraction": float(
+            np.mean(np.max(dataset.candidate_utilities, axis=1) > 0.0)
+        ),
+        "mean_candidate_utility_std": float(
+            np.mean(np.std(dataset.candidate_utilities, axis=1))
+        ),
         "base_selected_utility": float(np.mean(base_values)),
         "context_selected_utility": float(np.mean(residual_values)),
         "oracle_selected_utility": float(np.mean(oracle_values)),
@@ -852,6 +871,10 @@ def train_rooted_context_residual(
         ),
         "oracle_capture": float(
             np.mean(residual_values)
+            / max(abs(float(np.mean(oracle_values))), 1.0e-12)
+        ),
+        "oracle_normalized_gain": float(
+            (np.mean(residual_values) - np.mean(base_values))
             / max(abs(float(np.mean(oracle_values))), 1.0e-12)
         ),
         "residual_scale": float(selected_scale),

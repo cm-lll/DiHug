@@ -9,13 +9,19 @@ cannot be launched accidentally.
 
 - Initialization: independent family Binomial/Bernoulli prior.
 - Denoising: learned role-guided relocation and typed switch edits.
-- Optional frozen context residual: selected and reported as a paired ablation;
-  it must not read clean adjacency or evaluation targets at sampling time.
+- Optional frozen context residual: enabled per dataset only after a paired
+  held-out utility/generation gate. The frozen paper setting enables it for
+  PubMed and disables it for IMDB; it must not read clean adjacency or
+  evaluation targets at sampling time.
 - Context fusion is node-only: typed edges drive sparse message passing, while
   complete edit candidates are decoded from endpoint node states. The active
   method does not maintain hidden states for existing or NULL candidate edges.
 - GPU path: resident graph state, streamed proposal pools, and fused Triton
   typed-closure scoring.
+- Multi-sample path: independent same-schema chains can share one batched MLP
+  and block-diagonal sparse-HGT forward. Candidate generation, RNG, selection,
+  and mutation remain chain-local, so batching does not change the transition
+  semantics. Use `scripts/run_batched_context_generation.py`.
 
 The unconditional paper main protocol uses `FAMILY_COUNT_MODE=binomial`.
 `FAMILY_COUNT_MODE=fixed` conditions on the clean family edge counts and is
@@ -28,6 +34,7 @@ reported only as a conditional upper-bound/ablation, never as the main result.
 - `scripts/run_paper_final_evidence_8gpu.sh`
 - `scripts/run_pubmed_hgen40_nested_selection_8gpu.sh`
 - `scripts/run_rooted_context_freeze_2gpu.sh`
+- `scripts/run_batched_context_generation.py`
 
 `scripts/run_dblp_role_completion_8gpu.sh` is a step-budget diagnostic only;
 its 150k result is not the paper main protocol.
