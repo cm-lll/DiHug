@@ -302,6 +302,7 @@ def build_rooted_context_dataset(
     state_protocol: str = "legacy_switch_chain",
     noise_levels: Sequence[float] = (0.25, 0.5, 0.75, 1.0),
     targeted_role_candidate_fraction: float = 0.0,
+    terminal_noop_examples_per_trajectory: int = 0,
 ) -> RootedContextDataset:
     if int(trajectories) < 2:
         raise ValueError("rooted context training needs at least two trajectories")
@@ -315,6 +316,8 @@ def build_rooted_context_dataset(
         raise ValueError("noise levels must lie in (0,1]")
     if not 0.0 <= float(targeted_role_candidate_fraction) <= 1.0:
         raise ValueError("targeted role candidate fraction must lie in [0,1]")
+    if int(terminal_noop_examples_per_trajectory) < 0:
+        raise ValueError("terminal noop examples must be non-negative")
     target = rooted_closure_signature(source)
     family_names = tuple(_family_names(source))
     reference_plan = sample_role_plan(source, int(seed) + 17)
@@ -333,6 +336,46 @@ def build_rooted_context_dataset(
     edge_types = []
     role_conditions = []
     trajectory_ids = []
+
+    def append_example(
+        graph: TypedGraph,
+        candidates: Sequence[EditProposal],
+        fraction: float,
+        normalized_roles: np.ndarray,
+        trajectory_id: int,
+    ) -> None:
+        if not candidates or candidates[0].action != "noop":
+            raise RuntimeError("rooted context candidates must place noop first")
+        matrix = mixed_edit_candidate_matrix(
+            graph,
+            candidates,
+            fraction,
+            feature_profile=feature_profile,
+        )
+        matrix = align_mixed_edit_features_for_model(
+            matrix, legacy_model, family_count=len(graph.family_specs)
+        )
+        edge_index, relations = graph_edge_tensors(graph)
+        current_signature = rooted_closure_signature(graph, target.boundaries)
+        features.append(matrix)
+        endpoints.append(candidate_endpoint_matrix(candidates))
+        utilities.append(
+            np.asarray(
+                [
+                    rooted_closure_utility(
+                        graph, item, target, current=current_signature
+                    )
+                    for item in candidates
+                ],
+                dtype=np.float32,
+            )
+        )
+        node_features.append(graph_node_features(graph, fraction))
+        edge_indices.append(edge_index)
+        edge_types.append(relations)
+        role_conditions.append(normalized_roles)
+        trajectory_ids.append(trajectory_id)
+
     for trajectory_id in range(int(trajectories)):
         trajectory_seed = int(seed) + 1_000_003 * trajectory_id
         rng = np.random.default_rng(trajectory_seed)
@@ -344,6 +387,20 @@ def build_rooted_context_dataset(
         normalized_roles = _normalize_role_rows(
             role_rows, source.node_types, role_means, role_scales
         )
+        for _ in range(int(terminal_noop_examples_per_trajectory)):
+            terminal_candidates = sample_switch_refinement_candidates(
+                clean,
+                rng,
+                int(candidates_per_example),
+                closure_fraction=float(closure_fraction),
+            )
+            append_example(
+                clean,
+                terminal_candidates,
+                0.0,
+                normalized_roles,
+                trajectory_id,
+            )
         graph = clean.clone()
         for example_id in range(int(examples_per_trajectory)):
             if state_protocol == "legacy_switch_chain":
@@ -379,35 +436,9 @@ def build_rooted_context_dataset(
                     targeted_fraction=float(targeted_role_candidate_fraction),
                     actions=("relocation", "switch"),
                 )
-            matrix = mixed_edit_candidate_matrix(
-                graph,
-                candidates,
-                fraction,
-                feature_profile=feature_profile,
+            append_example(
+                graph, candidates, fraction, normalized_roles, trajectory_id
             )
-            matrix = align_mixed_edit_features_for_model(
-                matrix, legacy_model, family_count=len(graph.family_specs)
-            )
-            edge_index, relations = graph_edge_tensors(graph)
-            current_signature = rooted_closure_signature(graph, target.boundaries)
-            features.append(matrix)
-            endpoints.append(candidate_endpoint_matrix(candidates))
-            utilities.append(
-                np.asarray(
-                    [
-                        rooted_closure_utility(
-                            graph, item, target, current=current_signature
-                        )
-                        for item in candidates
-                    ],
-                    dtype=np.float32,
-                )
-            )
-            node_features.append(graph_node_features(graph, fraction))
-            edge_indices.append(edge_index)
-            edge_types.append(relations)
-            role_conditions.append(normalized_roles)
-            trajectory_ids.append(trajectory_id)
     return RootedContextDataset(
         candidate_features=np.stack(features).astype(np.float32),
         candidate_endpoints=np.stack(endpoints).astype(np.int64),
@@ -740,6 +771,7 @@ def train_rooted_context_residual(
     weight_decay: float = 1.0e-4,
     teacher_temperature: float = 0.5,
     trust_weight: float = 0.05,
+    stop_loss_weight: float = 0.25,
     device: str | torch.device = "cuda",
     seed: int = 0,
     alignment_checkpoint: str | Path | None = None,
@@ -800,7 +832,18 @@ def train_rooted_context_residual(
                 base_distribution,
                 reduction="batchmean",
             )
-            loss = task + float(trust_weight) * trust
+            continue_target = (
+                batch[-1][:, 1:].amax(dim=1) > batch[-1][:, 0] + 1.0e-12
+            ).float()
+            continue_logit = torch.logsumexp(logits[:, 1:], dim=1) - logits[:, 0]
+            stop = nn.functional.binary_cross_entropy_with_logits(
+                continue_logit, continue_target
+            )
+            loss = (
+                task
+                + float(trust_weight) * trust
+                + float(stop_loss_weight) * stop
+            )
             loss.backward()
             nn.utils.clip_grad_norm_(trainable, 5.0)
             optimizer.step()
@@ -845,6 +888,17 @@ def train_rooted_context_residual(
         (base_logits + selected_scale * (fused_logits - base_logits)).argmax(dim=1),
     ].tolist()
     oracle_values = validation_utility.max(dim=1).values.tolist()
+    continue_target = (
+        validation_utility[:, 1:].amax(dim=1)
+        > validation_utility[:, 0] + 1.0e-12
+    )
+    base_continue = base_logits[:, 1:].amax(dim=1) > base_logits[:, 0]
+    context_continue = (
+        base_logits + selected_scale * (fused_logits - base_logits)
+    )[:, 1:].amax(dim=1) > (
+        base_logits + selected_scale * (fused_logits - base_logits)
+    )[:, 0]
+    terminal = ~continue_target
     report = {
         "train_loss": final_loss,
         "train_examples": float(len(train_ids)),
@@ -883,6 +937,18 @@ def train_rooted_context_residual(
         },
         "non_regression": float(np.mean(residual_values) >= np.mean(base_values) - 1.0e-9),
         "context_encoder_frozen": bool(freeze_context_encoder),
+        "stop_loss_weight": float(stop_loss_weight),
+        "validation_continue_fraction": float(continue_target.float().mean()),
+        "base_stop_accuracy": float((base_continue == continue_target).float().mean()),
+        "context_stop_accuracy": float(
+            (context_continue == continue_target).float().mean()
+        ),
+        "base_terminal_noop_rate": float(
+            (~base_continue[terminal]).float().mean() if terminal.any() else 0.0
+        ),
+        "context_terminal_noop_rate": float(
+            (~context_continue[terminal]).float().mean() if terminal.any() else 0.0
+        ),
         **dict(initialization_report),
     }
     return model, report

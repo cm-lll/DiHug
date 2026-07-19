@@ -169,11 +169,14 @@ def test_closed_form_context_dataset_carries_fixed_role_conditions():
         seed=23,
         state_protocol="closed_form_marginal",
         noise_levels=(0.5, 1.0),
+        terminal_noop_examples_per_trajectory=1,
     )
-    assert dataset.role_conditions.shape == (4, graph.num_nodes, 1)
-    assert dataset.node_features.shape[0] == 4
+    assert dataset.role_conditions.shape == (6, graph.num_nodes, 1)
+    assert dataset.node_features.shape[0] == 6
     assert np.isfinite(dataset.role_conditions).all()
     assert np.allclose(dataset.role_conditions[0], dataset.role_conditions[1])
+    assert np.max(dataset.candidate_utilities[0]) <= 1.0e-12
+    assert np.max(dataset.candidate_utilities[3]) <= 1.0e-12
 
 
 def test_alignment_initialization_copies_encoder_only(tmp_path):

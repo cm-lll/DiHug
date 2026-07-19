@@ -47,6 +47,9 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--noise-levels", default="0.25,0.5,0.75,1.0")
     parser.add_argument("--targeted-role-candidate-fraction", type=float, default=0.0)
+    parser.add_argument("--terminal-noop-examples-per-trajectory", type=int, default=0)
+    parser.add_argument("--stop-loss-weight", type=float, default=0.25)
+    parser.add_argument("--use-role-condition", action="store_true")
     parser.add_argument("--freeze-context-encoder", action="store_true")
     return parser.parse_args()
 
@@ -115,12 +118,17 @@ def main() -> None:
         state_protocol=args.state_protocol,
         noise_levels=noise_levels,
         targeted_role_candidate_fraction=args.targeted_role_candidate_fraction,
+        terminal_noop_examples_per_trajectory=(
+            args.terminal_noop_examples_per_trajectory
+        ),
     )
     model_shape = {
         "hidden_dim": args.hidden_dim,
         "layers": args.layers,
         "heads": args.heads,
-        "role_condition_dim": 0,
+        "role_condition_dim": (
+            len(source.family_specs) if args.use_role_condition else 0
+        ),
     }
     if args.alignment_checkpoint is not None:
         model_shape = alignment_model_shape(args.alignment_checkpoint)
@@ -133,6 +141,7 @@ def main() -> None:
         seed=args.seed,
         alignment_checkpoint=args.alignment_checkpoint,
         freeze_context_encoder=args.freeze_context_encoder,
+        stop_loss_weight=args.stop_loss_weight,
         **model_shape,
     )
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -162,6 +171,10 @@ def main() -> None:
             else str(args.alignment_checkpoint)
         ),
         "noise_levels": list(noise_levels),
+        "use_role_condition": bool(args.use_role_condition),
+        "terminal_noop_examples_per_trajectory": (
+            args.terminal_noop_examples_per_trajectory
+        ),
         **report,
     }
     (args.output_dir / "gate_report.json").write_text(
