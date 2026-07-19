@@ -174,7 +174,30 @@ class GpuTypedGraphState:
         self.family_homogeneous_tensor = torch.tensor(
             self.family_homogeneous, dtype=torch.bool, device=self.device
         )
+        self.family_src_types = torch.tensor(
+            [
+                int(graph.family_specs[family].src_type)
+                for family in self.family_names
+            ],
+            dtype=torch.long,
+            device=self.device,
+        )
         self.family_by_type = family_by_type
+        # A single slot map is sufficient because family candidate domains are
+        # disjoint. It makes wedge-seeded proposal construction independent of
+        # a scan over every family edge table.
+        self.edge_slots = torch.full(
+            (self.num_nodes, self.num_nodes),
+            -1,
+            dtype=torch.long,
+            device=self.device,
+        )
+        for family_id, count in enumerate(counts):
+            if count:
+                edges = self.edge_tables[family_id, :count]
+                slots = torch.arange(count, dtype=torch.long, device=self.device)
+                self.edge_slots[edges[:, 0], edges[:, 1]] = slots
+                self.edge_slots[edges[:, 1], edges[:, 0]] = slots
         self.total_degree = self.family_degree.sum(dim=0)
         self.degree_scale = max(float(np.log1p(self.num_nodes)), 1.0)
         self.common_scale = max(float(np.sqrt(self.num_nodes)), 1.0)
@@ -376,6 +399,167 @@ class GpuTypedGraphState:
         )
         return batch, valid
 
+    def _random_mixed_pool(
+        self, count: int, generator: torch.Generator
+    ) -> tuple[GpuEditBatch, torch.Tensor]:
+        relocation, relocation_valid = self._random_relocation_pool(
+            count, generator
+        )
+        switch, switch_valid = self._random_switch_pool(count, generator)
+        choose_switch = (
+            torch.rand(count, device=self.device, generator=generator) < 0.5
+        )
+        batch = GpuEditBatch(
+            **{
+                field: torch.where(
+                    choose_switch.reshape(
+                        (count,)
+                        + (1,) * (getattr(relocation, field).ndim - 1)
+                    ),
+                    getattr(switch, field),
+                    getattr(relocation, field),
+                )
+                for field in GpuEditBatch.__dataclass_fields__
+            }
+        )
+        valid = torch.where(choose_switch, switch_valid, relocation_valid)
+        return batch, valid
+
+    def _orient_family_edges(
+        self, family: torch.Tensor, edges: torch.Tensor
+    ) -> torch.Tensor:
+        oriented = edges.clone()
+        homogeneous = self.family_homogeneous_tensor[family]
+        if homogeneous.any():
+            oriented[homogeneous] = self._canonical(oriented[homogeneous])
+        bipartite = ~homogeneous
+        if bipartite.any():
+            rows = oriented[bipartite]
+            families = family[bipartite]
+            flip = self.node_types[rows[:, 0]] != self.family_src_types[families]
+            rows[flip] = rows[flip].flip(1)
+            oriented[bipartite] = rows
+        return oriented
+
+    def _sample_masked_nodes(
+        self, mask: torch.Tensor, generator: torch.Generator
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        valid = mask.any(dim=1)
+        fallback = F.one_hot(
+            torch.zeros(mask.shape[0], dtype=torch.long, device=self.device),
+            num_classes=mask.shape[1],
+        ).to(torch.float32)
+        weights = torch.where(valid[:, None], mask.to(torch.float32), fallback)
+        sampled = torch.multinomial(
+            weights, 1, replacement=True, generator=generator
+        ).squeeze(1)
+        return sampled, valid
+
+    def _wedge_seeded_switch_pool(
+        self, count: int, generator: torch.Generator
+    ) -> tuple[GpuEditBatch, torch.Tensor]:
+        """Vectorized counterpart of ``propose_wedge_seeded_switch``.
+
+        The implementation samples open typed wedges directly and never ranks
+        a random switch pool by closure gain. Degree-biased wedge sampling is
+        intentionally excluded from the parity mode because the frozen paper
+        protocol uses zero degree bias.
+        """
+
+        center_weights = (self.total_degree >= 2).to(torch.float32)
+        center_available = center_weights.sum() > 0
+        center_weights = torch.where(
+            center_available,
+            center_weights,
+            F.one_hot(
+                torch.zeros((), dtype=torch.long, device=self.device),
+                num_classes=self.num_nodes,
+            ).to(torch.float32),
+        )
+        centers = torch.multinomial(
+            center_weights,
+            int(count),
+            replacement=True,
+            generator=generator,
+        )
+        neighbor_mask = self.adjacency[centers]
+        left, left_valid = self._sample_masked_nodes(neighbor_mask, generator)
+        right_mask = neighbor_mask.clone()
+        right_mask[torch.arange(count, device=self.device), left] = False
+        right, right_valid = self._sample_masked_nodes(right_mask, generator)
+
+        family = self.family_by_type[self.node_types[left], self.node_types[right]]
+        safe_family = family.clamp_min(0)
+        desired = self._orient_family_edges(
+            safe_family, torch.stack((left, right), dim=1)
+        )
+        source = desired[:, 0]
+        target = desired[:, 1]
+        node_ids = torch.arange(self.num_nodes, device=self.device)[None]
+        source_domains = self.family_by_type[
+            self.node_types[source, None], self.node_types[None, :]
+        ]
+        target_domains = self.family_by_type[
+            self.node_types[target, None], self.node_types[None, :]
+        ]
+        source_mask = self.adjacency[source] & (source_domains == safe_family[:, None])
+        target_mask = self.adjacency[target] & (target_domains == safe_family[:, None])
+        source_mask &= node_ids != centers[:, None]
+        target_mask &= node_ids != centers[:, None]
+        source_other, source_valid = self._sample_masked_nodes(source_mask, generator)
+        target_other, target_valid = self._sample_masked_nodes(target_mask, generator)
+
+        first_old = self._orient_family_edges(
+            safe_family, torch.stack((source, source_other), dim=1)
+        )
+        second_old = self._orient_family_edges(
+            safe_family, torch.stack((target_other, target), dim=1)
+        )
+        complement = self._orient_family_edges(
+            safe_family, torch.stack((target_other, source_other), dim=1)
+        )
+        old_edges = torch.stack((first_old, second_old), dim=1)
+        new_edges = torch.stack((desired, complement), dim=1)
+        old_indices = torch.stack(
+            (
+                self.edge_slots[first_old[:, 0], first_old[:, 1]],
+                self.edge_slots[second_old[:, 0], second_old[:, 1]],
+            ),
+            dim=1,
+        )
+        endpoints = torch.stack(
+            (source, target, source_other, target_other), dim=1
+        )
+        four_distinct = (
+            torch.sort(endpoints, dim=1).values.diff(dim=1).ne(0).all(dim=1)
+        )
+        valid = (
+            center_available
+            & left_valid
+            & right_valid
+            & source_valid
+            & target_valid
+            & (family >= 0)
+            & ~self.adjacency[left, right]
+            & four_distinct
+            & (old_indices >= 0).all(dim=1)
+            & ~self.adjacency[new_edges[:, :, 0], new_edges[:, :, 1]].any(dim=1)
+            & (new_edges[:, 0] != new_edges[:, 1]).any(dim=1)
+            & (new_edges[:, :, 0] != new_edges[:, :, 1]).all(dim=1)
+        )
+        batch = GpuEditBatch(
+            action=torch.full(
+                (count,), SWITCH_ID, dtype=torch.long, device=self.device
+            ),
+            family=safe_family,
+            old_edges=old_edges,
+            new_edges=new_edges,
+            old_indices=old_indices,
+            old_valid=torch.ones((count, 2), dtype=torch.bool, device=self.device),
+            new_valid=torch.ones((count, 2), dtype=torch.bool, device=self.device),
+        )
+        return batch, valid
+
     def _single_edge_batch(
         self,
         action: int,
@@ -457,9 +641,151 @@ class GpuTypedGraphState:
             selected.action,
             torch.full_like(selected.action, NOOP_ID),
         )
+        selected.family = torch.where(
+            selected_valid, selected.family, torch.zeros_like(selected.family)
+        )
         selected.old_valid &= selected_valid[:, None]
         selected.new_valid &= selected_valid[:, None]
         return selected
+
+    def _edit_keys(self, batch: GpuEditBatch) -> torch.Tensor:
+        def normalized_slots(edges: torch.Tensor, valid: torch.Tensor) -> torch.Tensor:
+            canonical = self._canonical(edges.clamp_min(0))
+            canonical = torch.where(valid[:, :, None], canonical, -torch.ones_like(canonical))
+            radix = self.num_nodes + 1
+            order_key = (canonical[:, :, 0] + 1) * radix + canonical[:, :, 1] + 1
+            order = order_key.argsort(dim=1)
+            return canonical.gather(1, order[:, :, None].expand(-1, -1, 2))
+
+        old_edges = normalized_slots(batch.old_edges, batch.old_valid)
+        new_edges = normalized_slots(batch.new_edges, batch.new_valid)
+        return torch.cat(
+            (
+                batch.action[:, None],
+                batch.family[:, None],
+                old_edges.reshape(old_edges.shape[0], -1),
+                new_edges.reshape(new_edges.shape[0], -1),
+            ),
+            dim=1,
+        )
+
+    def _ordered_pick_valid(
+        self,
+        batch: GpuEditBatch,
+        valid: torch.Tensor,
+        count: int,
+        *,
+        exclude: GpuEditBatch | None = None,
+    ) -> GpuEditBatch:
+        """Select first legal unique proposals without utility-based screening."""
+
+        if int(count) <= 0:
+            return self._noop(0)
+        keys = self._edit_keys(batch)
+        prefix = 0
+        if exclude is not None and exclude.action.numel() > 0:
+            exclude_keys = self._edit_keys(exclude)
+            keys = torch.cat((exclude_keys, keys), dim=0)
+            prefix = exclude_keys.shape[0]
+        _, inverse = torch.unique(keys, dim=0, sorted=True, return_inverse=True)
+        positions = torch.arange(keys.shape[0], dtype=torch.long, device=self.device)
+        first = torch.full(
+            (keys.shape[0],),
+            keys.shape[0],
+            dtype=torch.long,
+            device=self.device,
+        )
+        first.scatter_reduce_(0, inverse, positions, reduce="amin", include_self=True)
+        unique = first[inverse] == positions
+        unique = unique[prefix:]
+        eligible = valid & unique
+        pool_positions = torch.arange(
+            batch.action.shape[0], dtype=torch.long, device=self.device
+        )
+        ranked = torch.where(
+            eligible,
+            pool_positions,
+            pool_positions + batch.action.shape[0],
+        )
+        keep = min(int(count), ranked.shape[0])
+        selected_indices = torch.topk(ranked, k=keep, largest=False).indices
+        selected = batch.index_select(selected_indices)
+        selected_valid = eligible[selected_indices]
+        if keep < int(count):
+            selected = self._concat((selected, self._noop(int(count) - keep)))
+            selected_valid = torch.cat(
+                (
+                    selected_valid,
+                    torch.zeros(
+                        int(count) - keep, dtype=torch.bool, device=self.device
+                    ),
+                )
+            )
+        selected.action = torch.where(
+            selected_valid,
+            selected.action,
+            torch.full_like(selected.action, NOOP_ID),
+        )
+        selected.family = torch.where(
+            selected_valid, selected.family, torch.zeros_like(selected.family)
+        )
+        selected.old_valid &= selected_valid[:, None]
+        selected.new_valid &= selected_valid[:, None]
+        return selected
+
+    def canonical_ordered_candidates(
+        self,
+        count: int,
+        generator: torch.Generator,
+        *,
+        role_phase: bool,
+        targeted_fraction: float,
+        closure_fraction: float,
+        attempt_factor: int = 16,
+    ) -> GpuEditBatch:
+        """GPU proposal kernel matching canonical ordered-rejection semantics."""
+
+        if int(count) < 2:
+            raise ValueError("candidate count must be at least two")
+        requested = int(count) - 1
+        pool_size = max(256, requested * int(attempt_factor))
+        pieces = [self._noop()]
+        if role_phase:
+            targeted = min(
+                requested, int(round(requested * float(targeted_fraction)))
+            )
+            random_count = requested - targeted
+            if targeted:
+                pool, valid = self._targeted_relocation_pool(pool_size, generator)
+                chosen = self._ordered_pick_valid(
+                    pool, valid, targeted, exclude=self._concat(pieces)
+                )
+                pieces.append(chosen)
+            if random_count:
+                pool, valid = self._random_mixed_pool(pool_size, generator)
+                chosen = self._ordered_pick_valid(
+                    pool, valid, random_count, exclude=self._concat(pieces)
+                )
+                pieces.append(chosen)
+            return self._concat(pieces)
+
+        closure = min(
+            requested, int(round(requested * float(closure_fraction)))
+        )
+        random_count = requested - closure
+        if closure:
+            pool, valid = self._wedge_seeded_switch_pool(pool_size, generator)
+            chosen = self._ordered_pick_valid(
+                pool, valid, closure, exclude=self._concat(pieces)
+            )
+            pieces.append(chosen)
+        if random_count:
+            pool, valid = self._random_switch_pool(pool_size, generator)
+            chosen = self._ordered_pick_valid(
+                pool, valid, random_count, exclude=self._concat(pieces)
+            )
+            pieces.append(chosen)
+        return self._concat(pieces)
 
     def _stream_pick(
         self,
@@ -547,9 +873,21 @@ class GpuTypedGraphState:
         closure_fraction: float,
         proposal_pool_size: int = 0,
         proposal_chunk_size: int = 1024,
+        candidate_mode: str = "legacy_pool",
     ) -> GpuEditBatch:
         if int(count) < 2:
             raise ValueError("candidate count must be at least two")
+        candidate_mode = str(candidate_mode).strip().lower()
+        if candidate_mode == "canonical_ordered":
+            return self.canonical_ordered_candidates(
+                count,
+                generator,
+                role_phase=role_phase,
+                targeted_fraction=targeted_fraction,
+                closure_fraction=closure_fraction,
+            )
+        if candidate_mode != "legacy_pool":
+            raise ValueError(f"unknown GPU candidate mode {candidate_mode!r}")
         requested = int(count) - 1
         pool_size = (
             max(256, requested * 32)
@@ -875,6 +1213,14 @@ class GpuTypedGraphState:
             value = torch.where(valid, torch.zeros_like(old_value), old_value)
             self.adjacency[edge[0], edge[1]] = value
             self.adjacency[edge[1], edge[0]] = value
+            previous_slot = self.edge_slots[edge[0], edge[1]]
+            slot_value = torch.where(
+                valid,
+                torch.full_like(previous_slot, -1),
+                previous_slot,
+            )
+            self.edge_slots[edge[0], edge[1]] = slot_value
+            self.edge_slots[edge[1], edge[0]] = slot_value
             delta = valid.to(torch.long).expand(2).neg()
             self.total_degree.scatter_add_(0, edge, delta)
             self.family_degree[family].scatter_add_(0, edge, delta)
@@ -893,6 +1239,10 @@ class GpuTypedGraphState:
             self.edge_tables[family, edge_index] = torch.where(
                 valid, edge, previous
             )
+            previous_slot = self.edge_slots[edge[0], edge[1]]
+            slot_value = torch.where(valid, edge_index, previous_slot)
+            self.edge_slots[edge[0], edge[1]] = slot_value
+            self.edge_slots[edge[1], edge[0]] = slot_value
 
     def relation_degree_error(self) -> torch.Tensor:
         current = self.family_degree.transpose(0, 1).to(torch.float32)
@@ -1124,6 +1474,7 @@ def sample_gpu_role_guided_edit_diffusion(
     context_refresh_steps: int = 20,
     proposal_pool_size: int = 0,
     proposal_chunk_size: int = 1024,
+    candidate_mode: str = "legacy_pool",
     metric_edge_chunk_size: int = 2048,
     phase_check_interval: int = 32,
     use_triton: bool = True,
@@ -1159,6 +1510,7 @@ def sample_gpu_role_guided_edit_diffusion(
                     targeted_fraction=0.0,
                     closure_fraction=0.0,
                     proposal_pool_size=0,
+                    candidate_mode=candidate_mode,
                 )
                 matrix = state.compact_features(candidates, 1.0, model_input_dim)
                 logits.append(model(matrix[None]).squeeze(0))
@@ -1235,6 +1587,7 @@ def sample_gpu_role_guided_edit_diffusion(
                 ),
                 proposal_pool_size=proposal_pool_size,
                 proposal_chunk_size=proposal_chunk_size,
+                candidate_mode=candidate_mode,
             )
             features = state.compact_features(
                 candidates, time_fraction, model_input_dim

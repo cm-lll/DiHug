@@ -72,6 +72,15 @@ def parse_args() -> argparse.Namespace:
         help="streamed GPU proposal count per action pool; 0 keeps the parity gate",
     )
     parser.add_argument("--gpu-proposal-chunk-size", type=int, default=1024)
+    parser.add_argument(
+        "--gpu-candidate-mode",
+        choices=("legacy_pool", "canonical_ordered"),
+        default="legacy_pool",
+        help=(
+            "legacy_pool ranks an oversized GPU proposal pool; "
+            "canonical_ordered accepts the first legal unique proposals"
+        ),
+    )
     parser.add_argument("--gpu-metric-edge-chunk-size", type=int, default=2048)
     parser.add_argument("--gpu-phase-check-interval", type=int, default=32)
     parser.add_argument("--gpu-disable-triton", action="store_true")
@@ -293,6 +302,7 @@ def main() -> None:
         sampling_backend=args.sampling_backend,
         gpu_proposal_pool_size=args.gpu_proposal_pool_size,
         gpu_proposal_chunk_size=args.gpu_proposal_chunk_size,
+        gpu_candidate_mode=args.gpu_candidate_mode,
         gpu_metric_edge_chunk_size=args.gpu_metric_edge_chunk_size,
         gpu_phase_check_interval=args.gpu_phase_check_interval,
         gpu_use_triton=not args.gpu_disable_triton,
@@ -351,6 +361,7 @@ def main() -> None:
         ),
         "edge_energy_refresh_steps": args.edge_energy_refresh_steps,
         "sampling_backend": args.sampling_backend,
+        "gpu_candidate_mode": args.gpu_candidate_mode,
         "gpu_proposal_pool_size": args.gpu_proposal_pool_size,
         "gpu_proposal_chunk_size": args.gpu_proposal_chunk_size,
         "gpu_phase_check_interval": args.gpu_phase_check_interval,
