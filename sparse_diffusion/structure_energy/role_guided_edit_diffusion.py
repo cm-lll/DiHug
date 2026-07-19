@@ -660,6 +660,8 @@ def sample_role_guided_edit_diffusion(
     targeted_role_candidate_fraction: float = 0.0,
     context_model: Optional[torch.nn.Module] = None,
     context_refresh_steps: int = 20,
+    edge_energy_model: Optional[torch.nn.Module] = None,
+    edge_energy_refresh_steps: int = 20,
     sampling_backend: str = "cpu",
     gpu_proposal_pool_size: int = 0,
     gpu_proposal_chunk_size: int = 1024,
@@ -693,6 +695,11 @@ def sample_role_guided_edit_diffusion(
     if selection_mode not in {"model", "random"}:
         raise ValueError("selection mode must be model or random")
     if sampling_backend == "gpu":
+        if edge_energy_model is not None:
+            raise ValueError(
+                "edge-energy residual is currently validated only by the CPU "
+                "proposal path with CUDA scoring"
+            )
         if (
             tuple(actions) != ("relocation", "switch")
             or phase_policy != "auto"
@@ -747,6 +754,10 @@ def sample_role_guided_edit_diffusion(
         if int(context_refresh_steps) <= 0:
             raise ValueError("context refresh interval must be positive")
         context_model = context_model.to(device).eval()
+    if edge_energy_model is not None:
+        if int(edge_energy_refresh_steps) <= 0:
+            raise ValueError("edge-energy refresh interval must be positive")
+        edge_energy_model = edge_energy_model.to(device).eval()
     effective_role_weight = float(role_weight)
     if float(auto_role_balance) > 0.0:
         if int(role_calibration_batches) <= 0:
@@ -827,6 +838,8 @@ def sample_role_guided_edit_diffusion(
         raise ValueError("model time start step must be non-negative")
     context_hidden = None
     last_context_refresh = -int(context_refresh_steps)
+    edge_energy_hidden = None
+    last_edge_energy_refresh = -int(edge_energy_refresh_steps)
     with torch.no_grad():
         for completed in range(1, int(steps) + 1):
             time_fraction = denoising_time_fraction(
@@ -900,6 +913,26 @@ def sample_role_guided_edit_diffusion(
                 structure_logits = model(
                     torch.from_numpy(matrix)[None].float().to(device)
                 ).squeeze(0)
+            if edge_energy_model is not None:
+                if (
+                    edge_energy_hidden is None
+                    or completed - last_edge_energy_refresh
+                    >= int(edge_energy_refresh_steps)
+                ):
+                    edge_energy_hidden = edge_energy_model.encode_graph(
+                        graph,
+                        time_fraction,
+                        device,
+                        role_rows=target_rows,
+                    )
+                    last_edge_energy_refresh = completed
+                structure_logits = structure_logits + edge_energy_model.score_graph_candidates(
+                    graph,
+                    candidates,
+                    time_fraction,
+                    device,
+                    encoded=edge_energy_hidden,
+                )
             degree_gains = torch.tensor(
                 [
                     proposal_relation_degree_gain(

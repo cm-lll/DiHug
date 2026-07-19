@@ -15,6 +15,13 @@ from sparse_diffusion.structure_energy.cardinality_conditioned_edit import (
     family_edge_counts,
 )
 from sparse_diffusion.structure_energy.graph import TypedGraph, load_typed_graph
+from sparse_diffusion.structure_energy.edge_energy_edit_gate import (
+    EdgeEnergyInferenceResidual,
+)
+from sparse_diffusion.structure_energy.hgt_edit_denoiser import graph_node_features
+from sparse_diffusion.structure_energy.latent_edit_representation import (
+    WarmupHGTEncoder,
+)
 from sparse_diffusion.structure_energy.mixed_edit_diffusion import (
     MarginalGraphPrior,
     load_mixed_edit_checkpoint,
@@ -83,6 +90,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--context-checkpoint", type=Path)
     parser.add_argument("--context-refresh-steps", type=int, default=20)
     parser.add_argument("--context-scale", type=float, default=-1.0)
+    parser.add_argument("--edge-energy-checkpoint", type=Path)
+    parser.add_argument("--edge-energy-alignment-checkpoint", type=Path)
+    parser.add_argument("--edge-energy-refresh-steps", type=int, default=20)
     parser.add_argument(
         "--phase-policy",
         choices=("auto", "relocation_only", "switch_only"),
@@ -110,6 +120,7 @@ def main() -> None:
     role_path = args.output_dir / "exchangeable_role_degree_prior.json"
     role_prior = None
     context_model = None
+    edge_energy_model = None
     if args.context_checkpoint is not None:
         context_model, context_payload = load_rooted_context_checkpoint(
             args.context_checkpoint, legacy_scorer=None, device=args.device
@@ -135,6 +146,63 @@ def main() -> None:
     assert model is not None and marginal_prior is not None and metadata is not None
     if role_prior is None:
         role_prior = ExchangeableRoleDegreePrior.from_training_graph(source)
+    if (args.edge_energy_checkpoint is None) != (
+        args.edge_energy_alignment_checkpoint is None
+    ):
+        raise ValueError(
+            "edge-energy fusion and alignment checkpoints must be provided together"
+        )
+    if args.edge_energy_checkpoint is not None:
+        fusion_payload = torch.load(
+            args.edge_energy_checkpoint, map_location="cpu", weights_only=False
+        )
+        alignment_payload = torch.load(
+            args.edge_energy_alignment_checkpoint,
+            map_location="cpu",
+            weights_only=False,
+        )
+        if fusion_payload.get("format") != "dihug-edge-energy-edit-gate-v1":
+            raise ValueError("unsupported edge-energy fusion checkpoint")
+        if alignment_payload.get("format") != "dihug-role-conditioned-latent-alignment-v1":
+            raise ValueError("unsupported edge-energy alignment checkpoint")
+        report = fusion_payload["report"]
+        state = alignment_payload["model_state"]
+        hidden_dim = int(state["node_input.0.weight"].shape[0])
+        role_dim = int(state["role_input.0.weight"].shape[1])
+        layer_ids = {
+            int(key.split(".")[1]) for key in state if key.startswith("layers.")
+        }
+        heads = int(state["layers.0.relation_pri"].shape[1])
+        prototype_count = int(
+            state["prototype_head.2.weight"].shape[0] // hidden_dim
+        )
+        representation = WarmupHGTEncoder(
+            node_feature_dim=graph_node_features(source, 1.0).shape[1],
+            type_count=len(source.type_names),
+            family_count=len(source.family_specs),
+            hidden_dim=hidden_dim,
+            heads=heads,
+            layers=len(layer_ids),
+            dropout=0.0,
+            role_condition_dim=role_dim,
+            prototype_count=prototype_count,
+        )
+        representation.load_state_dict(state, strict=True)
+        normalizer = report["role_normalizer"]
+        edge_energy_model = EdgeEnergyInferenceResidual(
+            representation,
+            family_names=report["family_names"],
+            role_means=normalizer["means"],
+            role_scales=normalizer["scales"],
+            action_scales=(
+                report["action_scales"]["relocation"],
+                report["action_scales"]["switch"],
+            ),
+            action_weights=(
+                report["action_weights"]["relocation"],
+                report["action_weights"]["switch"],
+            ),
+        )
     if tuple(source.type_names) != role_prior.type_names:
         raise ValueError("dataset schema and role prior type names disagree")
     role_prior.save(role_path)
@@ -193,6 +261,8 @@ def main() -> None:
         targeted_role_candidate_fraction=args.targeted_role_candidate_fraction,
         context_model=context_model,
         context_refresh_steps=args.context_refresh_steps,
+        edge_energy_model=edge_energy_model,
+        edge_energy_refresh_steps=args.edge_energy_refresh_steps,
         sampling_backend=args.sampling_backend,
         gpu_proposal_pool_size=args.gpu_proposal_pool_size,
         gpu_proposal_chunk_size=args.gpu_proposal_chunk_size,
@@ -234,6 +304,17 @@ def main() -> None:
             None if args.context_checkpoint is None else str(args.context_checkpoint)
         ),
         "context_refresh_steps": args.context_refresh_steps,
+        "edge_energy_checkpoint": (
+            None
+            if args.edge_energy_checkpoint is None
+            else str(args.edge_energy_checkpoint)
+        ),
+        "edge_energy_alignment_checkpoint": (
+            None
+            if args.edge_energy_alignment_checkpoint is None
+            else str(args.edge_energy_alignment_checkpoint)
+        ),
+        "edge_energy_refresh_steps": args.edge_energy_refresh_steps,
         "sampling_backend": args.sampling_backend,
         "gpu_proposal_pool_size": args.gpu_proposal_pool_size,
         "gpu_proposal_chunk_size": args.gpu_proposal_chunk_size,
