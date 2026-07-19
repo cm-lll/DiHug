@@ -8,6 +8,10 @@ TAG="${TAG:-corrected_joint_cross_dataset_gate_0719}"
 OUT_ROOT="${OUT_ROOT:-results/$TAG}"
 LOG_ROOT="${LOG_ROOT:-logs/$TAG}"
 SEED="${SEED:-61}"
+IMDB_DATA="${IMDB_DATA:-data/IMDB_movie_subgraphs/subgraph_000}"
+PUBMED_DATA="${PUBMED_DATA:-data/PubMed_baseline_subgraphs/subgraph_000}"
+DBLP_DATA="${DBLP_DATA:-data/DBLP_four_area_subgraphs/subgraph_000}"
+SYN200_DATA="${SYN200_DATA:-data/HGEN_syn_200_subgraphs/subgraph_000}"
 mkdir -p "$OUT_ROOT" "$LOG_ROOT"
 : > "$LOG_ROOT/driver.log"
 
@@ -36,7 +40,7 @@ PIDS=()
 NAMES=()
 
 # IMDB: balanced role/closure pool; moderate context refresh.
-launch 0 imdb data/IMDB_movie_subgraphs/subgraph_000 \
+launch 0 imdb "$IMDB_DATA" \
   TRAJECTORIES=4 FORWARD_STEPS=100 RECORD_EVERY=10 CANDIDATES=16 \
   BASE_EPOCHS=20 JOINT_EPOCHS=10 BATCH_SIZE=4 \
   QUERY_EDGES_PER_FAMILY=16 HIDDEN_DIM=64 HEADS=4 LAYERS=2 \
@@ -45,7 +49,7 @@ launch 0 imdb data/IMDB_movie_subgraphs/subgraph_000 \
   TARGETED_FRACTION=0.5 CLOSURE_FRACTION=0.5
 
 # PubMed: refresh context more often because typed closure changes faster.
-launch 1 pubmed data/PubMed_baseline_subgraphs/subgraph_000 \
+launch 1 pubmed "$PUBMED_DATA" \
   TRAJECTORIES=4 FORWARD_STEPS=100 RECORD_EVERY=10 CANDIDATES=16 \
   BASE_EPOCHS=20 JOINT_EPOCHS=10 BATCH_SIZE=2 \
   QUERY_EDGES_PER_FAMILY=16 HIDDEN_DIM=64 HEADS=4 LAYERS=2 \
@@ -55,7 +59,7 @@ launch 1 pubmed data/PubMed_baseline_subgraphs/subgraph_000 \
 
 # DBLP has no triangle-valid typed schema. Spend the budget on role alignment,
 # use fewer expensive 11k-node snapshots, and keep the encoder inside 11 GB.
-launch 2 dblp data/DBLP_four_area_subgraphs/subgraph_000 \
+launch 2 dblp "$DBLP_DATA" \
   TRAJECTORIES=2 FORWARD_STEPS=40 RECORD_EVERY=10 CANDIDATES=8 \
   BASE_EPOCHS=10 JOINT_EPOCHS=5 BATCH_SIZE=1 \
   QUERY_EDGES_PER_FAMILY=4 HIDDEN_DIM=32 HEADS=4 LAYERS=1 \
@@ -65,7 +69,7 @@ launch 2 dblp data/DBLP_four_area_subgraphs/subgraph_000 \
 
 # syn200 begins close to its Bernoulli null; use more trajectories but a small
 # edit budget so noop/stability behavior is tested instead of forced editing.
-launch 3 syn200 data/HGEN_syn_200_subgraphs/subgraph_000 \
+launch 3 syn200 "$SYN200_DATA" \
   TRAJECTORIES=8 FORWARD_STEPS=100 RECORD_EVERY=10 CANDIDATES=16 \
   BASE_EPOCHS=30 JOINT_EPOCHS=15 BATCH_SIZE=8 \
   QUERY_EDGES_PER_FAMILY=8 HIDDEN_DIM=32 HEADS=4 LAYERS=2 \
