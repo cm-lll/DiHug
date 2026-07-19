@@ -75,6 +75,7 @@ run_mode() {
   CUDA_VISIBLE_DEVICES="$gpu" python -u scripts/run_role_guided_replacement_gate.py \
     --dataset-dir "$data" --context-checkpoint "$context" \
     --output-dir "$output" --seed "$seed" --device cuda \
+    --strict-target-free \
     --sampling-backend cpu --family-count-mode binomial \
     --steps "$steps" --candidates 16 --metrics-every "$(( STEPS / 10 ))" \
     --model-time-horizon-steps "$(( STEPS * 2 ))" \
@@ -169,3 +170,7 @@ print(json.dumps(summary, indent=2, sort_keys=True))
 PY
 
 echo "[COMPONENT-ABLATION] complete: $OUT_ROOT/component_ablation.tsv"
+python scripts/generate_extended_structure_tables.py \
+  --results-root "$OUT_ROOT" --output-dir "$OUT_ROOT/extended_structure" \
+  --dataset imdb --dataset pubmed
+echo "[COMPONENT-ABLATION] extended metrics: $OUT_ROOT/extended_structure/extended_structure.tsv"

@@ -40,6 +40,19 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset-dir", type=Path, required=True)
     parser.add_argument("--model-checkpoint", type=Path)
+    parser.add_argument(
+        "--role-prior",
+        type=Path,
+        help=(
+            "Frozen exchangeable role prior. Required with a standalone model "
+            "checkpoint for strict target-free inference; context bundles embed it."
+        ),
+    )
+    parser.add_argument(
+        "--strict-target-free",
+        action="store_true",
+        help="Reject inference that would rebuild a role prior from the target dataset.",
+    )
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--device", default="cuda")
@@ -110,6 +123,15 @@ def main() -> None:
     source = load_typed_graph(args.dataset_dir, active_only=True)
     if args.model_checkpoint is None and args.context_checkpoint is None:
         raise ValueError("provide --model-checkpoint or a self-contained --context-checkpoint")
+    if (
+        args.strict_target_free
+        and args.context_checkpoint is None
+        and args.role_prior is None
+    ):
+        raise ValueError(
+            "strict target-free inference with --model-checkpoint requires "
+            "--role-prior; a context checkpoint already embeds the prior"
+        )
     model = None
     marginal_prior = None
     metadata = None
@@ -143,6 +165,11 @@ def main() -> None:
             raise ValueError("context bundle and model checkpoint use different priors")
         if args.context_scale >= 0.0:
             context_model.set_residual_scale(args.context_scale)
+    if args.role_prior is not None:
+        supplied_role_prior = ExchangeableRoleDegreePrior.load(args.role_prior)
+        if role_prior is not None and supplied_role_prior.to_json_dict() != role_prior.to_json_dict():
+            raise ValueError("supplied role prior and context bundle role prior differ")
+        role_prior = supplied_role_prior
     assert model is not None and marginal_prior is not None and metadata is not None
     if role_prior is None:
         role_prior = ExchangeableRoleDegreePrior.from_training_graph(source)
@@ -300,8 +327,16 @@ def main() -> None:
         "effective_role_weight": result.trace[0]["effective_role_weight"],
         "targeted_role_candidate_fraction": args.targeted_role_candidate_fraction,
         "family_count_mode": args.family_count_mode,
+        "strict_target_free": bool(args.strict_target_free),
         "context_checkpoint": (
             None if args.context_checkpoint is None else str(args.context_checkpoint)
+        ),
+        "role_prior_source": (
+            "context_bundle"
+            if args.context_checkpoint is not None
+            else "frozen_role_prior_file"
+            if args.role_prior is not None
+            else "rebuilt_from_training_graph"
         ),
         "context_refresh_steps": args.context_refresh_steps,
         "edge_energy_checkpoint": (

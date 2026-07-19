@@ -75,6 +75,7 @@ run_pair() {
     --metrics-every "$((steps / 10))"
     --model-time-horizon-steps "$((steps * 2))"
     --family-count-mode "$FAMILY_COUNT_MODE"
+    --strict-target-free
     "${COMMON_ARGS[@]}"
   )
 
@@ -208,3 +209,8 @@ print(json.dumps(aggregates, indent=2, sort_keys=True))
 PY
 
 echo "[PAPER-FINAL] complete: $OUT_ROOT/aggregate.json" | tee -a "$LOG_ROOT/driver.log"
+python scripts/generate_extended_structure_tables.py \
+  --results-root "$OUT_ROOT" --output-dir "$OUT_ROOT/extended_structure" \
+  --dataset imdb --dataset pubmed
+echo "[PAPER-FINAL] extended metrics: $OUT_ROOT/extended_structure/extended_structure.tsv" \
+  | tee -a "$LOG_ROOT/driver.log"
