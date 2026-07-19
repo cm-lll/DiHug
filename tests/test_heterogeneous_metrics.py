@@ -78,6 +78,9 @@ def test_comparison_reports_family_and_identity_metrics():
     assert aggregate["uniqueness_percent"] == 50.0
     assert aggregate["global"]["triangles"]["target"] == 1.0
     assert aggregate["typed_triangles"]["patterns"]
+    assert np.isclose(
+        aggregate["global"]["clustering"]["relative_error"]["mean"], 0.0
+    )
 
 
 def test_powerlaw_fit_reports_tail_quality_not_only_alpha():

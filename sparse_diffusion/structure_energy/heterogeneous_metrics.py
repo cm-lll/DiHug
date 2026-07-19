@@ -398,7 +398,12 @@ def aggregate_comparisons(rows: Sequence[Mapping]) -> dict:
             "generated": summarize(generated),
             "absolute_error": summarize(abs(value - target) for value in generated),
             "relative_error": summarize(
-                abs(value - target) / max(abs(target), 1.0) for value in generated
+                (
+                    abs(value - target) / abs(target)
+                    if abs(target) > 1.0e-12
+                    else abs(value - target)
+                )
+                for value in generated
             ),
         }
     for family in families:
