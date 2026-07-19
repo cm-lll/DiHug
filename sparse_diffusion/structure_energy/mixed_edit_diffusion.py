@@ -306,9 +306,31 @@ def sample_closed_form_marginal_noise(
         spec = graph.family_specs[family]
         capacity = family_domain_size(spec)
         probability = float(prior.family_probabilities[family])
-        clean_ranks = {
-            domain_rank_from_edge(spec, edge) for edge in clean.family_edges[family]
-        }
+        if spec.bipartite:
+            left_index = {
+                int(node): index for index, node in enumerate(spec.src_nodes)
+            }
+            right_index = {
+                int(node): index for index, node in enumerate(spec.dst_nodes)
+            }
+            right_count = len(spec.dst_nodes)
+            clean_ranks = set()
+            for edge in clean.family_edges[family]:
+                left, right = int(edge[0]), int(edge[1])
+                if left not in left_index:
+                    left, right = right, left
+                clean_ranks.add(left_index[left] * right_count + right_index[right])
+        else:
+            positions = {
+                int(node): index for index, node in enumerate(spec.src_nodes)
+            }
+            node_count = len(spec.src_nodes)
+            clean_ranks = set()
+            for edge in clean.family_edges[family]:
+                i, j = sorted((positions[int(edge[0])], positions[int(edge[1])]))
+                clean_ranks.add(
+                    i * (2 * node_count - i - 1) // 2 + (j - i - 1)
+                )
         clean_probability = alpha + (1.0 - alpha) * probability
         for rank in clean_ranks:
             if rng.random() < clean_probability:
