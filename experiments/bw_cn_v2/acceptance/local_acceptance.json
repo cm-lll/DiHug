@@ -1,0 +1,126 @@
+{
+  "scope": "CN v2 engineering-only CPU review fixes; no BW execution",
+  "source_tests": {
+    "tests": 55,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "pytest_seconds": 228.1
+  },
+  "resources": {
+    "wall_seconds": 229.28,
+    "cpu_user_seconds": 190.09,
+    "cpu_system_seconds": 29.4,
+    "peak_rss_kib": 1069888
+  },
+  "environment": {
+    "python": "3.9.23",
+    "torch": "2.1.0",
+    "torch_geometric": "2.3.1",
+    "numpy": "1.26.4",
+    "scipy": "1.11.0",
+    "pytest": "7.4.4"
+  },
+  "review_regressions": {
+    "tests": 14,
+    "targeted_seconds": 96.05,
+    "passed": true,
+    "cases": [
+      "nonzero CN legacy logits and p0; empty query",
+      "hard process exit after graph export before terminal summary",
+      "stop after final commit before export",
+      "post-evaluation exception; pending evaluation",
+      "graph model/seed/edges/degrees/binding/final checkpoint corruption rejected",
+      "corrupt terminal checkpoint rejected",
+      "incomplete evaluation step count rejected",
+      "fully evaluated result rejects duplicate execution"
+    ],
+    "finalization_resume": "no reverse_step calls; existing graph bytes and latest checkpoint unchanged"
+  },
+  "v1_counterexample": {
+    "scope": "deterministic CPU toy regression, not scientific output",
+    "query": [
+      [
+        0,
+        0
+      ],
+      [
+        1,
+        4
+      ]
+    ],
+    "v1_logits": [
+      [
+        2.6396188735961914,
+        -0.6673926711082458
+      ],
+      [
+        2.867382764816284,
+        0.8817384243011475
+      ]
+    ],
+    "v2_logits": [
+      [
+        2.6396188735961914,
+        -0.6124430894851685
+      ],
+      [
+        2.867382764816284,
+        0.966330349445343
+      ]
+    ],
+    "v1_probabilities": [
+      0.037252869457006454,
+      0.1299894005060196
+    ],
+    "v2_probabilities": [
+      0.037252869457006454,
+      0.1299894005060196
+    ],
+    "v1_softmax_mismatch": 0.009270980954170227,
+    "v2_softmax_mismatch": 0.0,
+    "probability_change": 0.0,
+    "CN_readout_weight": 0.3,
+    "GPU_use": 0,
+    "formal_training_updates": 0
+  },
+  "preservation": {
+    "byte_preserved_from_v1": [
+      "hsgd/common_neighbor.py",
+      "hsgd/computational.py",
+      "hsgd/kernel.py",
+      "hsgd/noising.py",
+      "hsgd/slots.py",
+      "hsgd/learning_validation.py",
+      "hsgd/bw_preflight/config.json",
+      "data/IMDB_movie_reference.npz",
+      "data/IMDB_preprocessing_provenance.json",
+      "hsgd/vendor/__init__.py",
+      "hsgd/vendor/LICENSE",
+      "hsgd/vendor/conv_transformer_model.py",
+      "hsgd/vendor/transconv_layer.py",
+      "hsgd/vendor/sample_edges_utils_typed.py",
+      "hsgd/vendor/layers.py"
+    ],
+    "old_v1_zip_sha256": "c045034ba970d6b7e211ac73ef9c1f9c7a0f6532e9cea919020277916df0fa37"
+  },
+  "model_executable_AST_unchanged": true,
+  "parameters": {
+    "baseline": 6527311,
+    "cn": 6537427,
+    "new": 10116
+  },
+  "comparison_scope": "CN legacy aliases canonical upstream; no independent implementation claim",
+  "changes": "diagnostic readout and finalization recovery only; distinct source/version binding",
+  "tolerance_source": "unchanged v9 hsgd/perf_checks.py TOLERANCES; graph metadata exact",
+  "formal_IMDB_updates": 0,
+  "GPU_use": 0,
+  "new_scientific_graphs": 0,
+  "not_executed": [
+    "BW check/timing/memory",
+    "formal training",
+    "full IMDB sampling chain",
+    "quality comparison"
+  ],
+  "next": "user manual BW check first, then decide formal training; no automatic start"
+}
