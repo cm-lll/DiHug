@@ -1,0 +1,1204 @@
+--- a/hsgd/__init__.py
++++ b/hsgd/__init__.py
+@@ -1,3 +1,3 @@
+ """Isolated typed sparse state diffusion restart; no legacy controller import."""
+ 
+-__version__ = "0.1.0"
++__version__ = "0.2.0-cn1"
+--- a/hsgd/bw_preflight/common.py
++++ b/hsgd/bw_preflight/common.py
+@@ -22,6 +22,13 @@
+ 
+ PACKAGE = Path(__file__).resolve().parents[2]
+ CONFIG = Path(__file__).with_name("config.json")
++EXPERIMENT_ARM = "cn"
++
++
++def set_arm(arm):
++    global EXPERIMENT_ARM
++    if arm not in ("baseline","cn"):raise ValueError("unknown frozen experiment arm")
++    EXPERIMENT_ARM=arm
+ 
+ 
+ def sha(path):
+@@ -48,7 +55,11 @@
+ 
+ 
+ def config():
+-    return json.loads(CONFIG.read_text())
++    cfg=json.loads(CONFIG.read_text())
++    cfg["version"]="bw_cn_v1"
++    cfg["experiment_arm"]=EXPERIMENT_ARM
++    cfg["model"]["cn_hidden"]=32 if EXPERIMENT_ARM=="cn" else 0
++    return cfg
+ 
+ 
+ def code_hashes():
+@@ -57,7 +68,9 @@
+ 
+ 
+ def verify_manifest():
+-    path = next((PACKAGE / n for n in ("manifest_learning_v9.json", "manifest_learning_v7.json", "manifest_runtime_v6.json", "manifest_perf_v5.json", "manifest_v4.json", "manifest_v3.json", "manifest_v2.json") if (PACKAGE/n).exists()), None)
++    path = PACKAGE/"manifest_cn_v1.json"
++    if not path.is_file():
++        raise RuntimeError("CN package manifest missing")
+     if path is not None:
+         manifest = json.loads(path.read_text())
+         for name, expected in manifest["files"].items():
+@@ -234,12 +247,13 @@
+         elif module.__class__.__name__ == "Linear" and hasattr(module, "in_channels") and hasattr(module, "out_channels"):
+             linear[name] = {"in": module.in_channels, "out": module.out_channels}
+     return dict(parameters=sum(p.numel() for p in model.parameters()),
++                common_neighbor_parameters=sum(p.numel() for p in model.common_neighbor.parameters()) if model.common_neighbor is not None else 0,
+                 linear_layers=linear,
+                 layer_norms={n: {"shape": list(v.normalized_shape), "eps": v.eps}
+                              for n, v in model.named_modules() if isinstance(v, torch.nn.LayerNorm)},
+                 graph_output_head=False, mutable_node_charge_dims=0,
+                 dropout_config=model.backbone.dropout, dropout_active=False,
+-                features="type onehot + binary state/family + t/T; no positions/ID/cycles/spectrum")
++                features="v9 inputs + optional Xt-only shared first-layer contextual common-neighbor sum; no ID/spectrum/hard closure")
+ 
+ 
+ def train_input(case, T, rounds, seed, position, rng, force_t=None):
+@@ -327,19 +341,29 @@
+     delta = float((model.backbone.lin_out_E.weight.detach() - before).abs().max())
+     if do_step and require_parameter_change and not delta > 0:
+         raise RuntimeError("expected trainable edge head did not change")
++    with torch.no_grad():
++        # Logging only; original BCE(sum)*(R/S) and its backward are unchanged.
++        item=torch.nn.functional.binary_cross_entropy(p.detach(),label,reduction="none")
++        split={}
++        for label_value,label_name in ((0,"negative"),(1,"positive")):
++            mask=label==label_value;count=int(mask.sum())
++            split[label_name+"_count"]=count
++            split[label_name+"_ce"]=float(item[mask].mean()) if count else None
+     r = dict(backend=backend, actual_dispatch=backend, forward_timings=timings or {},
+              loss=float(loss.detach()), time=inp["t"], query_slots=len(inp["ids"]),
+              query_round=inp["round_id"], noisy_edges=inp["edges"].shape[1], gradient_norm=float(norm),
+              participating_parameters=len(named), no_gradient_parameters=[n for n, v in model.named_parameters() if v.grad is None],
++             no_gradient_indices=[i for i,(n,v) in enumerate(model.named_parameters()) if v.grad is None],
+              edge_head_max_update=delta, preparation_seconds=inp["preparation_seconds"], noise_seconds=inp["noise_seconds"],
+              label_transfer_seconds=transfer, forward_seconds=forward, backward_seconds=backward,
+              optimizer_seconds=optimizer_time, synchronized_update_seconds=time.perf_counter() - wall,
+-             optimizer_update=do_step, **memory(device))
++             optimizer_update=do_step, **split, **memory(device))
+     return r
+ 
+ 
+ def checkpoint(model, optimizer, rng, device, completed, binding, history):
+     return dict(model=cpu_tree(model.state_dict()), optimizer=cpu_tree(optimizer.state_dict()),
++                optimizer_parameter_names=[n for n,p in model.named_parameters()],
+                 completed_updates=completed, rng=cpu_tree(rng_save(rng, device)), binding=binding,
+                 history=history, purpose="engineering preflight, NOT a formal trained model")
+ 
+--- /dev/null
++++ b/hsgd/cn_checks.py
+@@ -0,0 +1,109 @@
++"""Small semantic gate + bounded full-size BW cost measurement. No formal fit."""
++import copy
++import json
++from pathlib import Path
++import time
++import numpy as np
++import torch
++from hsgd.bw_preflight import common as c
++from hsgd.computational import FrozenTypedContext
++from hsgd.kernel import MarginalKernel
++from hsgd.runtime import reverse_step
++from hsgd.learning_mode import configure
++from hsgd.perf_checks import TOLERANCES
++
++
++def small_model(device="cpu"):
++    case=c.make_case(np.array([0,0,1,1,2,2,2,0]),np.array([[0,1,2,2,3,0,1],[2,2,4,5,6,7,6]]),
++        tuple(__import__('itertools').combinations_with_replacement(range(3),2)))
++    cfg=c.config();cfg["model"].update(layers=2,width=16,edge_width=8,global_width=8,heads=2,
++        ff_node=16,ff_edge=8,ff_global=8,cn_hidden=32)
++    c.seed_all(1601);m=c.make_model(case,cfg,device)
++    return m,case,cfg
++
++
++def mechanism(device="cpu"):
++    m,case,cfg=small_model(device);m.eval()
++    query=np.array([[0,0],[1,4]]);fam=case["space"].encode(query)[0]
++    ctx=FrozenTypedContext(m,case["space"].types,case["clean"],case["space"].encode(case["clean"])[0],"fixture")
++    qt=torch.tensor(query,device=device);qf=torch.tensor(fam,device=device)
++    features=m.common_neighbor.aggregate(ctx,qt,qf,.5)
++    # Query0 shares node2. Query1 shares node2 as well, with a different target relation.
++    if not features.isfinite().all() or features[0,-3:].sum()!=1:raise AssertionError("shared intermediate extraction")
++    swapped=m.common_neighbor.aggregate(ctx,qt.flip(0),qf,.5)
++    if not torch.equal(features,swapped):raise AssertionError("endpoint swap changed CN features")
++    with torch.no_grad():m.common_neighbor.readout.weight.fill_(.01)
++    # New context required after a parameter update, including this test assignment.
++    ctx.close();ctx=FrozenTypedContext(m,case["space"].types,case["clean"],case["space"].encode(case["clean"])[0],"new")
++    graph,logits,p=ctx.predict(query,fam,.5,"new",details=True)
++    loss=torch.nn.functional.binary_cross_entropy(p,torch.zeros_like(p));loss.backward()
++    grads=[v.grad for v in m.parameters() if v.grad is not None]
++    if not grads or not all(torch.isfinite(v).all() for v in grads):raise AssertionError("nonfinite gradient")
++    if not any(p.grad is not None and p.grad.abs().sum()>0 for p in m.common_neighbor.phi.parameters()):raise AssertionError("no feature learning gradient")
++    ctx.close()
++    m.eval();T=4;R=3;kernel=MarginalKernel(case["prior"],c.schedule(T));rng=np.random.default_rng(1602)
++    state=(rng.random(case["space"].total)<np.repeat(case["prior"],case["space"].counts)).astype(np.uint8)
++    with torch.no_grad():
++        for t in range(T,0,-1):state,rec=reverse_step(m,case,state,kernel,t,R,1602,rng,device)
++    return dict(status="passed",device=device,checks=["shared intermediate", "symmetric endpoint exchange",
++        "finite forward/backward and nonzero phi gradient","complete 4-step/3-block engineering chain"],
++        small_reverse_steps=4,not_scientific_output=True,tolerances=TOLERANCES)
++
++
++def run_check(out,device="cuda",fixture=False):
++    out=Path(out);out.mkdir(parents=True,exist_ok=False)
++    started=time.perf_counter();cpu=time.process_time()
++    torch.set_num_threads(1);torch.set_float32_matmul_precision("highest")
++    torch.backends.cuda.matmul.allow_tf32=False;torch.backends.cudnn.allow_tf32=False;configure(False)
++    env=c.environment(device);c.verify_manifest()
++    if not fixture and (env["device_name"]!="BW" or not env["hip"]):raise RuntimeError("check requires actual BW/HIP")
++    receipt=dict(status="running",engineering_fixture=fixture,environment=env,code=c.code_hashes(),files={})
++    c.json_save(out/"check.json",receipt)
++    try:
++        semantic=mechanism(device);c.json_save(out/"mechanism.json",semantic)
++        arms={}
++        for arm in ("baseline","cn"):
++            c.set_arm(arm);cfg=c.config()
++            if fixture:
++                model,case,cfg=small_model(device)
++                cfg["model"]["cn_hidden"]=32 if arm=="cn" else 0
++                model=c.make_model(case,cfg,device)
++            else:case=c.imdb_case(c.PACKAGE/"data/IMDB_movie_reference.npz",cfg)
++            c.seed_all(cfg["train_seed"]);model=c.make_model(case,cfg,device)
++            opt=torch.optim.AdamW(model.parameters(),**cfg["optimizer"])
++            rng=np.random.default_rng(1603)
++            inp=c.train_input(case,cfg["T"],cfg["rounds"],1603,1,rng,force_t=500)
++            if device=="cuda":torch.cuda.reset_peak_memory_stats()
++            records=[]
++            for i in range(3):
++                print(json.dumps(dict(event="cost_update",arm=arm,index=i,phase="warmup" if i==0 else "measured")),flush=True)
++                records.append(c.update(model,opt,case,inp,cfg["T"],device,require_parameter_change=False))
++            from hsgd.slots import UniformQueryPlan
++            state=np.zeros(case["space"].total,dtype=np.uint8)
++            f,loc=case["space"].encode(inp["edges"]);state[case["space"].offsets[f]+loc]=1
++            model.eval();sampler_rng=np.random.default_rng(1604)
++            with torch.no_grad():
++                _,step=reverse_step(model,case,state,MarginalKernel(case["prior"],c.schedule(cfg["T"])),
++                    500,cfg["rounds"],1604,sampler_rng,device,
++                    event=lambda phase,**kw:print(json.dumps(dict(event=phase,arm=arm,**kw)),flush=True) if phase=="reverse_block" else None)
++                ctx=FrozenTypedContext(model,case["space"].types,inp["edges"],inp["edge_families"],"cost")
++                topology=dict(raw_wedges=ctx.cn_wedges.raw_wedges,index_bytes=ctx.cn_wedges.bytes) if ctx.cn_wedges else None
++                ctx.close()
++                del ctx
++            arms[arm]=dict(dimensions=c.dimensions(model),updates=records,warmup_updates=1,measured_updates=2,
++                full_20_block_step=step,cn_topology=topology,**c.memory(device),
++                reference=dict(nodes=len(case["space"].types),edges=len(case["clean_ids"]),slots=case["space"].total),
++                scope="CPU tiny fixture" if fixture else "random engineering weights, fixed true-scale forward-noised input; not formal learning or a scientific chain")
++            c.json_save(out/(arm+"_cost.json"),arms[arm])
++            del model,opt
++            if device=="cuda":torch.cuda.empty_cache()
++        receipt.update(status="passed",arms=arms,checks=["small mechanism forward/backward/short chain",
++            "complete query coverage and finite updates (fixture only)" if fixture else "real-size update and complete20-block step finite"],data_sha256=c.config()["imdb_sha256"] if not fixture else "engineering",
++            wall_seconds=time.perf_counter()-started,cpu_seconds=time.process_time()-cpu,**c.memory(device))
++        receipt["files"]={n:c.sha(out/n) for n in ("mechanism.json","baseline_cost.json","cn_cost.json")}
++    except BaseException as exc:
++        import traceback
++        receipt.update(status="failed",error=type(exc).__name__+": "+str(exc),traceback=traceback.format_exc())
++        raise
++    finally:c.json_save(out/"check.json",receipt)
++    return receipt
+--- /dev/null
++++ b/hsgd/cn_entry.py
+@@ -0,0 +1,203 @@
++"""Thin notebook entry over v9 learning, validation, transactional sampling."""
++import argparse
++import fcntl
++import json
++import os
++from pathlib import Path
++import subprocess
++import sys
++import time
++
++sys.dont_write_bytecode=True
++
++
++def prepare_runtime(device):
++    import torch
++    from hsgd.learning_mode import configure
++    torch.set_num_threads(1);torch.set_float32_matmul_precision("highest")
++    torch.backends.cuda.matmul.allow_tf32=False;torch.backends.cudnn.allow_tf32=False
++    configure(False)
++    from hsgd.bw_preflight.common import environment
++    return environment(device)
++
++
++def verify_check(directory,device):
++    from hsgd.bw_preflight import common as c
++    if directory is None:raise RuntimeError("run check first; --check-dir required")
++    directory=Path(directory).resolve();r=json.loads((directory/"check.json").read_text())
++    if r["status"]!="passed" or r["engineering_fixture"] is not False or not r["checks"]:
++        raise RuntimeError("BW engineering/cost gate incomplete or fixture only")
++    if r["code"]!=c.code_hashes() or r["data_sha256"]!=c.config()["imdb_sha256"]:
++        raise RuntimeError("engineering receipt code/data changed")
++    if c.runtime_binding(r["environment"])!=c.runtime_binding(c.environment(device)):
++        raise RuntimeError("engineering runtime differs")
++    for n in ("mechanism.json","baseline_cost.json","cn_cost.json"):
++        if n not in r["files"] or c.sha(directory/n)!=r["files"][n]:raise RuntimeError("engineering evidence missing/changed")
++    mechanism=json.loads((directory/"mechanism.json").read_text())
++    if mechanism["status"]!="passed" or len(mechanism["checks"])<4 or mechanism["small_reverse_steps"]!=4:
++        raise RuntimeError("mechanism/short-chain evidence incomplete")
++    for arm in ("baseline","cn"):
++        a=r["arms"][arm]
++        if a["measured_updates"]!=2 or len(a["updates"])!=3 or a["full_20_block_step"]["blocks"]!=20 or not a["full_20_block_step"]["exact_coverage"]:
++            raise RuntimeError("incomplete full-size cost evidence")
++        if a["reference"]["nodes"]!=c.config()["imdb_nodes"] or a["reference"]["edges"]!=c.config()["imdb_edges"]:
++            raise RuntimeError("cost measurement is not the full reference")
++        expected=10116 if arm=="cn" else 0
++        if a["dimensions"]["common_neighbor_parameters"]!=expected:raise RuntimeError("wrong arm parameter count")
++    return dict(directory=str(directory),sha256=c.sha(directory/"check.json"),files=r["files"])
++
++
++def load_final(run,arm,device):
++    import numpy as np
++    import torch
++    from hsgd.bw_preflight import common as c
++    from hsgd.learning_budget import model_fingerprint,signature
++    from hsgd.learning_mode import require
++    from hsgd.learning import PROTOCOL
++    from hsgd.cn_sampling import required,digest
++    c.set_arm(arm);c.verify_manifest();cfg=c.config();env=prepare_runtime(device)
++    if device!="cuda" or env["device_name"]!="BW" or not env["hip"]:raise RuntimeError("formal sampler requires BW")
++    run=Path(run).resolve()
++    names=("summary.json","freeze.json","latest.json","run_control.json")
++    s,f,l,control=[json.loads(required(run,n).read_text()) for n in names]
++    if s.get("stage")!="cn-v1-IMDB-B-learning" or s.get("formal_training") is not True or s.get("status") not in ("stopped_manual","stopped_limit"):
++        raise RuntimeError("not a finalized formal CN-experiment run")
++    if control.get("version")!="bw_cn_v1" or control.get("engineering_fixture") is not False:raise RuntimeError("old/fixture checkpoint rejected")
++    path=required(run,s.get("final_checkpoint"))
++    if s["final_checkpoint"]!=l["path"] or digest(path)!=l["sha256"]:raise RuntimeError("final/latest/hash mismatch")
++    ck=c.trusted_load(path);b=f["binding"];n=s["completed_updates"]
++    if not (type(n) is int and n>0 and n==l["completed_updates"]==ck["completed_updates"]):raise RuntimeError("effective update counts differ")
++    if (b["code"]!=c.code_hashes() or b["config"]!=cfg or b["execution_protocol"]!=PROTOCOL or
++        b["graph_backend"]!="upstream" or b["run_control"]!=control or ck["binding"]!=b or s["run_control"]!=control):
++        raise RuntimeError("source/config/arm/protocol binding mismatch")
++    require(c.runtime_binding(env),False)
++    if c.runtime_binding(env)!=b["backend"]:raise RuntimeError("dependency/runtime binding mismatch")
++    source=c.PACKAGE/"data/IMDB_movie_reference.npz";provenance=c.PACKAGE/"data/IMDB_preprocessing_provenance.json"
++    if c.sha(source)!=b["data"] or c.sha(provenance)!=b["data_provenance_sha256"]:raise RuntimeError("data binding mismatch")
++    if model_fingerprint(ck["model"])!=ck["model_sha256"] or not all(torch.isfinite(x).all() for x in ck["model"].values()):
++        raise RuntimeError("weight fingerprint/nonfinite")
++    from hsgd.cn_optimizer import verify_steps
++    verify_steps(ck)
++    vals=ck["validations"]
++    if vals!=s["validation_records"] or not vals or vals[-1]["stage"]!="final" or vals[-1]["status"]!="completed" or vals[-1]["completed_updates"]!=n or vals[-1]["model_sha256"]!=ck["model_sha256"]:
++        raise RuntimeError("final validation/weight mismatch")
++    case=c.imdb_case(source,cfg);model=c.make_model(case,cfg,device)
++    model.load_state_dict(ck["model"],strict=True);model.eval()
++    if model_fingerprint(model.state_dict())!=ck["model_sha256"]:raise RuntimeError("strict load differs")
++    if not np.array_equal(model.prior.detach().cpu().numpy(),case["prior"]):raise RuntimeError("final prior differs from bound reference")
++    manifest=json.loads((c.PACKAGE/"manifest_cn_v1.json").read_text())
++    receipt=dict(formal_training=True,experiment_arm=arm,model_sha256=ck["model_sha256"],completed_updates=n,
++        final_checkpoint=str(path),checkpoint_sha256=l["sha256"],config=cfg,environment=env,
++        source_package=dict(path=str(c.PACKAGE),files={k:v["sha256"] for k,v in manifest["files"].items()}),
++        run=str(run),run_evidence={name:digest(run/name) for name in names},binding_signature=signature(b))
++    receipt["run_evidence"][s["final_checkpoint"]]=digest(path)
++    return model,case,cfg,receipt
++
++
++def main():
++    p=argparse.ArgumentParser(description=__doc__)
++    p.add_argument("command",choices=("check","_check","start","resume","progress","stop","sample"))
++    p.add_argument("--output",type=Path,required=True)
++    p.add_argument("--arm",choices=("baseline","cn"),default="cn")
++    p.add_argument("--check-dir",type=Path)
++    p.add_argument("--max-updates",type=int,default=10000)
++    p.add_argument("--run",type=Path)
++    p.add_argument("--seed",type=int,default=2026101601)
++    p.add_argument("--sample-resume",action="store_true")
++    p.add_argument("--check-only",action="store_true")
++    p.add_argument("--fixture",action="store_true",help=argparse.SUPPRESS)
++    args=p.parse_args();out=args.output.resolve()
++    if args.command in ("progress","stop"):
++        if not out.is_dir():p.error("run directory missing")
++        if (out/"run_control.json").exists():
++            if json.loads((out/"run_control.json").read_text())["version"]!="bw_cn_v1":p.error("not a CN experiment run")
++        elif (out/"sampling_binding.json").exists():
++            if json.loads((out/"sampling_binding.json").read_text())["input"]["config"]["version"]!="bw_cn_v1":p.error("not a CN experiment sample")
++        else:p.error("no native experiment binding")
++        if args.command=="stop":
++            with (out/"STOP_REQUESTED").open("a") as f:f.write("user safe stop\n")
++            print("Requested safe stop; wait for terminal status and final checkpoint.")
++        for name in ("active_worker.json","launcher_progress.json","progress.json","latest.json","chain_latest.json","summary.json"):
++            if (out/name).exists():
++                data=json.loads((out/name).read_text())
++                if name=="summary.json":data={k:data.get(k) for k in ("status","reason","completed_updates","completed_reverse_steps","remaining_time","final_checkpoint","final_graph","validation_trend")}
++                print(name,json.dumps(data,ensure_ascii=False))
++        vals=list((out/"validation").glob("*/validation.json"))
++        if vals:
++            r=json.loads(max(vals,key=lambda p:p.stat().st_mtime).read_text())
++            print("validation",json.dumps(dict(stage=r["stage"],updates=r["completed_updates"],
++                pooled_ce=r["pooled_ce"],positive_ce=r["positive_ce"],negative_ce=r["negative_ce"],
++                times=[{k:x[k] for k in ("time","pooled_ce","positive_ce","negative_ce","expected_edges")} for x in r["times"]])))
++        return 0
++    from hsgd.bw_preflight import common as c
++    c.set_arm(args.arm)
++    device="cpu" if args.fixture else "cuda"
++    if args.command=="check":
++        command=[sys.executable,"-m","hsgd.cn_entry","_check","--output",str(out)]
++        if args.fixture:command.append("--fixture")
++        try:return subprocess.run(command,timeout=570).returncode
++        except subprocess.TimeoutExpired:
++            if out.exists():c.json_save(out/"timeout.json",dict(status="incomplete",seconds=570))
++            return 75
++    if args.command=="_check":
++        from hsgd.cn_checks import run_check
++        r=run_check(out,device,args.fixture);print(json.dumps(r,indent=2));return 0
++    if args.command in ("start","resume"):
++        if args.max_updates<1:p.error("positive maximum updates required")
++        if args.command=="resume":
++            frozen=json.loads((out/"freeze.json").read_text())
++            if frozen["binding"]["config"]["experiment_arm"]!=args.arm:p.error("resume arm differs; original run unchanged")
++            if "--max-updates" in sys.argv:p.error("resume uses the frozen maximum; cannot change it")
++        command=[sys.executable,"-m","hsgd.learning_launch","--output",str(out),"--arm",args.arm]
++        if args.command=="resume":command.append("--resume")
++        else:command.extend(["--stop-after-updates",str(args.max_updates)])
++        if args.check_dir:command.extend(["--check-dir",str(args.check_dir.resolve())])
++        if args.fixture:command.extend(["--fixture","--device","cpu"])
++        os.execv(sys.executable,command)
++    if args.command=="sample":
++        if not args.run:p.error("--run finalized new experiment run required")
++        if args.fixture:p.error("formal sample CLI cannot use fixtures")
++        for source in (c.PACKAGE,args.run.resolve()):
++            if source==out or source in out.parents or out in source.parents:p.error("output must be isolated")
++        from hsgd.cn_sampling import chain,unchanged,read,write
++        if args.sample_resume:
++            if not out.is_dir():p.error("no native sample directory")
++            if args.check_only:p.error("check-only requires a new directory")
++        else:out.mkdir(parents=True,exist_ok=False)
++        lock=(out/".sample.lock").open("a+");fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
++        model,case,cfg,receipt=load_final(args.run,args.arm,device)
++        unchanged(receipt)
++        write(out/("input_check_%d.json"%time.time_ns()),receipt)
++        if args.check_only:
++            write(out/"summary.json",dict(status="checked_only",forward_calls=0));return 0
++        if args.sample_resume and (out/"summary.json").exists():
++            status=read(out/"summary.json")["status"]
++            if status not in ("stopped","failed"):raise RuntimeError("sample is not resumable")
++            (out/"summary.json").rename(out/("summary_before_resume_%d.json"%time.time_ns()))
++        code=chain(model,case,cfg,receipt,out,args.seed,device,args.sample_resume)
++        try:
++            unchanged(receipt)
++            summary=read(out/"summary.json")
++            if summary["status"]=="completed":
++                import numpy as np
++                from hsgd.cn_metrics import evaluate,imdb_roles
++                roles=imdb_roles(read(c.PACKAGE/"data/IMDB_preprocessing_provenance.json"))
++                with np.load(out/"graph.npz") as z:
++                    generated=evaluate(z["types"],z["edges"].T,z["family_ids"],case["space"].pairs,roles)
++                reference=evaluate(case["space"].types,case["clean"],case["space"].encode(case["clean"])[0],case["space"].pairs,roles)
++                summary.update(structure_diagnostics=dict(generated=generated,reference=reference),
++                    source_inputs_unchanged=True,evaluator_complete=True)
++                write(out/"summary.json",summary)
++        except BaseException as exc:
++            summary=read(out/"summary.json")
++            summary.update(status="incomplete_evaluation_or_integrity",evaluator_complete=False,error=str(exc))
++            write(out/"summary.json",summary)
++            raise
++        return code
++
++
++if __name__=="__main__":
++    try:raise SystemExit(main())
++    except Exception:
++        import traceback
++        traceback.print_exc();raise SystemExit(1)
+--- /dev/null
++++ b/hsgd/cn_metrics.py
+@@ -0,0 +1,55 @@
++"""Deterministic graph diagnostics; never a loss, constraint or filter."""
++import itertools
++import numpy as np
++
++
++def evaluate(types,edges,families,pairs,role_types=None):
++    types=np.asarray(types);edges=np.asarray(edges).reshape(2,-1);families=np.asarray(families)
++    adj=[{} for _ in types]
++    for (u,v),r in zip(edges.T,families):
++        if u==v or v in adj[u]:raise ValueError("non-simple graph in evaluator")
++        if tuple(sorted((int(types[u]),int(types[v]))))!=tuple(pairs[r]):raise ValueError("schema mismatch")
++        adj[u][v]=int(r);adj[v][u]=int(r)
++    triangles={};total=0
++    # Independent set intersections, no production wedge extraction reused.
++    for u in range(len(types)):
++        for v in adj[u]:
++            if v<=u:continue
++            for w in adj[u].keys()&adj[v].keys():
++                if w<=v:continue
++                vertices=(u,v,w)
++                patterns=[]
++                for a,b,c in itertools.permutations(vertices):
++                    patterns.append((int(types[a]),adj[a][b],int(types[b]),adj[b][c],int(types[c]),adj[c][a]))
++                key=",".join(map(str,min(patterns)))
++                triangles[key]=triangles.get(key,0)+1;total+=1
++    closure=None
++    if role_types is not None:
++        dt,mt,at=role_types
++        open_paths,closed=0,0
++        for m in np.flatnonzero(types==mt):
++            ds=[u for u in adj[m] if types[u]==dt]
++            actors=[v for v in adj[m] if types[v]==at]
++            open_paths+=len(ds)*len(actors)
++            closed+=sum(a in adj[d] for d in ds for a in actors)
++        closure=dict(definition="Director-Movie-Actor simple path instances whose Director-Actor edge exists",
++            paths=open_paths,closed_paths=closed,rate=closed/open_paths if open_paths else None,
++            role_types=list(role_types),zero_denominator="NA; no pseudocount")
++    return dict(triangles=total,typed_relation_triangle_patterns=triangles,director_movie_actor_closure=closure,
++        scope="descriptive diagnostics only; no acceptance threshold or graph repair")
++
++
++def imdb_roles(provenance):
++    meta=provenance["source_metadata"] if "source_metadata" in provenance else provenance.get("metadata",{})
++    # Bound full preprocessing record supplies the original insertion/type order.
++    def find(obj):
++        if isinstance(obj,dict):
++            if "num_nodes_by_type" in obj:return list(obj["num_nodes_by_type"])
++            for value in obj.values():
++                result=find(value)
++                if result:return result
++        return None
++    names=find(provenance)
++    if names!=["Director","Actor","Movie","Genre"]:
++        raise RuntimeError("IMDB role/type binding not verified")
++    return (names.index("Director"),names.index("Movie"),names.index("Actor"))
+--- /dev/null
++++ b/hsgd/cn_optimizer.py
+@@ -0,0 +1,28 @@
++"""Adam counts follow gradient participation, including empty CN batches."""
++import numpy as np
++
++
++def verify_steps(ck,model=None):
++    names=ck["optimizer_parameter_names"]
++    if model is not None and names!=[n for n,p in model.named_parameters()]:
++        raise RuntimeError("optimizer parameter order mismatch")
++    groups=ck["optimizer"]["param_groups"]
++    if len(groups)!=1 or len(groups[0]["params"])!=len(names) or len(set(names))!=len(names):
++        raise RuntimeError("optimizer inventory mismatch")
++    count=np.zeros(len(names),dtype=np.int64)
++    history=ck["history"]
++    if len(history)!=ck["completed_updates"]:raise RuntimeError("update history count mismatch")
++    for r in history:
++        absent=np.asarray(r["no_gradient_indices"],dtype=np.int64)
++        if ((absent<0)|(absent>=len(names))).any() or len(np.unique(absent))!=len(absent):
++            raise RuntimeError("gradient participation indices invalid")
++        count+=1;count[absent]-=1
++    states=ck["optimizer"]["state"]
++    if set(states)-set(groups[0]["params"]):raise RuntimeError("unknown Adam parameter state")
++    for i,pid in enumerate(groups[0]["params"]):
++        if count[i]==0:
++            if pid in states:raise RuntimeError("Adam state for a never-participating parameter")
++        elif pid not in states or int(states[pid]["step"])!=int(count[i]):
++            raise RuntimeError("Adam participation count differs: "+names[i])
++    return dict(effective_updates=len(history),parameters=len(names),
++        participating_step_min=int(count.min()),participating_step_max=int(count.max()))
+--- /dev/null
++++ b/hsgd/cn_sampling.py
+@@ -0,0 +1,284 @@
++"""Unmodified transaction/graph-stat routines from reviewed bw_single_graph_v1.
++New native weight import is in cn_entry; no v9/preflight weight compatibility.
++"""
++import hashlib
++import json
++import os
++from pathlib import Path
++import signal
++import sys
++import time
++import traceback
++ROOT=Path(__file__).resolve().parents[1]
++VERSION="bw_cn_v1_sampling"
++
++def adapter_hashes():
++    manifest=read(ROOT/"manifest_cn_v1.json")
++    entries={n:v["sha256"] for n,v in manifest["files"].items()}
++    for n,s in entries.items():
++        if digest(required(ROOT,n))!=s:raise RuntimeError("package changed: "+n)
++    return dict(manifest_sha256=digest(ROOT/"manifest_cn_v1.json"),files=entries)
++
++def digest(path):
++    h = hashlib.sha256()
++    with Path(path).open("rb") as f:
++        for chunk in iter(lambda: f.read(1024 * 1024), b""):
++            h.update(chunk)
++    return h.hexdigest()
++
++def read(path):
++    return json.loads(Path(path).read_text())
++
++def required(root, name):
++    if not isinstance(name, str) or not name or Path(name).is_absolute():
++        raise RuntimeError("expected nonempty relative evidence path")
++    root = Path(root).resolve()
++    p = (root / name).resolve()
++    if root not in p.parents or not p.is_file() or p.stat().st_size == 0:
++        raise RuntimeError("missing, empty or escaping evidence: " + name)
++    return p
++
++def write(path, value):
++    p = Path(path)
++    tmp = p.with_name(p.name + ".tmp")
++    with tmp.open("w") as f:
++        json.dump(value, f, indent=2, allow_nan=False, ensure_ascii=False)
++        f.flush()
++        os.fsync(f.fileno())
++    tmp.replace(p)
++
++def atomic_torch(path, value):
++    import torch
++    p = Path(path)
++    tmp = p.with_name(p.name + ".tmp")
++    with tmp.open("wb") as f:
++        torch.save(value, f)
++        f.flush()
++        os.fsync(f.fileno())
++    tmp.replace(p)
++
++def graph_stats(case, state):
++    import numpy as np
++    from hsgd.bw_preflight.common import state_edges
++    state = np.asarray(state)
++    if state.shape != (case["space"].total,) or not np.isin(state, [0, 1]).all():
++        raise RuntimeError("invalid full-slot state")
++    for f, pi in enumerate(case["prior"]):
++        if pi in (0., 1.) and not (state[case["space"].offsets[f]:case["space"].offsets[f+1]] == int(pi)).all():
++            raise RuntimeError("state violates fixed support")
++    edges, families = state_edges(case, state)
++    types = case["space"].types
++    n, k = len(types), case["n_families"]
++    degree = np.zeros((n, k), dtype=np.int64)
++    parent = np.arange(n)
++    def find(u):
++        while parent[u] != u:
++            parent[u] = parent[parent[u]]
++            u = int(parent[u])
++        return u
++    for r in range(k):
++        degree[:, r] = np.bincount(edges[:, families == r].ravel(), minlength=n)
++    for a, b in edges.T:
++        x, y = find(int(a)), find(int(b))
++        parent[x] = y
++    sizes = sorted(np.bincount([find(i) for i in range(n)]).tolist(), reverse=True)
++    sizes = [s for s in sizes if s]
++    total = degree.sum(1)
++    def distribution(x):
++        return dict(nodes=len(x), histogram=np.bincount(x).tolist(), mean=float(x.mean()) if len(x) else None,
++                    median=float(np.median(x)) if len(x) else None, max=int(x.max()) if len(x) else None)
++    encoded, local = case["space"].encode(edges)
++    ids = case["space"].offsets[encoded] + local
++    simple = bool((edges[0] < edges[1]).all() and len(np.unique(ids)) == len(ids))
++    stats = dict(nodes=n, physical_edges=edges.shape[1], type_counts=np.bincount(types).tolist(),
++        family_pairs=[list(x) for x in case["space"].pairs], family_edges=np.bincount(families, minlength=k).tolist(),
++        isolated_nodes=int((total == 0).sum()), components=len(sizes), component_sizes=sizes,
++        connected=len(sizes) == 1, largest_component_nodes=max(sizes, default=0),
++        degree=distribution(total), degree_by_type={str(t): distribution(total[types == t]) for t in np.unique(types)},
++        degree_by_relation={str(r): distribution(degree[:, r]) for r in range(k)},
++        degree_by_type_relation={str(t): {str(r): distribution(degree[types == t, r]) for r in range(k)} for t in np.unique(types)},
++        schema_legal=bool(np.array_equal(encoded, families)), simple_undirected=simple,
++        edge_storage="canonical u<v once; each edge contributes degree at both endpoints",
++        relation_histogram_population="all nodes, including zeros; type-relation populations also reported")
++    return stats, edges, families, degree
++
++def check_state(ck, case, binding, T):
++    import numpy as np
++    from hsgd.learning_budget import signature
++    if ck["binding"] != binding or signature(ck["binding"]) != ck["binding_sha256"]:
++        raise RuntimeError("sampling checkpoint binding changed")
++    t, steps = ck["remaining_time"], ck["completed_reverse_steps"]
++    if type(t) is not int or type(steps) is not int or not 0 <= t <= T or steps + t != T:
++        raise RuntimeError("sampling time/step count mismatch")
++    if ck["state_slots"] != case["space"].total or ck["packed_state"].dtype != np.uint8:
++        raise RuntimeError("sampling state shape/type mismatch")
++    if ck["packed_state"].shape != ((case["space"].total + 7)//8,):
++        raise RuntimeError("packed state length mismatch")
++    if set(ck["rng"]) != {"generator", "python", "numpy", "torch", "accelerator"}:
++        raise RuntimeError("sampling RNG incomplete")
++    state = np.unpackbits(ck["packed_state"])[:ck["state_slots"]]
++    graph_stats(case, state)
++    return state
++
++def chain(model, case, cfg, receipt, out, seed, device, resume=False, stop_after=None, interrupt_block=None):
++    """stop_after/interrupt_block are internal finite engineering-test hooks only."""
++    import numpy as np
++    import torch
++    from hsgd.bw_preflight.common import seed_all, rng_save, rng_restore, trusted_load, sync, memory, schedule
++    from hsgd.kernel import MarginalKernel
++    from hsgd.learning_budget import signature
++    from hsgd.learning_mode import require, state as mode_state
++    from hsgd.runtime import reverse_step
++    out = Path(out)
++    binding = dict(adapter=adapter_hashes(), input=receipt, seed=seed,
++        T=cfg["T"], rounds=cfg["rounds"], backend="upstream", execution_mode=mode_state(),
++        contract="frozen Xt/full sweep/atomic complete-step commit; ordinary resume not bitwise certified")
++    require(mode_state(), False)
++    model.eval()
++    seed_all(seed)
++    rng = np.random.default_rng(seed)
++    T, t, completed = cfg["T"], cfg["T"], 0
++    kernel = MarginalKernel(case["prior"], schedule(T))
++    stopped = [None]
++    old_handlers = {}
++    for sig in (signal.SIGINT, signal.SIGTERM):
++        old_handlers[sig] = signal.signal(sig, lambda s, f: stopped.__setitem__(0, "signal_" + str(s)))
++    started, cpu = time.perf_counter(), time.process_time()
++    cumulative, cumulative_cpu, step_seconds, checkpoint_seconds = 0., 0., 0., 0.
++    failure = None
++    def event(phase, **kw):
++        row = dict(phase=phase, utc=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), **kw)
++        with (out/"events.jsonl").open("a") as f:
++            f.write(json.dumps(row, allow_nan=False) + "\n")
++        print(json.dumps(row, ensure_ascii=False), flush=True)
++    def stop_check():
++        if stopped[0] or (out / "STOP_REQUESTED").exists():
++            raise InterruptedError("safe stop requested; incomplete time step discarded")
++        require(mode_state(), False)
++    def save(last_step):
++        nonlocal checkpoint_seconds
++        tick = time.perf_counter()
++        filename = "states/step_%04d_%d.pt" % (completed, time.time_ns())
++        ck = dict(binding=binding, binding_sha256=signature(binding), packed_state=np.packbits(state),
++            state_slots=len(state), remaining_time=t, completed_reverse_steps=completed,
++            rng=rng_save(rng, device), cumulative_wall_seconds=cumulative+time.perf_counter()-started,
++            cumulative_cpu_seconds=cumulative_cpu+time.process_time()-cpu,
++            reverse_compute_seconds=step_seconds, checkpoint_seconds=checkpoint_seconds, last_step=last_step)
++        atomic_torch(out/filename, ck)
++        write(out/"chain_latest.json", dict(path=filename, sha256=digest(out/filename),
++            remaining_time=t, completed_reverse_steps=completed, binding_sha256=signature(binding)))
++        checkpoint_seconds += time.perf_counter()-tick
++    try:
++        if resume:
++            pointer = read(required(out, "chain_latest.json"))
++            p = required(out, pointer["path"])
++            if digest(p) != pointer["sha256"]:
++                raise RuntimeError("sampling checkpoint hash mismatch")
++            ck = trusted_load(p)
++            # Observational environment timestamp changes; stable binding was frozen at first launch.
++            old_binding = read(required(out, "sampling_binding.json"))
++            comparable = json.loads(json.dumps(binding))
++            comparable["input"]["environment"]["utc"] = old_binding["input"]["environment"]["utc"]
++            if comparable != old_binding:
++                raise RuntimeError("sampling source/input/config/runtime/seed changed")
++            binding = old_binding
++            state = check_state(ck, case, binding, T)
++            if (pointer["remaining_time"] != ck["remaining_time"] or pointer["completed_reverse_steps"] != ck["completed_reverse_steps"] or
++                    pointer["binding_sha256"] != signature(binding)):
++                raise RuntimeError("pointer/time/binding mismatch")
++            t, completed = ck["remaining_time"], ck["completed_reverse_steps"]
++            cumulative, cumulative_cpu = ck["cumulative_wall_seconds"], ck["cumulative_cpu_seconds"]
++            step_seconds, checkpoint_seconds = ck["reverse_compute_seconds"], ck["checkpoint_seconds"]
++            rng_restore(ck["rng"], rng, device)
++            # Exact loaded RNG, without promising future non-deterministic trajectory identity.
++            from hsgd.perf_checks import compare_rng
++            compare_rng(ck["rng"], rng_save(rng, device))
++            event("restored", remaining_time=t, completed_reverse_steps=completed, loaded_RNG_exact=True,
++                  ordinary_future_trajectory_identity=False)
++            flag = out/"STOP_REQUESTED"
++            if flag.exists():
++                flag.rename(out/("STOP_REQUESTED_served_%d" % time.time_ns()))
++        else:
++            pi = np.repeat(case["prior"], case["space"].counts)
++            state = (rng.random(case["space"].total) < pi).astype(np.uint8)
++            write(out/"sampling_binding.json", binding)
++            (out/"states").mkdir()
++            save(None)
++            event("prior_initialized", T=T, rounds=cfg["rounds"], slots=len(state), seed=seed,
++                  state_edges=int(state.sum()), no_time_limit=True, scientific_requests=int(receipt.get("formal_training") is True))
++        # FrozenTypedContext checks Tensor._version; inference_mode removes that
++        # counter. no_grad preserves the original guard without changing v9.
++        with torch.no_grad():
++            while t:
++                stop_check()
++                # reverse_step restores RNG and closes the frozen context on any partial failure.
++                next_state, rec = reverse_step(model,case,state,kernel,t,cfg["rounds"],seed,rng,device,
++                    backend="upstream",check_time=stop_check,
++                    event=lambda phase, **kw: event(phase, **kw) if phase=="reverse_block" and kw["block_completed"]%5==0 else None,
++                    interrupt_block=interrupt_block)
++                if not rec["exact_coverage"] or rec["blocks"] != cfg["rounds"]:
++                    raise RuntimeError("incomplete sweep cannot be committed")
++                state, t, completed = next_state, t-1, completed+1
++                step_seconds += rec["step_seconds"]
++                save(rec)
++                write(out/"progress.json", dict(status="running", completed_reverse_steps=completed,
++                    remaining_time=t, last_step_seconds=rec["step_seconds"], physical_edges=int(state.sum()),
++                    session_wall_seconds=time.perf_counter()-started, **memory(device)))
++                event("time_committed", completed_reverse_steps=completed, remaining_time=t,
++                      seconds=rec["step_seconds"], physical_edges=int(state.sum()),
++                      estimated_remaining_seconds=rec["step_seconds"]*t,
++                      ETA_note="last-step extrapolation only; graph density and time may change cost")
++                if stop_after is not None and completed >= stop_after:
++                    raise InterruptedError("finite engineering test stop")
++        stats, edges, families, degree = graph_stats(case, state)
++        reference_state = np.isin(np.arange(case["space"].total),case["clean_ids"]).astype(np.uint8)
++        ref, _, _, _ = graph_stats(case, reference_state)
++        target = out/"graph.npz"
++        if target.exists():
++            raise RuntimeError("final graph already exists; refusing overwrite")
++        tmp = out/"graph.npz.tmp"
++        with tmp.open("wb") as f:
++            np.savez_compressed(f, types=case["space"].types, edges=edges.T,
++                relations=families+1, family_ids=families, family_pairs=np.asarray(case["space"].pairs),
++                degree=degree.sum(1), relation_degree=degree, source_model_sha256=receipt["model_sha256"], seed=seed)
++            f.flush(); os.fsync(f.fileno())
++        tmp.replace(target)
++        with np.load(target, allow_pickle=False) as z:
++            if not np.array_equal(z["edges"],edges.T) or not np.array_equal(z["types"],case["space"].types) or not np.array_equal(z["family_ids"],families):
++                raise RuntimeError("final graph reload mismatch")
++        result = dict(status="completed", completed_reverse_steps=completed, remaining_time=t,
++            graph_sha256=digest(target), generated=stats, reference=ref,
++            final_graph="graph.npz", no_completion_or_filter=True, reloaded_graph_exact=True)
++    except InterruptedError as exc:
++        result = dict(status="stopped", reason=str(exc), completed_reverse_steps=completed,
++            remaining_time=t, final_graph=None, incomplete_step_discarded=True)
++    except BaseException as exc:
++        failure = traceback.format_exc()
++        # Pointer is the authoritative durable commit, including a crash during save.
++        if (out/"chain_latest.json").exists():
++            committed = read(out/"chain_latest.json")
++            t, completed = committed["remaining_time"], committed["completed_reverse_steps"]
++        result = dict(status="failed", reason=type(exc).__name__+": "+str(exc),
++            traceback=failure, completed_reverse_steps=completed, remaining_time=t, final_graph=None)
++    finally:
++        sync(device)
++        for sig, handler in old_handlers.items():
++            signal.signal(sig, handler)
++    result.update(version=VERSION, seed=seed, model_sha256=receipt["model_sha256"],
++        source_final_checkpoint=receipt["final_checkpoint"], source_completed_updates=receipt["completed_updates"],
++        session_wall_seconds=time.perf_counter()-started, cumulative_wall_seconds=cumulative+time.perf_counter()-started,
++        session_cpu_seconds=time.process_time()-cpu, cumulative_cpu_seconds=cumulative_cpu+time.process_time()-cpu,
++        reverse_compute_seconds=step_seconds, checkpoint_seconds=checkpoint_seconds,
++        inference_mode="eval + no_grad, deterministic_algorithms=False", precision=cfg["precision"],
++        scientific_output_count=int(result["status"]=="completed" and receipt.get("formal_training") is True), training_updates=0,
++        ordinary_resume_bitwise_trajectory_certified=False, **memory(device))
++    write(out/"summary.json",result)
++    event("sampling_terminal", **result)
++    return 1 if failure else 0
++
++def unchanged(receipt):
++    for root, files in ((receipt["source_package"]["path"], receipt["source_package"]["files"]),
++                        (receipt["run"], receipt["run_evidence"])):
++        for name, sha in files.items():
++            if digest(required(root, name)) != sha:
++                raise RuntimeError("read-only source changed during execution: " + name)
+--- /dev/null
++++ b/hsgd/common_neighbor.py
+@@ -0,0 +1,99 @@
++"""Exact typed common-neighbor features from existing Xt edges ONLY.
++
++Topology enumerates unordered wedges once; no candidate-edge Python loop, no
++NxNxN tensor, no truncation. A query looks up all matching wedges with sorted
++keys. Contextual node features use the shared first Transformer layer on Xt,
++without queries. Query-independent features may be cached inside ONE frozen Xt.
++"""
++import torch
++from torch import nn
++from torch.nn import functional as F
++
++
++class Wedges:
++    def __init__(self, context):
++        self.n = len(context.types)
++        device = context.device
++        directed, family = context.directed, context.directed_families
++        order = torch.argsort(directed[0]*self.n+directed[1], stable=True)
++        edges, family = directed[:,order], family[order]
++        degree = torch.bincount(edges[0], minlength=self.n)
++        starts = degree.cumsum(0)-degree
++        positions = torch.arange(edges.shape[1], device=device)
++        after = degree[edges[0]]-(positions-starts[edges[0]])-1
++        # Exact workload size on CPU from already validated physical endpoints.
++        import numpy as np
++        dc = np.bincount(context.old.ravel(), minlength=self.n)
++        self.raw_wedges = int(np.sum(dc*(dc-1)//2))
++        first = torch.repeat_interleave(positions, after, output_size=self.raw_wedges)
++        repeats_start = (after.cumsum(0)-after)[first]
++        second = first+1+torch.arange(self.raw_wedges,device=device)-repeats_start
++        u,v = edges[1,first],edges[1,second]
++        keys = u*self.n+v  # Neighbors sorted; u < v, no immediate returns.
++        perm = torch.argsort(keys,stable=True)
++        self.keys = keys[perm]
++        self.middle = edges[0,first][perm]
++        self.left,self.right = family[first][perm],family[second][perm]
++        self.bytes = sum(x.numel()*x.element_size() for x in (self.keys,self.middle,self.left,self.right))
++
++    def lookup(self, query):
++        lo,hi = torch.minimum(query[0],query[1]),torch.maximum(query[0],query[1])
++        keys = lo*self.n+hi
++        begin=torch.searchsorted(self.keys,keys,right=False)
++        end=torch.searchsorted(self.keys,keys,right=True)
++        counts=end-begin
++        qid=torch.repeat_interleave(torch.arange(len(keys),device=query.device),counts)
++        offset=(counts.cumsum(0)-counts)[qid]
++        wid=begin[qid]+torch.arange(len(qid),device=query.device)-offset
++        return qid,self.middle[wid],self.left[wid],self.right[wid]
++
++
++class CommonNeighborReadout(nn.Module):
++    def __init__(self, node_width,n_types,n_families,hidden=32):
++        super().__init__()
++        self.n_types,self.n_families,self.hidden=n_types,n_families,hidden
++        # h_w, type(w), unordered {r_uw,r_wv}, target family, t/T.
++        dim=node_width+n_types+2*n_families+1
++        self.phi=nn.Sequential(nn.Linear(dim,hidden),nn.SiLU(),nn.Linear(hidden,hidden),nn.SiLU())
++        self.readout=nn.Linear(hidden+n_types,1,bias=False)
++        # Original initial predictions are preserved; not a fixed structural rule.
++        nn.init.zeros_(self.readout.weight)
++        self.chunk_paths=65536  # Memory batching only: every matched path included.
++
++    def contextual_nodes(self,ctx,time):
++        b=ctx.model.backbone
++        X=b.lin_in_X(ctx.x)
++        if not ctx.directed.numel():return X
++        fam=ctx.directed_families
++        attrs=torch.cat([F.one_hot(fam+1,ctx.model.n_families+1).float(),
++                         F.one_hot(fam,ctx.model.n_families).float()],-1)
++        E=b.lin_in_E(attrs)
++        y=b.lin_in_y(torch.tensor([[float(time)]],device=ctx.device))
++        # Same learned layer, on existing edges alone. No query-edge input.
++        return b.tf_layers[0](X,ctx.directed,E,y,ctx.batch)[0]
++
++    def aggregate(self,ctx,query,qf,time):
++        qid,w,r1,r2=ctx.cn_wedges.lookup(query)
++        features=ctx.x.new_zeros((query.shape[1],self.hidden+self.n_types))
++        if not len(w):return features
++        if ctx.cn_nodes is None:
++            ctx.cn_nodes=self.contextual_nodes(ctx,time)
++            ctx.cn_time=float(time)
++        elif float(time)!=ctx.cn_time:
++            raise ValueError("common-neighbor hidden cache used at a different time")
++        for start in range(0,len(w),self.chunk_paths):
++            sl=slice(start,start+self.chunk_paths)
++            iw,iq=w[sl],qid[sl]
++            rel=F.one_hot(r1[sl],self.n_families)+F.one_hot(r2[sl],self.n_families)
++            z=torch.cat([ctx.cn_nodes[iw],ctx.x[iw],rel.float(),
++                F.one_hot(qf[iq],self.n_families).float(),
++                ctx.x.new_full((len(iw),1),float(time))],-1)
++            value=torch.cat([self.phi(z),ctx.x[iw]],-1)
++            features.index_add_(0,iq,value)
++        return features
++
++    def forward(self,ctx,graph,time):
++        # graph query_index restores the original requested candidate order.
++        query=graph.edges[:,graph.query_index]
++        aggregate=self.aggregate(ctx,query,graph.query_families,time)
++        return self.readout(aggregate).squeeze(-1)
+--- a/hsgd/computational.py
++++ b/hsgd/computational.py
+@@ -63,12 +63,20 @@
+         self.directed = torch.cat([old, old.flip(0)], dim=1)
+         self.directed_families = torch.cat([of, of])
+         self._guards = [(v, v._version) for v in (self.x, self.batch, self.directed, self.directed_families, model.prior)]
++        self.cn_nodes,self.cn_time,self.cn_wedges=None,None,None
++        self._cn_parameters=[]
++        if model.common_neighbor is not None:
++            from hsgd.common_neighbor import Wedges
++            self.cn_wedges=Wedges(self)
++            self._cn_parameters=[(p,p._version) for p in model.parameters()]
+ 
+     def check(self, state_version):
+         if self.closed or state_version != self.state_version:
+             raise ValueError("stale/closed frozen context")
+         if next(self.model.parameters()).device != self.device or any(v._version != version for v, version in self._guards):
+             raise ValueError("cached metadata or model device changed")
++        if any(p._version!=version for p,version in self._cn_parameters):
++            raise ValueError("model parameters changed inside frozen CN context")
+ 
+     def prepare_query(self, edges, families, state_version):
+         self.check(state_version)
+@@ -96,6 +104,9 @@
+                 torch.tensor([[float(time)]], device=self.device), self.batch)
+         logits = torch.stack([pred.edge_attr[graph.query_index, 0],
+                              pred.edge_attr[graph.query_index, graph.query_families + 1]], dim=-1)
++        if self.model.common_neighbor is not None:
++            delta=self.model.common_neighbor(self,graph,time)
++            logits=logits+torch.stack([torch.zeros_like(delta),delta],-1)
+         p0 = logits.softmax(-1)[:, 1]
+         pi = self.model.prior[graph.query_families]
+         p0 = torch.where(pi == 0, torch.zeros_like(p0), torch.where(pi == 1, torch.ones_like(p0), p0))
+@@ -108,6 +119,8 @@
+ 
+     def close(self):
+         self.closed = True
++        self.cn_nodes=None
++        self.cn_wedges=None
+ 
+ 
+ def legacy_arrays(context, query_edges, query_families, state_version):
+--- a/hsgd/learning.py
++++ b/hsgd/learning.py
+@@ -30,10 +30,10 @@
+ class StopRequested(Exception):pass
+ 
+ 
+-PROTOCOL=dict(version="bw_learning_v9",graph_backend="upstream",training_seed=2026101407,
++PROTOCOL=dict(version="bw_cn_v1",graph_backend="upstream",training_seed=2026101407,
+     validation_seed=2026101408,validation_times=[1,250,500,750,1000],validation_blocks=20,
+     validation_interval_seconds=1800,checkpoint_interval_seconds=1800,
+-    eight_hour_limit=False,default_stop="explicit policy required",default_evaluation_weight="final",
++    eight_hour_limit=False,default_stop="maximum10000 updates, explicit override before start",default_evaluation_weight="final",
+     cached_prediction_stages=["initial","first_periodic","final"],
+     preflight_strict=True,training_strict=False,validation_strict=False,post_resume_trajectory_identity_required=False,
+     fresh_initialization_after_gate=True,sampling_gate_required=False,automatic_generation=False,
+@@ -42,7 +42,7 @@
+     learning_rate_schedule="constant2e-4; first5 successful updates per worker invocation timing warmup only, no LR warmup",gradient_clipping=False,
+     parameter_zero_change="finite completed optimizer step counts even if FP32 edge-head delta rounds to0; not skipped",
+     label_statistics="observations plus exact unique-slot coverage bitset, not independent samples",
+-    features="type/state/family onehot+t/T; no IDs/positions/SignNet/ring/spectrum; configured dropout.1 inactive",
++    features="baseline v9 or single common-neighbor readout; Xt-only shared first-layer node context, no IDs; dropout.1 inactive",
+     convergence_claim=False)
+ 
+ 
+@@ -63,7 +63,7 @@
+ 
+ 
+ def source_commit():
+-    m=PACKAGE/"manifest_learning_v9.json"
++    m=PACKAGE/"manifest_cn_v1.json"
+     if m.exists():return json.loads(m.read_text())["source_commit"]
+     return subprocess.check_output(["git","-C",str(PACKAGE),"rev-parse","HEAD"],text=True).strip()+" (local development; actual files hashed)"
+ 
+@@ -79,7 +79,7 @@
+         completed_updates=0,binding=binding,history=[],origin_optimizer_updates=0,origin=None,start_time=500,
+         state=np.isin(np.arange(case["space"].total),case["clean_ids"]).astype(np.uint8))
+     torch_save(out/"initial.pt",initial)
+-    json_save(out/"run.json",dict(initial_binding=binding,environment=env,stage="v9-strict-training-only-gate"))
++    json_save(out/"run.json",dict(initial_binding=binding,environment=env,stage="cn-v1-strict-training-only-gate"))
+     print("Fresh training-only gate initialized; no B100/C-chain import",flush=True)
+ 
+ 
+@@ -109,7 +109,8 @@
+     for name,n in (("training_split.pt",1),("training_continuous.pt",2),("training_recovered.pt",2)):
+         ck=trusted_load(out/name)
+         if ck["binding"]!=binding or ck["completed_updates"]!=n or len(ck["history"])!=n:raise RuntimeError("gate checkpoint count/binding")
+-        if not ck["optimizer"]["state"] or not all(int(x["step"])==n for x in ck["optimizer"]["state"].values()):raise RuntimeError("gate optimizer counts")
++        from hsgd.cn_optimizer import verify_steps
++        verify_steps(ck)
+         for i,r in enumerate(ck["history"],1):
+             if not (r["backend"]==r["actual_dispatch"]=="upstream"):raise RuntimeError("gate dispatch")
+             if r["input_sha256"]!=sha(out/("training_input_%d.pt"%i)):raise RuntimeError("gate actual input")
+@@ -175,6 +176,7 @@
+         nonlocal last_ck
+         valid_source();sync(args.device);start=time.perf_counter()
+         ck=dict(model=cpu_tree(model.state_dict()),optimizer=cpu_tree(opt.state_dict()),rng=cpu_tree(rng_save(rng,args.device)),
++            optimizer_parameter_names=[n for n,p in model.named_parameters()],
+             completed_updates=completed,binding=binding,history=history,validations=validations,
+             cumulative_run_elapsed_seconds=elapsed(control),next_milestone_elapsed_seconds=milestone_due,
+             coverage_bits=np.packbits(coverage),observations=observations.copy(),periodic_prediction_saved=periodic_saved,
+@@ -210,7 +212,8 @@
+             if signature({k:v for k,v in opt.param_groups[0].items() if k!="params"})!=signature(actual["optimizer"]):
+                 raise RuntimeError("restored optimizer defaults/settings differ")
+             completed=ck["completed_updates"];history=ck["history"];validations=ck["validations"]
+-            if len(history)!=completed or (completed and checkpoint_steps(opt)!=[completed]):raise RuntimeError("checkpoint update/Adam accounting mismatch")
++            from hsgd.cn_optimizer import verify_steps
++            verify_steps(ck,model)
+             coverage=np.unpackbits(ck["coverage_bits"])[:len(coverage)];observations=ck["observations"]
+             periodic_saved=ck["periodic_prediction_saved"];milestone_due=ck["next_milestone_elapsed_seconds"];last_ck=path
+             validation_cost[0]=max([r["wall_seconds"] for r in validations] or [0.])
+@@ -294,7 +297,7 @@
+         # Never label potentially half-updated weights as valid. Last atomic milestone remains.
+     finally:
+         stable=[r["batch_seconds"] for r in history if r["timing_phase"]=="stable"]
+-        result=dict(stage="v9-IMDB-B-learning",status="failed" if failure else ("stopped_limit" if reason=="configured_update_limit" else "stopped_manual"),
++        result=dict(stage="cn-v1-IMDB-B-learning",status="failed" if failure else ("stopped_limit" if reason=="configured_update_limit" else "stopped_manual"),
+             reason=reason,failure=failure,completed_updates=completed,run_control=control,run_elapsed_seconds=elapsed(control),
+             execution_mode=mode_state(),post_resume_trajectory_identity_required=False,
+             effective_training_compute_seconds=sum(r["batch_seconds"] for r in history),
+@@ -326,7 +329,10 @@
+     p.add_argument("--output",type=Path,required=True);p.add_argument("--data",type=Path,default=PACKAGE/"data/IMDB_movie_reference.npz")
+     p.add_argument("--device",choices=("cuda","cpu"),default="cuda");p.add_argument("--fixture",action="store_true")
+     p.add_argument("--resume",action="store_true")
++    p.add_argument("--arm",choices=("baseline","cn"),required=True)
+     args=p.parse_args();args.output=args.output.resolve()
++    from hsgd.bw_preflight.common import set_arm
++    set_arm(args.arm)
+     if args.device=="cpu" and not args.fixture:p.error("CPU only for explicit engineering fixture")
+     if args.phase=="gate_initialize":gate_initialize(args);return 0
+     return train(args)
+--- a/hsgd/learning_control.py
++++ b/hsgd/learning_control.py
+@@ -18,7 +18,7 @@
+     if resume:
+         if manual or stop_updates is not None or related:raise RuntimeError("resume uses frozen stop policy/provenance")
+         c=json.loads((out/"run_control.json").read_text())
+-        if c["version"]!="bw_learning_v9" or c["engineering_fixture"]!=fixture:raise RuntimeError("run control version/mode mismatch")
++        if c["version"]!="bw_cn_v1" or c["engineering_fixture"]!=fixture:raise RuntimeError("run control version/mode mismatch")
+         validate(c)
+         return c
+     if manual==bool(stop_updates is not None):raise RuntimeError("select --manual-stop OR --stop-after-updates N explicitly; no default duration")
+@@ -31,9 +31,9 @@
+         if summary.get("status")!="failed":raise RuntimeError("related failure record is not failed; never rewrite its status")
+         for name in ("summary.json","preflight/run.json","preflight/initial.pt","preflight/training_pair_input.pt"):
+             files[str(related/name)]=sha(related/name)
+-    elif not fixture:raise RuntimeError("fresh BW run requires --related-failure-run for provenance only")
++    # A new, from-scratch experiment has no dependency on the failed old v7 run.
+     now=time.time()
+-    c=dict(version="bw_learning_v9",created_epoch=now,created_utc=utc(now),engineering_fixture=fixture,
++    c=dict(version="bw_cn_v1",created_epoch=now,created_utc=utc(now),engineering_fixture=fixture,
+         eight_hour_limit=False,hard_cutoff_utc=None,stop_mode="manual" if manual else "updates",
+         stop_after_updates=stop_updates,related_failure_files=files,
+         preflight_mode=dict(deterministic_algorithms=True,deterministic_warn_only=False),
+--- a/hsgd/learning_launch.py
++++ b/hsgd/learning_launch.py
+@@ -1,7 +1,7 @@
+-"""V9: bounded strict preflight -> separate ordinary-mode IMDB B process.
++"""CN v1: v9 bounded strict preflight -> ordinary from-scratch IMDB process.
+ 
+-No eight-hour window or inherited deadline. Explicit manual/updates stop choice
+-is required. This launcher never starts a complete generation chain.
++No eight-hour window or inherited deadline. Default maximum10000 updates.
++This launcher never starts a complete generation chain.
+ """
+ import argparse
+ import fcntl
+@@ -20,8 +20,10 @@
+ def main():
+     p=argparse.ArgumentParser(description=__doc__)
+     p.add_argument("--output",type=Path,required=True);p.add_argument("--resume",action="store_true")
++    p.add_argument("--arm",choices=("baseline","cn"),required=True)
++    p.add_argument("--check-dir",type=Path,help="passed independent BW engineering/cost receipt")
+     stop=p.add_mutually_exclusive_group()
+-    stop.add_argument("--manual-stop",action="store_true",help="explicitly run until safe manual stop or error; no time/update ceiling")
++    stop.add_argument("--manual-stop",action="store_true",help=argparse.SUPPRESS)
+     stop.add_argument("--stop-after-updates",type=int,help="optional USER-selected total successful update limit")
+     p.add_argument("--related-failure-run",type=Path,help="original failed v7 output, provenance only; old expiry ignored")
+     p.add_argument("--device",choices=("cuda","cpu"),default="cuda")
+@@ -29,11 +31,29 @@
+     p.add_argument("--fixture",action="store_true",help="CPU engineering only, never real-data learning")
+     p.add_argument("--preflight-timeout-seconds",type=int,default=600)
+     args=p.parse_args();out=args.output.resolve()
++    from hsgd.bw_preflight.common import set_arm
++    set_arm(args.arm)
++    if args.manual_stop:p.error("this experiment requires a maximum update count; default10000")
++    if not args.resume and args.stop_after_updates is None:args.stop_after_updates=10000
+     if not 30<=args.preflight_timeout_seconds<=600:p.error("preflight timeout must be30..600s")
+     if args.fixture and args.device!="cpu":p.error("fixture CPU only")
+     if not args.fixture and (args.device!="cuda" or not str(out).startswith("/root/private_data/")):
+         p.error("formal BW cuda artifacts must be under persistent /root/private_data")
++    if args.resume:
++        if json.loads((out/"freeze.json").read_text())["binding"]["config"]["experiment_arm"]!=args.arm:
++            p.error("resume arm differs; rejecting before any run mutation")
+     control=open_control(out,args.resume,args.manual_stop,args.stop_after_updates,args.related_failure_run,args.fixture)
++    if not args.fixture and not args.resume:
++        from hsgd.cn_entry import prepare_runtime,verify_check
++        prepare_runtime(args.device)
++        verified=verify_check(args.check_dir,args.device)
++        control["cn_engineering_check"]=verified
++        atomic_json(out/"run_control.json",control)
++    elif not args.fixture:
++        from hsgd.cn_entry import prepare_runtime,verify_check
++        prepare_runtime(args.device)
++        if verify_check(Path(control["cn_engineering_check"]["directory"]),args.device)!=control["cn_engineering_check"]:
++            raise RuntimeError("native engineering receipt changed")
+     lock=(out/".launcher.lock").open("a+");fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+     if args.resume:
+         if not (out/"latest.json").is_file():raise RuntimeError("no native formal checkpoint; preflight failures require review")
+@@ -75,7 +95,7 @@
+                  child_wall_seconds=time.time()-tick,log=log.name,strict=job!="train")
+         launches.append(row);atomic_json(out/"launcher_progress.json",row)
+         print("END",job,"exit",code,flush=True);return code
+-    flags=["--device",args.device,"--data",str(args.data.resolve())]
++    flags=["--device",args.device,"--data",str(args.data.resolve()),"--arm",args.arm]
+     if args.fixture:flags.append("--fixture")
+     code=0
+     if not args.resume:
+@@ -106,7 +126,7 @@
+     if code and (not summary.exists() or summary.stat().st_mtime<started):
+         previous=json.loads(summary.read_text()) if summary.exists() else None
+         if previous:summary.rename(out/("summary_previous_%d.json"%time.time_ns()))
+-        atomic_json(summary,dict(stage="v9-IMDB-B-learning",status="incomplete" if code in (75,130) else "failed",
++        atomic_json(summary,dict(stage="cn-v1-IMDB-B-learning",status="incomplete" if code in (75,130) else "failed",
+             reason="preflight/worker incomplete; no gate waiver",completed_updates=previous.get("completed_updates") if previous else None,
+             run_control=control,final_checkpoint=None,launcher=receipt))
+     print(json.dumps(receipt,indent=2),flush=True)
+--- a/hsgd/learning_stop.py
++++ b/hsgd/learning_stop.py
+@@ -9,7 +9,7 @@
+     p=argparse.ArgumentParser(description=__doc__);p.add_argument("directory",type=Path);a=p.parse_args()
+     out=a.directory.resolve()
+     c=json.loads((out/"run_control.json").read_text())
+-    if c["version"]!="bw_learning_v9":raise RuntimeError("wrong run version")
++    if c["version"]!="bw_cn_v1":raise RuntimeError("wrong run version")
+     path=out/"STOP_REQUESTED"
+     try:
+         with path.open("x") as f:json.dump(dict(requested_epoch=time.time(),action="finish current safe boundary, final validation and atomic save"),f)
+--- a/hsgd/learning_verify.py
++++ b/hsgd/learning_verify.py
+@@ -34,7 +34,8 @@
+         if ck["model_sha256"]!=model_fingerprint(ck["model"]):raise RuntimeError("checkpoint weight fingerprint")
+         if ck["binding"]!=binding or ck["completed_updates"]!=latest["completed_updates"]:raise RuntimeError("checkpoint counts/binding")
+         n=ck["completed_updates"]
+-        if len(ck["history"])!=n or (n and not all(int(v["step"])==n for v in ck["optimizer"]["state"].values())):raise RuntimeError("Adam/update/history counts")
++        from hsgd.cn_optimizer import verify_steps
++        verify_steps(ck)
+         if signature({k:v for k,v in ck["optimizer"]["param_groups"][0].items() if k!="params"})!=signature(freeze["actual_dimensions"]["optimizer"]):raise RuntimeError("optimizer settings")
+         if not all(torch.isfinite(v).all() for v in ck["model"].values()):raise RuntimeError("nonfinite checkpoint")
+         rows=[json.loads(x) for x in (out/"updates.jsonl").read_text().splitlines() if x.strip()]
+@@ -98,7 +99,10 @@
+ 
+ 
+ def main():
+-    p=argparse.ArgumentParser();p.add_argument("directory",type=Path);args=p.parse_args()
++    p=argparse.ArgumentParser();p.add_argument("directory",type=Path)
++    p.add_argument("--arm",choices=("baseline","cn"),required=True);args=p.parse_args()
++    from hsgd.bw_preflight.common import set_arm
++    set_arm(args.arm)
+     r=audit(args.directory);print(json.dumps(r,indent=2));return r["exit_code"]
+ 
+ 
+--- a/hsgd/model.py
++++ b/hsgd/model.py
+@@ -16,7 +16,7 @@
+ class TypedSparseDenoiser(nn.Module):
+     def __init__(self, n_types, n_families, layers=3, width=128, edge_width=64, heads=4, dropout=0.0,
+                  family_pairs=None, prior=None, global_width=32,
+-                 ff_node=None, ff_edge=None, ff_global=None):
++                 ff_node=None, ff_edge=None, ff_global=None, cn_hidden=0):
+         super().__init__()
+         if width % heads or edge_width % heads:
+             raise ValueError("hidden dimensions must divide heads")
+@@ -46,6 +46,12 @@
+                 if layer.last_layer:
+                     layer.lin_y1 = nn.Linear(global_width, ff_global)
+                     layer.lin_y2 = nn.Linear(ff_global, global_width)
++        if cn_hidden not in (0,32):
++            raise ValueError("frozen experiment supports baseline0 or CN32 only")
++        self.common_neighbor = None
++        if cn_hidden:
++            from hsgd.common_neighbor import CommonNeighborReadout
++            self.common_neighbor = CommonNeighborReadout(width,n_types,n_families,cn_hidden)
+ 
+     def forward(self, types, existing_edges, existing_families, query_edges, query_families, time):
+         """Single graph; existing/query arrays have each physical edge once.
+@@ -55,6 +61,8 @@
+         family information does not disappear in sparse zero edge attributes.
+         Backbone output then softmaxes ONLY none and this slot's family relation.
+         """
++        if self.common_neighbor is not None:
++            return self.forward_upstream(types,existing_edges,existing_families,query_edges,query_families,time)
+         device = next(self.parameters()).device
+         ty = torch.as_tensor(types, dtype=torch.long, device=device)
+         n = len(ty)
+--- a/hsgd/runtime_gate.py
++++ b/hsgd/runtime_gate.py
+@@ -347,6 +347,7 @@
+     p.add_argument("--output",type=Path,required=True)
+     p.add_argument("--device",choices=("cpu","cuda"),default="cuda")
+     p.add_argument("--fixture",action="store_true",help="smaller inventory local engineering only; full architecture")
++    p.add_argument("--arm",choices=("baseline","cn"),required=True)
+     p.add_argument("--source-package",type=Path);p.add_argument("--b-dir",type=Path);p.add_argument("--chain-dir",type=Path)
+     p.add_argument("--data",type=Path,default=PACKAGE/"data/IMDB_movie_reference.npz")
+     p.add_argument("--wall-seconds",type=int,default=570)
+@@ -354,6 +355,8 @@
+     p.add_argument("--bounded-launch",action="store_true",help=argparse.SUPPRESS)
+     p.add_argument("--worker-cap",type=float,default=540,help=argparse.SUPPRESS)
+     args=p.parse_args();args.output=args.output.resolve()
++    from hsgd.bw_preflight.common import set_arm
++    set_arm(args.arm)
+     if not 1<=args.wall_seconds<=570:p.error("suite cap must be 1..570s; startup and cleanup share this budget")
+     if args.device=="cpu" and not args.fixture:p.error("full IMDB manual gate requires accelerator")
+     if args.job:return worker(args)

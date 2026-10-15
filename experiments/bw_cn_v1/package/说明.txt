@@ -1,0 +1,79 @@
+BW 单参考异质稀疏扩散：候选边共同邻居聚合 CN v1（独立于旧v9）
+
+目标仅验证共同邻居特征聚合能否改善跨关系结构；本包不是已证明有效的方法。
+原v9/权重/结果无需替换。包含baseline（从头原结构）及cn（从头新增聚合）两臂。
+旧12365更新v9结果不是同10000更新的主对照，不能直接用其证明归因。
+主比较两臂应实际完成相同的10000有效更新；若某臂提前停止，必须报告实际更新，
+不能将不同训练量的最终模型差异直接归因于共同邻居分支。
+
+最小设计：保留原8层Transformer及原边预测，仅在二状态softmax前增加有边logit。
+对Xt中的每个 u-w-v（u!=v，w不同于端点，uw和wv都真实存在），计算：
+  h_w = 现有Transformer第一层在仅含Xt真实边的图上的节点隐藏表示；与主干共享参数。
+  phi_w = MLP([h_w, onehot(type_w), onehot(r_uw)+onehot(r_wv), onehot(r_uv), t/T])
+  a_uv = sum_w phi_w；c_uv = 各中间节点类型计数。
+  delta_uv = Linear_without_bias([a_uv,c_uv])；logits = 原logits + [0,delta_uv]。
+隐藏宽32；MLP为281->32->32（SiLU），readout36->1无偏置；IMDB新增10116参数。
+readout零初始化，所以两臂在同seed下的主干初始权重、初始预测相同。
+第一步phi梯度可能为零，readout学到非零后phi可训练；不是退化成计数器。
+没有共同邻居时delta严格0，不强制补边，不保证闭合，不调整参考边数或度。
+共享第一层引入额外一次Xt-only编码及额外梯度来源；不增加第二套Transformer参数。
+节点表征带邻域信息，不是固定节点ID或纯类型嵌入；clean目标不进入此特征接口。
+
+分块与缓存：共同邻居拓扑和h只取冻结Xt，不含absent查询、不含已预测的下一步边。
+在单次无梯度采样/验证冻结上下文内缓存一次，20块共享；训练每次一个查询块同逻辑。
+状态/时间/设备/权重改变或close后旧缓存拒绝复用。主干仍包含查询边，因此整个
+预测仍可能依赖查询划分；仅新增分支对查询分块独立。两臂固定相同20块规则。
+交换端点时r1+r2对称；节点重编号数学上等变，浮点检查沿用v9容差，不承诺逐位。
+
+复杂度：枚举Xt的无序楔W=sum_w d_w(d_w-1)/2，排序键后批量查询匹配。
+拓扑O(W log W)，索引32W字节；上下文仅一层Transformer；查询聚合O(P*281*32)，
+P为本批匹配楔数，特征按65536路径分块计算，所有路径参与，绝不截断。
+没有逐候选边Python循环、没有NxNxN张量。内存/算子失败留证停止，不自动缩模型。
+完整参考IMDB为1653节点4079物理边，最大度497，W=217005；其索引约6.62MiB。
+这是参考邻接的静态成本，不是运行中的Xt/BW模型耗时。生成图变稠会增大W，成本
+不是端到端线性空间保证。诊断/评价可用简单Python枚举，不在学习构图热点中。
+
+训练不变项：8层8头，节点/边/全局宽256/64/128，FF256/64/256；AdamW lr2e-4、
+weight_decay1e-12、amsgrad=False、原eps；microbatch1，无累积，FP32网络/float64核；
+T1000，20块，原均匀时间抽样、分族先验、精确0/1支持及(R/S)*sum BCE。
+新增有边/无边CE仅日志，不改变损失、平衡权重或查询抽样。
+默认train_seed2026101407，两臂从头、同前向噪声/查询随机流。原dropout配置.1但
+现有vendor forward未启用；没有新增随机dropout、ID、谱/环保护或补连。
+默认每臂最多10000有效更新，可启动前显式设置--max-updates；恢复不能改变上限。
+无8小时时限。安全停止完成当前边界、最终验证和原子保存；到上限不等于收敛。
+初始/约30分钟/最终固定验证：t1/250/500/750/1000各完整20块，分时间/关系/有无边CE、
+常数先验和预测边数/度校准。每步日志也有t及有无边CE。验证不改变训练随机流。
+默认后续生成使用最终权重，不根据CE或生成结果选择历史检查点。
+无共同邻居的批次可使新增参数无梯度；保留原AdamW的None梯度跳过行为。检查点
+保存参数顺序，逐更新记录缺梯度参数索引，恢复/审计按实际参与次数核对逐参数
+Adam step，而非错误地要求每个参数step都等于总更新数。损失与优化器算法不变。
+
+使用方式：在notebook终端运行，默认/usr/local/bin/python3.11；run.sh固定两个线程
+环境变量为1。不安装依赖、不替换BW厂商Torch。旧v9及旧采样器继续保留。
+
+1) sha256sum -c SHA256SUMS
+2) bash run.sh check --output /root/private_data/gnn_projects/bw_cn_v1/check01
+   单次check子进程最多570秒；失败/超时不准启动训练。先小图设备前向/梯度/短链，
+   再两臂完整IMDB各1次预热+2次测量更新、同冻结输入完整20块一步；随机工程权重，
+   不计正式更新，不产生科学样本。输出baseline_cost.json/cn_cost.json。
+3) bash run.sh start --arm baseline --check-dir /root/private_data/gnn_projects/bw_cn_v1/check01 --output /root/private_data/gnn_projects/bw_cn_v1/baseline_seed2026101407 --max-updates 10000
+4) bash run.sh start --arm cn --check-dir /root/private_data/gnn_projects/bw_cn_v1/check01 --output /root/private_data/gnn_projects/bw_cn_v1/cn_seed2026101407 --max-updates 10000
+   单张BW建议顺序运行，勿同时争用一张卡。每臂严格数值/跨进程短恢复门通过后，
+   另起普通模式进程从头训练；失败直接停止，不放宽容差、不使用预检权重。
+5) bash run.sh progress --output /root/private_data/gnn_projects/bw_cn_v1/cn_seed2026101407
+6) bash run.sh stop --output /root/private_data/gnn_projects/bw_cn_v1/cn_seed2026101407
+7) bash run.sh resume --arm cn --output /root/private_data/gnn_projects/bw_cn_v1/cn_seed2026101407
+   只恢复本包原生检查点，绑定代码/模型/数据/配置/arm/Python/实际Torch/运行模式。
+   普通模式恢复认证载入状态，不承诺之后轨迹逐位一致。旧v9权重拒绝冒充新模型。
+
+手动生成（不自动执行，建议两臂同seed各一张先检查链路，不足以证明统计收益）：
+bash run.sh sample --arm cn --run /root/private_data/gnn_projects/bw_cn_v1/cn_seed2026101407 --output /root/private_data/gnn_projects/bw_cn_v1/sample_cn_seed2026101601 --seed 2026101601
+可加--check-only单独检查/严格加载；要正式采样请用另一个全新output。
+中断后同命令加--sample-resume。完整T1000/20块、冻结Xt和每完整步状态/RNG保存。
+无补连/补抽/副本过滤。graph.npz与summary.json保留类型库存、各关系边数、度分布、
+孤立点/连通分量，增加带节点类型和关系的三角形计数、导演-电影-演员路径被
+导演-演员边闭合的比例（无路径则NA），并列参考。指标不参与损失或采样约束。
+评价完整简单图，不用临时分区颜色；一张图不支持多样性或跨seed结论。
+
+本地验收只包括CPU小图和入口工程检查；BW实际训练/采样/真实尺寸速度显存待用户
+运行check。源码、包和机器证据隔离保存；没有把未执行BW项目写成通过。

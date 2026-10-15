@@ -1,0 +1,107 @@
+{
+  "scope": "CPU engineering/numerical/native-entry tests only; no BW execution",
+  "source_tests": {
+    "name": "pytest",
+    "errors": "0",
+    "failures": "0",
+    "skipped": "0",
+    "tests": "41",
+    "time": "137.660",
+    "timestamp": "2026-10-16T00:27:20.466442",
+    "hostname": "GPU-Node01"
+  },
+  "resources": {
+    "wall_seconds": 138.78,
+    "cpu_user_seconds": 118.67,
+    "cpu_system_seconds": 19.61,
+    "peak_rss_kib": 1069516
+  },
+  "parameters": {
+    "baseline": {
+      "parameters": 6527311,
+      "common_neighbor_parameters": 0
+    },
+    "cn": {
+      "parameters": 6537427,
+      "common_neighbor_parameters": 10116
+    }
+  },
+  "reference_static": {
+    "nodes": 1653,
+    "physical_edges": 4079,
+    "type_counts": [
+      410,
+      494,
+      726,
+      23
+    ],
+    "max_degree": 497,
+    "wedges": 217005,
+    "topology_index_bytes": 6944160,
+    "metrics": {
+      "triangles": 655,
+      "typed_relation_triangle_patterns": {
+        "0,1,1,5,2,2": 640,
+        "1,4,1,5,2,5": 15
+      },
+      "director_movie_actor_closure": {
+        "definition": "Director-Movie-Actor simple path instances whose Director-Actor edge exists",
+        "paths": 640,
+        "closed_paths": 640,
+        "rate": 1.0,
+        "role_types": [
+          0,
+          2,
+          1
+        ],
+        "zero_denominator": "NA; no pseudocount"
+      },
+      "scope": "descriptive diagnostics only; no acceptance threshold or graph repair"
+    }
+  },
+  "environment": {
+    "python": "3.9.23",
+    "packages": {
+      "torch": "2.1.0",
+      "torch-geometric": "2.3.1",
+      "numpy": "1.26.4",
+      "scipy": "1.11.0",
+      "networkx": "2.8.7",
+      "pytest": "7.4.4"
+    }
+  },
+  "passed_scopes": [
+    "20 original probability/query/support contracts",
+    "16 CN semantic/gradient/renumber/cache/loss/optimizer tests",
+    "3 native entry tests: fixture-only cost check rejected as formal, strict gates + ordinary stop/resume + independent audit, baseline fresh entry and audit",
+    "2 nonzero-CN 4-step CPU chain tests: cross-process 2+2 recovery, partial-block interruption and recovery"
+  ],
+  "tolerance_source": "unchanged hsgd/perf_checks.py v9 tolerances; integer/count checks exact",
+  "development_findings": [
+    {
+      "issue": "initial gradient test queried exact-zero prior families",
+      "resolution": "corrected engineering fixture to have movable target families; exact support unchanged"
+    },
+    {
+      "issue": "old all-Adam-counters-equal-total assertion invalid for batches with no CN paths",
+      "evidence": "results/native_fixture01_acceptance.json",
+      "resolution": "log no-gradient indices; independently verify per-parameter participating updates, no optimizer-policy change"
+    },
+    {
+      "issue": "test compared FP32 device p0 to FP64 exported p0 without dtype conversion",
+      "evidence": "results/second_tests.xml",
+      "resolution": "compare both as float64; unchanged FP32 prediction/FP64 kernel"
+    }
+  ],
+  "not_executed": [
+    "BW common-neighbor operators and numerical tests",
+    "full-size IMDB model forward/update timing and GPU memory",
+    "formal 10000-update fits",
+    "full T1000 scientific chain",
+    "generation-quality comparison"
+  ],
+  "formal_IMDB_updates": 0,
+  "GPU_use": 0,
+  "new_scientific_graphs": 0,
+  "old_v9_archive_sha256": "fc70583c3d06e308486a4fe65ce3da8c3b73554268c685ca251300ee837b1ccf"
+}
