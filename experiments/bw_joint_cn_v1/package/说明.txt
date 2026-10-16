@@ -1,0 +1,35 @@
+联合局部—全局读出 v1：独立工程部署包
+
+保留CN v2，不能直接载入旧CN权重。本包无正式训练或完整科学采样命令。
+联合头在两状态logits之前融合候选隐藏边、对称端点、真实主干全局表示/时间、
+完整Xt分关系边数/密度统计，以及可选CN均值内容/log1p分类计数/存在标记。
+A是匹配的新框架无CN对照，不是旧v9；A/C一套权重、B/D一套权重，角色引导仍只t1。
+公共头和CN参数须重新训练；本轮不声称已经修复完整链膨胀。
+
+解压到 /root/private_data/gnn_projects/dihug_sparse_bw_joint_cn_v1，保留旧目录。
+不安装或升级依赖。默认Python /usr/local/bin/python3.11；OMP_NUM_THREADS=1、OPENBLAS_NUM_THREADS=1。
+先只读校验及CPU工程检查：
+cd /root/private_data/gnn_projects/dihug_sparse_bw_joint_cn_v1
+sha256sum -c SHA256SUMS
+bash run.sh test --output /root/private_data/gnn_projects/bw_joint_cn_v1/test01
+bash run.sh plan --output /root/private_data/gnn_projects/bw_joint_cn_v1/plan01
+bash run.sh toy-check --output /root/private_data/gnn_projects/bw_joint_cn_v1/toy01
+
+test保留原20项合同并加入融合关键检查；toy-check仅小图随机权重，每臂4次工程更新，
+包含同一小图T4完整工程链，不能称为IMDB生成。plan不调用模型、不用GPU。
+各命令上限180秒，失败非零退出，独立新输出目录，不自动重试。
+
+以下是待用户确认的BW短测命令，本轮不自动运行：
+bash run.sh device-check --device cuda --confirm-bounded-BW-check --output /root/private_data/gnn_projects/bw_joint_cn_v1/device01
+
+该命令只允许一张BW/HIP，480秒子进程+最多3秒清理，无正式长训或1000步链。
+固定完整IMDB低噪声工程状态，A/B各1次工程更新、t1/30/1000诊断、各1个完整20块工程步骤。
+是随机权重/一次更新后的资源和接线检查，不是生成质量验证。超过200万Xt wedges或
+每块200万匹配路径就停止，不截断。显存实际峰值尚未BW实测，不能事先保证64GiB内。
+任何OOM/不支持/非有限/超时保留failure或launcher记录，不自动缩模型或换精度。
+进度写在终端提示的输出同名.log中；可在另一终端 tail -f 指定日志。
+
+角色度模块在role_degree/，字节保持上一版t1方案；只有小图接口兼容测试会调用。
+固定32频率代理不保证每张离散图改善；短测不依赖它来掩盖中间失控。
+详细真实数据流、维度、成本风险和未签发分阶段验证见DESIGN_AND_STAGED_PLAN.md。
+从源码构建的包附cn_v2_to_joint_v1.diff、manifest、证据；新输出与旧CN失败轨迹完全分离。

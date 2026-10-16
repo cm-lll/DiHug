@@ -1,0 +1,4471 @@
+{
+  "status": "passed_engineering_only",
+  "tests_passed": 27,
+  "tests_seconds": 3.806,
+  "mechanism": {
+    "CN_feature_mask_logit_response": 0.04487988352775574,
+    "endpoint_swap_logit_max_abs": 0.0,
+    "independent_CN_counts": [
+      [
+        0.0,
+        1.0,
+        0.0
+      ],
+      [
+        0.0,
+        1.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        1.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0
+      ]
+    ],
+    "legal_global_input_only_logit_response": 0.0031882822513580322,
+    "CN_global_mixed_finite_difference_max": 0.0002031959593296051,
+    "middle_context_content_response": 0.005142584443092346,
+    "query_edges_not_CN_edges": true,
+    "no_architectural_positive_count_monotonicity": true,
+    "feature_abs_quantiles": [
+      0.0,
+      0.17138135433197021,
+      1.0570337772369385,
+      2.0692169666290283,
+      2.521355152130127
+    ],
+    "logit_quantiles": [
+      0.07937979698181152,
+      0.12311247736215591,
+      0.22492726147174835,
+      0.25626543164253235,
+      0.2597474157810211
+    ],
+    "probability_saturation_fraction": 0.0,
+    "renumber_logit_max_abs": 4.470348358154297e-08,
+    "phi_gradient_max": 0.003131398232653737,
+    "global_head_input_gradient_max": 0.018532749265432358,
+    "global_update_parameter_gradient_max": 0.006703102961182594,
+    "train_sample_probability_max_abs": 0.0,
+    "small_engineering_full_chain_steps": 4,
+    "status": "passed",
+    "atol": 2e-06,
+    "scope": "random-weight small CPU engineering; response is NOT learned coordination",
+    "new_scientific_graphs": 0,
+    "GPU_use": 0,
+    "old_weights_loaded": false
+  },
+  "toy_arms": [
+    {
+      "arm": "A_matched_no_CN",
+      "dimensions": {
+        "parameters": 21108,
+        "common_neighbor_parameters": 0,
+        "linear_layers": {
+          "backbone.lin_in_X": {
+            "in": 3,
+            "out": 16
+          },
+          "backbone.lin_in_E": {
+            "in": 13,
+            "out": 8
+          },
+          "backbone.lin_in_y": {
+            "in": 1,
+            "out": 8
+          },
+          "backbone.tf_layers.0.self_attn.lin_key": {
+            "in": 16,
+            "out": 16
+          },
+          "backbone.tf_layers.0.self_attn.lin_query": {
+            "in": 16,
+            "out": 16
+          },
+          "backbone.tf_layers.0.self_attn.lin_value": {
+            "in": 16,
+            "out": 16
+          },
+          "backbone.tf_layers.0.self_attn.lin_skip": {
+            "in": 16,
+            "out": 16
+          },
+          "backbone.tf_layers.0.self_attn.e_add": {
+            "in": 8,
+            "out": 2
+          },
+          "backbone.tf_layers.0.self_attn.e_mul": {
+            "in": 8,
+            "out": 2
+          },
+          "backbone.tf_layers.0.self_attn.y_e_mul": {
+            "in": 8,
+            "out": 8
+          },
+          "backbone.tf_layers.0.self_attn.y_e_add": {
+            "in": 8,
+            "out": 8
+          },
+          "backbone.tf_layers.0.self_attn.y_x_mul": {
+            "in": 8,
+            "out": 16
+          },
+          "backbone.tf_layers.0.self_attn.y_x_add": {
+            "in": 8,
+            "out": 16
+          },
+          "backbone.tf_layers.0.self_attn.y_y": {
+            "in": 8,
+            "out": 8
+          },
+          "backbone.tf_layers.0.self_attn.x_y.lin": {
+            "in": 64,
+            "out": 8
+          },
+          "backbone.tf_layers.0.self_attn.e_y.lin": {
+            "in": 32,
+            "out": 8
+          },
+          "backbone.tf_layers.0.self_attn.y_out.0": {
+            "in": 8,
+            "out": 8
+          },
+          "backbone.tf_layers.0.self_attn.y_out.2": {
+            "in": 8,
+            "out": 8
+          },
+          "backbone.tf_layers.0.self_attn.x_out": {
+            "in": 16,
+            "out": 16
+          },
+          "backbone.tf_layers.0.self_attn.e_out": {
+            "in": 16,
+            "out": 8
+          },
+          "backbone.tf_layers.0.linX1": {
+            "in": 16,
+            "out": 16
+          },
+          "backbone.tf_layers.0.linX2": {
+            "in": 16,
+            "out": 16
+          },
+          "backbone.tf_layers.0.linE1": {
+            "in": 8,
+            "out": 8
+          },
+          "backbone.tf_layers.0.linE2": {
+            "in": 8,
+            "out": 8
+          },
+          "backbone.tf_layers.0.lin_y1": {
+            "in": 8,
+            "out": 8
+          },
+          "backbone.tf_layers.0.lin_y2": {
+            "in": 8,
+            "out": 8
+          },
+          "backbone.tf_layers.1.self_attn.lin_key": {
+            "in": 16,
+            "out": 16
+          },
+          "backbone.tf_layers.1.self_attn.lin_query": {
+            "in": 16,
+            "out": 16
+          },
+          "backbone.tf_layers.1.self_attn.lin_value": {
+            "in": 16,
+            "out": 16
+          },
+          "backbone.tf_layers.1.self_attn.lin_skip": {
+            "in": 16,
+            "out": 16
+          },
+          "backbone.tf_layers.1.self_attn.e_add": {
+            "in": 8,
+            "out": 2
+          },
+          "backbone.tf_layers.1.self_attn.e_mul": {
+            "in": 8,
+            "out": 2
+          },
+          "backbone.tf_layers.1.self_attn.y_e_mul": {
+            "in": 8,
+            "out": 8
+          },
+          "backbone.tf_layers.1.self_attn.y_e_add": {
+            "in": 8,
+            "out": 8
+          },
+          "backbone.tf_layers.1.self_attn.y_x_mul": {
+            "in": 8,
+            "out": 16
+          },
+          "backbone.tf_layers.1.self_attn.y_x_add": {
+            "in": 8,
+            "out": 16
+          },
+          "backbone.tf_layers.1.self_attn.x_out": {
+            "in": 16,
+            "out": 16
+          },
+          "backbone.tf_layers.1.self_attn.e_out": {
+            "in": 16,
+            "out": 8
+          },
+          "backbone.tf_layers.1.linX1": {
+            "in": 16,
+            "out": 16
+          },
+          "backbone.tf_layers.1.linX2": {
+            "in": 16,
+            "out": 16
+          },
+          "backbone.tf_layers.1.linE1": {
+            "in": 8,
+            "out": 8
+          },
+          "backbone.tf_layers.1.linE2": {
+            "in": 8,
+            "out": 8
+          },
+          "backbone.lin_out_X": {
+            "in": 16,
+            "out": 3
+          },
+          "backbone.lin_out_E": {
+            "in": 8,
+            "out": 7
+          },
+          "joint_head.0": {
+            "in": 107,
+            "out": 128
+          },
+          "joint_head.2": {
+            "in": 128,
+            "out": 2
+          }
+        },
+        "layer_norms": {
+          "backbone.tf_layers.0.normX1": {
+            "shape": [
+              16
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.0.normX2": {
+            "shape": [
+              16
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.0.normE1": {
+            "shape": [
+              8
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.0.normE2": {
+            "shape": [
+              8
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.0.norm_y1": {
+            "shape": [
+              8
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.0.norm_y2": {
+            "shape": [
+              8
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.1.normX1": {
+            "shape": [
+              16
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.1.normX2": {
+            "shape": [
+              16
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.1.normE1": {
+            "shape": [
+              8
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.1.normE2": {
+            "shape": [
+              8
+            ],
+            "eps": 1e-05
+          },
+          "backbone.out_ln_X": {
+            "shape": [
+              16
+            ],
+            "eps": 1e-05
+          },
+          "backbone.out_ln_E": {
+            "shape": [
+              8
+            ],
+            "eps": 1e-05
+          }
+        },
+        "graph_output_head": false,
+        "mutable_node_charge_dims": 0,
+        "dropout_config": 0.1,
+        "dropout_active": false,
+        "features": "shared nonlinear joint edge/global readout; complete Xt counts/density; optional mean CN + log1p typed counts + existence; no scalar CN addition",
+        "architecture": "joint_local_global_cn_v1",
+        "joint_input": 107,
+        "joint_hidden": 128,
+        "joint_slices": {
+          "edge": [
+            0,
+            8
+          ],
+          "endpoint_mean": [
+            8,
+            24
+          ],
+          "endpoint_absdiff": [
+            24,
+            40
+          ],
+          "backbone_global": [
+            40,
+            48
+          ],
+          "time": [
+            48,
+            49
+          ],
+          "Xt_statistics": [
+            49,
+            61
+          ],
+          "family": [
+            61,
+            67
+          ],
+          "current_state": [
+            67,
+            69
+          ],
+          "backbone_logits": [
+            69,
+            71
+          ],
+          "CN": [
+            71,
+            107
+          ]
+        }
+      },
+      "post_first_update_median": 0.031637731939554214,
+      "post_first_update_P90": 0.031742848455905914,
+      "post_first_update_count": 3,
+      "initialization_seconds": 0.011780401691794395,
+      "frozen_engineering_step": {
+        "time": 30,
+        "remaining_time": 29,
+        "backend": "upstream",
+        "blocks": 3,
+        "covered_slots": 24,
+        "exact_coverage": true,
+        "step_seconds": 0.02567811869084835,
+        "timings": {
+          "query_plan_seconds": 0.0008761575445532799,
+          "query_plan_seconds_cpu": 0.0008762149999999025,
+          "uniform_seconds": 9.560957551002502e-06,
+          "uniform_seconds_cpu": 1.0199999999738196e-05,
+          "posterior_seconds": 0.0008935276418924332,
+          "posterior_seconds_cpu": 0.0008969479999993979,
+          "full_sweep_seconds": 0.02321362216025591,
+          "full_sweep_seconds_cpu": 0.023214788000000208,
+          "state_edge_extraction_seconds": 0.0003539668396115303,
+          "state_edge_extraction_seconds_cpu": 0.000355528999999688,
+          "context_seconds": 0.0010714735835790634,
+          "context_seconds_cpu": 0.0010744449999999794,
+          "query_validation_seconds": 0.00048768147826194763,
+          "query_validation_seconds_cpu": 0.0004915710000004125,
+          "query_transfer_seconds": 0.0002534901723265648,
+          "query_transfer_seconds_cpu": 0.0002580360000004056,
+          "graph_assembly_seconds": 0.003083188086748123,
+          "graph_assembly_seconds_cpu": 0.003092569999999739,
+          "network_seconds": 0.015436762943863869,
+          "network_seconds_cpu": 0.01544751600000005,
+          "probability_check_export_seconds": 0.00041475333273410797,
+          "probability_check_export_seconds_cpu": 0.00042235900000031634
+        },
+        "timing_scope": "synchronized detailed step; trace adds diagnostic posterior/copy overhead"
+      },
+      "resources": {
+        "process_peak_rss_mib": 432.60546875
+      },
+      "post_update_diagnostics": [
+        {
+          "t": 1,
+          "time_group": "low",
+          "scope": "query-only expected counts; not extrapolated to whole graph",
+          "relation_label_CE": [
+            {
+              "family": 0,
+              "clean_label": 0,
+              "count": 1,
+              "CE": 0.5735254287719727,
+              "p_present_mean": 0.43646475672721863,
+              "expected_birth": 0.43646475672721863,
+              "expected_death": 0.0,
+              "expected_net": 0.43646475672721863
+            },
+            {
+              "family": 0,
+              "clean_label": 1,
+              "count": 0,
+              "CE": null,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            },
+            {
+              "family": 1,
+              "clean_label": 0,
+              "count": 2,
+              "CE": 0.5525904297828674,
+              "p_present_mean": 0.424516424536705,
+              "expected_birth": 0.84903284907341,
+              "expected_death": 0.0,
+              "expected_net": 0.84903284907341
+            },
+            {
+              "family": 1,
+              "clean_label": 1,
+              "count": 0,
+              "CE": null,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            },
+            {
+              "family": 2,
+              "clean_label": 0,
+              "count": 2,
+              "CE": 0.5239067077636719,
+              "p_present_mean": 0.40779687464237213,
+              "expected_birth": 0.8155937492847443,
+              "expected_death": 0.0,
+              "expected_net": 0.8155937492847443
+            },
+            {
+              "family": 2,
+              "clean_label": 1,
+              "count": 1,
+              "CE": 0.9319859147071838,
+              "p_present_mean": 0.3937709331512451,
+              "expected_birth": 0.0,
+              "expected_death": 0.6062290668487549,
+              "expected_net": -0.6062290668487549
+            },
+            {
+              "family": 3,
+              "clean_label": 0,
+              "count": 0,
+              "CE": null,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            },
+            {
+              "family": 3,
+              "clean_label": 1,
+              "count": 0,
+              "CE": null,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            },
+            {
+              "family": 4,
+              "clean_label": 0,
+              "count": 1,
+              "CE": 0.5126312971115112,
+              "p_present_mean": 0.40108242630958557,
+              "expected_birth": 0.40108242630958557,
+              "expected_death": 0.0,
+              "expected_net": 0.40108242630958557
+            },
+            {
+              "family": 4,
+              "clean_label": 1,
+              "count": 1,
+              "CE": 0.9416509866714478,
+              "p_present_mean": 0.3899834454059601,
+              "expected_birth": 0.0,
+              "expected_death": 0.6100165545940399,
+              "expected_net": -0.6100165545940399
+            },
+            {
+              "family": 5,
+              "clean_label": 0,
+              "count": 0,
+              "CE": null,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            },
+            {
+              "family": 5,
+              "clean_label": 1,
+              "count": 0,
+              "CE": null,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            }
+          ],
+          "CN_buckets": [
+            {
+              "CN_range": [
+                0,
+                1
+              ],
+              "count": 6,
+              "p_present_mean": 0.4091365883747737,
+              "expected_birth": 1.6710651516914368,
+              "expected_death": 1.2162456214427948,
+              "expected_net": 0.45481953024864197
+            },
+            {
+              "CN_range": [
+                1,
+                2
+              ],
+              "count": 2,
+              "p_present_mean": 0.41555431485176086,
+              "expected_birth": 0.8311086297035217,
+              "expected_death": 0.0,
+              "expected_net": 0.8311086297035217
+            },
+            {
+              "CN_range": [
+                2,
+                4
+              ],
+              "count": 0,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            },
+            {
+              "CN_range": [
+                4,
+                16
+              ],
+              "count": 0,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            },
+            {
+              "CN_range": [
+                16,
+                null
+              ],
+              "count": 0,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            }
+          ],
+          "CN_count_source": "exact Xt topology for BOTH arms; diagnostic-only when baseline branch disabled",
+          "feature_abs_quantiles": [
+            0.0,
+            0.10373539850115776,
+            1.1449822783470154,
+            2.1738842964172385,
+            2.5588159561157227
+          ],
+          "logits_quantiles": [
+            -0.12978588044643402,
+            0.09413495659828186,
+            0.33958563208580017,
+            0.35372159630060196,
+            0.3561650216579437
+          ],
+          "saturation_fraction": 0.0,
+          "CN_mask_logit_difference_max": 0.0,
+          "masking_caveat": "counterfactual feature masking only, not independent trained baseline or additive decomposition"
+        },
+        {
+          "t": 30,
+          "time_group": "low",
+          "scope": "query-only expected counts; not extrapolated to whole graph",
+          "relation_label_CE": [
+            {
+              "family": 0,
+              "clean_label": 0,
+              "count": 1,
+              "CE": 0.5760000348091125,
+              "p_present_mean": 0.43785756826400757,
+              "expected_birth": 0.023796699776849624,
+              "expected_death": 0.0,
+              "expected_net": 0.023796699776849624
+            },
+            {
+              "family": 0,
+              "clean_label": 1,
+              "count": 0,
+              "CE": null,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            },
+            {
+              "family": 1,
+              "clean_label": 0,
+              "count": 1,
+              "CE": 0.5446862578392029,
+              "p_present_mean": 0.41997626423835754,
+              "expected_birth": 0.022824891229478107,
+              "expected_death": 0.0,
+              "expected_net": 0.022824891229478107
+            },
+            {
+              "family": 1,
+              "clean_label": 1,
+              "count": 1,
+              "CE": 0.8693863749504089,
+              "p_present_mean": 0.41920870542526245,
+              "expected_birth": 0.0,
+              "expected_death": 0.03159820593756302,
+              "expected_net": -0.03159820593756302
+            },
+            {
+              "family": 2,
+              "clean_label": 0,
+              "count": 3,
+              "CE": 0.5232563018798828,
+              "p_present_mean": 0.40741023421287537,
+              "expected_birth": 0.06637890958407819,
+              "expected_death": 0.0,
+              "expected_net": 0.06637890958407819
+            },
+            {
+              "family": 2,
+              "clean_label": 1,
+              "count": 0,
+              "CE": null,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            },
+            {
+              "family": 3,
+              "clean_label": 0,
+              "count": 0,
+              "CE": null,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            },
+            {
+              "family": 3,
+              "clean_label": 1,
+              "count": 0,
+              "CE": null,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            },
+            {
+              "family": 4,
+              "clean_label": 0,
+              "count": 1,
+              "CE": 0.5106254816055298,
+              "p_present_mean": 0.39987990260124207,
+              "expected_birth": 0.021744200334858115,
+              "expected_death": 0.0,
+              "expected_net": 0.021744200334858115
+            },
+            {
+              "family": 4,
+              "clean_label": 1,
+              "count": 1,
+              "CE": 0.9479827880859375,
+              "p_present_mean": 0.3875219523906708,
+              "expected_birth": 0.0,
+              "expected_death": 0.03330453606650119,
+              "expected_net": -0.03330453606650119
+            },
+            {
+              "family": 5,
+              "clean_label": 0,
+              "count": 0,
+              "CE": null,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            },
+            {
+              "family": 5,
+              "clean_label": 1,
+              "count": 0,
+              "CE": null,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            }
+          ],
+          "CN_buckets": [
+            {
+              "CN_range": [
+                0,
+                1
+              ],
+              "count": 3,
+              "p_present_mean": 0.40543554226557416,
+              "expected_birth": 0.02224392316734111,
+              "expected_death": 0.0649027420040642,
+              "expected_net": -0.042658818836723095
+            },
+            {
+              "CN_range": [
+                1,
+                2
+              ],
+              "count": 5,
+              "p_present_mean": 0.4140736937522888,
+              "expected_birth": 0.11250077775792293,
+              "expected_death": 0.0,
+              "expected_net": 0.11250077775792293
+            },
+            {
+              "CN_range": [
+                2,
+                4
+              ],
+              "count": 0,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            },
+            {
+              "CN_range": [
+                4,
+                16
+              ],
+              "count": 0,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            },
+            {
+              "CN_range": [
+                16,
+                null
+              ],
+              "count": 0,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            }
+          ],
+          "CN_count_source": "exact Xt topology for BOTH arms; diagnostic-only when baseline branch disabled",
+          "feature_abs_quantiles": [
+            0.0,
+            0.11070145294070244,
+            1.1252413988113403,
+            2.103636491298676,
+            2.5219860076904297
+          ],
+          "logits_quantiles": [
+            -0.1342320740222931,
+            0.09046705067157745,
+            0.3370537608861923,
+            0.33953055143356325,
+            0.33953747153282166
+          ],
+          "saturation_fraction": 0.0,
+          "CN_mask_logit_difference_max": 0.0,
+          "masking_caveat": "counterfactual feature masking only, not independent trained baseline or additive decomposition"
+        },
+        {
+          "t": 1000,
+          "time_group": "high",
+          "scope": "query-only expected counts; not extrapolated to whole graph",
+          "relation_label_CE": [
+            {
+              "family": 0,
+              "clean_label": 0,
+              "count": 1,
+              "CE": 0.6482046842575073,
+              "p_present_mean": 0.4770161509513855,
+              "expected_birth": 0.33333368230540583,
+              "expected_death": 0.0,
+              "expected_net": 0.33333368230540583
+            },
+            {
+              "family": 0,
+              "clean_label": 1,
+              "count": 0,
+              "CE": null,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            },
+            {
+              "family": 1,
+              "clean_label": 0,
+              "count": 2,
+              "CE": 0.6257957220077515,
+              "p_present_mean": 0.46512772142887115,
+              "expected_birth": 0.6666673068623632,
+              "expected_death": 0.0,
+              "expected_net": 0.6666673068623632
+            },
+            {
+              "family": 1,
+              "clean_label": 1,
+              "count": 0,
+              "CE": null,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            },
+            {
+              "family": 2,
+              "clean_label": 0,
+              "count": 3,
+              "CE": 0.6068785786628723,
+              "p_present_mean": 0.4548760751883189,
+              "expected_birth": 0.2222239230554642,
+              "expected_death": 0.8888880849472253,
+              "expected_net": -0.666664161891761
+            },
+            {
+              "family": 2,
+              "clean_label": 1,
+              "count": 0,
+              "CE": null,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            },
+            {
+              "family": 3,
+              "clean_label": 0,
+              "count": 0,
+              "CE": null,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            },
+            {
+              "family": 3,
+              "clean_label": 1,
+              "count": 0,
+              "CE": null,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            },
+            {
+              "family": 4,
+              "clean_label": 0,
+              "count": 1,
+              "CE": 0.5521403551101685,
+              "p_present_mean": 0.4242837429046631,
+              "expected_birth": 0.0,
+              "expected_death": 0.5000001838971396,
+              "expected_net": -0.5000001838971396
+            },
+            {
+              "family": 4,
+              "clean_label": 1,
+              "count": 1,
+              "CE": 0.8676697611808777,
+              "p_present_mean": 0.4199289381504059,
+              "expected_birth": 0.0,
+              "expected_death": 0.5000001944739453,
+              "expected_net": -0.5000001944739453
+            },
+            {
+              "family": 5,
+              "clean_label": 0,
+              "count": 0,
+              "CE": null,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            },
+            {
+              "family": 5,
+              "clean_label": 1,
+              "count": 0,
+              "CE": null,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            }
+          ],
+          "CN_buckets": [
+            {
+              "CN_range": [
+                0,
+                1
+              ],
+              "count": 6,
+              "p_present_mean": 0.44712255895137787,
+              "expected_birth": 0.7777792802752219,
+              "expected_death": 1.88888846331831,
+              "expected_net": -1.1111091830430881
+            },
+            {
+              "CN_range": [
+                1,
+                2
+              ],
+              "count": 2,
+              "p_present_mean": 0.4666885733604431,
+              "expected_birth": 0.44444563194801145,
+              "expected_death": 0.0,
+              "expected_net": 0.44444563194801145
+            },
+            {
+              "CN_range": [
+                2,
+                4
+              ],
+              "count": 0,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            },
+            {
+              "CN_range": [
+                4,
+                16
+              ],
+              "count": 0,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            },
+            {
+              "CN_range": [
+                16,
+                null
+              ],
+              "count": 0,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            }
+          ],
+          "CN_count_source": "exact Xt topology for BOTH arms; diagnostic-only when baseline branch disabled",
+          "feature_abs_quantiles": [
+            0.0,
+            0.07450630888342857,
+            1.2992264032363892,
+            2.1351911544799806,
+            3.443025588989258
+          ],
+          "logits_quantiles": [
+            -0.0559772290289402,
+            0.14932287484407425,
+            0.26639656722545624,
+            0.274527008831501,
+            0.27583977580070496
+          ],
+          "saturation_fraction": 0.0,
+          "CN_mask_logit_difference_max": 0.0,
+          "masking_caveat": "counterfactual feature masking only, not independent trained baseline or additive decomposition"
+        }
+      ]
+    },
+    {
+      "arm": "B_joint_CN",
+      "dimensions": {
+        "parameters": 23220,
+        "common_neighbor_parameters": 2112,
+        "linear_layers": {
+          "backbone.lin_in_X": {
+            "in": 3,
+            "out": 16
+          },
+          "backbone.lin_in_E": {
+            "in": 13,
+            "out": 8
+          },
+          "backbone.lin_in_y": {
+            "in": 1,
+            "out": 8
+          },
+          "backbone.tf_layers.0.self_attn.lin_key": {
+            "in": 16,
+            "out": 16
+          },
+          "backbone.tf_layers.0.self_attn.lin_query": {
+            "in": 16,
+            "out": 16
+          },
+          "backbone.tf_layers.0.self_attn.lin_value": {
+            "in": 16,
+            "out": 16
+          },
+          "backbone.tf_layers.0.self_attn.lin_skip": {
+            "in": 16,
+            "out": 16
+          },
+          "backbone.tf_layers.0.self_attn.e_add": {
+            "in": 8,
+            "out": 2
+          },
+          "backbone.tf_layers.0.self_attn.e_mul": {
+            "in": 8,
+            "out": 2
+          },
+          "backbone.tf_layers.0.self_attn.y_e_mul": {
+            "in": 8,
+            "out": 8
+          },
+          "backbone.tf_layers.0.self_attn.y_e_add": {
+            "in": 8,
+            "out": 8
+          },
+          "backbone.tf_layers.0.self_attn.y_x_mul": {
+            "in": 8,
+            "out": 16
+          },
+          "backbone.tf_layers.0.self_attn.y_x_add": {
+            "in": 8,
+            "out": 16
+          },
+          "backbone.tf_layers.0.self_attn.y_y": {
+            "in": 8,
+            "out": 8
+          },
+          "backbone.tf_layers.0.self_attn.x_y.lin": {
+            "in": 64,
+            "out": 8
+          },
+          "backbone.tf_layers.0.self_attn.e_y.lin": {
+            "in": 32,
+            "out": 8
+          },
+          "backbone.tf_layers.0.self_attn.y_out.0": {
+            "in": 8,
+            "out": 8
+          },
+          "backbone.tf_layers.0.self_attn.y_out.2": {
+            "in": 8,
+            "out": 8
+          },
+          "backbone.tf_layers.0.self_attn.x_out": {
+            "in": 16,
+            "out": 16
+          },
+          "backbone.tf_layers.0.self_attn.e_out": {
+            "in": 16,
+            "out": 8
+          },
+          "backbone.tf_layers.0.linX1": {
+            "in": 16,
+            "out": 16
+          },
+          "backbone.tf_layers.0.linX2": {
+            "in": 16,
+            "out": 16
+          },
+          "backbone.tf_layers.0.linE1": {
+            "in": 8,
+            "out": 8
+          },
+          "backbone.tf_layers.0.linE2": {
+            "in": 8,
+            "out": 8
+          },
+          "backbone.tf_layers.0.lin_y1": {
+            "in": 8,
+            "out": 8
+          },
+          "backbone.tf_layers.0.lin_y2": {
+            "in": 8,
+            "out": 8
+          },
+          "backbone.tf_layers.1.self_attn.lin_key": {
+            "in": 16,
+            "out": 16
+          },
+          "backbone.tf_layers.1.self_attn.lin_query": {
+            "in": 16,
+            "out": 16
+          },
+          "backbone.tf_layers.1.self_attn.lin_value": {
+            "in": 16,
+            "out": 16
+          },
+          "backbone.tf_layers.1.self_attn.lin_skip": {
+            "in": 16,
+            "out": 16
+          },
+          "backbone.tf_layers.1.self_attn.e_add": {
+            "in": 8,
+            "out": 2
+          },
+          "backbone.tf_layers.1.self_attn.e_mul": {
+            "in": 8,
+            "out": 2
+          },
+          "backbone.tf_layers.1.self_attn.y_e_mul": {
+            "in": 8,
+            "out": 8
+          },
+          "backbone.tf_layers.1.self_attn.y_e_add": {
+            "in": 8,
+            "out": 8
+          },
+          "backbone.tf_layers.1.self_attn.y_x_mul": {
+            "in": 8,
+            "out": 16
+          },
+          "backbone.tf_layers.1.self_attn.y_x_add": {
+            "in": 8,
+            "out": 16
+          },
+          "backbone.tf_layers.1.self_attn.x_out": {
+            "in": 16,
+            "out": 16
+          },
+          "backbone.tf_layers.1.self_attn.e_out": {
+            "in": 16,
+            "out": 8
+          },
+          "backbone.tf_layers.1.linX1": {
+            "in": 16,
+            "out": 16
+          },
+          "backbone.tf_layers.1.linX2": {
+            "in": 16,
+            "out": 16
+          },
+          "backbone.tf_layers.1.linE1": {
+            "in": 8,
+            "out": 8
+          },
+          "backbone.tf_layers.1.linE2": {
+            "in": 8,
+            "out": 8
+          },
+          "backbone.lin_out_X": {
+            "in": 16,
+            "out": 3
+          },
+          "backbone.lin_out_E": {
+            "in": 8,
+            "out": 7
+          },
+          "joint_head.0": {
+            "in": 107,
+            "out": 128
+          },
+          "joint_head.2": {
+            "in": 128,
+            "out": 2
+          },
+          "common_neighbor.phi.0": {
+            "in": 32,
+            "out": 32
+          },
+          "common_neighbor.phi.2": {
+            "in": 32,
+            "out": 32
+          }
+        },
+        "layer_norms": {
+          "backbone.tf_layers.0.normX1": {
+            "shape": [
+              16
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.0.normX2": {
+            "shape": [
+              16
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.0.normE1": {
+            "shape": [
+              8
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.0.normE2": {
+            "shape": [
+              8
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.0.norm_y1": {
+            "shape": [
+              8
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.0.norm_y2": {
+            "shape": [
+              8
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.1.normX1": {
+            "shape": [
+              16
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.1.normX2": {
+            "shape": [
+              16
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.1.normE1": {
+            "shape": [
+              8
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.1.normE2": {
+            "shape": [
+              8
+            ],
+            "eps": 1e-05
+          },
+          "backbone.out_ln_X": {
+            "shape": [
+              16
+            ],
+            "eps": 1e-05
+          },
+          "backbone.out_ln_E": {
+            "shape": [
+              8
+            ],
+            "eps": 1e-05
+          }
+        },
+        "graph_output_head": false,
+        "mutable_node_charge_dims": 0,
+        "dropout_config": 0.1,
+        "dropout_active": false,
+        "features": "shared nonlinear joint edge/global readout; complete Xt counts/density; optional mean CN + log1p typed counts + existence; no scalar CN addition",
+        "architecture": "joint_local_global_cn_v1",
+        "joint_input": 107,
+        "joint_hidden": 128,
+        "joint_slices": {
+          "edge": [
+            0,
+            8
+          ],
+          "endpoint_mean": [
+            8,
+            24
+          ],
+          "endpoint_absdiff": [
+            24,
+            40
+          ],
+          "backbone_global": [
+            40,
+            48
+          ],
+          "time": [
+            48,
+            49
+          ],
+          "Xt_statistics": [
+            49,
+            61
+          ],
+          "family": [
+            61,
+            67
+          ],
+          "current_state": [
+            67,
+            69
+          ],
+          "backbone_logits": [
+            69,
+            71
+          ],
+          "CN": [
+            71,
+            107
+          ]
+        }
+      },
+      "post_first_update_median": 0.03824255149811506,
+      "post_first_update_P90": 0.03832247313112021,
+      "post_first_update_count": 3,
+      "initialization_seconds": 0.014077532105147839,
+      "frozen_engineering_step": {
+        "time": 30,
+        "remaining_time": 29,
+        "backend": "upstream",
+        "blocks": 3,
+        "covered_slots": 24,
+        "exact_coverage": true,
+        "step_seconds": 0.030781274661421776,
+        "timings": {
+          "query_plan_seconds": 0.0008689109236001968,
+          "query_plan_seconds_cpu": 0.0008686579999999111,
+          "uniform_seconds": 9.47713851928711e-06,
+          "uniform_seconds_cpu": 1.0155000000011682e-05,
+          "posterior_seconds": 0.0009013703092932701,
+          "posterior_seconds_cpu": 0.0009049089999990656,
+          "full_sweep_seconds": 0.027907337062060833,
+          "full_sweep_seconds_cpu": 0.027908462999999273,
+          "state_edge_extraction_seconds": 0.000352565199136734,
+          "state_edge_extraction_seconds_cpu": 0.00035416199999982467,
+          "context_seconds": 0.0014892937615513802,
+          "context_seconds_cpu": 0.0014623190000007114,
+          "query_validation_seconds": 0.0005082534626126289,
+          "query_validation_seconds_cpu": 0.0005117480000000896,
+          "query_transfer_seconds": 0.00026043038815259933,
+          "query_transfer_seconds_cpu": 0.00026476599999991635,
+          "graph_assembly_seconds": 0.0030385665595531464,
+          "graph_assembly_seconds_cpu": 0.0030471639999989364,
+          "network_seconds": 0.019874964840710163,
+          "network_seconds_cpu": 0.019886030000000332,
+          "probability_check_export_seconds": 0.0004340466111898422,
+          "probability_check_export_seconds_cpu": 0.0004415949999998503
+        },
+        "timing_scope": "synchronized detailed step; trace adds diagnostic posterior/copy overhead"
+      },
+      "resources": {
+        "process_peak_rss_mib": 433.1015625
+      },
+      "post_update_diagnostics": [
+        {
+          "t": 1,
+          "time_group": "low",
+          "scope": "query-only expected counts; not extrapolated to whole graph",
+          "relation_label_CE": [
+            {
+              "family": 0,
+              "clean_label": 0,
+              "count": 1,
+              "CE": 0.5733128786087036,
+              "p_present_mean": 0.4363449811935425,
+              "expected_birth": 0.4363449811935425,
+              "expected_death": 0.0,
+              "expected_net": 0.4363449811935425
+            },
+            {
+              "family": 0,
+              "clean_label": 1,
+              "count": 0,
+              "CE": null,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            },
+            {
+              "family": 1,
+              "clean_label": 0,
+              "count": 2,
+              "CE": 0.5544296503067017,
+              "p_present_mean": 0.42556197941303253,
+              "expected_birth": 0.8511239588260651,
+              "expected_death": 0.0,
+              "expected_net": 0.8511239588260651
+            },
+            {
+              "family": 1,
+              "clean_label": 1,
+              "count": 0,
+              "CE": null,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            },
+            {
+              "family": 2,
+              "clean_label": 0,
+              "count": 2,
+              "CE": 0.5238348841667175,
+              "p_present_mean": 0.4077543318271637,
+              "expected_birth": 0.8155086636543274,
+              "expected_death": 0.0,
+              "expected_net": 0.8155086636543274
+            },
+            {
+              "family": 2,
+              "clean_label": 1,
+              "count": 1,
+              "CE": 0.9321675300598145,
+              "p_present_mean": 0.39369943737983704,
+              "expected_birth": 0.0,
+              "expected_death": 0.606300562620163,
+              "expected_net": -0.606300562620163
+            },
+            {
+              "family": 3,
+              "clean_label": 0,
+              "count": 0,
+              "CE": null,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            },
+            {
+              "family": 3,
+              "clean_label": 1,
+              "count": 0,
+              "CE": null,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            },
+            {
+              "family": 4,
+              "clean_label": 0,
+              "count": 1,
+              "CE": 0.5194021463394165,
+              "p_present_mean": 0.40512388944625854,
+              "expected_birth": 0.40512388944625854,
+              "expected_death": 0.0,
+              "expected_net": 0.40512388944625854
+            },
+            {
+              "family": 4,
+              "clean_label": 1,
+              "count": 1,
+              "CE": 0.9417099952697754,
+              "p_present_mean": 0.3899604380130768,
+              "expected_birth": 0.0,
+              "expected_death": 0.6100395619869232,
+              "expected_net": -0.6100395619869232
+            },
+            {
+              "family": 5,
+              "clean_label": 0,
+              "count": 0,
+              "CE": null,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            },
+            {
+              "family": 5,
+              "clean_label": 1,
+              "count": 0,
+              "CE": null,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            }
+          ],
+          "CN_buckets": [
+            {
+              "CN_range": [
+                0,
+                1
+              ],
+              "count": 6,
+              "p_present_mean": 0.4090741624434789,
+              "expected_birth": 1.6707850992679596,
+              "expected_death": 1.2163401246070862,
+              "expected_net": 0.4544449746608734
+            },
+            {
+              "CN_range": [
+                1,
+                2
+              ],
+              "count": 2,
+              "p_present_mean": 0.41865819692611694,
+              "expected_birth": 0.8373163938522339,
+              "expected_death": 0.0,
+              "expected_net": 0.8373163938522339
+            },
+            {
+              "CN_range": [
+                2,
+                4
+              ],
+              "count": 0,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            },
+            {
+              "CN_range": [
+                4,
+                16
+              ],
+              "count": 0,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            },
+            {
+              "CN_range": [
+                16,
+                null
+              ],
+              "count": 0,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            }
+          ],
+          "CN_count_source": "exact Xt topology for BOTH arms; diagnostic-only when baseline branch disabled",
+          "feature_abs_quantiles": [
+            0.0,
+            0.17972803115844727,
+            1.1400323510169983,
+            2.1829639077186607,
+            2.559051752090454
+          ],
+          "logits_quantiles": [
+            -0.1299278438091278,
+            0.0964847132563591,
+            0.3397025167942047,
+            0.3538619667291641,
+            0.3563072383403778
+          ],
+          "saturation_fraction": 0.0,
+          "CN_mask_logit_difference_max": 0.016457825899124146,
+          "masking_caveat": "counterfactual feature masking only, not independent trained baseline or additive decomposition"
+        },
+        {
+          "t": 30,
+          "time_group": "low",
+          "scope": "query-only expected counts; not extrapolated to whole graph",
+          "relation_label_CE": [
+            {
+              "family": 0,
+              "clean_label": 0,
+              "count": 1,
+              "CE": 0.5849495530128479,
+              "p_present_mean": 0.4428660273551941,
+              "expected_birth": 0.024068898233237022,
+              "expected_death": 0.0,
+              "expected_net": 0.024068898233237022
+            },
+            {
+              "family": 0,
+              "clean_label": 1,
+              "count": 0,
+              "CE": null,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            },
+            {
+              "family": 1,
+              "clean_label": 0,
+              "count": 1,
+              "CE": 0.5494495034217834,
+              "p_present_mean": 0.42273250222206116,
+              "expected_birth": 0.022974686547946547,
+              "expected_death": 0.0,
+              "expected_net": 0.022974686547946547
+            },
+            {
+              "family": 1,
+              "clean_label": 1,
+              "count": 1,
+              "CE": 0.8696973919868469,
+              "p_present_mean": 0.41907835006713867,
+              "expected_birth": 0.0,
+              "expected_death": 0.03160529794932665,
+              "expected_net": -0.03160529794932665
+            },
+            {
+              "family": 2,
+              "clean_label": 0,
+              "count": 3,
+              "CE": 0.5288568139076233,
+              "p_present_mean": 0.4107211232185364,
+              "expected_birth": 0.06691834776467699,
+              "expected_death": 0.0,
+              "expected_net": 0.06691834776467699
+            },
+            {
+              "family": 2,
+              "clean_label": 1,
+              "count": 0,
+              "CE": null,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            },
+            {
+              "family": 3,
+              "clean_label": 0,
+              "count": 0,
+              "CE": null,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            },
+            {
+              "family": 3,
+              "clean_label": 1,
+              "count": 0,
+              "CE": null,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            },
+            {
+              "family": 4,
+              "clean_label": 0,
+              "count": 1,
+              "CE": 0.5173617601394653,
+              "p_present_mean": 0.403908908367157,
+              "expected_birth": 0.021963283428536574,
+              "expected_death": 0.0,
+              "expected_net": 0.021963283428536574
+            },
+            {
+              "family": 4,
+              "clean_label": 1,
+              "count": 1,
+              "CE": 0.9480804800987244,
+              "p_present_mean": 0.3874841034412384,
+              "expected_birth": 0.0,
+              "expected_death": 0.03330659415860038,
+              "expected_net": -0.03330659415860038
+            },
+            {
+              "family": 5,
+              "clean_label": 0,
+              "count": 0,
+              "CE": null,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            },
+            {
+              "family": 5,
+              "clean_label": 1,
+              "count": 0,
+              "CE": null,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            }
+          ],
+          "CN_buckets": [
+            {
+              "CN_range": [
+                0,
+                1
+              ],
+              "count": 3,
+              "p_present_mean": 0.4053652286529541,
+              "expected_birth": 0.02224160216774323,
+              "expected_death": 0.06491189210792703,
+              "expected_net": -0.04267028994018379
+            },
+            {
+              "CN_range": [
+                1,
+                2
+              ],
+              "count": 5,
+              "p_present_mean": 0.4184275150299072,
+              "expected_birth": 0.1136836138066539,
+              "expected_death": 0.0,
+              "expected_net": 0.1136836138066539
+            },
+            {
+              "CN_range": [
+                2,
+                4
+              ],
+              "count": 0,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            },
+            {
+              "CN_range": [
+                4,
+                16
+              ],
+              "count": 0,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            },
+            {
+              "CN_range": [
+                16,
+                null
+              ],
+              "count": 0,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            }
+          ],
+          "CN_count_source": "exact Xt topology for BOTH arms; diagnostic-only when baseline branch disabled",
+          "feature_abs_quantiles": [
+            0.0,
+            0.22529920935630798,
+            1.1233731508255005,
+            2.101383364200592,
+            2.521760940551758
+          ],
+          "logits_quantiles": [
+            -0.13439339399337769,
+            0.10022549331188202,
+            0.33942341804504395,
+            0.3442163974046707,
+            0.344231516122818
+          ],
+          "saturation_fraction": 0.0,
+          "CN_mask_logit_difference_max": 0.025500141084194183,
+          "masking_caveat": "counterfactual feature masking only, not independent trained baseline or additive decomposition"
+        },
+        {
+          "t": 1000,
+          "time_group": "high",
+          "scope": "query-only expected counts; not extrapolated to whole graph",
+          "relation_label_CE": [
+            {
+              "family": 0,
+              "clean_label": 0,
+              "count": 1,
+              "CE": 0.6475909948348999,
+              "p_present_mean": 0.47669509053230286,
+              "expected_birth": 0.3333336815256249,
+              "expected_death": 0.0,
+              "expected_net": 0.3333336815256249
+            },
+            {
+              "family": 0,
+              "clean_label": 1,
+              "count": 0,
+              "CE": null,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            },
+            {
+              "family": 1,
+              "clean_label": 0,
+              "count": 2,
+              "CE": 0.6315427422523499,
+              "p_present_mean": 0.46814635396003723,
+              "expected_birth": 0.6666673215254728,
+              "expected_death": 0.0,
+              "expected_net": 0.6666673215254728
+            },
+            {
+              "family": 1,
+              "clean_label": 1,
+              "count": 0,
+              "CE": null,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            },
+            {
+              "family": 2,
+              "clean_label": 0,
+              "count": 3,
+              "CE": 0.6096304059028625,
+              "p_present_mean": 0.456346462170283,
+              "expected_birth": 0.22222393426967363,
+              "expected_death": 0.888888085447753,
+              "expected_net": -0.6666641511780793
+            },
+            {
+              "family": 2,
+              "clean_label": 1,
+              "count": 0,
+              "CE": null,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            },
+            {
+              "family": 3,
+              "clean_label": 0,
+              "count": 0,
+              "CE": null,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            },
+            {
+              "family": 3,
+              "clean_label": 1,
+              "count": 0,
+              "CE": null,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            },
+            {
+              "family": 4,
+              "clean_label": 0,
+              "count": 1,
+              "CE": 0.5520836710929871,
+              "p_present_mean": 0.42425110936164856,
+              "expected_birth": 0.0,
+              "expected_death": 0.5000001839763989,
+              "expected_net": -0.5000001839763989
+            },
+            {
+              "family": 4,
+              "clean_label": 1,
+              "count": 1,
+              "CE": 0.8676283359527588,
+              "p_present_mean": 0.4199463427066803,
+              "expected_birth": 0.0,
+              "expected_death": 0.5000001944316737,
+              "expected_net": -0.5000001944316737
+            },
+            {
+              "family": 5,
+              "clean_label": 0,
+              "count": 0,
+              "CE": null,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            },
+            {
+              "family": 5,
+              "clean_label": 1,
+              "count": 0,
+              "CE": null,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            }
+          ],
+          "CN_buckets": [
+            {
+              "CN_range": [
+                0,
+                1
+              ],
+              "count": 6,
+              "p_present_mean": 0.4469713469346364,
+              "expected_birth": 0.7777792786091847,
+              "expected_death": 1.8888884638558257,
+              "expected_net": -1.111109185246641
+            },
+            {
+              "CN_range": [
+                1,
+                2
+              ],
+              "count": 2,
+              "p_present_mean": 0.4721982777118683,
+              "expected_birth": 0.4444456587115866,
+              "expected_death": 0.0,
+              "expected_net": 0.4444456587115866
+            },
+            {
+              "CN_range": [
+                2,
+                4
+              ],
+              "count": 0,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            },
+            {
+              "CN_range": [
+                4,
+                16
+              ],
+              "count": 0,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            },
+            {
+              "CN_range": [
+                16,
+                null
+              ],
+              "count": 0,
+              "p_present_mean": null,
+              "expected_birth": 0.0,
+              "expected_death": 0.0,
+              "expected_net": 0.0
+            }
+          ],
+          "CN_count_source": "exact Xt topology for BOTH arms; diagnostic-only when baseline branch disabled",
+          "feature_abs_quantiles": [
+            0.0,
+            0.12882429361343384,
+            1.2994166612625122,
+            2.1418577671051025,
+            3.446295738220215
+          ],
+          "logits_quantiles": [
+            -0.05591932684183121,
+            0.1680578887462616,
+            0.2664050906896591,
+            0.27475686371326447,
+            0.2761125862598419
+          ],
+          "saturation_fraction": 0.0,
+          "CN_mask_logit_difference_max": 0.03816509246826172,
+          "masking_caveat": "counterfactual feature masking only, not independent trained baseline or additive decomposition"
+        }
+      ]
+    }
+  ],
+  "full_dimensions": {
+    "A": {
+      "dimensions": {
+        "parameters": 6627025,
+        "common_neighbor_parameters": 0,
+        "linear_layers": {
+          "backbone.lin_in_X": {
+            "in": 4,
+            "out": 256
+          },
+          "backbone.lin_in_E": {
+            "in": 21,
+            "out": 64
+          },
+          "backbone.lin_in_y": {
+            "in": 1,
+            "out": 128
+          },
+          "backbone.tf_layers.0.self_attn.lin_key": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.0.self_attn.lin_query": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.0.self_attn.lin_value": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.0.self_attn.lin_skip": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.0.self_attn.e_add": {
+            "in": 64,
+            "out": 8
+          },
+          "backbone.tf_layers.0.self_attn.e_mul": {
+            "in": 64,
+            "out": 8
+          },
+          "backbone.tf_layers.0.self_attn.y_e_mul": {
+            "in": 128,
+            "out": 64
+          },
+          "backbone.tf_layers.0.self_attn.y_e_add": {
+            "in": 128,
+            "out": 64
+          },
+          "backbone.tf_layers.0.self_attn.y_x_mul": {
+            "in": 128,
+            "out": 256
+          },
+          "backbone.tf_layers.0.self_attn.y_x_add": {
+            "in": 128,
+            "out": 256
+          },
+          "backbone.tf_layers.0.self_attn.y_y": {
+            "in": 128,
+            "out": 128
+          },
+          "backbone.tf_layers.0.self_attn.x_y.lin": {
+            "in": 1024,
+            "out": 128
+          },
+          "backbone.tf_layers.0.self_attn.e_y.lin": {
+            "in": 256,
+            "out": 128
+          },
+          "backbone.tf_layers.0.self_attn.y_out.0": {
+            "in": 128,
+            "out": 128
+          },
+          "backbone.tf_layers.0.self_attn.y_out.2": {
+            "in": 128,
+            "out": 128
+          },
+          "backbone.tf_layers.0.self_attn.x_out": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.0.self_attn.e_out": {
+            "in": 256,
+            "out": 64
+          },
+          "backbone.tf_layers.0.linX1": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.0.linX2": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.0.linE1": {
+            "in": 64,
+            "out": 64
+          },
+          "backbone.tf_layers.0.linE2": {
+            "in": 64,
+            "out": 64
+          },
+          "backbone.tf_layers.0.lin_y1": {
+            "in": 128,
+            "out": 256
+          },
+          "backbone.tf_layers.0.lin_y2": {
+            "in": 256,
+            "out": 128
+          },
+          "backbone.tf_layers.1.self_attn.lin_key": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.1.self_attn.lin_query": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.1.self_attn.lin_value": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.1.self_attn.lin_skip": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.1.self_attn.e_add": {
+            "in": 64,
+            "out": 8
+          },
+          "backbone.tf_layers.1.self_attn.e_mul": {
+            "in": 64,
+            "out": 8
+          },
+          "backbone.tf_layers.1.self_attn.y_e_mul": {
+            "in": 128,
+            "out": 64
+          },
+          "backbone.tf_layers.1.self_attn.y_e_add": {
+            "in": 128,
+            "out": 64
+          },
+          "backbone.tf_layers.1.self_attn.y_x_mul": {
+            "in": 128,
+            "out": 256
+          },
+          "backbone.tf_layers.1.self_attn.y_x_add": {
+            "in": 128,
+            "out": 256
+          },
+          "backbone.tf_layers.1.self_attn.y_y": {
+            "in": 128,
+            "out": 128
+          },
+          "backbone.tf_layers.1.self_attn.x_y.lin": {
+            "in": 1024,
+            "out": 128
+          },
+          "backbone.tf_layers.1.self_attn.e_y.lin": {
+            "in": 256,
+            "out": 128
+          },
+          "backbone.tf_layers.1.self_attn.y_out.0": {
+            "in": 128,
+            "out": 128
+          },
+          "backbone.tf_layers.1.self_attn.y_out.2": {
+            "in": 128,
+            "out": 128
+          },
+          "backbone.tf_layers.1.self_attn.x_out": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.1.self_attn.e_out": {
+            "in": 256,
+            "out": 64
+          },
+          "backbone.tf_layers.1.linX1": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.1.linX2": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.1.linE1": {
+            "in": 64,
+            "out": 64
+          },
+          "backbone.tf_layers.1.linE2": {
+            "in": 64,
+            "out": 64
+          },
+          "backbone.tf_layers.1.lin_y1": {
+            "in": 128,
+            "out": 256
+          },
+          "backbone.tf_layers.1.lin_y2": {
+            "in": 256,
+            "out": 128
+          },
+          "backbone.tf_layers.2.self_attn.lin_key": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.2.self_attn.lin_query": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.2.self_attn.lin_value": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.2.self_attn.lin_skip": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.2.self_attn.e_add": {
+            "in": 64,
+            "out": 8
+          },
+          "backbone.tf_layers.2.self_attn.e_mul": {
+            "in": 64,
+            "out": 8
+          },
+          "backbone.tf_layers.2.self_attn.y_e_mul": {
+            "in": 128,
+            "out": 64
+          },
+          "backbone.tf_layers.2.self_attn.y_e_add": {
+            "in": 128,
+            "out": 64
+          },
+          "backbone.tf_layers.2.self_attn.y_x_mul": {
+            "in": 128,
+            "out": 256
+          },
+          "backbone.tf_layers.2.self_attn.y_x_add": {
+            "in": 128,
+            "out": 256
+          },
+          "backbone.tf_layers.2.self_attn.y_y": {
+            "in": 128,
+            "out": 128
+          },
+          "backbone.tf_layers.2.self_attn.x_y.lin": {
+            "in": 1024,
+            "out": 128
+          },
+          "backbone.tf_layers.2.self_attn.e_y.lin": {
+            "in": 256,
+            "out": 128
+          },
+          "backbone.tf_layers.2.self_attn.y_out.0": {
+            "in": 128,
+            "out": 128
+          },
+          "backbone.tf_layers.2.self_attn.y_out.2": {
+            "in": 128,
+            "out": 128
+          },
+          "backbone.tf_layers.2.self_attn.x_out": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.2.self_attn.e_out": {
+            "in": 256,
+            "out": 64
+          },
+          "backbone.tf_layers.2.linX1": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.2.linX2": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.2.linE1": {
+            "in": 64,
+            "out": 64
+          },
+          "backbone.tf_layers.2.linE2": {
+            "in": 64,
+            "out": 64
+          },
+          "backbone.tf_layers.2.lin_y1": {
+            "in": 128,
+            "out": 256
+          },
+          "backbone.tf_layers.2.lin_y2": {
+            "in": 256,
+            "out": 128
+          },
+          "backbone.tf_layers.3.self_attn.lin_key": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.3.self_attn.lin_query": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.3.self_attn.lin_value": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.3.self_attn.lin_skip": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.3.self_attn.e_add": {
+            "in": 64,
+            "out": 8
+          },
+          "backbone.tf_layers.3.self_attn.e_mul": {
+            "in": 64,
+            "out": 8
+          },
+          "backbone.tf_layers.3.self_attn.y_e_mul": {
+            "in": 128,
+            "out": 64
+          },
+          "backbone.tf_layers.3.self_attn.y_e_add": {
+            "in": 128,
+            "out": 64
+          },
+          "backbone.tf_layers.3.self_attn.y_x_mul": {
+            "in": 128,
+            "out": 256
+          },
+          "backbone.tf_layers.3.self_attn.y_x_add": {
+            "in": 128,
+            "out": 256
+          },
+          "backbone.tf_layers.3.self_attn.y_y": {
+            "in": 128,
+            "out": 128
+          },
+          "backbone.tf_layers.3.self_attn.x_y.lin": {
+            "in": 1024,
+            "out": 128
+          },
+          "backbone.tf_layers.3.self_attn.e_y.lin": {
+            "in": 256,
+            "out": 128
+          },
+          "backbone.tf_layers.3.self_attn.y_out.0": {
+            "in": 128,
+            "out": 128
+          },
+          "backbone.tf_layers.3.self_attn.y_out.2": {
+            "in": 128,
+            "out": 128
+          },
+          "backbone.tf_layers.3.self_attn.x_out": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.3.self_attn.e_out": {
+            "in": 256,
+            "out": 64
+          },
+          "backbone.tf_layers.3.linX1": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.3.linX2": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.3.linE1": {
+            "in": 64,
+            "out": 64
+          },
+          "backbone.tf_layers.3.linE2": {
+            "in": 64,
+            "out": 64
+          },
+          "backbone.tf_layers.3.lin_y1": {
+            "in": 128,
+            "out": 256
+          },
+          "backbone.tf_layers.3.lin_y2": {
+            "in": 256,
+            "out": 128
+          },
+          "backbone.tf_layers.4.self_attn.lin_key": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.4.self_attn.lin_query": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.4.self_attn.lin_value": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.4.self_attn.lin_skip": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.4.self_attn.e_add": {
+            "in": 64,
+            "out": 8
+          },
+          "backbone.tf_layers.4.self_attn.e_mul": {
+            "in": 64,
+            "out": 8
+          },
+          "backbone.tf_layers.4.self_attn.y_e_mul": {
+            "in": 128,
+            "out": 64
+          },
+          "backbone.tf_layers.4.self_attn.y_e_add": {
+            "in": 128,
+            "out": 64
+          },
+          "backbone.tf_layers.4.self_attn.y_x_mul": {
+            "in": 128,
+            "out": 256
+          },
+          "backbone.tf_layers.4.self_attn.y_x_add": {
+            "in": 128,
+            "out": 256
+          },
+          "backbone.tf_layers.4.self_attn.y_y": {
+            "in": 128,
+            "out": 128
+          },
+          "backbone.tf_layers.4.self_attn.x_y.lin": {
+            "in": 1024,
+            "out": 128
+          },
+          "backbone.tf_layers.4.self_attn.e_y.lin": {
+            "in": 256,
+            "out": 128
+          },
+          "backbone.tf_layers.4.self_attn.y_out.0": {
+            "in": 128,
+            "out": 128
+          },
+          "backbone.tf_layers.4.self_attn.y_out.2": {
+            "in": 128,
+            "out": 128
+          },
+          "backbone.tf_layers.4.self_attn.x_out": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.4.self_attn.e_out": {
+            "in": 256,
+            "out": 64
+          },
+          "backbone.tf_layers.4.linX1": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.4.linX2": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.4.linE1": {
+            "in": 64,
+            "out": 64
+          },
+          "backbone.tf_layers.4.linE2": {
+            "in": 64,
+            "out": 64
+          },
+          "backbone.tf_layers.4.lin_y1": {
+            "in": 128,
+            "out": 256
+          },
+          "backbone.tf_layers.4.lin_y2": {
+            "in": 256,
+            "out": 128
+          },
+          "backbone.tf_layers.5.self_attn.lin_key": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.5.self_attn.lin_query": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.5.self_attn.lin_value": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.5.self_attn.lin_skip": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.5.self_attn.e_add": {
+            "in": 64,
+            "out": 8
+          },
+          "backbone.tf_layers.5.self_attn.e_mul": {
+            "in": 64,
+            "out": 8
+          },
+          "backbone.tf_layers.5.self_attn.y_e_mul": {
+            "in": 128,
+            "out": 64
+          },
+          "backbone.tf_layers.5.self_attn.y_e_add": {
+            "in": 128,
+            "out": 64
+          },
+          "backbone.tf_layers.5.self_attn.y_x_mul": {
+            "in": 128,
+            "out": 256
+          },
+          "backbone.tf_layers.5.self_attn.y_x_add": {
+            "in": 128,
+            "out": 256
+          },
+          "backbone.tf_layers.5.self_attn.y_y": {
+            "in": 128,
+            "out": 128
+          },
+          "backbone.tf_layers.5.self_attn.x_y.lin": {
+            "in": 1024,
+            "out": 128
+          },
+          "backbone.tf_layers.5.self_attn.e_y.lin": {
+            "in": 256,
+            "out": 128
+          },
+          "backbone.tf_layers.5.self_attn.y_out.0": {
+            "in": 128,
+            "out": 128
+          },
+          "backbone.tf_layers.5.self_attn.y_out.2": {
+            "in": 128,
+            "out": 128
+          },
+          "backbone.tf_layers.5.self_attn.x_out": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.5.self_attn.e_out": {
+            "in": 256,
+            "out": 64
+          },
+          "backbone.tf_layers.5.linX1": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.5.linX2": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.5.linE1": {
+            "in": 64,
+            "out": 64
+          },
+          "backbone.tf_layers.5.linE2": {
+            "in": 64,
+            "out": 64
+          },
+          "backbone.tf_layers.5.lin_y1": {
+            "in": 128,
+            "out": 256
+          },
+          "backbone.tf_layers.5.lin_y2": {
+            "in": 256,
+            "out": 128
+          },
+          "backbone.tf_layers.6.self_attn.lin_key": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.6.self_attn.lin_query": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.6.self_attn.lin_value": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.6.self_attn.lin_skip": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.6.self_attn.e_add": {
+            "in": 64,
+            "out": 8
+          },
+          "backbone.tf_layers.6.self_attn.e_mul": {
+            "in": 64,
+            "out": 8
+          },
+          "backbone.tf_layers.6.self_attn.y_e_mul": {
+            "in": 128,
+            "out": 64
+          },
+          "backbone.tf_layers.6.self_attn.y_e_add": {
+            "in": 128,
+            "out": 64
+          },
+          "backbone.tf_layers.6.self_attn.y_x_mul": {
+            "in": 128,
+            "out": 256
+          },
+          "backbone.tf_layers.6.self_attn.y_x_add": {
+            "in": 128,
+            "out": 256
+          },
+          "backbone.tf_layers.6.self_attn.y_y": {
+            "in": 128,
+            "out": 128
+          },
+          "backbone.tf_layers.6.self_attn.x_y.lin": {
+            "in": 1024,
+            "out": 128
+          },
+          "backbone.tf_layers.6.self_attn.e_y.lin": {
+            "in": 256,
+            "out": 128
+          },
+          "backbone.tf_layers.6.self_attn.y_out.0": {
+            "in": 128,
+            "out": 128
+          },
+          "backbone.tf_layers.6.self_attn.y_out.2": {
+            "in": 128,
+            "out": 128
+          },
+          "backbone.tf_layers.6.self_attn.x_out": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.6.self_attn.e_out": {
+            "in": 256,
+            "out": 64
+          },
+          "backbone.tf_layers.6.linX1": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.6.linX2": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.6.linE1": {
+            "in": 64,
+            "out": 64
+          },
+          "backbone.tf_layers.6.linE2": {
+            "in": 64,
+            "out": 64
+          },
+          "backbone.tf_layers.6.lin_y1": {
+            "in": 128,
+            "out": 256
+          },
+          "backbone.tf_layers.6.lin_y2": {
+            "in": 256,
+            "out": 128
+          },
+          "backbone.tf_layers.7.self_attn.lin_key": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.7.self_attn.lin_query": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.7.self_attn.lin_value": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.7.self_attn.lin_skip": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.7.self_attn.e_add": {
+            "in": 64,
+            "out": 8
+          },
+          "backbone.tf_layers.7.self_attn.e_mul": {
+            "in": 64,
+            "out": 8
+          },
+          "backbone.tf_layers.7.self_attn.y_e_mul": {
+            "in": 128,
+            "out": 64
+          },
+          "backbone.tf_layers.7.self_attn.y_e_add": {
+            "in": 128,
+            "out": 64
+          },
+          "backbone.tf_layers.7.self_attn.y_x_mul": {
+            "in": 128,
+            "out": 256
+          },
+          "backbone.tf_layers.7.self_attn.y_x_add": {
+            "in": 128,
+            "out": 256
+          },
+          "backbone.tf_layers.7.self_attn.x_out": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.7.self_attn.e_out": {
+            "in": 256,
+            "out": 64
+          },
+          "backbone.tf_layers.7.linX1": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.7.linX2": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.7.linE1": {
+            "in": 64,
+            "out": 64
+          },
+          "backbone.tf_layers.7.linE2": {
+            "in": 64,
+            "out": 64
+          },
+          "backbone.lin_out_X": {
+            "in": 256,
+            "out": 4
+          },
+          "backbone.lin_out_E": {
+            "in": 64,
+            "out": 11
+          },
+          "joint_head.0": {
+            "in": 776,
+            "out": 128
+          },
+          "joint_head.2": {
+            "in": 128,
+            "out": 2
+          }
+        },
+        "layer_norms": {
+          "backbone.tf_layers.0.normX1": {
+            "shape": [
+              256
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.0.normX2": {
+            "shape": [
+              256
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.0.normE1": {
+            "shape": [
+              64
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.0.normE2": {
+            "shape": [
+              64
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.0.norm_y1": {
+            "shape": [
+              128
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.0.norm_y2": {
+            "shape": [
+              128
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.1.normX1": {
+            "shape": [
+              256
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.1.normX2": {
+            "shape": [
+              256
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.1.normE1": {
+            "shape": [
+              64
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.1.normE2": {
+            "shape": [
+              64
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.1.norm_y1": {
+            "shape": [
+              128
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.1.norm_y2": {
+            "shape": [
+              128
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.2.normX1": {
+            "shape": [
+              256
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.2.normX2": {
+            "shape": [
+              256
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.2.normE1": {
+            "shape": [
+              64
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.2.normE2": {
+            "shape": [
+              64
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.2.norm_y1": {
+            "shape": [
+              128
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.2.norm_y2": {
+            "shape": [
+              128
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.3.normX1": {
+            "shape": [
+              256
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.3.normX2": {
+            "shape": [
+              256
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.3.normE1": {
+            "shape": [
+              64
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.3.normE2": {
+            "shape": [
+              64
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.3.norm_y1": {
+            "shape": [
+              128
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.3.norm_y2": {
+            "shape": [
+              128
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.4.normX1": {
+            "shape": [
+              256
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.4.normX2": {
+            "shape": [
+              256
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.4.normE1": {
+            "shape": [
+              64
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.4.normE2": {
+            "shape": [
+              64
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.4.norm_y1": {
+            "shape": [
+              128
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.4.norm_y2": {
+            "shape": [
+              128
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.5.normX1": {
+            "shape": [
+              256
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.5.normX2": {
+            "shape": [
+              256
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.5.normE1": {
+            "shape": [
+              64
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.5.normE2": {
+            "shape": [
+              64
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.5.norm_y1": {
+            "shape": [
+              128
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.5.norm_y2": {
+            "shape": [
+              128
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.6.normX1": {
+            "shape": [
+              256
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.6.normX2": {
+            "shape": [
+              256
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.6.normE1": {
+            "shape": [
+              64
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.6.normE2": {
+            "shape": [
+              64
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.6.norm_y1": {
+            "shape": [
+              128
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.6.norm_y2": {
+            "shape": [
+              128
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.7.normX1": {
+            "shape": [
+              256
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.7.normX2": {
+            "shape": [
+              256
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.7.normE1": {
+            "shape": [
+              64
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.7.normE2": {
+            "shape": [
+              64
+            ],
+            "eps": 1e-05
+          },
+          "backbone.out_ln_X": {
+            "shape": [
+              256
+            ],
+            "eps": 1e-05
+          },
+          "backbone.out_ln_E": {
+            "shape": [
+              64
+            ],
+            "eps": 1e-05
+          }
+        },
+        "graph_output_head": false,
+        "mutable_node_charge_dims": 0,
+        "dropout_config": 0.1,
+        "dropout_active": false,
+        "features": "shared nonlinear joint edge/global readout; complete Xt counts/density; optional mean CN + log1p typed counts + existence; no scalar CN addition",
+        "architecture": "joint_local_global_cn_v1",
+        "joint_input": 776,
+        "joint_hidden": 128,
+        "joint_slices": {
+          "edge": [
+            0,
+            64
+          ],
+          "endpoint_mean": [
+            64,
+            320
+          ],
+          "endpoint_absdiff": [
+            320,
+            576
+          ],
+          "backbone_global": [
+            576,
+            704
+          ],
+          "time": [
+            704,
+            705
+          ],
+          "Xt_statistics": [
+            705,
+            725
+          ],
+          "family": [
+            725,
+            735
+          ],
+          "current_state": [
+            735,
+            737
+          ],
+          "backbone_logits": [
+            737,
+            739
+          ],
+          "CN": [
+            739,
+            776
+          ]
+        }
+      },
+      "config": {
+        "version": "bw_joint_cn_v1",
+        "runtime_binding_schema": 2,
+        "model": {
+          "layers": 8,
+          "width": 256,
+          "edge_width": 64,
+          "global_width": 128,
+          "heads": 8,
+          "ff_node": 256,
+          "ff_edge": 64,
+          "ff_global": 256,
+          "dropout": 0.1,
+          "cn_hidden": 0,
+          "joint_width": 128,
+          "max_wedges": 2000000,
+          "max_query_paths": 2000000
+        },
+        "optimizer": {
+          "lr": 0.0002,
+          "weight_decay": 1e-12
+        },
+        "precision": "FP32 network and CE; float64 marginal kernel",
+        "T": 1000,
+        "schedule_offset": 0.008,
+        "rounds": 20,
+        "active_policy": "reference-positive families only; exact-none families stay in schema and full CE denominator",
+        "updates": 100,
+        "microbatch": 1,
+        "gradient_accumulation": 1,
+        "warmup_updates": 5,
+        "train_seed": 2026101407,
+        "validation_seed": 2026101408,
+        "sample_seed": 2026101409,
+        "validation_times": [
+          1,
+          250,
+          500,
+          750,
+          1000
+        ],
+        "device_check_times": [
+          1,
+          500,
+          1000
+        ],
+        "recovery_atol": 5e-06,
+        "recovery_rtol": 0.0,
+        "imdb_sha256": "10f1dbbbe55c6a069594b2dcb590d1b8295ca5436320ef4597cd30e6b7f73e42",
+        "imdb_nodes": 1653,
+        "imdb_edges": 4079,
+        "imdb_type_counts": [
+          410,
+          494,
+          726,
+          23
+        ],
+        "imdb_family_counts": [
+          0,
+          604,
+          642,
+          0,
+          15,
+          739,
+          0,
+          0,
+          2079,
+          0
+        ],
+        "parameter_sources": {
+          "8_layers_8_heads_256_64_128_T1000_lr": "SparseDiff reported large-graph generic settings; NOT recovered Cora YAML",
+          "ff_256_64_256": "engineering choice aligned with previously accepted local smoke; global FF explicitly replaced in adapter",
+          "schedule": "existing accepted engineering cosine offset .008, alpha0=1, alphaT=0; not certified original Cora schedule",
+          "optimizer": "AdamW, inherited public default weight_decay 1e-12; no LR schedule/clipping for finite preflight",
+          "warmup": "first five timing updates; NOT LR warmup",
+          "dropout": "configured .1; upstream forward has no active dropout operation",
+          "features": "fixed node-type onehot, current binary edge state and relation-family onehot, normalized t/T only; no ID/position/spectrum/cycle",
+          "output": "none-versus-this-relation softmax; exact prior0/1 support; mirrored computational edges"
+        },
+        "experiment_arm": "cn"
+      }
+    },
+    "B": {
+      "dimensions": {
+        "parameters": 6637105,
+        "common_neighbor_parameters": 10080,
+        "linear_layers": {
+          "backbone.lin_in_X": {
+            "in": 4,
+            "out": 256
+          },
+          "backbone.lin_in_E": {
+            "in": 21,
+            "out": 64
+          },
+          "backbone.lin_in_y": {
+            "in": 1,
+            "out": 128
+          },
+          "backbone.tf_layers.0.self_attn.lin_key": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.0.self_attn.lin_query": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.0.self_attn.lin_value": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.0.self_attn.lin_skip": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.0.self_attn.e_add": {
+            "in": 64,
+            "out": 8
+          },
+          "backbone.tf_layers.0.self_attn.e_mul": {
+            "in": 64,
+            "out": 8
+          },
+          "backbone.tf_layers.0.self_attn.y_e_mul": {
+            "in": 128,
+            "out": 64
+          },
+          "backbone.tf_layers.0.self_attn.y_e_add": {
+            "in": 128,
+            "out": 64
+          },
+          "backbone.tf_layers.0.self_attn.y_x_mul": {
+            "in": 128,
+            "out": 256
+          },
+          "backbone.tf_layers.0.self_attn.y_x_add": {
+            "in": 128,
+            "out": 256
+          },
+          "backbone.tf_layers.0.self_attn.y_y": {
+            "in": 128,
+            "out": 128
+          },
+          "backbone.tf_layers.0.self_attn.x_y.lin": {
+            "in": 1024,
+            "out": 128
+          },
+          "backbone.tf_layers.0.self_attn.e_y.lin": {
+            "in": 256,
+            "out": 128
+          },
+          "backbone.tf_layers.0.self_attn.y_out.0": {
+            "in": 128,
+            "out": 128
+          },
+          "backbone.tf_layers.0.self_attn.y_out.2": {
+            "in": 128,
+            "out": 128
+          },
+          "backbone.tf_layers.0.self_attn.x_out": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.0.self_attn.e_out": {
+            "in": 256,
+            "out": 64
+          },
+          "backbone.tf_layers.0.linX1": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.0.linX2": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.0.linE1": {
+            "in": 64,
+            "out": 64
+          },
+          "backbone.tf_layers.0.linE2": {
+            "in": 64,
+            "out": 64
+          },
+          "backbone.tf_layers.0.lin_y1": {
+            "in": 128,
+            "out": 256
+          },
+          "backbone.tf_layers.0.lin_y2": {
+            "in": 256,
+            "out": 128
+          },
+          "backbone.tf_layers.1.self_attn.lin_key": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.1.self_attn.lin_query": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.1.self_attn.lin_value": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.1.self_attn.lin_skip": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.1.self_attn.e_add": {
+            "in": 64,
+            "out": 8
+          },
+          "backbone.tf_layers.1.self_attn.e_mul": {
+            "in": 64,
+            "out": 8
+          },
+          "backbone.tf_layers.1.self_attn.y_e_mul": {
+            "in": 128,
+            "out": 64
+          },
+          "backbone.tf_layers.1.self_attn.y_e_add": {
+            "in": 128,
+            "out": 64
+          },
+          "backbone.tf_layers.1.self_attn.y_x_mul": {
+            "in": 128,
+            "out": 256
+          },
+          "backbone.tf_layers.1.self_attn.y_x_add": {
+            "in": 128,
+            "out": 256
+          },
+          "backbone.tf_layers.1.self_attn.y_y": {
+            "in": 128,
+            "out": 128
+          },
+          "backbone.tf_layers.1.self_attn.x_y.lin": {
+            "in": 1024,
+            "out": 128
+          },
+          "backbone.tf_layers.1.self_attn.e_y.lin": {
+            "in": 256,
+            "out": 128
+          },
+          "backbone.tf_layers.1.self_attn.y_out.0": {
+            "in": 128,
+            "out": 128
+          },
+          "backbone.tf_layers.1.self_attn.y_out.2": {
+            "in": 128,
+            "out": 128
+          },
+          "backbone.tf_layers.1.self_attn.x_out": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.1.self_attn.e_out": {
+            "in": 256,
+            "out": 64
+          },
+          "backbone.tf_layers.1.linX1": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.1.linX2": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.1.linE1": {
+            "in": 64,
+            "out": 64
+          },
+          "backbone.tf_layers.1.linE2": {
+            "in": 64,
+            "out": 64
+          },
+          "backbone.tf_layers.1.lin_y1": {
+            "in": 128,
+            "out": 256
+          },
+          "backbone.tf_layers.1.lin_y2": {
+            "in": 256,
+            "out": 128
+          },
+          "backbone.tf_layers.2.self_attn.lin_key": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.2.self_attn.lin_query": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.2.self_attn.lin_value": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.2.self_attn.lin_skip": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.2.self_attn.e_add": {
+            "in": 64,
+            "out": 8
+          },
+          "backbone.tf_layers.2.self_attn.e_mul": {
+            "in": 64,
+            "out": 8
+          },
+          "backbone.tf_layers.2.self_attn.y_e_mul": {
+            "in": 128,
+            "out": 64
+          },
+          "backbone.tf_layers.2.self_attn.y_e_add": {
+            "in": 128,
+            "out": 64
+          },
+          "backbone.tf_layers.2.self_attn.y_x_mul": {
+            "in": 128,
+            "out": 256
+          },
+          "backbone.tf_layers.2.self_attn.y_x_add": {
+            "in": 128,
+            "out": 256
+          },
+          "backbone.tf_layers.2.self_attn.y_y": {
+            "in": 128,
+            "out": 128
+          },
+          "backbone.tf_layers.2.self_attn.x_y.lin": {
+            "in": 1024,
+            "out": 128
+          },
+          "backbone.tf_layers.2.self_attn.e_y.lin": {
+            "in": 256,
+            "out": 128
+          },
+          "backbone.tf_layers.2.self_attn.y_out.0": {
+            "in": 128,
+            "out": 128
+          },
+          "backbone.tf_layers.2.self_attn.y_out.2": {
+            "in": 128,
+            "out": 128
+          },
+          "backbone.tf_layers.2.self_attn.x_out": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.2.self_attn.e_out": {
+            "in": 256,
+            "out": 64
+          },
+          "backbone.tf_layers.2.linX1": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.2.linX2": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.2.linE1": {
+            "in": 64,
+            "out": 64
+          },
+          "backbone.tf_layers.2.linE2": {
+            "in": 64,
+            "out": 64
+          },
+          "backbone.tf_layers.2.lin_y1": {
+            "in": 128,
+            "out": 256
+          },
+          "backbone.tf_layers.2.lin_y2": {
+            "in": 256,
+            "out": 128
+          },
+          "backbone.tf_layers.3.self_attn.lin_key": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.3.self_attn.lin_query": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.3.self_attn.lin_value": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.3.self_attn.lin_skip": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.3.self_attn.e_add": {
+            "in": 64,
+            "out": 8
+          },
+          "backbone.tf_layers.3.self_attn.e_mul": {
+            "in": 64,
+            "out": 8
+          },
+          "backbone.tf_layers.3.self_attn.y_e_mul": {
+            "in": 128,
+            "out": 64
+          },
+          "backbone.tf_layers.3.self_attn.y_e_add": {
+            "in": 128,
+            "out": 64
+          },
+          "backbone.tf_layers.3.self_attn.y_x_mul": {
+            "in": 128,
+            "out": 256
+          },
+          "backbone.tf_layers.3.self_attn.y_x_add": {
+            "in": 128,
+            "out": 256
+          },
+          "backbone.tf_layers.3.self_attn.y_y": {
+            "in": 128,
+            "out": 128
+          },
+          "backbone.tf_layers.3.self_attn.x_y.lin": {
+            "in": 1024,
+            "out": 128
+          },
+          "backbone.tf_layers.3.self_attn.e_y.lin": {
+            "in": 256,
+            "out": 128
+          },
+          "backbone.tf_layers.3.self_attn.y_out.0": {
+            "in": 128,
+            "out": 128
+          },
+          "backbone.tf_layers.3.self_attn.y_out.2": {
+            "in": 128,
+            "out": 128
+          },
+          "backbone.tf_layers.3.self_attn.x_out": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.3.self_attn.e_out": {
+            "in": 256,
+            "out": 64
+          },
+          "backbone.tf_layers.3.linX1": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.3.linX2": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.3.linE1": {
+            "in": 64,
+            "out": 64
+          },
+          "backbone.tf_layers.3.linE2": {
+            "in": 64,
+            "out": 64
+          },
+          "backbone.tf_layers.3.lin_y1": {
+            "in": 128,
+            "out": 256
+          },
+          "backbone.tf_layers.3.lin_y2": {
+            "in": 256,
+            "out": 128
+          },
+          "backbone.tf_layers.4.self_attn.lin_key": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.4.self_attn.lin_query": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.4.self_attn.lin_value": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.4.self_attn.lin_skip": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.4.self_attn.e_add": {
+            "in": 64,
+            "out": 8
+          },
+          "backbone.tf_layers.4.self_attn.e_mul": {
+            "in": 64,
+            "out": 8
+          },
+          "backbone.tf_layers.4.self_attn.y_e_mul": {
+            "in": 128,
+            "out": 64
+          },
+          "backbone.tf_layers.4.self_attn.y_e_add": {
+            "in": 128,
+            "out": 64
+          },
+          "backbone.tf_layers.4.self_attn.y_x_mul": {
+            "in": 128,
+            "out": 256
+          },
+          "backbone.tf_layers.4.self_attn.y_x_add": {
+            "in": 128,
+            "out": 256
+          },
+          "backbone.tf_layers.4.self_attn.y_y": {
+            "in": 128,
+            "out": 128
+          },
+          "backbone.tf_layers.4.self_attn.x_y.lin": {
+            "in": 1024,
+            "out": 128
+          },
+          "backbone.tf_layers.4.self_attn.e_y.lin": {
+            "in": 256,
+            "out": 128
+          },
+          "backbone.tf_layers.4.self_attn.y_out.0": {
+            "in": 128,
+            "out": 128
+          },
+          "backbone.tf_layers.4.self_attn.y_out.2": {
+            "in": 128,
+            "out": 128
+          },
+          "backbone.tf_layers.4.self_attn.x_out": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.4.self_attn.e_out": {
+            "in": 256,
+            "out": 64
+          },
+          "backbone.tf_layers.4.linX1": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.4.linX2": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.4.linE1": {
+            "in": 64,
+            "out": 64
+          },
+          "backbone.tf_layers.4.linE2": {
+            "in": 64,
+            "out": 64
+          },
+          "backbone.tf_layers.4.lin_y1": {
+            "in": 128,
+            "out": 256
+          },
+          "backbone.tf_layers.4.lin_y2": {
+            "in": 256,
+            "out": 128
+          },
+          "backbone.tf_layers.5.self_attn.lin_key": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.5.self_attn.lin_query": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.5.self_attn.lin_value": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.5.self_attn.lin_skip": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.5.self_attn.e_add": {
+            "in": 64,
+            "out": 8
+          },
+          "backbone.tf_layers.5.self_attn.e_mul": {
+            "in": 64,
+            "out": 8
+          },
+          "backbone.tf_layers.5.self_attn.y_e_mul": {
+            "in": 128,
+            "out": 64
+          },
+          "backbone.tf_layers.5.self_attn.y_e_add": {
+            "in": 128,
+            "out": 64
+          },
+          "backbone.tf_layers.5.self_attn.y_x_mul": {
+            "in": 128,
+            "out": 256
+          },
+          "backbone.tf_layers.5.self_attn.y_x_add": {
+            "in": 128,
+            "out": 256
+          },
+          "backbone.tf_layers.5.self_attn.y_y": {
+            "in": 128,
+            "out": 128
+          },
+          "backbone.tf_layers.5.self_attn.x_y.lin": {
+            "in": 1024,
+            "out": 128
+          },
+          "backbone.tf_layers.5.self_attn.e_y.lin": {
+            "in": 256,
+            "out": 128
+          },
+          "backbone.tf_layers.5.self_attn.y_out.0": {
+            "in": 128,
+            "out": 128
+          },
+          "backbone.tf_layers.5.self_attn.y_out.2": {
+            "in": 128,
+            "out": 128
+          },
+          "backbone.tf_layers.5.self_attn.x_out": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.5.self_attn.e_out": {
+            "in": 256,
+            "out": 64
+          },
+          "backbone.tf_layers.5.linX1": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.5.linX2": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.5.linE1": {
+            "in": 64,
+            "out": 64
+          },
+          "backbone.tf_layers.5.linE2": {
+            "in": 64,
+            "out": 64
+          },
+          "backbone.tf_layers.5.lin_y1": {
+            "in": 128,
+            "out": 256
+          },
+          "backbone.tf_layers.5.lin_y2": {
+            "in": 256,
+            "out": 128
+          },
+          "backbone.tf_layers.6.self_attn.lin_key": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.6.self_attn.lin_query": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.6.self_attn.lin_value": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.6.self_attn.lin_skip": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.6.self_attn.e_add": {
+            "in": 64,
+            "out": 8
+          },
+          "backbone.tf_layers.6.self_attn.e_mul": {
+            "in": 64,
+            "out": 8
+          },
+          "backbone.tf_layers.6.self_attn.y_e_mul": {
+            "in": 128,
+            "out": 64
+          },
+          "backbone.tf_layers.6.self_attn.y_e_add": {
+            "in": 128,
+            "out": 64
+          },
+          "backbone.tf_layers.6.self_attn.y_x_mul": {
+            "in": 128,
+            "out": 256
+          },
+          "backbone.tf_layers.6.self_attn.y_x_add": {
+            "in": 128,
+            "out": 256
+          },
+          "backbone.tf_layers.6.self_attn.y_y": {
+            "in": 128,
+            "out": 128
+          },
+          "backbone.tf_layers.6.self_attn.x_y.lin": {
+            "in": 1024,
+            "out": 128
+          },
+          "backbone.tf_layers.6.self_attn.e_y.lin": {
+            "in": 256,
+            "out": 128
+          },
+          "backbone.tf_layers.6.self_attn.y_out.0": {
+            "in": 128,
+            "out": 128
+          },
+          "backbone.tf_layers.6.self_attn.y_out.2": {
+            "in": 128,
+            "out": 128
+          },
+          "backbone.tf_layers.6.self_attn.x_out": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.6.self_attn.e_out": {
+            "in": 256,
+            "out": 64
+          },
+          "backbone.tf_layers.6.linX1": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.6.linX2": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.6.linE1": {
+            "in": 64,
+            "out": 64
+          },
+          "backbone.tf_layers.6.linE2": {
+            "in": 64,
+            "out": 64
+          },
+          "backbone.tf_layers.6.lin_y1": {
+            "in": 128,
+            "out": 256
+          },
+          "backbone.tf_layers.6.lin_y2": {
+            "in": 256,
+            "out": 128
+          },
+          "backbone.tf_layers.7.self_attn.lin_key": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.7.self_attn.lin_query": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.7.self_attn.lin_value": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.7.self_attn.lin_skip": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.7.self_attn.e_add": {
+            "in": 64,
+            "out": 8
+          },
+          "backbone.tf_layers.7.self_attn.e_mul": {
+            "in": 64,
+            "out": 8
+          },
+          "backbone.tf_layers.7.self_attn.y_e_mul": {
+            "in": 128,
+            "out": 64
+          },
+          "backbone.tf_layers.7.self_attn.y_e_add": {
+            "in": 128,
+            "out": 64
+          },
+          "backbone.tf_layers.7.self_attn.y_x_mul": {
+            "in": 128,
+            "out": 256
+          },
+          "backbone.tf_layers.7.self_attn.y_x_add": {
+            "in": 128,
+            "out": 256
+          },
+          "backbone.tf_layers.7.self_attn.x_out": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.7.self_attn.e_out": {
+            "in": 256,
+            "out": 64
+          },
+          "backbone.tf_layers.7.linX1": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.7.linX2": {
+            "in": 256,
+            "out": 256
+          },
+          "backbone.tf_layers.7.linE1": {
+            "in": 64,
+            "out": 64
+          },
+          "backbone.tf_layers.7.linE2": {
+            "in": 64,
+            "out": 64
+          },
+          "backbone.lin_out_X": {
+            "in": 256,
+            "out": 4
+          },
+          "backbone.lin_out_E": {
+            "in": 64,
+            "out": 11
+          },
+          "joint_head.0": {
+            "in": 776,
+            "out": 128
+          },
+          "joint_head.2": {
+            "in": 128,
+            "out": 2
+          },
+          "common_neighbor.phi.0": {
+            "in": 281,
+            "out": 32
+          },
+          "common_neighbor.phi.2": {
+            "in": 32,
+            "out": 32
+          }
+        },
+        "layer_norms": {
+          "backbone.tf_layers.0.normX1": {
+            "shape": [
+              256
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.0.normX2": {
+            "shape": [
+              256
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.0.normE1": {
+            "shape": [
+              64
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.0.normE2": {
+            "shape": [
+              64
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.0.norm_y1": {
+            "shape": [
+              128
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.0.norm_y2": {
+            "shape": [
+              128
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.1.normX1": {
+            "shape": [
+              256
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.1.normX2": {
+            "shape": [
+              256
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.1.normE1": {
+            "shape": [
+              64
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.1.normE2": {
+            "shape": [
+              64
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.1.norm_y1": {
+            "shape": [
+              128
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.1.norm_y2": {
+            "shape": [
+              128
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.2.normX1": {
+            "shape": [
+              256
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.2.normX2": {
+            "shape": [
+              256
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.2.normE1": {
+            "shape": [
+              64
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.2.normE2": {
+            "shape": [
+              64
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.2.norm_y1": {
+            "shape": [
+              128
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.2.norm_y2": {
+            "shape": [
+              128
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.3.normX1": {
+            "shape": [
+              256
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.3.normX2": {
+            "shape": [
+              256
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.3.normE1": {
+            "shape": [
+              64
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.3.normE2": {
+            "shape": [
+              64
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.3.norm_y1": {
+            "shape": [
+              128
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.3.norm_y2": {
+            "shape": [
+              128
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.4.normX1": {
+            "shape": [
+              256
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.4.normX2": {
+            "shape": [
+              256
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.4.normE1": {
+            "shape": [
+              64
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.4.normE2": {
+            "shape": [
+              64
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.4.norm_y1": {
+            "shape": [
+              128
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.4.norm_y2": {
+            "shape": [
+              128
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.5.normX1": {
+            "shape": [
+              256
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.5.normX2": {
+            "shape": [
+              256
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.5.normE1": {
+            "shape": [
+              64
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.5.normE2": {
+            "shape": [
+              64
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.5.norm_y1": {
+            "shape": [
+              128
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.5.norm_y2": {
+            "shape": [
+              128
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.6.normX1": {
+            "shape": [
+              256
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.6.normX2": {
+            "shape": [
+              256
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.6.normE1": {
+            "shape": [
+              64
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.6.normE2": {
+            "shape": [
+              64
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.6.norm_y1": {
+            "shape": [
+              128
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.6.norm_y2": {
+            "shape": [
+              128
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.7.normX1": {
+            "shape": [
+              256
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.7.normX2": {
+            "shape": [
+              256
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.7.normE1": {
+            "shape": [
+              64
+            ],
+            "eps": 1e-05
+          },
+          "backbone.tf_layers.7.normE2": {
+            "shape": [
+              64
+            ],
+            "eps": 1e-05
+          },
+          "backbone.out_ln_X": {
+            "shape": [
+              256
+            ],
+            "eps": 1e-05
+          },
+          "backbone.out_ln_E": {
+            "shape": [
+              64
+            ],
+            "eps": 1e-05
+          }
+        },
+        "graph_output_head": false,
+        "mutable_node_charge_dims": 0,
+        "dropout_config": 0.1,
+        "dropout_active": false,
+        "features": "shared nonlinear joint edge/global readout; complete Xt counts/density; optional mean CN + log1p typed counts + existence; no scalar CN addition",
+        "architecture": "joint_local_global_cn_v1",
+        "joint_input": 776,
+        "joint_hidden": 128,
+        "joint_slices": {
+          "edge": [
+            0,
+            64
+          ],
+          "endpoint_mean": [
+            64,
+            320
+          ],
+          "endpoint_absdiff": [
+            320,
+            576
+          ],
+          "backbone_global": [
+            576,
+            704
+          ],
+          "time": [
+            704,
+            705
+          ],
+          "Xt_statistics": [
+            705,
+            725
+          ],
+          "family": [
+            725,
+            735
+          ],
+          "current_state": [
+            735,
+            737
+          ],
+          "backbone_logits": [
+            737,
+            739
+          ],
+          "CN": [
+            739,
+            776
+          ]
+        }
+      },
+      "config": {
+        "version": "bw_joint_cn_v1",
+        "runtime_binding_schema": 2,
+        "model": {
+          "layers": 8,
+          "width": 256,
+          "edge_width": 64,
+          "global_width": 128,
+          "heads": 8,
+          "ff_node": 256,
+          "ff_edge": 64,
+          "ff_global": 256,
+          "dropout": 0.1,
+          "cn_hidden": 32,
+          "joint_width": 128,
+          "max_wedges": 2000000,
+          "max_query_paths": 2000000
+        },
+        "optimizer": {
+          "lr": 0.0002,
+          "weight_decay": 1e-12
+        },
+        "precision": "FP32 network and CE; float64 marginal kernel",
+        "T": 1000,
+        "schedule_offset": 0.008,
+        "rounds": 20,
+        "active_policy": "reference-positive families only; exact-none families stay in schema and full CE denominator",
+        "updates": 100,
+        "microbatch": 1,
+        "gradient_accumulation": 1,
+        "warmup_updates": 5,
+        "train_seed": 2026101407,
+        "validation_seed": 2026101408,
+        "sample_seed": 2026101409,
+        "validation_times": [
+          1,
+          250,
+          500,
+          750,
+          1000
+        ],
+        "device_check_times": [
+          1,
+          500,
+          1000
+        ],
+        "recovery_atol": 5e-06,
+        "recovery_rtol": 0.0,
+        "imdb_sha256": "10f1dbbbe55c6a069594b2dcb590d1b8295ca5436320ef4597cd30e6b7f73e42",
+        "imdb_nodes": 1653,
+        "imdb_edges": 4079,
+        "imdb_type_counts": [
+          410,
+          494,
+          726,
+          23
+        ],
+        "imdb_family_counts": [
+          0,
+          604,
+          642,
+          0,
+          15,
+          739,
+          0,
+          0,
+          2079,
+          0
+        ],
+        "parameter_sources": {
+          "8_layers_8_heads_256_64_128_T1000_lr": "SparseDiff reported large-graph generic settings; NOT recovered Cora YAML",
+          "ff_256_64_256": "engineering choice aligned with previously accepted local smoke; global FF explicitly replaced in adapter",
+          "schedule": "existing accepted engineering cosine offset .008, alpha0=1, alphaT=0; not certified original Cora schedule",
+          "optimizer": "AdamW, inherited public default weight_decay 1e-12; no LR schedule/clipping for finite preflight",
+          "warmup": "first five timing updates; NOT LR warmup",
+          "dropout": "configured .1; upstream forward has no active dropout operation",
+          "features": "fixed node-type onehot, current binary edge state and relation-family onehot, normalized t/T only; no ID/position/spectrum/cycle",
+          "output": "none-versus-this-relation softmax; exact prior0/1 support; mirrored computational edges"
+        },
+        "experiment_arm": "cn"
+      }
+    }
+  },
+  "IMDB_inventory": {
+    "nodes": 1653,
+    "physical_edges": 4079,
+    "type_counts": [
+      410,
+      494,
+      726,
+      23
+    ],
+    "family_edges": [
+      0,
+      604,
+      642,
+      0,
+      15,
+      739,
+      0,
+      0,
+      2079,
+      0
+    ],
+    "all_slots": 1365378,
+    "active_slots": 997313,
+    "Xt_reference_wedges": 217005
+  },
+  "IMDB_query_sizes": [
+    49865,
+    49865,
+    49866,
+    49865,
+    49866,
+    49865,
+    49866,
+    49866,
+    49865,
+    49867,
+    49865,
+    49866,
+    49866,
+    49866,
+    49865,
+    49865,
+    49865,
+    49866,
+    49867,
+    49866
+  ],
+  "toy_wall_seconds": 1.5087010581046343,
+  "toy_cpu_seconds": 1.8860367889999998,
+  "toy_resources": {
+    "process_peak_rss_mib": 433.34765625
+  },
+  "toy_launcher": {
+    "exit_code": 0,
+    "wall_seconds": 4.378748408518732,
+    "cap_seconds": 180,
+    "cleanup_reserve_seconds": 3,
+    "log": "results/toy03.log",
+    "status": "worker_exited"
+  },
+  "original_CN2_manifest_files_unchanged": 63,
+  "actual_BW_diagnosis_files_read": false,
+  "diagnosed_numbers_source": "user provided; remote notebook directory not accessible",
+  "known_development_issues": [
+    {
+      "issue": "prepare manifest initially referenced evidence/base_receipt.json before materializing it",
+      "effect": "all three wrappers stopped before any computation",
+      "fix": "write evidence copy before checksums; rerun passed"
+    },
+    {
+      "issue": "baseline diagnostic CN buckets initially used disabled feature zeros",
+      "effect": "toy01 counts only; model forward/training unaffected",
+      "fix": "offline exact Xt counts for BOTH arms; corrected toy02/toy03; all requested diagnostics matched by inputs"
+    },
+    {
+      "issue": "initial handwritten full-head dimension estimate was876; actual construction is776",
+      "effect": "design text only",
+      "fix": "dimension audit and documentation updated to actual776/parameter99714"
+    }
+  ],
+  "no_formal_training": true,
+  "engineering_updates_per_final_toy_run": 8,
+  "full_scientific_chains": 0,
+  "new_scientific_graphs": 0,
+  "GPU_use": 0,
+  "unverified": [
+    "BW operator/memory/time",
+    "real IMDB training and full-chain stability",
+    "learned local/global coordination",
+    "formal four-arm generation quality"
+  ],
+  "cpu_test_environment": {
+    "python": "3.9.23 | packaged by conda-forge | (main, Jun  4 2025, 17:57:12) \n[GCC 13.3.0]",
+    "python_version": "3.9.23",
+    "executable": "/data2/lyh/miniconda3/envs/dihug/bin/python",
+    "system": "Linux-5.4.0-216-generic-x86_64-with-glibc2.31",
+    "machine": "x86_64",
+    "packages": {
+      "torch": "2.1.0",
+      "torch-geometric": "2.3.1",
+      "numpy": "1.26.4",
+      "scipy": "1.11.0",
+      "pytest": "7.4.4",
+      "networkx": "2.8.7"
+    },
+    "hip": null,
+    "cuda": "12.1",
+    "requested_device": "cpu",
+    "torch_runtime_version": "2.1.0",
+    "float32_matmul_precision": "highest",
+    "matmul_allow_tf32": false,
+    "deterministic_algorithms": false,
+    "deterministic_warn_only": false,
+    "torch_threads": 1,
+    "utc": "2026-10-16T15:51:08Z",
+    "device_name": "CPU engineering test",
+    "device_type": "CPU"
+  },
+  "test_evidence": "results/final_tests04/tests.xml",
+  "path_chunk_value_gradient_regression_passed": true,
+  "patch_dry_run": {
+    "exit_code": 0,
+    "stdout": "checking file hsgd/bw_preflight/common.py\nchecking file hsgd/common_neighbor.py\nchecking file hsgd/computational.py\nchecking file hsgd/fusion_checks.py\nchecking file hsgd/fusion_preflight.py\nchecking file hsgd/model.py\nchecking file hsgd/runtime.py\nchecking file hsgd/vendor/conv_transformer_model.py\n",
+    "stderr": "",
+    "temporary_copy": "/tmp/dihug_joint_patch_1cyk3q_5"
+  }
+}
