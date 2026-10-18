@@ -1,0 +1,24 @@
+--- a/hsgd/vendor/transconv_layer.py
++++ b/hsgd/vendor/transconv_layer.py
+@@ -169,14 +169,18 @@
+         size = self._check_input(edge_index, size)
+         coll_dict = self._collect(self._user_args, edge_index, size, kwargs)
+ 
+-        msg_kwargs = self.inspector.distribute("message", coll_dict)
++        # PyG >= 2.5 renamed Inspector.distribute; preserve tuple messages.
++        collect_params = getattr(self.inspector, "collect_param_data", None)
++        if collect_params is None:
++            collect_params = self.inspector.distribute
++        msg_kwargs = collect_params("message", coll_dict)
+         out, edge_attr = self.message(**msg_kwargs)
+ 
+-        aggr_kwargs = self.inspector.distribute("aggregate", coll_dict)
++        aggr_kwargs = collect_params("aggregate", coll_dict)
+ 
+         out = self.aggregate(out, **aggr_kwargs)
+ 
+-        update_kwargs = self.inspector.distribute("update", coll_dict)
++        update_kwargs = collect_params("update", coll_dict)
+         out = self.update(out, **update_kwargs)
+ 
+         return (out, edge_attr)
