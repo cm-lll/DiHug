@@ -1,0 +1,45 @@
+{
+  "scope": "ENGINEERING_ONLY public CLI",
+  "cases": [
+    {
+      "scenario": "success",
+      "outer_exit_code": "0",
+      "controller_exit_code": "0",
+      "status": "completed",
+      "reason": "completed",
+      "owned_group_gone": "True",
+      "artifact_present": "True",
+      "wall_seconds": "0.6320775700733066"
+    },
+    {
+      "scenario": "invalid",
+      "outer_exit_code": "1",
+      "controller_exit_code": "1",
+      "status": "failed",
+      "reason": "child_failed",
+      "owned_group_gone": "True",
+      "artifact_present": "False",
+      "wall_seconds": "0.5362491616979241"
+    },
+    {
+      "scenario": "timeout",
+      "outer_exit_code": "124",
+      "controller_exit_code": "124",
+      "status": "incomplete",
+      "reason": "timeout",
+      "owned_group_gone": "True",
+      "artifact_present": "False",
+      "wall_seconds": "15.625508901663125"
+    },
+    {
+      "scenario": "STOP",
+      "outer_exit_code": "75",
+      "controller_exit_code": "75",
+      "status": "stopped",
+      "reason": "STOP",
+      "owned_group_gone": "True",
+      "artifact_present": "False",
+      "wall_seconds": "2.0436374126002192"
+    }
+  ]
+}
