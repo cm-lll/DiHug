@@ -1,0 +1,539 @@
+--- /dev/null
++++ b/REVIEW_FIXES.md
+@@ -0,0 +1,53 @@
++# Joint CN v1.1: two review fixes only
++
++Base: fixed published commit `6379e992c107a1d9c2dd124d3e976d2aa2004f2e`.
++Old package/ZIP and all prior evidence remain untouched. No architecture,
++optimizer, forward-noise, query, reverse-posterior, sampling or RNG changes.
++
++## Stable loss
++
++For free slots, compute `cross_entropy([z_absent,z_present], hard_label)`
++directly. For exact prior0/1, first validate the label agrees with support,
++then use differentiable exact zero loss/gradient without evaluating their CE.
++Invalid/nonfinite labels, logits or priors are rejected. Training remains
++`sum(per_slot_CE) * ce_weight`, retaining the original R/S denominator, including
++fixed slots in that denominator. No rebalancing, epsilon or label smoothing.
++
++`common.update` requests logits even without diagnostics; no probability export
++is added to ordinary training. `fusion_checks.diagnostics` and split training
++logs use the same supported CE helper. The original probability output and
++exact prior projection remain available unchanged for inference/validation of
++support. This fixes FP32 probability-saturation loss gradients; it is not a new
++objective in exact arithmetic on free slots and does not prove training quality.
++
++Regressions compare moderate FP64 values/gradients with the old objective and
++an analytic gradient; extreme FP32 wrong-confidence logits retain nonzero
++corrective gradients. All-fixed/empty and illegal-label cases are tested.
++
++## Decision responses
++
++Keep the original max displacement of both logits as an interface metric.
++Also measure the change in `z_present-z_absent` and supported p0. For CN×global
++inputs compute the four-corner mixed response separately in logits, gap and
++p0. Gap and probability responses must exceed the predeclared 1e-8 floor in
++the fixed engineering fixture; no threshold was relaxed after inspection.
++
++Counterexamples add8 to both logits. Interface displacement and a pure shared
++shift interaction can be8 while both gap and probability effects are exactly0.
++Actual random-weight head responses only show interface capability; they do
++not show learned coordination, useful guidance or full-chain stability.
++
++## Scope and evidence
++
++The original27 tests remain byte-identical;12 targeted CPU cases are added.
++No BW, optimizer update/formal training, real IMDB inference or scientific
++generation is started for this repair. Original tiny-chain unit fixtures still
++run as part of the explicitly requested original27 tests. Old architecture,
++data, math kernel, query and resource guards are hash-checked against the base.
++See `evidence/` for raw test XML/logs, measured resources and numeric witnesses;
++`joint_cn_v1_to_v1_1.diff` is the relative patch. `DESIGN_AND_STAGED_PLAN.md`
++is preserved as the original design, not a newly issued experiment.
++
++Runtime architecture/config names intentionally remain v1; the independent
++package release is v1.1 with new code hashes/manifest. Existing recovery/source
++guards are not bypassed. Old checkpoints are not automatically resumed.
+--- a/build_release.py
++++ b/build_release.py
+@@ -1,4 +1,4 @@
+-"""Independent joint-fusion deployment, bound to CN v2 and no old weights."""
++"""Freeze the two-fix release against published joint CN v1, no model execution."""
+ import argparse
+ import difflib
+ import hashlib
+@@ -8,76 +8,78 @@
+ import zipfile
+ 
+ ROOT=Path(__file__).resolve().parent
++BASE_COMMIT='6379e992c107a1d9c2dd124d3e976d2aa2004f2e'
++BASE_PREFIX='experiments/bw_joint_cn_v1/package/'
++ALLOWED={'hsgd/bw_preflight/common.py','hsgd/fusion_checks.py','hsgd/losses.py'}
+ 
+ 
+-def digest(data):return hashlib.sha256(data).hexdigest()
++def sha(data):return hashlib.sha256(data).hexdigest()
+ 
+ 
+ def main():
+     p=argparse.ArgumentParser();p.add_argument('--base',type=Path,required=True)
+-    p.add_argument('--prepare',action='store_true');p.add_argument('--output',type=Path);a=p.parse_args()
+-    base=a.base.resolve();manifest=json.loads((base/'manifest_cn_v2.json').read_text())
+-    for name,entry in manifest['files'].items():
+-        if digest((base/name).read_bytes())!=entry['sha256']:raise ValueError('original CN v2 changed: '+name)
++    p.add_argument('--evidence',type=Path,required=True);p.add_argument('--prepare',action='store_true')
++    p.add_argument('--output',type=Path);a=p.parse_args();base=a.base.resolve()
++    recorded=subprocess.check_output(['git','show',BASE_COMMIT+':'+BASE_PREFIX+'manifest_joint_cn_v1.json'],cwd=ROOT)
++    if (base/'manifest_joint_cn_v1.json').read_bytes()!=recorded:raise ValueError('base manifest is not the fixed review commit')
++    baseline=json.loads(recorded)
++    for n,r in baseline['files'].items():
++        if sha((base/n).read_bytes())!=r['sha256']:raise ValueError('fixed base source changed: '+n)
+     files={}
+     for folder in ['hsgd','tests','data','role_degree']:
+         for path in sorted((ROOT/folder).rglob('*')):
+             if path.is_file() and '__pycache__' not in path.parts and path.suffix in ['.py','.json','.npz','']:
+                 files[str(path.relative_to(ROOT))]=path.read_bytes()
+-    for name in ['run.py','run.sh','build_release.py','说明.txt','DESIGN_AND_STAGED_PLAN.md','pyg_inspector_compat.diff']:
+-        if (ROOT/name).exists():files[name]=(ROOT/name).read_bytes()
+-    frozen=['hsgd/kernel.py','hsgd/noising.py','hsgd/slots.py','hsgd/vendor/transconv_layer.py','hsgd/vendor/layers.py',
+-        'hsgd/vendor/sample_edges_utils_typed.py','hsgd/bw_preflight/config.json','data/IMDB_movie_reference.npz',
+-        'data/IMDB_preprocessing_provenance.json','tests/test_contract.py']
+-    for name in frozen:
+-        if files[name]!=(base/name).read_bytes():raise ValueError('protected method/data changed: '+name)
+-    patch=[];changed=[]
+-    for name,data in sorted(files.items()):
+-        if name.startswith('hsgd/') and name.endswith('.py'):
+-            previous=(base/name).read_bytes() if (base/name).is_file() else b''
+-            if data!=previous:
+-                changed.append(name)
+-                patch.extend(difflib.unified_diff(previous.decode().splitlines(True),data.decode().splitlines(True),
+-                    fromfile='a/'+name if previous else '/dev/null',tofile='b/'+name))
+-    files['cn_v2_to_joint_v1.diff']=''.join(patch).encode();(ROOT/'cn_v2_to_joint_v1.diff').write_bytes(files['cn_v2_to_joint_v1.diff'])
+-    for name in ['base_receipt.json','local_acceptance.json']:
+-        path=ROOT/'results'/name
+-        if path.exists():
+-            files['evidence/'+name]=path.read_bytes()
+-            (ROOT/'evidence').mkdir(exist_ok=True)
+-            (ROOT/'evidence'/name).write_bytes(files['evidence/'+name])
+-    for source,name in [('final_tests04/tests.xml','tests.xml'),('final_tests04.log','tests.log'),
+-                        ('toy03/mechanism.json','mechanism.json'),('toy03/launcher.json','toy_launcher.json'),
+-                        ('patch_dry_run.json','patch_dry_run.json')]:
+-        path=ROOT/'results'/source
++    for n in ['run.py','run.sh','build_release.py','pytest.ini','说明.txt','DESIGN_AND_STAGED_PLAN.md',
++              'REVIEW_FIXES.md','pyg_inspector_compat.diff','cn_v2_to_joint_v1.diff']:
++        files[n]=(ROOT/n).read_bytes()
++    protected={}
++    for n,data in files.items():
++        protected_group=n.startswith(('hsgd/','role_degree/','data/')) or n in [
++            'run.py','run.sh','tests/test_contract.py','tests/test_fusion.py',
++            'DESIGN_AND_STAGED_PLAN.md','pyg_inspector_compat.diff','cn_v2_to_joint_v1.diff']
++        if protected_group and n not in ALLOWED:
++            if data!=(base/n).read_bytes():raise ValueError('out-of-scope change: '+n)
++            protected[n]=sha(data)
++    patch=[]
++    for n,data in sorted(files.items()):
++        before=(base/n).read_bytes() if (base/n).is_file() else b''
++        if before!=data:
++            patch.extend(difflib.unified_diff(before.decode().splitlines(True),data.decode().splitlines(True),
++                fromfile='a/'+n if before else '/dev/null',tofile='b/'+n))
++    patch=''.join(patch).encode()
++    (ROOT/'joint_cn_v1_to_v1_1.diff').write_bytes(patch);files['joint_cn_v1_to_v1_1.diff']=patch
++    evidence_names=['input_binding.json','acceptance.json','tests_final.xml','tests_final.log','resources_final.txt']
++    for n in evidence_names:
++        path=a.evidence/n
+         if path.is_file():
+-            files['evidence/'+name]=path.read_bytes()
+-            (ROOT/'evidence').mkdir(exist_ok=True)
+-            (ROOT/'evidence'/name).write_bytes(path.read_bytes())
+-    role_base=ROOT.parent/'role_degree_design_v1'
+-    role_preserved={}
+-    for name in ['role_guidance.py','role_statistics.py','role_sampling.py','implementation_contract.json']:
+-        key='role_degree/'+name
+-        if files[key]!=(role_base/name).read_bytes():raise ValueError('role degree contract changed: '+name)
+-        role_preserved[key]=digest(files[key])
+-    doc=dict(version='bw_joint_cn_v1',source_commit=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),
+-        base_CN_v2_manifest_sha256=digest((base/'manifest_cn_v2.json').read_bytes()),
+-        protected_method_data_files=frozen,changes=changed,role_degree_unchanged=role_preserved,
+-        no_old_weight_import=True,no_formal_training_entry=True,no_full_scientific_chain_entry=True,
+-        files={n:dict(sha256=digest(b),bytes=len(b)) for n,b in files.items()})
+-    (ROOT/'manifest_joint_cn_v1.json').write_text(json.dumps(doc,indent=2)+'\n')
++            data=path.read_bytes();files['evidence/'+n]=data
++            (ROOT/'evidence').mkdir(exist_ok=True);(ROOT/'evidence'/n).write_bytes(data)
++    if not a.prepare:
++        for n in evidence_names:
++            if 'evidence/'+n not in files:raise ValueError('missing required evidence: '+n)
++        accepted=json.loads(files['evidence/acceptance.json'])
++        if accepted.get('status')!='passed_two_fixes_only' or accepted.get('original_cases')!=27 or accepted.get('new_cases')!=12:
++            raise ValueError('acceptance not complete')
++    manifest=dict(version='bw_joint_cn_v1_1',source_commit=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),
++        base_review_commit=BASE_COMMIT,allowed_functional_changes=sorted(ALLOWED),
++        protected_unchanged_files=protected,architecture_noise_query_sampling_unchanged=True,
++        loss='sum exact-support checked stable two-class CE * original R/S',
++        no_BW_or_formal_training_or_scientific_sampling=True,
++        files={n:dict(sha256=sha(b),bytes=len(b)) for n,b in sorted(files.items())})
++    (ROOT/'manifest_joint_cn_v1.json').write_text(json.dumps(manifest,indent=2)+'\n')
+     files['manifest_joint_cn_v1.json']=(ROOT/'manifest_joint_cn_v1.json').read_bytes()
+-    checks=''.join(digest(b)+'  '+n+'\n' for n,b in sorted(files.items()));(ROOT/'SHA256SUMS').write_text(checks)
+-    if a.prepare:print('prepared manifest/patch; no model execution');return
+-    if a.output is None or 'evidence/local_acceptance.json' not in files:p.error('accepted release and --output required')
+-    accepted=json.loads(files['evidence/local_acceptance.json'])
+-    if accepted.get('status')!='passed_engineering_only' or not accepted.get('tests_passed'):raise ValueError('acceptance missing')
+-    files['SHA256SUMS']=checks.encode();a.output.mkdir(parents=True,exist_ok=False)
+-    target=a.output/'dihug_sparse_bw_joint_cn_v1.zip'
+-    with zipfile.ZipFile(target,'x',zipfile.ZIP_DEFLATED) as z:
+-        for n,b in sorted(files.items()):z.writestr('dihug_sparse_bw_joint_cn_v1/'+n,b)
+-    sha=digest(target.read_bytes());(a.output/'SHA256SUMS').write_text(sha+'  '+target.name+'\n')
+-    print(json.dumps(dict(zip=str(target),sha256=sha,bytes=target.stat().st_size,source_commit=doc['source_commit']),indent=2))
++    checks=''.join(sha(data)+'  '+n+'\n' for n,data in sorted(files.items()))
++    (ROOT/'SHA256SUMS').write_text(checks)
++    if a.prepare:print('prepared hashes and relative patch; no model execution');return
++    if a.output is None:p.error('--output required')
++    a.output.mkdir(exist_ok=False,parents=True);files['SHA256SUMS']=checks.encode()
++    archive=a.output/'dihug_sparse_bw_joint_cn_v1_1.zip'
++    with zipfile.ZipFile(archive,'x',zipfile.ZIP_DEFLATED) as z:
++        for n,data in sorted(files.items()):z.writestr('dihug_sparse_bw_joint_cn_v1_1/'+n,data)
++    (a.output/'SHA256SUMS').write_text(sha(archive.read_bytes())+'  '+archive.name+'\n')
++    print(json.dumps(dict(zip=str(archive),sha256=sha(archive.read_bytes()),bytes=archive.stat().st_size,
++        source_commit=manifest['source_commit']),indent=2))
+ 
+ 
+ if __name__=='__main__':main()
+--- a/hsgd/bw_preflight/common.py
++++ b/hsgd/bw_preflight/common.py
+@@ -298,6 +298,7 @@
+ 
+ def update(model, optimizer, case, inp, T, device, do_step=True, backend="upstream", diagnostics=None, require_parameter_change=True):
+     from hsgd.runtime import predict, backend_name
++    from hsgd.losses import supported_binary_ce
+     backend_name(backend)
+     sync(device)
+     wall = time.perf_counter()
+@@ -311,16 +312,16 @@
+     timings = {} if diagnostics is not None else None
+     result = predict(model, case["space"].types, inp["edges"], inp["edge_families"],
+                      inp["query"], inp["f"], inp["t"] / T, backend=backend,
+-                     times=timings, details=diagnostics is not None)
++                     times=timings, details=True)
++    logits,p = result
+     if diagnostics is not None:
+-        logits,p = result
+         diagnostics.update(logits=cpu_tree(logits),p0=cpu_tree(p))
+-    else:
+-        p = result
+     sync(device)
+     forward = time.perf_counter() - start
+     check_prob_device(p, inp["f"], case, device_prior=model.prior)
+-    loss = torch.nn.functional.binary_cross_entropy(p, label, reduction="sum") * inp["ce_weight"]
++    pi=model.prior[torch.as_tensor(inp['f'],dtype=torch.long,device=device)]
++    item=supported_binary_ce(logits,label,pi)
++    loss = item.sum() * inp["ce_weight"]
+     if not torch.isfinite(loss):
+         raise RuntimeError("nonfinite loss")
+     start = time.perf_counter()
+@@ -345,8 +346,8 @@
+     if do_step and require_parameter_change and not delta > 0:
+         raise RuntimeError("expected trainable edge head did not change")
+     with torch.no_grad():
+-        # Logging only; original BCE(sum)*(R/S) and its backward are unchanged.
+-        item=torch.nn.functional.binary_cross_entropy(p.detach(),label,reduction="none")
++        # Same stable slot CE and denominator as the actual training loss.
++        item=item.detach()
+         split={}
+         for label_value,label_name in ((0,"negative"),(1,"positive")):
+             mask=label==label_value;count=int(mask.sum())
+--- a/hsgd/fusion_checks.py
++++ b/hsgd/fusion_checks.py
+@@ -8,9 +8,35 @@
+ from hsgd.model import TypedSparseDenoiser
+ from hsgd.kernel import MarginalKernel
+ from hsgd.runtime import predict,reverse_step
++from hsgd.losses import supported_binary_ce
+ 
+ ATOL=2e-6
+ GRAD_ATOL=2e-6
++DECISION_RESPONSE_FLOOR=1e-8
++
++
++def decision_coordinates(logits,prior):
++    """Raw logit gap and ACTUAL supported p0, not two-logit displacement."""
++    prior=torch.as_tensor(prior,device=logits.device)
++    if logits.ndim!=2 or logits.shape[1]!=2 or prior.shape!=logits.shape[:1]:raise ValueError('decision dimensions')
++    margin=logits[:,1]-logits[:,0]
++    p=logits.softmax(-1)[:,1]
++    p=torch.where(prior==0,torch.zeros_like(p),torch.where(prior==1,torch.ones_like(p),p))
++    return margin,p
++
++
++def decision_response(left,right,prior):
++    dl,pl=decision_coordinates(left,prior);dr,pr=decision_coordinates(right,prior)
++    return dict(interface_logits_max_abs=float((left-right).abs().max()),
++        logit_gap_max_abs=float((dl-dr).abs().max()),p0_max_abs=float((pl-pr).abs().max()))
++
++
++def decision_mixed_response(c1g1,c0g1,c1g0,c0g0,prior):
++    d11,p11=decision_coordinates(c1g1,prior);d01,p01=decision_coordinates(c0g1,prior)
++    d10,p10=decision_coordinates(c1g0,prior);d00,p00=decision_coordinates(c0g0,prior)
++    return dict(interface_logits_max_abs=float(((c1g1-c0g1)-(c1g0-c0g0)).abs().max()),
++        logit_gap_max_abs=float(((d11-d01)-(d10-d00)).abs().max()),
++        p0_max_abs=float(((p11-p01)-(p10-p00)).abs().max()))
+ 
+ 
+ def fixture():
+@@ -53,6 +79,10 @@
+         assert torch.equal(masked,baseline)
+         response=float((logits-masked).abs().max());assert response>1e-7
+         record['CN_feature_mask_logit_response']=response
++        prior=b.prior[graph.query_families]
++        record['CN_feature_mask_decision_response']=decision_response(logits,masked,prior)
++        assert record['CN_feature_mask_decision_response']['logit_gap_max_abs']>DECISION_RESPONSE_FLOOR
++        assert record['CN_feature_mask_decision_response']['p0_max_abs']>DECISION_RESPONSE_FLOOR
+         # Mirror the exact same graph query endpoints, not a fresh query context.
+         keys=graph.edges[0]*len(ctx.types)+graph.edges[1]
+         reverse_index=torch.searchsorted(keys,graph.edges[1,graph.query_index]*len(ctx.types)+graph.edges[0,graph.query_index])
+@@ -78,11 +108,18 @@
+         changed[:,b.joint_slices['Xt_statistics']]=other.global_statistics
+         global_response=float((b.joint_head(changed)-b.joint_head(features)).abs().max())
+         assert global_response>1e-8;record['legal_global_input_only_logit_response']=global_response
++        record['legal_global_input_only_decision_response']=decision_response(b.joint_head(changed),b.joint_head(features),prior)
++        assert record['legal_global_input_only_decision_response']['logit_gap_max_abs']>DECISION_RESPONSE_FLOOR
++        assert record['legal_global_input_only_decision_response']['p0_max_abs']>DECISION_RESPONSE_FLOOR
+         without_cn=features.clone();without_cn[:,b.joint_slices['CN']]=0
+         changed_without_cn=changed.clone();changed_without_cn[:,b.joint_slices['CN']]=0
+         mixed=(b.joint_head(changed)-b.joint_head(changed_without_cn))-(b.joint_head(features)-b.joint_head(without_cn))
+         record['CN_global_mixed_finite_difference_max']=float(mixed.abs().max())
+         assert record['CN_global_mixed_finite_difference_max']>1e-8
++        record['CN_global_decision_mixed_response']=decision_mixed_response(b.joint_head(changed),b.joint_head(changed_without_cn),
++            b.joint_head(features),b.joint_head(without_cn),prior)
++        assert record['CN_global_decision_mixed_response']['logit_gap_max_abs']>DECISION_RESPONSE_FLOOR
++        assert record['CN_global_decision_mixed_response']['p0_max_abs']>DECISION_RESPONSE_FLOOR
+         # Isolate neighbor context response in learned content (same CN count).
+         other_cn=b.common_neighbor.aggregate(other,torch.tensor(q),torch.tensor(f),.03)
+         content_response=float((aggregate[0,:32]-other_cn[0,:32]).abs().max())
+@@ -113,7 +150,7 @@
+     record['renumber_logit_max_abs']=float((left-right).abs().max());assert torch.allclose(left,right,atol=ATOL,rtol=0)
+     # Loss really reaches phi AND the common nonlinear head.
+     b.train();logits,p=predict(b,case['space'].types,case['clean'],case['space'].encode(case['clean'])[0],q,f,.03,details=True)
+-    loss=torch.nn.functional.binary_cross_entropy(p,torch.tensor([0.,1.,0.,0.]));loss.backward()
++    loss=supported_binary_ce(logits,torch.tensor([0.,1.,0.,0.]),b.prior[torch.tensor(f)]).mean();loss.backward()
+     record['phi_gradient_max']=max(float(x.grad.abs().max()) for x in b.common_neighbor.parameters() if x.grad is not None)
+     assert record['phi_gradient_max']>0 and b.joint_head[0].weight.grad.abs().max()>0
+     record['global_head_input_gradient_max']=float(b.joint_head[0].weight.grad[:,b.joint_slices['backbone_global']].abs().max())
+@@ -165,7 +202,7 @@
+         p=logits.softmax(-1)[:,1];pi=model.prior[torch.tensor(inp['f'],device=p.device)]
+         p=torch.where(pi==0,torch.zeros_like(p),torch.where(pi==1,torch.ones_like(p),p))
+         prob=p.cpu().numpy().astype(float);q=MarginalKernel(case['prior'],c.schedule(T)).reverse(prob,xt[inp['ids']],inp['f'],inp['t']-1,inp['t'])
+-        labels=np.asarray(inp['labels']);item=torch.nn.functional.binary_cross_entropy(p,torch.tensor(labels,device=p.device),reduction='none').cpu().numpy()
++        labels=np.asarray(inp['labels']);item=supported_binary_ce(logits,torch.tensor(labels,device=p.device),pi).cpu().numpy()
+         # Diagnostic grouping must use the SAME actual Xt counts for both arms.
+         # This offline count is not supplied to the disabled baseline branch.
+         from hsgd.common_neighbor import Wedges
+@@ -194,5 +231,6 @@
+             logits_quantiles=np.quantile(logits.cpu().numpy(),[0,.5,.9,.99,1]).tolist(),
+             saturation_fraction=float(np.mean((prob<1e-6)|(prob>1-1e-6))),
+             CN_mask_logit_difference_max=float((logits-masked).abs().max()),
++            CN_mask_decision_response=decision_response(logits,masked,pi),
+             masking_caveat='counterfactual feature masking only, not independent trained baseline or additive decomposition')
+     finally:ctx.close()
+--- /dev/null
++++ b/hsgd/losses.py
+@@ -0,0 +1,31 @@
++"""Stable per-slot binary CE with exact, checked prior support.
++
++The training objective is sum(items) * original query ce_weight (R/S).
++Sampling probabilities and their exact-support projection remain unchanged.
++"""
++import torch
++from torch.nn import functional as F
++
++
++def supported_binary_ce(logits, labels, prior):
++    if logits.ndim != 2 or logits.shape[1] != 2 or not logits.is_floating_point():
++        raise ValueError('two floating-point logits per slot required')
++    labels=torch.as_tensor(labels,device=logits.device)
++    prior=torch.as_tensor(prior,device=logits.device)
++    if labels.shape != logits.shape[:1] or prior.shape != labels.shape:
++        raise ValueError('slot/label/prior dimensions differ')
++    if not torch.isfinite(logits).all() or not torch.isfinite(labels).all() or not torch.isfinite(prior).all():
++        raise ValueError('nonfinite logits/labels/prior')
++    if not ((labels==0)|(labels==1)).all():raise ValueError('binary labels required')
++    if not ((prior>=0)&(prior<=1)).all():raise ValueError('prior outside [0,1]')
++    fixed0,fixed1=prior==0,prior==1
++    if (labels[fixed0]!=0).any() or (labels[fixed1]!=1).any():
++        raise ValueError('label violates exact prior support')
++    free=~(fixed0|fixed1)
++    # Multiply each finite logit by zero before summing: all-fixed/empty input
++    # stays differentiable with exactly zero gradient and no 0*inf from a sum.
++    zero=(logits*0).sum(-1)
++    ids=torch.nonzero(free,as_tuple=False).flatten()
++    if not len(ids):return zero
++    item=F.cross_entropy(logits[ids],labels[ids].long(),reduction='none')
++    return zero.index_copy(0,ids,item)
+--- /dev/null
++++ b/pytest.ini
+@@ -0,0 +1,2 @@
++[pytest]
++junit_family = xunit1
+--- /dev/null
++++ b/tests/test_loss_response.py
+@@ -0,0 +1,120 @@
++"""Only loss numerics and decision-response regressions; no architecture changes."""
++import numpy as np
++import json
++import pytest
++import torch
++from torch.nn import functional as F
++from hsgd.losses import supported_binary_ce
++from hsgd.fusion_checks import (fixture,make,diagnostics,decision_response,
++    decision_mixed_response,decision_coordinates,mechanism)
++from hsgd.bw_preflight import common as c
++
++
++def moderate_evidence():
++    z=torch.tensor([[.2,-.3],[-1.2,.8],[1.,-.4],[-2.,1.],[2.,-1.]],dtype=torch.float64,requires_grad=True)
++    y=torch.tensor([0.,1.,1.,0.,1.],dtype=torch.float64);pi=torch.tensor([.2,.7,.4,0.,1.],dtype=torch.float64)
++    old=z.softmax(-1)[:,1];old=torch.where(pi==0,torch.zeros_like(old),torch.where(pi==1,torch.ones_like(old),old))
++    before=F.binary_cross_entropy(old,y,reduction='none');after=supported_binary_ce(z,y,pi)
++    weight=3/28
++    gb=torch.autograd.grad(before.sum()*weight,z,retain_graph=True)[0]
++    ga=torch.autograd.grad(after.sum()*weight,z)[0]
++    expected=(z.detach().softmax(-1)-F.one_hot(y.long(),2))*((pi>0)&(pi<1))[:,None]*weight
++    assert torch.allclose(before,after,atol=1e-14,rtol=1e-13)
++    assert torch.allclose(gb,ga,atol=1e-14,rtol=1e-13)
++    assert torch.allclose(ga,expected,atol=1e-14,rtol=1e-13)
++    assert torch.equal(after[-2:],torch.zeros(2,dtype=torch.float64))
++    return dict(loss_max_abs=float((before-after).abs().max()),gradient_max_abs=float((gb-ga).abs().max()),
++        analytic_gradient_max_abs=float((ga-expected).abs().max()),weighted_loss=float(after.sum()*weight),ce_weight=weight)
++
++
++def extreme_evidence():
++    z=torch.tensor([[1000.,-1000.],[-1000.,1000.]],requires_grad=True)
++    y=torch.tensor([1.,0.]);pi=torch.tensor([.2,.8])
++    old=F.binary_cross_entropy(z.softmax(-1)[:,1],y,reduction='sum')
++    gold=torch.autograd.grad(old,z,retain_graph=True)[0]
++    new=supported_binary_ce(z,y,pi).sum();g=torch.autograd.grad(new,z)[0]
++    assert torch.isfinite(new) and torch.isfinite(g).all() and new.item()==4000
++    assert torch.equal(g,torch.tensor([[1.,-1.],[-1.,1.]]))
++    assert torch.equal(gold,torch.zeros_like(gold))
++    # One step in the negative gradient direction reduces BOTH wrong margins.
++    candidate=z.detach()-.1*g
++    assert supported_binary_ce(candidate,y,pi).sum()<new
++    return dict(logits=z.detach().tolist(),labels=y.tolist(),old_probability_BCE=float(old),
++        old_gradient=gold.tolist(),stable_CE=float(new),stable_gradient=g.tolist(),
++        loss_after_negative_gradient_step=float(supported_binary_ce(candidate,y,pi).sum()))
++
++
++def translation_evidence():
++    z=torch.tensor([[0.,1.],[2.,-1.]],dtype=torch.float64);pi=torch.tensor([.2,.7],dtype=torch.float64)
++    direct=decision_response(z+8,z,pi);mixed=decision_mixed_response(z+8,z,z,z,pi)
++    for r in [direct,mixed]:
++        assert r['interface_logits_max_abs']==8 and r['logit_gap_max_abs']==0 and r['p0_max_abs']==0
++    return dict(shared_shift=8.,direct=direct,pure_shared_shift_interaction=mixed)
++
++
++def test_moderate_logits_match_original_objective_and_R_over_S(record_property):
++    record_property('evidence',json.dumps(moderate_evidence()))
++
++
++def test_extreme_wrong_confidence_retains_corrective_gradient(record_property):
++    record_property('evidence',json.dumps(extreme_evidence()))
++
++
++def test_exact_support_zero_loss_zero_gradient_and_empty():
++    z=torch.tensor([[-1000.,1000.],[1000.,-1000.]],requires_grad=True)
++    loss=supported_binary_ce(z,torch.tensor([0.,1.]),torch.tensor([0.,1.]))
++    assert torch.equal(loss,torch.zeros_like(loss));loss.sum().backward()
++    assert torch.equal(z.grad,torch.zeros_like(z))
++    empty=torch.empty((0,2),requires_grad=True)
++    supported_binary_ce(empty,torch.empty(0),torch.empty(0)).sum().backward()
++    assert empty.grad.shape==(0,2)
++
++
++@pytest.mark.parametrize('labels,prior,match',[
++    ([1.],[0.],'support'),([0.],[1.],'support'),([.5],[.2],'binary'),
++    ([float('nan')],[.2],'nonfinite'),([0.],[1.1],'prior')])
++def test_invalid_labels_or_support_rejected(labels,prior,match):
++    with pytest.raises(ValueError,match=match):supported_binary_ce(torch.zeros(1,2),torch.tensor(labels),torch.tensor(prior))
++
++
++def test_common_shift_is_not_a_decision_response(record_property):
++    record_property('evidence',json.dumps(translation_evidence()))
++
++
++def test_decision_probability_uses_exact_supported_p0():
++    z=torch.tensor([[0.,2.],[1.,0.],[0.,1.]])
++    pi=torch.tensor([0.,1.,.2]);margin,p=decision_coordinates(z,pi)
++    assert torch.equal(margin,torch.tensor([2.,-1.,1.]))
++    assert p[0]==0 and p[1]==1 and torch.allclose(p[2],z[2].softmax(-1)[1])
++    response=decision_response(z+torch.tensor([[0.,2.],[0.,2.],[0.,0.]]),z,pi)
++    assert response['logit_gap_max_abs']==2 and response['p0_max_abs']==0
++
++
++def test_actual_head_has_gap_probability_and_mixed_decision_responses(record_property):
++    r=mechanism()
++    for name in ['CN_feature_mask_decision_response','legal_global_input_only_decision_response','CN_global_decision_mixed_response']:
++        assert r[name]['logit_gap_max_abs']>1e-8 and r[name]['p0_max_abs']>1e-8
++    record_property('evidence',json.dumps(r))
++
++
++def test_training_and_diagnostics_share_stable_CE_without_probability_BCE(monkeypatch,record_property):
++    case,_,_=fixture();m,_=make(case,True)
++    inp=c.train_input(case,1000,3,2026101407,1,np.random.default_rng(910),force_t=30)
++    opt=torch.optim.AdamW(m.parameters(),lr=2e-4,weight_decay=1e-12,amsgrad=False)
++    def forbidden(*args,**kwargs):raise AssertionError('production probability-domain BCE used')
++    monkeypatch.setattr(F,'binary_cross_entropy',forbidden)
++    captured={};row=c.update(m,opt,case,inp,1000,'cpu',do_step=False,diagnostics=captured)
++    pi=m.prior[torch.tensor(inp['f'])];item=supported_binary_ce(captured['logits'],torch.tensor(inp['labels']),pi)
++    assert row['loss']==pytest.approx(float(item.sum()*inp['ce_weight']),abs=1e-7)
++    diag=diagnostics(m,case,inp,1000)
++    for group in diag['relation_label_CE']:
++        sel=(inp['f']==group['family'])&(inp['labels']==group['clean_label'])
++        assert group['count']==int(sel.sum())
++        if sel.any():assert group['CE']==pytest.approx(float(item[sel].mean()),abs=2e-6)
++    # Non-diagnostic training dispatch must also request/use logits.
++    row2=c.update(m,opt,case,inp,1000,'cpu',do_step=False,diagnostics=None)
++    assert row2['loss']==pytest.approx(row['loss'],abs=1e-7)
++    assert not opt.state  # No optimizer update or formal training occurred.
++    record_property('evidence',json.dumps(dict(loss=row['loss'],ce_weight=inp['ce_weight'],
++        independent_sum_R_over_S=float(item.sum()*inp['ce_weight']),non_diagnostic_loss=row2['loss'],
++        diagnostic_groups=diag['relation_label_CE'],optimizer_updates=0)))
+--- a/说明.txt
++++ b/说明.txt
+@@ -1,4 +1,8 @@
+-联合局部—全局读出 v1：独立工程部署包
++联合局部—全局读出 v1.1：仅稳定CE与决策响应修复
++
++基于固定6379e992c107a1d9c2dd124d3e976d2aa2004f2e，架构/噪声/查询/采样保持不变。
++训练及诊断共用logits CE；固定prior=0/1合法项零损失，非法标签报错。
++新增logit差、实际p0与CN×全局决策混合响应，以及共同平移反例。见REVIEW_FIXES.md。
+ 
+ 保留CN v2，不能直接载入旧CN权重。本包无正式训练或完整科学采样命令。
+ 联合头在两状态logits之前融合候选隐藏边、对称端点、真实主干全局表示/时间、
+@@ -6,21 +10,21 @@
+ A是匹配的新框架无CN对照，不是旧v9；A/C一套权重、B/D一套权重，角色引导仍只t1。
+ 公共头和CN参数须重新训练；本轮不声称已经修复完整链膨胀。
+ 
+-解压到 /root/private_data/gnn_projects/dihug_sparse_bw_joint_cn_v1，保留旧目录。
++解压到 /root/private_data/gnn_projects/dihug_sparse_bw_joint_cn_v1_1，保留旧目录。
+ 不安装或升级依赖。默认Python /usr/local/bin/python3.11；OMP_NUM_THREADS=1、OPENBLAS_NUM_THREADS=1。
+ 先只读校验及CPU工程检查：
+-cd /root/private_data/gnn_projects/dihug_sparse_bw_joint_cn_v1
++cd /root/private_data/gnn_projects/dihug_sparse_bw_joint_cn_v1_1
+ sha256sum -c SHA256SUMS
+-bash run.sh test --output /root/private_data/gnn_projects/bw_joint_cn_v1/test01
+-bash run.sh plan --output /root/private_data/gnn_projects/bw_joint_cn_v1/plan01
+-bash run.sh toy-check --output /root/private_data/gnn_projects/bw_joint_cn_v1/toy01
++bash run.sh test --output /root/private_data/gnn_projects/bw_joint_cn_v1_1/test01
++bash run.sh plan --output /root/private_data/gnn_projects/bw_joint_cn_v1_1/plan01
++bash run.sh toy-check --output /root/private_data/gnn_projects/bw_joint_cn_v1_1/toy01
+ 
+-test保留原20项合同并加入融合关键检查；toy-check仅小图随机权重，每臂4次工程更新，
++test保留原27项并加入12项损失与决策针对性检查；toy-check仅小图随机权重，每臂4次工程更新，
+ 包含同一小图T4完整工程链，不能称为IMDB生成。plan不调用模型、不用GPU。
+ 各命令上限180秒，失败非零退出，独立新输出目录，不自动重试。
+ 
+ 以下是待用户确认的BW短测命令，本轮不自动运行：
+-bash run.sh device-check --device cuda --confirm-bounded-BW-check --output /root/private_data/gnn_projects/bw_joint_cn_v1/device01
++bash run.sh device-check --device cuda --confirm-bounded-BW-check --output /root/private_data/gnn_projects/bw_joint_cn_v1_1/device01
+ 
+ 该命令只允许一张BW/HIP，480秒子进程+最多3秒清理，无正式长训或1000步链。
+ 固定完整IMDB低噪声工程状态，A/B各1次工程更新、t1/30/1000诊断、各1个完整20块工程步骤。

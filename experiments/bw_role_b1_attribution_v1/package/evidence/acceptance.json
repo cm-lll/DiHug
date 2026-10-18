@@ -1,0 +1,322 @@
+{
+  "status": "passed_two_fixes_only",
+  "base_review_commit": "6379e992c107a1d9c2dd124d3e976d2aa2004f2e",
+  "original_cases": 27,
+  "new_cases": 12,
+  "total_cases": 39,
+  "pytest_seconds": 4.463,
+  "numeric_witnesses": {
+    "test_moderate_logits_match_original_objective_and_R_over_S": {
+      "loss_max_abs": 2.7755575615628914e-17,
+      "gradient_max_abs": 1.3877787807814457e-17,
+      "analytic_gradient_max_abs": 6.938893903907228e-18,
+      "weighted_loss": 0.23800954340802108,
+      "ce_weight": 0.10714285714285714
+    },
+    "test_extreme_wrong_confidence_retains_corrective_gradient": {
+      "logits": [
+        [
+          1000.0,
+          -1000.0
+        ],
+        [
+          -1000.0,
+          1000.0
+        ]
+      ],
+      "labels": [
+        1.0,
+        0.0
+      ],
+      "old_probability_BCE": 200.0,
+      "old_gradient": [
+        [
+          0.0,
+          -0.0
+        ],
+        [
+          -0.0,
+          0.0
+        ]
+      ],
+      "stable_CE": 4000.0,
+      "stable_gradient": [
+        [
+          1.0,
+          -1.0
+        ],
+        [
+          -1.0,
+          1.0
+        ]
+      ],
+      "loss_after_negative_gradient_step": 3999.60009765625
+    },
+    "test_common_shift_is_not_a_decision_response": {
+      "shared_shift": 8.0,
+      "direct": {
+        "interface_logits_max_abs": 8.0,
+        "logit_gap_max_abs": 0.0,
+        "p0_max_abs": 0.0
+      },
+      "pure_shared_shift_interaction": {
+        "interface_logits_max_abs": 8.0,
+        "logit_gap_max_abs": 0.0,
+        "p0_max_abs": 0.0
+      }
+    },
+    "test_actual_head_has_gap_probability_and_mixed_decision_responses": {
+      "CN_feature_mask_logit_response": 0.04487988352775574,
+      "CN_feature_mask_decision_response": {
+        "interface_logits_max_abs": 0.04487988352775574,
+        "logit_gap_max_abs": 0.04383218288421631,
+        "p0_max_abs": 0.010913670063018799
+      },
+      "endpoint_swap_logit_max_abs": 0.0,
+      "independent_CN_counts": [
+        [
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0
+        ]
+      ],
+      "legal_global_input_only_logit_response": 0.0031882822513580322,
+      "legal_global_input_only_decision_response": {
+        "interface_logits_max_abs": 0.0031882822513580322,
+        "logit_gap_max_abs": 0.002321794629096985,
+        "p0_max_abs": 0.0005125999450683594
+      },
+      "CN_global_mixed_finite_difference_max": 0.0002031959593296051,
+      "CN_global_decision_mixed_response": {
+        "interface_logits_max_abs": 0.0002031959593296051,
+        "logit_gap_max_abs": 0.00025169551372528076,
+        "p0_max_abs": 6.22868537902832e-05
+      },
+      "middle_context_content_response": 0.005142584443092346,
+      "query_edges_not_CN_edges": true,
+      "no_architectural_positive_count_monotonicity": true,
+      "feature_abs_quantiles": [
+        0.0,
+        0.17138135433197021,
+        1.0570337772369385,
+        2.0692169666290283,
+        2.521355152130127
+      ],
+      "logit_quantiles": [
+        0.07937979698181152,
+        0.12311247736215591,
+        0.22492726147174835,
+        0.25626543164253235,
+        0.2597474157810211
+      ],
+      "probability_saturation_fraction": 0.0,
+      "renumber_logit_max_abs": 4.470348358154297e-08,
+      "phi_gradient_max": 0.003131398931145668,
+      "global_head_input_gradient_max": 0.01853274740278721,
+      "global_update_parameter_gradient_max": 0.006703103426843882,
+      "train_sample_probability_max_abs": 0.0,
+      "small_engineering_full_chain_steps": 4,
+      "status": "passed",
+      "atol": 2e-06,
+      "scope": "random-weight small CPU engineering; response is NOT learned coordination",
+      "new_scientific_graphs": 0,
+      "GPU_use": 0,
+      "old_weights_loaded": false
+    },
+    "test_training_and_diagnostics_share_stable_CE_without_probability_BCE": {
+      "loss": 0.5479567050933838,
+      "ce_weight": 0.10714285714285714,
+      "independent_sum_R_over_S": 0.5479567050933838,
+      "non_diagnostic_loss": 0.5479567050933838,
+      "diagnostic_groups": [
+        {
+          "family": 0,
+          "clean_label": 0,
+          "count": 1,
+          "CE": 0.6379085183143616,
+          "p_present_mean": 0.4716036021709442,
+          "expected_birth": 0.025630720614681555,
+          "expected_death": 0.0,
+          "expected_net": 0.025630720614681555
+        },
+        {
+          "family": 0,
+          "clean_label": 1,
+          "count": 0,
+          "CE": null,
+          "p_present_mean": null,
+          "expected_birth": 0.0,
+          "expected_death": 0.0,
+          "expected_net": 0.0
+        },
+        {
+          "family": 1,
+          "clean_label": 0,
+          "count": 2,
+          "CE": 0.6311246156692505,
+          "p_present_mean": 0.46797487139701843,
+          "expected_birth": 0.05086701456146992,
+          "expected_death": 0.0,
+          "expected_net": 0.05086701456146992
+        },
+        {
+          "family": 1,
+          "clean_label": 1,
+          "count": 0,
+          "CE": null,
+          "p_present_mean": null,
+          "expected_birth": 0.0,
+          "expected_death": 0.0,
+          "expected_net": 0.0
+        },
+        {
+          "family": 2,
+          "clean_label": 0,
+          "count": 3,
+          "CE": 0.5984724760055542,
+          "p_present_mean": 0.45030473669370014,
+          "expected_birth": 0.0733676465475896,
+          "expected_death": 0.0,
+          "expected_net": 0.0733676465475896
+        },
+        {
+          "family": 2,
+          "clean_label": 1,
+          "count": 0,
+          "CE": null,
+          "p_present_mean": null,
+          "expected_birth": 0.0,
+          "expected_death": 0.0,
+          "expected_net": 0.0
+        },
+        {
+          "family": 3,
+          "clean_label": 0,
+          "count": 0,
+          "CE": null,
+          "p_present_mean": null,
+          "expected_birth": 0.0,
+          "expected_death": 0.0,
+          "expected_net": 0.0
+        },
+        {
+          "family": 3,
+          "clean_label": 1,
+          "count": 0,
+          "CE": null,
+          "p_present_mean": null,
+          "expected_birth": 0.0,
+          "expected_death": 0.0,
+          "expected_net": 0.0
+        },
+        {
+          "family": 4,
+          "clean_label": 0,
+          "count": 1,
+          "CE": 0.5784192681312561,
+          "p_present_mean": 0.43921586871147156,
+          "expected_birth": 0.023883151145295323,
+          "expected_death": 0.0,
+          "expected_net": 0.023883151145295323
+        },
+        {
+          "family": 4,
+          "clean_label": 1,
+          "count": 1,
+          "CE": 0.8402678966522217,
+          "p_present_mean": 0.4315949082374573,
+          "expected_birth": 0.0,
+          "expected_death": 0.03090800449631681,
+          "expected_net": -0.03090800449631681
+        },
+        {
+          "family": 5,
+          "clean_label": 0,
+          "count": 0,
+          "CE": null,
+          "p_present_mean": null,
+          "expected_birth": 0.0,
+          "expected_death": 0.0,
+          "expected_net": 0.0
+        },
+        {
+          "family": 5,
+          "clean_label": 1,
+          "count": 0,
+          "CE": null,
+          "p_present_mean": null,
+          "expected_birth": 0.0,
+          "expected_death": 0.0,
+          "expected_net": 0.0
+        }
+      ],
+      "optimizer_updates": 0
+    }
+  },
+  "original_test_files_byte_identical": true,
+  "functional_files_changed": [
+    "hsgd/bw_preflight/common.py",
+    "hsgd/fusion_checks.py",
+    "hsgd/losses.py"
+  ],
+  "unchanged_hsgd_files": {
+    "hsgd/__init__.py": "a4737e1651429fcffe97f6d5c2b81c056b7caca1b87e880ae88e8152c34abaa2",
+    "hsgd/bw_preflight/__init__.py": "486d75e373229cd7c8c0f780a7943361a5244e8e1cbd99002cbc04526c362771",
+    "hsgd/common_neighbor.py": "0e07773809e5f58825f62a9038b71e3997083ed9827dcb3538be14f2a50c658b",
+    "hsgd/computational.py": "726a4f19b6500f1ecf9d8a1eb34488db191f78467d2b1454418d843b9738a6af",
+    "hsgd/fusion_preflight.py": "91fe18b78b4a33b22c5a550c073f8704d7b01af0105cab8b6542135a01202f6c",
+    "hsgd/holders.py": "8ae8714419a2c20d94ccdfa388aaefb409b5b8facea3aac0d6585b6cb0bfde07",
+    "hsgd/kernel.py": "e398606416f2dd6b58c94c67c423bd81c0f04b938b3144989f6044b69a416c74",
+    "hsgd/learning_mode.py": "05a3b3991f068a9a1ae0f4c06494cc7c59c5db215d0d7a7dc4a5a7b1572ca576",
+    "hsgd/model.py": "f84fa11ea077dc746db2d99ce858dc62154ae511ab881df8bfa2155e17c54fb4",
+    "hsgd/noising.py": "c8c4586ec5e9dd55ba6bb50c68237130b1cf6af0cb6def5374325906fa7ebd08",
+    "hsgd/runtime.py": "87cdb9c083516fa693acf6877680f667221f1f78e166bb1d967dd36b412c7046",
+    "hsgd/slots.py": "f69709a6c63924e5d5875dbd71a3ed038fdbabe12c76b40fd8cbdbe48a8e5eb6",
+    "hsgd/vendor/__init__.py": "a9d1e40ec3e568dbe891006f6f0d913b5c508bc43af0fe62f31177bac0211f72",
+    "hsgd/vendor/conv_transformer_model.py": "30224ea26091970c2007d1645eb1c8236d62e877b79f45da7227f787fbaa605a",
+    "hsgd/vendor/layers.py": "5a07827103fc201e601a182798ff5fae32520ab7a557a7dfaeb9cdc3bbd6ad78",
+    "hsgd/vendor/sample_edges_utils_typed.py": "7653a2dfb4a88be7a0e4f76cdb04325e69cf927071625b22b544a87df24996dc",
+    "hsgd/vendor/transconv_layer.py": "d8b953639ecd6e971cd1dfb47f74fea1c69db2768978bcfb67403599919c18a2"
+  },
+  "environment": {
+    "python": "3.9.23",
+    "torch": "2.1.0",
+    "PyG": "2.3.1",
+    "numpy": "1.26.4",
+    "scipy": "1.11.0",
+    "pytest": "7.4.4",
+    "device": "CPU",
+    "OMP_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1"
+  },
+  "resource_measurement": {
+    "wall_seconds": 5.46,
+    "CPU_user_seconds": 5.0,
+    "CPU_system_seconds": 0.41,
+    "peak_RSS_KiB": 486476
+  },
+  "original_ZIP_unchanged": true,
+  "original_ZIP_sha256": "9c46a081d53d820f062f669a50d489246a80859029ab4de04fc884c5a597a651",
+  "optimizer_updates": 0,
+  "BW_use": 0,
+  "formal_training": 0,
+  "new_scientific_graphs": 0,
+  "full_scientific_chains": 0,
+  "CPU_model_unit_forwards": "existing and targeted random-weight small fixtures only; no actual IMDB model inference",
+  "limitation": "random-weight decision response proves interface capability, not learned coordination"
+}

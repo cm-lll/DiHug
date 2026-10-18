@@ -1,0 +1,1695 @@
+--- a/DEPLOY_README.md
++++ b/DEPLOY_README.md
+@@ -1,53 +1,51 @@
+-# bw_role_multiscale_tail_v1_1 审查交付
++# v1.2 三项运行保护修复，交付后等待复审
+ 
+-基于固定d1e1d9a，仅工程修复；原版本不改。
+-package/REPAIR_NOTES.md说明修复边界，package/INPUT_CONTRACT.md定义真实旧产物适配。
+-package/evidence_repairs/是本轮CPU工程证据；继承的evidence目录属于旧版本。
+-package/v1_to_v1_1_repair.diff为相对基线包的修复补丁。
+-build_repair.py核验81个原文件和数学/控制器/科学判据AST不变，制作独立ZIP。
++基线4740416，保留v1.1及更早版本。数学目标、科学判据、900秒总上限未改。
++不连接BW、不训练、不跑真实六状态或完整生成链。
++GUARD_FIXES.md和INPUT_CONTRACT.md说明新边界，evidence_guard为本轮证据；
++继承evidence_repairs等目录属于旧版本。
+ 
+-## 手动命令（交付后等待复审，不自动运行）
++## 复审后手动运行
+ 
+-先上传新ZIP与外部SHA256SUMS；不要覆盖原包。以下不安装依赖，不启用GPU：
++上传新ZIP和同名.zip.sha256校验文件，不覆盖旧包：
+ 
+ ```bash
++set -euo pipefail
+ cd /root/private_data/gnn_projects
+-sha256sum -c dihug_sparse_bw_role_multiscale_tail_v1_1.zip.sha256
+-unzip -n dihug_sparse_bw_role_multiscale_tail_v1_1.zip
+-cd dihug_sparse_bw_role_multiscale_tail_v1_1
++sha256sum -c dihug_sparse_bw_role_multiscale_tail_v1_2.zip.sha256
++unzip -n dihug_sparse_bw_role_multiscale_tail_v1_2.zip
++cd dihug_sparse_bw_role_multiscale_tail_v1_2
+ export PYTHON_BIN=/usr/local/bin/python3.11
+ export CUDA_VISIBLE_DEVICES=''
+-bash multiscale.sh test --output /root/private_data/gnn_projects/role_mt_v1_1_cpu_tests --seconds 300
+-bash multiscale.sh cost --output /root/private_data/gnn_projects/role_mt_v1_1_synthetic_cost --seconds 120
++bash multiscale.sh test --output /root/private_data/gnn_projects/role_mt_v1_2_cpu_tests --seconds 300
+ ```
+ 
+-下面转换命令核对真实旧目录，不改变概率或调用模型；缺原轨迹/权重就拒绝。
+-OLD_ZIP应指向实际已上传的原诊断ZIP。ledger的SHA应与旧封存清单核对，
+-现场计算值只是完整性基准，不是独立来源认证。
++真实转换仍需要完整旧产物与来源文件。下面使用用户从旧封存报告ZIP核对的预期ledger哈希，
++先比对，再传给转换器；不得把当前文件自算值替换为预期值，也不得覆盖旧ledger。
++OLD_ZIP需要指向实际上传位置。任何不一致立即停止，原目录不能被“修复”。
+ 
+ ```bash
++set -euo pipefail
+ OLD_RUN=/root/private_data/gnn_projects/joint_role_frozen_diag_v1_run
+ OLD_ZIP=/root/private_data/gnn_projects/joint_role_frozen_diag_v1.zip
+-sha256sum "$OLD_ZIP" "$OLD_RUN/evidence_hashes.json"
+-LEDGER_SHA=$(sha256sum "$OLD_RUN/evidence_hashes.json" | cut -d' ' -f1)
+-EXPORT=/root/private_data/gnn_projects/role_mt_v1_1_export01
++EXPECTED_LEDGER_SHA=961e6d93c8194396223ac9062b1658ac87232e82710b1ab3d36e722ed2c00196
++printf '%s  %s\n' "$EXPECTED_LEDGER_SHA" "$OLD_RUN/evidence_hashes.json" | sha256sum -c -
++EXPORT=/root/private_data/gnn_projects/role_mt_v1_2_export01
+ bash multiscale.sh export-legacy --legacy-zip "$OLD_ZIP" --legacy-run "$OLD_RUN" \
+-  --legacy-ledger-sha256 "$LEDGER_SHA" --output "$EXPORT" --seconds 900
++  --legacy-ledger-sha256 "$EXPECTED_LEDGER_SHA" --output "$EXPORT" --seconds 900
+ ```
+ 
+-复审后如用户批准实际短测，再单独手动执行：
++只有复审后获准实际短测再手动执行（转换产物的现算哈希仅作本次输入完整性绑定）：
+ 
+ ```bash
++set -euo pipefail
+ MANIFEST_SHA=$(sha256sum "$EXPORT/six_states.json" | cut -d' ' -f1)
+ EVALUATION_SHA=$(sha256sum "$EXPORT/original_evaluation.json" | cut -d' ' -f1)
+ bash multiscale.sh short --manifest "$EXPORT/six_states.json" --manifest-sha256 "$MANIFEST_SHA" \
+   --evaluation "$EXPORT/original_evaluation.json" --evaluation-sha256 "$EVALUATION_SHA" \
+-  --output /root/private_data/gnn_projects/role_mt_v1_1_short01 --seconds 900
++  --output /root/private_data/gnn_projects/role_mt_v1_2_short01 --seconds 900
+ ```
+ 
+-每次使用新输出目录。STOP：touch 输出目录/STOP。
+-也可向本次控制器PID发送INT/TERM/HUP（见activation.json），不可全局pkill。
+-状态见controller.json、summary.json、progress.json；完成需要文件/计数/最终哈希齐全，
+-不接受只有status标签。Ctrl+C和STOP保留未完成证据，不算科学失败。
+-本版CPU参考；BW性能、真实旧数组兼容性及六状态科学结果均待核验。
+-
++每次使用新输出目录；输出不能落在被保护输入树内或与它重叠。
++touch 输出目录/STOP，或向activation记录的本次控制器发送INT/TERM/HUP，可安全停止。
++SIGKILL不可捕获。状态和真实兼容性边界沿用输入合同，任何未完成均不得标为成功。
+--- /dev/null
++++ b/GUARD_FIXES.md
+@@ -0,0 +1,12 @@
++# 三项最小保护修复
++
++1. 路径预检在mkdir和activation之前。解析符号链接，拒绝与被保护树双向重叠；
++   包含原结果、原activation指定的状态/权重树、转换输入及源代码。错误路径不落盘。
++2. 不再沿用85项门槛。冻结完整133个nodeid及测试文件哈希，隔离PYTEST_*筛选环境，
++   关闭第三方插件自动加载，固定pytest配置。核对完整收集集合、零跳过/筛除/xfail、
++   setup/call/teardown全部通过，并交叉核对JUnit。保留原112项，新增21项。
++3. 封存ledger预期SHA固定为用户提供的961e6d93...2c00196，命令先比对再传入；
++   代码同样拒绝替换预期值或不匹配的当前文件，从不写入原ledger。
++
++旧版本/原数学目标/控制器/科学判据/900秒上限保持。此轮只做CPU工程回归和上传，
++无BW连接、真实六状态短测、训练或科学生成。真实ledger尚未在本地读取。
+--- a/INPUT_CONTRACT.md
++++ b/INPUT_CONTRACT.md
+@@ -1,4 +1,4 @@
+-# v1.1：真实旧诊断只读转换合同
++# v1.2：真实旧诊断只读转换合同
+ 
+ 已读取用户提供的 joint_role_frozen_diag_v1.zip，SHA256：
+ c0fc3a8dade80a66f550a0506e405bf62bf80b3c1fb9f902d6a8baebf861194b。
+@@ -7,13 +7,18 @@
+ 
+ ## 旧产物实际接口
+ 
+-export-legacy接受原ZIP、实际旧结果根目录、用户核实的evidence_hashes.json SHA256。
++export-legacy接受原ZIP、实际旧结果根目录、用户提供的已封存evidence_hashes.json SHA256：
++961e6d93c8194396223ac9062b1658ac87232e82710b1ab3d36e722ed2c00196。
++该值由用户与旧封存报告ZIP核对后提供，本地未取得真实ledger，未冒称独立核验。
++入口拒绝其他预期哈希，也拒绝当前文件与该值不符；不覆盖、修补或重算旧ledger替代封存值。
+ 扫描collection.json，从最近祖先provenance.json的arm和collection.time识别案例，
+ 不依赖A/X0500等目录名称。必须恰好A/B×t=500/20/1，拒绝重复、缺失和异常案例。
+ 核对原结果ledger、activation、completed、源码release和各arm provenance。
+ 完整原轨迹和最终6000更新检查点路径读取activation.states/checkpoints及ZIP原始pins，
+ 流式哈希所有被引用文件，不猜检查点时间戳、不加载模型；原文件缺失就拒绝。
+-新输出必须位于旧结果树以外，且目录事先不存在。
++新输出必须位于旧结果树以外，且目录事先不存在。任何mkdir/activation/控制器写入前，
++父入口解析符号链接并双向检查输出与代码、旧结果、原activation声明的状态/检查点目录；
++short还保护转换输入目录及可追溯原输入目录。重叠或ledger错误拒绝后不创建输出。
+ 
+ 旧baseline.npz实际含state,p0,q0,types,pairs,prior,alpha等；
+ collected.npz含state,p0,coverage。q0映射为q之前用原MarginalKernel.reverse
+@@ -81,3 +86,13 @@
+ 父进程由SIGKILL直接杀死时，不能保证子进程自动回收；须检查controller_child.json及进程。
+ 完整性缺失、超时或清理失败均非零退出，部分输出只标incomplete/stopped/failed。
+ 缺真实源文件不回退示例；不会自动启动任何训练、科学短测或完整链。
++
++## 本版完整工程测试合同
++
++TEST_SUITE.json冻结133个完整nodeid和测试源文件哈希，其中原v1.1的112项保留。
++测试子进程清除继承PYTEST_*筛选/插件变量，强制关闭第三方插件自动加载，
++显式指定pytest.ini、空addopts、测试目录和conftest边界。
++test_execution.json逐项记录集合及setup/call/teardown结果，父入口同时核对冻结ID集合、
++零deselect/skip/xfail、完整三个通过阶段和JUnit精确数量/零跳过。
++旧85或112项、相同数量但错用例、空结果和缺阶段都不得宣告本版通过。
++不在运行时重写测试合同来迎合实际收集结果。数学目标/科学判据/900秒上限不变。
+--- a/LEGACY_SOURCE_CONTRACT.json
++++ b/LEGACY_SOURCE_CONTRACT.json
+@@ -20,5 +20,7 @@
+   "W1_field_path": [
+     "w1_between_expected_empirical_laws"
+   ],
+-  "actual_result_directory_not_locally_available": true
++  "actual_result_directory_not_locally_available": true,
++  "sealed_evidence_ledger_sha256": "961e6d93c8194396223ac9062b1658ac87232e82710b1ab3d36e722ed2c00196",
++  "sealed_ledger_source": "User reports comparison with previously sealed report ZIP on 2026-10-18; not independently read locally. Mismatch must never be repaired by rewriting the original ledger."
+ }
+--- /dev/null
++++ b/TEST_SUITE.json
+@@ -0,0 +1,156 @@
++{
++  "version": "bw_role_multiscale_tail_v1_2",
++  "total": 133,
++  "nodeids": [
++    "tests/test_admission_suite.py::test_correct_sealed_value_checked_not_substituted",
++    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[deselected]",
++    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[duplicate]",
++    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[empty_receipt]",
++    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[junit_skip]",
++    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[missing_teardown]",
++    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[old_112]",
++    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[old_85]",
++    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[same_count_wrong_identity]",
++    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[skip]",
++    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[xfail]",
++    "tests/test_admission_suite.py::test_inherited_pytest_selection_and_plugin_environment_isolated",
++    "tests/test_admission_suite.py::test_manifest_checks_test_files_and_new_file_set",
++    "tests/test_admission_suite.py::test_path_sibling_allowed_but_source_or_ancestor_rejected",
++    "tests/test_admission_suite.py::test_rejected_output_adds_no_file_to_protected_inputs[results]",
++    "tests/test_admission_suite.py::test_rejected_output_adds_no_file_to_protected_inputs[short_input]",
++    "tests/test_admission_suite.py::test_rejected_output_adds_no_file_to_protected_inputs[states]",
++    "tests/test_admission_suite.py::test_rejected_output_adds_no_file_to_protected_inputs[symlink]",
++    "tests/test_admission_suite.py::test_rejected_output_adds_no_file_to_protected_inputs[weights]",
++    "tests/test_admission_suite.py::test_unsealed_or_changed_ledger_rejected_without_writes[sealed_but_changed_file]",
++    "tests/test_admission_suite.py::test_unsealed_or_changed_ledger_rejected_without_writes[self_computed_current_hash]",
++    "tests/test_contract.py::test_active_family_chunks_concatenate_and_preserve_ce_scaling",
++    "tests/test_contract.py::test_active_sweep_skips_only_exact_fixed_families",
++    "tests/test_contract.py::test_decode_independent_combinations",
++    "tests/test_contract.py::test_empty_inventory_and_fixed_slots_still_in_plan",
++    "tests/test_contract.py::test_explicit_large_recipe_dimensions",
++    "tests/test_contract.py::test_fixed_support_and_clean_endpoint",
++    "tests/test_contract.py::test_full_sweep_frozen_context_and_clock",
++    "tests/test_contract.py::test_global_forward_complement_exhaustive",
++    "tests/test_contract.py::test_global_noising_support_retention_and_relabel",
++    "tests/test_contract.py::test_kernel_independent_joint_enumeration",
++    "tests/test_contract.py::test_network_fixed_support_and_schema_mismatch",
++    "tests/test_contract.py::test_network_gradient_and_query_order",
++    "tests/test_contract.py::test_network_rejects_duplicate_and_illegal_inputs",
++    "tests/test_contract.py::test_network_type_preserving_renumber_and_restore",
++    "tests/test_contract.py::test_random_reproducibility_cap_and_batch_independence",
++    "tests/test_contract.py::test_uniform_full_coverage_and_weight[10]",
++    "tests/test_contract.py::test_uniform_full_coverage_and_weight[1]",
++    "tests/test_contract.py::test_uniform_full_coverage_and_weight[20]",
++    "tests/test_contract.py::test_uniform_full_coverage_and_weight[3]",
++    "tests/test_contract.py::test_without_replacement_exact_subset_law",
++    "tests/test_fusion.py::test_cache_time_parameter_and_wedge_limits",
++    "tests/test_fusion.py::test_existing_role_guidance_remains_a_separate_t1_option",
++    "tests/test_fusion.py::test_joint_mechanism",
++    "tests/test_fusion.py::test_mean_content_separate_from_log_count",
++    "tests/test_fusion.py::test_old_checkpoint_rejected_and_empty_query",
++    "tests/test_fusion.py::test_path_memory_chunks_preserve_values_and_gradients",
++    "tests/test_fusion.py::test_sampling_cannot_read_clean_identity_and_hidden_exposure_preserves_backbone",
++    "tests/test_legacy_repairs.py::test_budget_restores_handlers_and_stop_precedes_commit",
++    "tests/test_legacy_repairs.py::test_completed_label_alone_cannot_pass_evidence_gate[cost]",
++    "tests/test_legacy_repairs.py::test_completed_label_alone_cannot_pass_evidence_gate[export-legacy]",
++    "tests/test_legacy_repairs.py::test_completed_label_alone_cannot_pass_evidence_gate[short]",
++    "tests/test_legacy_repairs.py::test_discover_actual_metadata_not_folder_names_and_reject_duplicate",
++    "tests/test_legacy_repairs.py::test_export_complete_manifest_without_array_rejected",
++    "tests/test_legacy_repairs.py::test_nested_scalar_original_CF_and_W1_replay_independent_algorithm",
++    "tests/test_legacy_repairs.py::test_old_mapping_canonical_slots_and_full_query_bytes",
++    "tests/test_legacy_repairs.py::test_old_mapping_rejects_tampering[alpha]",
++    "tests/test_legacy_repairs.py::test_old_mapping_rejects_tampering[coverage]",
++    "tests/test_legacy_repairs.py::test_old_mapping_rejects_tampering[digest]",
++    "tests/test_legacy_repairs.py::test_old_mapping_rejects_tampering[family_order]",
++    "tests/test_legacy_repairs.py::test_old_mapping_rejects_tampering[p0_digest]",
++    "tests/test_legacy_repairs.py::test_old_mapping_rejects_tampering[q0]",
++    "tests/test_legacy_repairs.py::test_old_mapping_rejects_tampering[seed]",
++    "tests/test_legacy_repairs.py::test_short_six_labels_without_case_file_rejected",
++    "tests/test_legacy_repairs.py::test_source_hash_and_final_IO_checks_reject_without_partial_commit",
++    "tests/test_loss_response.py::test_actual_head_has_gap_probability_and_mixed_decision_responses",
++    "tests/test_loss_response.py::test_common_shift_is_not_a_decision_response",
++    "tests/test_loss_response.py::test_decision_probability_uses_exact_supported_p0",
++    "tests/test_loss_response.py::test_exact_support_zero_loss_zero_gradient_and_empty",
++    "tests/test_loss_response.py::test_extreme_wrong_confidence_retains_corrective_gradient",
++    "tests/test_loss_response.py::test_invalid_labels_or_support_rejected[labels0-prior0-support]",
++    "tests/test_loss_response.py::test_invalid_labels_or_support_rejected[labels1-prior1-support]",
++    "tests/test_loss_response.py::test_invalid_labels_or_support_rejected[labels2-prior2-binary]",
++    "tests/test_loss_response.py::test_invalid_labels_or_support_rejected[labels3-prior3-nonfinite]",
++    "tests/test_loss_response.py::test_invalid_labels_or_support_rejected[labels4-prior4-prior]",
++    "tests/test_loss_response.py::test_moderate_logits_match_original_objective_and_R_over_S",
++    "tests/test_loss_response.py::test_training_and_diagnostics_share_stable_CE_without_probability_BCE",
++    "tests/test_multiscale.py::test_binomial_endpoints_underflow_and_untrusted_gradient_skip",
++    "tests/test_multiscale.py::test_controller_retained_and_failure_rollback",
++    "tests/test_multiscale.py::test_exact_one_support_and_internal_nonfinite_failure",
++    "tests/test_multiscale.py::test_forward_noisy_target_and_conditional_statistics_enumeration[0]",
++    "tests/test_multiscale.py::test_forward_noisy_target_and_conditional_statistics_enumeration[1]",
++    "tests/test_multiscale.py::test_forward_noisy_target_and_conditional_statistics_enumeration[2]",
++    "tests/test_multiscale.py::test_forward_noisy_target_and_conditional_statistics_enumeration[3]",
++    "tests/test_multiscale.py::test_full_joint_information_frequencies_not_evaluation_bank_and_no_duplicates",
++    "tests/test_multiscale.py::test_new_objective_existing_sampler_transaction_and_binding[False]",
++    "tests/test_multiscale.py::test_new_objective_existing_sampler_transaction_and_binding[True]",
++    "tests/test_multiscale.py::test_original_posterior_and_complete_objective_gradient[1]",
++    "tests/test_multiscale.py::test_original_posterior_and_complete_objective_gradient[2]",
++    "tests/test_multiscale.py::test_original_posterior_and_complete_objective_gradient[3]",
++    "tests/test_multiscale.py::test_renumber_endpoint_symmetry_support_and_no_global_rng",
++    "tests/test_multiscale.py::test_tail_derivative_two_endpoints_and_probability_not_mean_degree",
++    "tests/test_multiscale_evaluation.py::test_W1_of_expected_distribution_not_expected_graph_W1",
++    "tests/test_multiscale_evaluation.py::test_exact_pmf_against_enumeration_including_fixed_boundaries",
++    "tests/test_multiscale_evaluation.py::test_missing_real_files_nonzero_no_fake_pass",
++    "tests/test_multiscale_evaluation.py::test_no_original64_substitute_and_predeclared_mixed_decision",
++    "tests/test_multiscale_evaluation.py::test_safe_stop_without_inputs_does_not_start_work",
++    "tests/test_multiscale_inputs.py::test_even_rehashed_wrong_mapping_or_schedule_rejected[alpha]",
++    "tests/test_multiscale_inputs.py::test_even_rehashed_wrong_mapping_or_schedule_rejected[prior]",
++    "tests/test_multiscale_inputs.py::test_even_rehashed_wrong_mapping_or_schedule_rejected[query_block]",
++    "tests/test_multiscale_inputs.py::test_even_rehashed_wrong_mapping_or_schedule_rejected[slots]",
++    "tests/test_multiscale_inputs.py::test_even_rehashed_wrong_mapping_or_schedule_rejected[types]",
++    "tests/test_multiscale_inputs.py::test_saved_probability_bindings_and_original_q",
++    "tests/test_runtime_repairs.py::test_exact_forward_PMF_cache_equals_uncached_and_is_readonly",
++    "tests/test_runtime_repairs.py::test_owned_process_group_cleanup_and_status[SIGHUP]",
++    "tests/test_runtime_repairs.py::test_owned_process_group_cleanup_and_status[SIGINT]",
++    "tests/test_runtime_repairs.py::test_owned_process_group_cleanup_and_status[SIGTERM]",
++    "tests/test_runtime_repairs.py::test_owned_process_group_cleanup_and_status[STOP]",
++    "tests/test_runtime_repairs.py::test_owned_process_group_cleanup_and_status[missing]",
++    "tests/test_runtime_repairs.py::test_owned_process_group_cleanup_and_status[success]",
++    "tests/test_runtime_repairs.py::test_owned_process_group_cleanup_and_status[timeout]",
++    "tests/test_runtime_repairs.py::test_private_cache_corruption_detected_by_binding",
++    "tests/test_runtime_repairs.py::test_target_cache_outer_inner_tail_and_flags_cannot_mutate",
++    "tests/test_stepwise.py::test_backtracking_failure_nonfinite_and_unresolvable_gradient",
++    "tests/test_stepwise.py::test_bridge_gradient_finite_difference_and_clean_endpoint[1]",
++    "tests/test_stepwise.py::test_bridge_gradient_finite_difference_and_clean_endpoint[2]",
++    "tests/test_stepwise.py::test_bridge_gradient_finite_difference_and_clean_endpoint[3]",
++    "tests/test_stepwise.py::test_bridge_gradient_finite_difference_and_clean_endpoint[4]",
++    "tests/test_stepwise.py::test_checkpoint_roundtrip_binding_tamper_and_pending_step",
++    "tests/test_stepwise.py::test_exact_support_saturation_and_kl_limits",
++    "tests/test_stepwise.py::test_fresh_process_recovery",
++    "tests/test_stepwise.py::test_joint_dependence_target_response_and_zero_gradient_counterexample",
++    "tests/test_stepwise.py::test_model_arm_and_receipt_reject_wrong_native_weights",
++    "tests/test_stepwise.py::test_noisy_target_against_exhaustive_forward[0]",
++    "tests/test_stepwise.py::test_noisy_target_against_exhaustive_forward[1]",
++    "tests/test_stepwise.py::test_noisy_target_against_exhaustive_forward[2]",
++    "tests/test_stepwise.py::test_noisy_target_against_exhaustive_forward[3]",
++    "tests/test_stepwise.py::test_noisy_target_against_exhaustive_forward[4]",
++    "tests/test_stepwise.py::test_off_original_rng_full_small_chain_and_interruption[False]",
++    "tests/test_stepwise.py::test_off_original_rng_full_small_chain_and_interruption[True]",
++    "tests/test_stepwise.py::test_proxy_is_not_expected_discrete_squared_error",
++    "tests/test_stepwise.py::test_reindexing_symmetry_and_incomplete_mask_rejection",
++    "tests/test_stepwise.py::test_underflow_and_factor_guard_never_normalize_untrusted_signal"
++  ],
++  "test_file_sha256": {
++    "tests/legacy_genre_reference.py": "2fb698b878278fa909fbc588c6aa65230ab19c2a96b087529a6f1ff6b4b70dea",
++    "tests/process_fixture.py": "c19c780fcc773a252c9bdb023071f91c42620f05c69c537619cbd699d0f92e6d",
++    "tests/stepwise_resume_worker.py": "853642b18611ea156b8a6becd97f108321b2f897eff83b22f3b77ec28f6ac0ba",
++    "tests/test_admission_suite.py": "20a173483dfa8ae1b2d63ba06c3e52bca3e1632799076c9d1489beaf0ba709b8",
++    "tests/test_contract.py": "e3afa1720e8bb027c2edabbea81ba1abf099efa90db5e1c7fdaf69c9ac2940e4",
++    "tests/test_fusion.py": "c381c990a573d2cfadbd753f28575d683ce52f7835397d825901870b52906178",
++    "tests/test_legacy_repairs.py": "9cb4dc0b1b6fd3e11988cc25510f6af133fbe783ec1b2a33ec80f4a4ab7bc07e",
++    "tests/test_loss_response.py": "2ee144d7fcc3957baf138fffd734ed66978e41c76c4e3180c72fd9770a92a176",
++    "tests/test_multiscale.py": "5c552da0ee431d2d8c7f5dd8eb3eec1b80bd8021baa413180fdf04d30d20566e",
++    "tests/test_multiscale_evaluation.py": "ca9f9c73ac1d70c0d00d21cbcd3bac411a294059bade622a8546b0dc93b4ed2d",
++    "tests/test_multiscale_inputs.py": "3f657ab56602ace61b21d9c706346cc9489cf5617907ef5fe2ce5cc02f743847",
++    "tests/test_runtime_repairs.py": "1becdb3ca0ddd4673bf29b3a9dcc626e7514917f15f7688b03505af755b6df81",
++    "tests/test_stepwise.py": "ed38d52b06ebea34b85c2c5c0b51737b39c3dd6055e04b8bed8a0b68223032f5"
++  },
++  "inherited_v1_1_cases": 112,
++  "collection_mode": "isolated environment; explicit config/addopts; plugin autoload disabled"
++}
+--- /dev/null
++++ b/evidence_guard/acceptance.json
+@@ -0,0 +1,35 @@
++{
++  "status": "passed_engineering_only",
++  "CPU_cases": 133,
++  "retained_v1_1_cases": 112,
++  "new_cases": 21,
++  "base_review_commit": "4740416cfae0235f24a885851e65550cc2832ca6",
++  "pytest_seconds": 31.49,
++  "command_wall_seconds": 32.71,
++  "command_CPU_seconds": 21.27,
++  "peak_RSS_MiB": 480.625,
++  "inherited_environment_challenge": {
++    "PYTEST_ADDOPTS": "-k test_contract",
++    "PYTEST_PLUGINS": "not_an_installed_plugin",
++    "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "0"
++  },
++  "challenge_result": "all 133 fixed nodeids and all setup/call/teardown passed; zero deselected/skipped/xfail",
++  "rejected_output_snapshot_cases": [
++    "old_results",
++    "symlink_alias",
++    "original_states",
++    "original_weights",
++    "short_input_tree"
++  ],
++  "protected_directories_added_files": 0,
++  "frozen_ledger_expected": "961e6d93c8194396223ac9062b1658ac87232e82710b1ab3d36e722ed2c00196",
++  "frozen_ledger_source": "user-provided sealed report/current file comparison, NOT independently read locally",
++  "real_ledger_read_locally": false,
++  "real_six_states_executed": false,
++  "BW_connected": false,
++  "training": 0,
++  "GPU_use": 0,
++  "scientific_graphs": 0,
++  "mathematical_objective_and_scientific_policy_unchanged": true,
++  "single_run_max_seconds": 900
++}
+--- /dev/null
++++ b/evidence_guard/controller.json
+@@ -0,0 +1,18 @@
++{
++  "status": "completed",
++  "reason": "completed",
++  "exit_code": 0,
++  "caught_signals": [],
++  "cleanup": {
++    "direct_child_reaped": true,
++    "owned_group_gone": true
++  },
++  "subreaper_enabled": true,
++  "controller_wall_seconds": 32.632035072892904,
++  "single_run_limit_seconds": 120,
++  "no_absolute_old_deadline": true,
++  "SIGKILL_catchable": false,
++  "training": 0,
++  "scientific_chains": 0,
++  "error": null
++}--- /dev/null
++++ b/evidence_guard/resources.txt
+@@ -0,0 +1,23 @@
++	Command being timed: "bash multiscale.sh test --output /data2/lyh/gnn_project/DiHug/results/role_multiscale_tail_v1_2_20261018/native_suite --seconds 120"
++	User time (seconds): 19.56
++	System time (seconds): 1.71
++	Percent of CPU this job got: 65%
++	Elapsed (wall clock) time (h:mm:ss or m:ss): 0:32.71
++	Average shared text size (kbytes): 0
++	Average unshared data size (kbytes): 0
++	Average stack size (kbytes): 0
++	Average total size (kbytes): 0
++	Maximum resident set size (kbytes): 492160
++	Average resident set size (kbytes): 0
++	Major (requiring I/O) page faults: 0
++	Minor (reclaiming a frame) page faults: 342210
++	Voluntary context switches: 3628
++	Involuntary context switches: 268
++	Swaps: 0
++	File system inputs: 0
++	File system outputs: 7056
++	Socket messages sent: 0
++	Socket messages received: 0
++	Signals delivered: 0
++	Page size (bytes): 4096
++	Exit status: 0
+--- /dev/null
++++ b/evidence_guard/test_execution.json
+@@ -0,0 +1,942 @@
++{
++  "status": "complete",
++  "expected_nodeids": [
++    "tests/test_admission_suite.py::test_correct_sealed_value_checked_not_substituted",
++    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[deselected]",
++    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[duplicate]",
++    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[empty_receipt]",
++    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[junit_skip]",
++    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[missing_teardown]",
++    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[old_112]",
++    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[old_85]",
++    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[same_count_wrong_identity]",
++    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[skip]",
++    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[xfail]",
++    "tests/test_admission_suite.py::test_inherited_pytest_selection_and_plugin_environment_isolated",
++    "tests/test_admission_suite.py::test_manifest_checks_test_files_and_new_file_set",
++    "tests/test_admission_suite.py::test_path_sibling_allowed_but_source_or_ancestor_rejected",
++    "tests/test_admission_suite.py::test_rejected_output_adds_no_file_to_protected_inputs[results]",
++    "tests/test_admission_suite.py::test_rejected_output_adds_no_file_to_protected_inputs[short_input]",
++    "tests/test_admission_suite.py::test_rejected_output_adds_no_file_to_protected_inputs[states]",
++    "tests/test_admission_suite.py::test_rejected_output_adds_no_file_to_protected_inputs[symlink]",
++    "tests/test_admission_suite.py::test_rejected_output_adds_no_file_to_protected_inputs[weights]",
++    "tests/test_admission_suite.py::test_unsealed_or_changed_ledger_rejected_without_writes[sealed_but_changed_file]",
++    "tests/test_admission_suite.py::test_unsealed_or_changed_ledger_rejected_without_writes[self_computed_current_hash]",
++    "tests/test_contract.py::test_active_family_chunks_concatenate_and_preserve_ce_scaling",
++    "tests/test_contract.py::test_active_sweep_skips_only_exact_fixed_families",
++    "tests/test_contract.py::test_decode_independent_combinations",
++    "tests/test_contract.py::test_empty_inventory_and_fixed_slots_still_in_plan",
++    "tests/test_contract.py::test_explicit_large_recipe_dimensions",
++    "tests/test_contract.py::test_fixed_support_and_clean_endpoint",
++    "tests/test_contract.py::test_full_sweep_frozen_context_and_clock",
++    "tests/test_contract.py::test_global_forward_complement_exhaustive",
++    "tests/test_contract.py::test_global_noising_support_retention_and_relabel",
++    "tests/test_contract.py::test_kernel_independent_joint_enumeration",
++    "tests/test_contract.py::test_network_fixed_support_and_schema_mismatch",
++    "tests/test_contract.py::test_network_gradient_and_query_order",
++    "tests/test_contract.py::test_network_rejects_duplicate_and_illegal_inputs",
++    "tests/test_contract.py::test_network_type_preserving_renumber_and_restore",
++    "tests/test_contract.py::test_random_reproducibility_cap_and_batch_independence",
++    "tests/test_contract.py::test_uniform_full_coverage_and_weight[10]",
++    "tests/test_contract.py::test_uniform_full_coverage_and_weight[1]",
++    "tests/test_contract.py::test_uniform_full_coverage_and_weight[20]",
++    "tests/test_contract.py::test_uniform_full_coverage_and_weight[3]",
++    "tests/test_contract.py::test_without_replacement_exact_subset_law",
++    "tests/test_fusion.py::test_cache_time_parameter_and_wedge_limits",
++    "tests/test_fusion.py::test_existing_role_guidance_remains_a_separate_t1_option",
++    "tests/test_fusion.py::test_joint_mechanism",
++    "tests/test_fusion.py::test_mean_content_separate_from_log_count",
++    "tests/test_fusion.py::test_old_checkpoint_rejected_and_empty_query",
++    "tests/test_fusion.py::test_path_memory_chunks_preserve_values_and_gradients",
++    "tests/test_fusion.py::test_sampling_cannot_read_clean_identity_and_hidden_exposure_preserves_backbone",
++    "tests/test_legacy_repairs.py::test_budget_restores_handlers_and_stop_precedes_commit",
++    "tests/test_legacy_repairs.py::test_completed_label_alone_cannot_pass_evidence_gate[cost]",
++    "tests/test_legacy_repairs.py::test_completed_label_alone_cannot_pass_evidence_gate[export-legacy]",
++    "tests/test_legacy_repairs.py::test_completed_label_alone_cannot_pass_evidence_gate[short]",
++    "tests/test_legacy_repairs.py::test_discover_actual_metadata_not_folder_names_and_reject_duplicate",
++    "tests/test_legacy_repairs.py::test_export_complete_manifest_without_array_rejected",
++    "tests/test_legacy_repairs.py::test_nested_scalar_original_CF_and_W1_replay_independent_algorithm",
++    "tests/test_legacy_repairs.py::test_old_mapping_canonical_slots_and_full_query_bytes",
++    "tests/test_legacy_repairs.py::test_old_mapping_rejects_tampering[alpha]",
++    "tests/test_legacy_repairs.py::test_old_mapping_rejects_tampering[coverage]",
++    "tests/test_legacy_repairs.py::test_old_mapping_rejects_tampering[digest]",
++    "tests/test_legacy_repairs.py::test_old_mapping_rejects_tampering[family_order]",
++    "tests/test_legacy_repairs.py::test_old_mapping_rejects_tampering[p0_digest]",
++    "tests/test_legacy_repairs.py::test_old_mapping_rejects_tampering[q0]",
++    "tests/test_legacy_repairs.py::test_old_mapping_rejects_tampering[seed]",
++    "tests/test_legacy_repairs.py::test_short_six_labels_without_case_file_rejected",
++    "tests/test_legacy_repairs.py::test_source_hash_and_final_IO_checks_reject_without_partial_commit",
++    "tests/test_loss_response.py::test_actual_head_has_gap_probability_and_mixed_decision_responses",
++    "tests/test_loss_response.py::test_common_shift_is_not_a_decision_response",
++    "tests/test_loss_response.py::test_decision_probability_uses_exact_supported_p0",
++    "tests/test_loss_response.py::test_exact_support_zero_loss_zero_gradient_and_empty",
++    "tests/test_loss_response.py::test_extreme_wrong_confidence_retains_corrective_gradient",
++    "tests/test_loss_response.py::test_invalid_labels_or_support_rejected[labels0-prior0-support]",
++    "tests/test_loss_response.py::test_invalid_labels_or_support_rejected[labels1-prior1-support]",
++    "tests/test_loss_response.py::test_invalid_labels_or_support_rejected[labels2-prior2-binary]",
++    "tests/test_loss_response.py::test_invalid_labels_or_support_rejected[labels3-prior3-nonfinite]",
++    "tests/test_loss_response.py::test_invalid_labels_or_support_rejected[labels4-prior4-prior]",
++    "tests/test_loss_response.py::test_moderate_logits_match_original_objective_and_R_over_S",
++    "tests/test_loss_response.py::test_training_and_diagnostics_share_stable_CE_without_probability_BCE",
++    "tests/test_multiscale.py::test_binomial_endpoints_underflow_and_untrusted_gradient_skip",
++    "tests/test_multiscale.py::test_controller_retained_and_failure_rollback",
++    "tests/test_multiscale.py::test_exact_one_support_and_internal_nonfinite_failure",
++    "tests/test_multiscale.py::test_forward_noisy_target_and_conditional_statistics_enumeration[0]",
++    "tests/test_multiscale.py::test_forward_noisy_target_and_conditional_statistics_enumeration[1]",
++    "tests/test_multiscale.py::test_forward_noisy_target_and_conditional_statistics_enumeration[2]",
++    "tests/test_multiscale.py::test_forward_noisy_target_and_conditional_statistics_enumeration[3]",
++    "tests/test_multiscale.py::test_full_joint_information_frequencies_not_evaluation_bank_and_no_duplicates",
++    "tests/test_multiscale.py::test_new_objective_existing_sampler_transaction_and_binding[False]",
++    "tests/test_multiscale.py::test_new_objective_existing_sampler_transaction_and_binding[True]",
++    "tests/test_multiscale.py::test_original_posterior_and_complete_objective_gradient[1]",
++    "tests/test_multiscale.py::test_original_posterior_and_complete_objective_gradient[2]",
++    "tests/test_multiscale.py::test_original_posterior_and_complete_objective_gradient[3]",
++    "tests/test_multiscale.py::test_renumber_endpoint_symmetry_support_and_no_global_rng",
++    "tests/test_multiscale.py::test_tail_derivative_two_endpoints_and_probability_not_mean_degree",
++    "tests/test_multiscale_evaluation.py::test_W1_of_expected_distribution_not_expected_graph_W1",
++    "tests/test_multiscale_evaluation.py::test_exact_pmf_against_enumeration_including_fixed_boundaries",
++    "tests/test_multiscale_evaluation.py::test_missing_real_files_nonzero_no_fake_pass",
++    "tests/test_multiscale_evaluation.py::test_no_original64_substitute_and_predeclared_mixed_decision",
++    "tests/test_multiscale_evaluation.py::test_safe_stop_without_inputs_does_not_start_work",
++    "tests/test_multiscale_inputs.py::test_even_rehashed_wrong_mapping_or_schedule_rejected[alpha]",
++    "tests/test_multiscale_inputs.py::test_even_rehashed_wrong_mapping_or_schedule_rejected[prior]",
++    "tests/test_multiscale_inputs.py::test_even_rehashed_wrong_mapping_or_schedule_rejected[query_block]",
++    "tests/test_multiscale_inputs.py::test_even_rehashed_wrong_mapping_or_schedule_rejected[slots]",
++    "tests/test_multiscale_inputs.py::test_even_rehashed_wrong_mapping_or_schedule_rejected[types]",
++    "tests/test_multiscale_inputs.py::test_saved_probability_bindings_and_original_q",
++    "tests/test_runtime_repairs.py::test_exact_forward_PMF_cache_equals_uncached_and_is_readonly",
++    "tests/test_runtime_repairs.py::test_owned_process_group_cleanup_and_status[SIGHUP]",
++    "tests/test_runtime_repairs.py::test_owned_process_group_cleanup_and_status[SIGINT]",
++    "tests/test_runtime_repairs.py::test_owned_process_group_cleanup_and_status[SIGTERM]",
++    "tests/test_runtime_repairs.py::test_owned_process_group_cleanup_and_status[STOP]",
++    "tests/test_runtime_repairs.py::test_owned_process_group_cleanup_and_status[missing]",
++    "tests/test_runtime_repairs.py::test_owned_process_group_cleanup_and_status[success]",
++    "tests/test_runtime_repairs.py::test_owned_process_group_cleanup_and_status[timeout]",
++    "tests/test_runtime_repairs.py::test_private_cache_corruption_detected_by_binding",
++    "tests/test_runtime_repairs.py::test_target_cache_outer_inner_tail_and_flags_cannot_mutate",
++    "tests/test_stepwise.py::test_backtracking_failure_nonfinite_and_unresolvable_gradient",
++    "tests/test_stepwise.py::test_bridge_gradient_finite_difference_and_clean_endpoint[1]",
++    "tests/test_stepwise.py::test_bridge_gradient_finite_difference_and_clean_endpoint[2]",
++    "tests/test_stepwise.py::test_bridge_gradient_finite_difference_and_clean_endpoint[3]",
++    "tests/test_stepwise.py::test_bridge_gradient_finite_difference_and_clean_endpoint[4]",
++    "tests/test_stepwise.py::test_checkpoint_roundtrip_binding_tamper_and_pending_step",
++    "tests/test_stepwise.py::test_exact_support_saturation_and_kl_limits",
++    "tests/test_stepwise.py::test_fresh_process_recovery",
++    "tests/test_stepwise.py::test_joint_dependence_target_response_and_zero_gradient_counterexample",
++    "tests/test_stepwise.py::test_model_arm_and_receipt_reject_wrong_native_weights",
++    "tests/test_stepwise.py::test_noisy_target_against_exhaustive_forward[0]",
++    "tests/test_stepwise.py::test_noisy_target_against_exhaustive_forward[1]",
++    "tests/test_stepwise.py::test_noisy_target_against_exhaustive_forward[2]",
++    "tests/test_stepwise.py::test_noisy_target_against_exhaustive_forward[3]",
++    "tests/test_stepwise.py::test_noisy_target_against_exhaustive_forward[4]",
++    "tests/test_stepwise.py::test_off_original_rng_full_small_chain_and_interruption[False]",
++    "tests/test_stepwise.py::test_off_original_rng_full_small_chain_and_interruption[True]",
++    "tests/test_stepwise.py::test_proxy_is_not_expected_discrete_squared_error",
++    "tests/test_stepwise.py::test_reindexing_symmetry_and_incomplete_mask_rejection",
++    "tests/test_stepwise.py::test_underflow_and_factor_guard_never_normalize_untrusted_signal"
++  ],
++  "collected_nodeids": [
++    "tests/test_admission_suite.py::test_rejected_output_adds_no_file_to_protected_inputs[results]",
++    "tests/test_admission_suite.py::test_rejected_output_adds_no_file_to_protected_inputs[symlink]",
++    "tests/test_admission_suite.py::test_rejected_output_adds_no_file_to_protected_inputs[states]",
++    "tests/test_admission_suite.py::test_rejected_output_adds_no_file_to_protected_inputs[weights]",
++    "tests/test_admission_suite.py::test_rejected_output_adds_no_file_to_protected_inputs[short_input]",
++    "tests/test_admission_suite.py::test_path_sibling_allowed_but_source_or_ancestor_rejected",
++    "tests/test_admission_suite.py::test_unsealed_or_changed_ledger_rejected_without_writes[sealed_but_changed_file]",
++    "tests/test_admission_suite.py::test_unsealed_or_changed_ledger_rejected_without_writes[self_computed_current_hash]",
++    "tests/test_admission_suite.py::test_correct_sealed_value_checked_not_substituted",
++    "tests/test_admission_suite.py::test_inherited_pytest_selection_and_plugin_environment_isolated",
++    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[old_85]",
++    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[old_112]",
++    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[same_count_wrong_identity]",
++    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[duplicate]",
++    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[skip]",
++    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[xfail]",
++    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[missing_teardown]",
++    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[deselected]",
++    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[empty_receipt]",
++    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[junit_skip]",
++    "tests/test_admission_suite.py::test_manifest_checks_test_files_and_new_file_set",
++    "tests/test_contract.py::test_decode_independent_combinations",
++    "tests/test_contract.py::test_uniform_full_coverage_and_weight[1]",
++    "tests/test_contract.py::test_uniform_full_coverage_and_weight[3]",
++    "tests/test_contract.py::test_uniform_full_coverage_and_weight[10]",
++    "tests/test_contract.py::test_uniform_full_coverage_and_weight[20]",
++    "tests/test_contract.py::test_random_reproducibility_cap_and_batch_independence",
++    "tests/test_contract.py::test_without_replacement_exact_subset_law",
++    "tests/test_contract.py::test_kernel_independent_joint_enumeration",
++    "tests/test_contract.py::test_fixed_support_and_clean_endpoint",
++    "tests/test_contract.py::test_full_sweep_frozen_context_and_clock",
++    "tests/test_contract.py::test_network_gradient_and_query_order",
++    "tests/test_contract.py::test_network_type_preserving_renumber_and_restore",
++    "tests/test_contract.py::test_network_rejects_duplicate_and_illegal_inputs",
++    "tests/test_contract.py::test_network_fixed_support_and_schema_mismatch",
++    "tests/test_contract.py::test_empty_inventory_and_fixed_slots_still_in_plan",
++    "tests/test_contract.py::test_active_family_chunks_concatenate_and_preserve_ce_scaling",
++    "tests/test_contract.py::test_active_sweep_skips_only_exact_fixed_families",
++    "tests/test_contract.py::test_global_forward_complement_exhaustive",
++    "tests/test_contract.py::test_global_noising_support_retention_and_relabel",
++    "tests/test_contract.py::test_explicit_large_recipe_dimensions",
++    "tests/test_fusion.py::test_joint_mechanism",
++    "tests/test_fusion.py::test_cache_time_parameter_and_wedge_limits",
++    "tests/test_fusion.py::test_mean_content_separate_from_log_count",
++    "tests/test_fusion.py::test_old_checkpoint_rejected_and_empty_query",
++    "tests/test_fusion.py::test_existing_role_guidance_remains_a_separate_t1_option",
++    "tests/test_fusion.py::test_sampling_cannot_read_clean_identity_and_hidden_exposure_preserves_backbone",
++    "tests/test_fusion.py::test_path_memory_chunks_preserve_values_and_gradients",
++    "tests/test_legacy_repairs.py::test_old_mapping_canonical_slots_and_full_query_bytes",
++    "tests/test_legacy_repairs.py::test_old_mapping_rejects_tampering[seed]",
++    "tests/test_legacy_repairs.py::test_old_mapping_rejects_tampering[digest]",
++    "tests/test_legacy_repairs.py::test_old_mapping_rejects_tampering[family_order]",
++    "tests/test_legacy_repairs.py::test_old_mapping_rejects_tampering[q0]",
++    "tests/test_legacy_repairs.py::test_old_mapping_rejects_tampering[coverage]",
++    "tests/test_legacy_repairs.py::test_old_mapping_rejects_tampering[p0_digest]",
++    "tests/test_legacy_repairs.py::test_old_mapping_rejects_tampering[alpha]",
++    "tests/test_legacy_repairs.py::test_nested_scalar_original_CF_and_W1_replay_independent_algorithm",
++    "tests/test_legacy_repairs.py::test_source_hash_and_final_IO_checks_reject_without_partial_commit",
++    "tests/test_legacy_repairs.py::test_budget_restores_handlers_and_stop_precedes_commit",
++    "tests/test_legacy_repairs.py::test_completed_label_alone_cannot_pass_evidence_gate[short]",
++    "tests/test_legacy_repairs.py::test_completed_label_alone_cannot_pass_evidence_gate[export-legacy]",
++    "tests/test_legacy_repairs.py::test_completed_label_alone_cannot_pass_evidence_gate[cost]",
++    "tests/test_legacy_repairs.py::test_discover_actual_metadata_not_folder_names_and_reject_duplicate",
++    "tests/test_legacy_repairs.py::test_short_six_labels_without_case_file_rejected",
++    "tests/test_legacy_repairs.py::test_export_complete_manifest_without_array_rejected",
++    "tests/test_loss_response.py::test_moderate_logits_match_original_objective_and_R_over_S",
++    "tests/test_loss_response.py::test_extreme_wrong_confidence_retains_corrective_gradient",
++    "tests/test_loss_response.py::test_exact_support_zero_loss_zero_gradient_and_empty",
++    "tests/test_loss_response.py::test_invalid_labels_or_support_rejected[labels0-prior0-support]",
++    "tests/test_loss_response.py::test_invalid_labels_or_support_rejected[labels1-prior1-support]",
++    "tests/test_loss_response.py::test_invalid_labels_or_support_rejected[labels2-prior2-binary]",
++    "tests/test_loss_response.py::test_invalid_labels_or_support_rejected[labels3-prior3-nonfinite]",
++    "tests/test_loss_response.py::test_invalid_labels_or_support_rejected[labels4-prior4-prior]",
++    "tests/test_loss_response.py::test_common_shift_is_not_a_decision_response",
++    "tests/test_loss_response.py::test_decision_probability_uses_exact_supported_p0",
++    "tests/test_loss_response.py::test_actual_head_has_gap_probability_and_mixed_decision_responses",
++    "tests/test_loss_response.py::test_training_and_diagnostics_share_stable_CE_without_probability_BCE",
++    "tests/test_multiscale.py::test_forward_noisy_target_and_conditional_statistics_enumeration[0]",
++    "tests/test_multiscale.py::test_forward_noisy_target_and_conditional_statistics_enumeration[1]",
++    "tests/test_multiscale.py::test_forward_noisy_target_and_conditional_statistics_enumeration[2]",
++    "tests/test_multiscale.py::test_forward_noisy_target_and_conditional_statistics_enumeration[3]",
++    "tests/test_multiscale.py::test_original_posterior_and_complete_objective_gradient[1]",
++    "tests/test_multiscale.py::test_original_posterior_and_complete_objective_gradient[2]",
++    "tests/test_multiscale.py::test_original_posterior_and_complete_objective_gradient[3]",
++    "tests/test_multiscale.py::test_tail_derivative_two_endpoints_and_probability_not_mean_degree",
++    "tests/test_multiscale.py::test_full_joint_information_frequencies_not_evaluation_bank_and_no_duplicates",
++    "tests/test_multiscale.py::test_renumber_endpoint_symmetry_support_and_no_global_rng",
++    "tests/test_multiscale.py::test_binomial_endpoints_underflow_and_untrusted_gradient_skip",
++    "tests/test_multiscale.py::test_controller_retained_and_failure_rollback",
++    "tests/test_multiscale.py::test_new_objective_existing_sampler_transaction_and_binding[False]",
++    "tests/test_multiscale.py::test_new_objective_existing_sampler_transaction_and_binding[True]",
++    "tests/test_multiscale.py::test_exact_one_support_and_internal_nonfinite_failure",
++    "tests/test_multiscale_evaluation.py::test_exact_pmf_against_enumeration_including_fixed_boundaries",
++    "tests/test_multiscale_evaluation.py::test_W1_of_expected_distribution_not_expected_graph_W1",
++    "tests/test_multiscale_evaluation.py::test_no_original64_substitute_and_predeclared_mixed_decision",
++    "tests/test_multiscale_evaluation.py::test_missing_real_files_nonzero_no_fake_pass",
++    "tests/test_multiscale_evaluation.py::test_safe_stop_without_inputs_does_not_start_work",
++    "tests/test_multiscale_inputs.py::test_saved_probability_bindings_and_original_q",
++    "tests/test_multiscale_inputs.py::test_even_rehashed_wrong_mapping_or_schedule_rejected[slots]",
++    "tests/test_multiscale_inputs.py::test_even_rehashed_wrong_mapping_or_schedule_rejected[query_block]",
++    "tests/test_multiscale_inputs.py::test_even_rehashed_wrong_mapping_or_schedule_rejected[alpha]",
++    "tests/test_multiscale_inputs.py::test_even_rehashed_wrong_mapping_or_schedule_rejected[prior]",
++    "tests/test_multiscale_inputs.py::test_even_rehashed_wrong_mapping_or_schedule_rejected[types]",
++    "tests/test_runtime_repairs.py::test_target_cache_outer_inner_tail_and_flags_cannot_mutate",
++    "tests/test_runtime_repairs.py::test_private_cache_corruption_detected_by_binding",
++    "tests/test_runtime_repairs.py::test_exact_forward_PMF_cache_equals_uncached_and_is_readonly",
++    "tests/test_runtime_repairs.py::test_owned_process_group_cleanup_and_status[timeout]",
++    "tests/test_runtime_repairs.py::test_owned_process_group_cleanup_and_status[STOP]",
++    "tests/test_runtime_repairs.py::test_owned_process_group_cleanup_and_status[SIGINT]",
++    "tests/test_runtime_repairs.py::test_owned_process_group_cleanup_and_status[SIGTERM]",
++    "tests/test_runtime_repairs.py::test_owned_process_group_cleanup_and_status[SIGHUP]",
++    "tests/test_runtime_repairs.py::test_owned_process_group_cleanup_and_status[success]",
++    "tests/test_runtime_repairs.py::test_owned_process_group_cleanup_and_status[missing]",
++    "tests/test_stepwise.py::test_noisy_target_against_exhaustive_forward[0]",
++    "tests/test_stepwise.py::test_noisy_target_against_exhaustive_forward[1]",
++    "tests/test_stepwise.py::test_noisy_target_against_exhaustive_forward[2]",
++    "tests/test_stepwise.py::test_noisy_target_against_exhaustive_forward[3]",
++    "tests/test_stepwise.py::test_noisy_target_against_exhaustive_forward[4]",
++    "tests/test_stepwise.py::test_bridge_gradient_finite_difference_and_clean_endpoint[1]",
++    "tests/test_stepwise.py::test_bridge_gradient_finite_difference_and_clean_endpoint[2]",
++    "tests/test_stepwise.py::test_bridge_gradient_finite_difference_and_clean_endpoint[3]",
++    "tests/test_stepwise.py::test_bridge_gradient_finite_difference_and_clean_endpoint[4]",
++    "tests/test_stepwise.py::test_joint_dependence_target_response_and_zero_gradient_counterexample",
++    "tests/test_stepwise.py::test_reindexing_symmetry_and_incomplete_mask_rejection",
++    "tests/test_stepwise.py::test_exact_support_saturation_and_kl_limits",
++    "tests/test_stepwise.py::test_backtracking_failure_nonfinite_and_unresolvable_gradient",
++    "tests/test_stepwise.py::test_off_original_rng_full_small_chain_and_interruption[False]",
++    "tests/test_stepwise.py::test_off_original_rng_full_small_chain_and_interruption[True]",
++    "tests/test_stepwise.py::test_checkpoint_roundtrip_binding_tamper_and_pending_step",
++    "tests/test_stepwise.py::test_model_arm_and_receipt_reject_wrong_native_weights",
++    "tests/test_stepwise.py::test_proxy_is_not_expected_discrete_squared_error",
++    "tests/test_stepwise.py::test_fresh_process_recovery",
++    "tests/test_stepwise.py::test_underflow_and_factor_guard_never_normalize_untrusted_signal"
++  ],
++  "deselected_nodeids": [],
++  "reports": {
++    "tests/test_admission_suite.py::test_rejected_output_adds_no_file_to_protected_inputs[results]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_admission_suite.py::test_rejected_output_adds_no_file_to_protected_inputs[symlink]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_admission_suite.py::test_rejected_output_adds_no_file_to_protected_inputs[states]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_admission_suite.py::test_rejected_output_adds_no_file_to_protected_inputs[weights]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_admission_suite.py::test_rejected_output_adds_no_file_to_protected_inputs[short_input]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_admission_suite.py::test_path_sibling_allowed_but_source_or_ancestor_rejected": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_admission_suite.py::test_unsealed_or_changed_ledger_rejected_without_writes[sealed_but_changed_file]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_admission_suite.py::test_unsealed_or_changed_ledger_rejected_without_writes[self_computed_current_hash]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_admission_suite.py::test_correct_sealed_value_checked_not_substituted": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_admission_suite.py::test_inherited_pytest_selection_and_plugin_environment_isolated": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[old_85]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[old_112]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[same_count_wrong_identity]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[duplicate]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[skip]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[xfail]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[missing_teardown]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[deselected]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[empty_receipt]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[junit_skip]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_admission_suite.py::test_manifest_checks_test_files_and_new_file_set": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_contract.py::test_decode_independent_combinations": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_contract.py::test_uniform_full_coverage_and_weight[1]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_contract.py::test_uniform_full_coverage_and_weight[3]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_contract.py::test_uniform_full_coverage_and_weight[10]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_contract.py::test_uniform_full_coverage_and_weight[20]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_contract.py::test_random_reproducibility_cap_and_batch_independence": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_contract.py::test_without_replacement_exact_subset_law": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_contract.py::test_kernel_independent_joint_enumeration": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_contract.py::test_fixed_support_and_clean_endpoint": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_contract.py::test_full_sweep_frozen_context_and_clock": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_contract.py::test_network_gradient_and_query_order": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_contract.py::test_network_type_preserving_renumber_and_restore": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_contract.py::test_network_rejects_duplicate_and_illegal_inputs": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_contract.py::test_network_fixed_support_and_schema_mismatch": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_contract.py::test_empty_inventory_and_fixed_slots_still_in_plan": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_contract.py::test_active_family_chunks_concatenate_and_preserve_ce_scaling": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_contract.py::test_active_sweep_skips_only_exact_fixed_families": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_contract.py::test_global_forward_complement_exhaustive": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_contract.py::test_global_noising_support_retention_and_relabel": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_contract.py::test_explicit_large_recipe_dimensions": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_fusion.py::test_joint_mechanism": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_fusion.py::test_cache_time_parameter_and_wedge_limits": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_fusion.py::test_mean_content_separate_from_log_count": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_fusion.py::test_old_checkpoint_rejected_and_empty_query": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_fusion.py::test_existing_role_guidance_remains_a_separate_t1_option": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_fusion.py::test_sampling_cannot_read_clean_identity_and_hidden_exposure_preserves_backbone": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_fusion.py::test_path_memory_chunks_preserve_values_and_gradients": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_legacy_repairs.py::test_old_mapping_canonical_slots_and_full_query_bytes": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_legacy_repairs.py::test_old_mapping_rejects_tampering[seed]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_legacy_repairs.py::test_old_mapping_rejects_tampering[digest]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_legacy_repairs.py::test_old_mapping_rejects_tampering[family_order]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_legacy_repairs.py::test_old_mapping_rejects_tampering[q0]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_legacy_repairs.py::test_old_mapping_rejects_tampering[coverage]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_legacy_repairs.py::test_old_mapping_rejects_tampering[p0_digest]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_legacy_repairs.py::test_old_mapping_rejects_tampering[alpha]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_legacy_repairs.py::test_nested_scalar_original_CF_and_W1_replay_independent_algorithm": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_legacy_repairs.py::test_source_hash_and_final_IO_checks_reject_without_partial_commit": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_legacy_repairs.py::test_budget_restores_handlers_and_stop_precedes_commit": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_legacy_repairs.py::test_completed_label_alone_cannot_pass_evidence_gate[short]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_legacy_repairs.py::test_completed_label_alone_cannot_pass_evidence_gate[export-legacy]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_legacy_repairs.py::test_completed_label_alone_cannot_pass_evidence_gate[cost]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_legacy_repairs.py::test_discover_actual_metadata_not_folder_names_and_reject_duplicate": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_legacy_repairs.py::test_short_six_labels_without_case_file_rejected": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_legacy_repairs.py::test_export_complete_manifest_without_array_rejected": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_loss_response.py::test_moderate_logits_match_original_objective_and_R_over_S": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_loss_response.py::test_extreme_wrong_confidence_retains_corrective_gradient": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_loss_response.py::test_exact_support_zero_loss_zero_gradient_and_empty": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_loss_response.py::test_invalid_labels_or_support_rejected[labels0-prior0-support]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_loss_response.py::test_invalid_labels_or_support_rejected[labels1-prior1-support]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_loss_response.py::test_invalid_labels_or_support_rejected[labels2-prior2-binary]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_loss_response.py::test_invalid_labels_or_support_rejected[labels3-prior3-nonfinite]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_loss_response.py::test_invalid_labels_or_support_rejected[labels4-prior4-prior]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_loss_response.py::test_common_shift_is_not_a_decision_response": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_loss_response.py::test_decision_probability_uses_exact_supported_p0": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_loss_response.py::test_actual_head_has_gap_probability_and_mixed_decision_responses": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_loss_response.py::test_training_and_diagnostics_share_stable_CE_without_probability_BCE": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_multiscale.py::test_forward_noisy_target_and_conditional_statistics_enumeration[0]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_multiscale.py::test_forward_noisy_target_and_conditional_statistics_enumeration[1]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_multiscale.py::test_forward_noisy_target_and_conditional_statistics_enumeration[2]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_multiscale.py::test_forward_noisy_target_and_conditional_statistics_enumeration[3]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_multiscale.py::test_original_posterior_and_complete_objective_gradient[1]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_multiscale.py::test_original_posterior_and_complete_objective_gradient[2]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_multiscale.py::test_original_posterior_and_complete_objective_gradient[3]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_multiscale.py::test_tail_derivative_two_endpoints_and_probability_not_mean_degree": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_multiscale.py::test_full_joint_information_frequencies_not_evaluation_bank_and_no_duplicates": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_multiscale.py::test_renumber_endpoint_symmetry_support_and_no_global_rng": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_multiscale.py::test_binomial_endpoints_underflow_and_untrusted_gradient_skip": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_multiscale.py::test_controller_retained_and_failure_rollback": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_multiscale.py::test_new_objective_existing_sampler_transaction_and_binding[False]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_multiscale.py::test_new_objective_existing_sampler_transaction_and_binding[True]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_multiscale.py::test_exact_one_support_and_internal_nonfinite_failure": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_multiscale_evaluation.py::test_exact_pmf_against_enumeration_including_fixed_boundaries": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_multiscale_evaluation.py::test_W1_of_expected_distribution_not_expected_graph_W1": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_multiscale_evaluation.py::test_no_original64_substitute_and_predeclared_mixed_decision": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_multiscale_evaluation.py::test_missing_real_files_nonzero_no_fake_pass": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_multiscale_evaluation.py::test_safe_stop_without_inputs_does_not_start_work": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_multiscale_inputs.py::test_saved_probability_bindings_and_original_q": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_multiscale_inputs.py::test_even_rehashed_wrong_mapping_or_schedule_rejected[slots]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_multiscale_inputs.py::test_even_rehashed_wrong_mapping_or_schedule_rejected[query_block]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_multiscale_inputs.py::test_even_rehashed_wrong_mapping_or_schedule_rejected[alpha]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_multiscale_inputs.py::test_even_rehashed_wrong_mapping_or_schedule_rejected[prior]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_multiscale_inputs.py::test_even_rehashed_wrong_mapping_or_schedule_rejected[types]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_runtime_repairs.py::test_target_cache_outer_inner_tail_and_flags_cannot_mutate": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_runtime_repairs.py::test_private_cache_corruption_detected_by_binding": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_runtime_repairs.py::test_exact_forward_PMF_cache_equals_uncached_and_is_readonly": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_runtime_repairs.py::test_owned_process_group_cleanup_and_status[timeout]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_runtime_repairs.py::test_owned_process_group_cleanup_and_status[STOP]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_runtime_repairs.py::test_owned_process_group_cleanup_and_status[SIGINT]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_runtime_repairs.py::test_owned_process_group_cleanup_and_status[SIGTERM]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_runtime_repairs.py::test_owned_process_group_cleanup_and_status[SIGHUP]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_runtime_repairs.py::test_owned_process_group_cleanup_and_status[success]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_runtime_repairs.py::test_owned_process_group_cleanup_and_status[missing]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_stepwise.py::test_noisy_target_against_exhaustive_forward[0]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_stepwise.py::test_noisy_target_against_exhaustive_forward[1]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_stepwise.py::test_noisy_target_against_exhaustive_forward[2]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_stepwise.py::test_noisy_target_against_exhaustive_forward[3]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_stepwise.py::test_noisy_target_against_exhaustive_forward[4]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_stepwise.py::test_bridge_gradient_finite_difference_and_clean_endpoint[1]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_stepwise.py::test_bridge_gradient_finite_difference_and_clean_endpoint[2]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_stepwise.py::test_bridge_gradient_finite_difference_and_clean_endpoint[3]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_stepwise.py::test_bridge_gradient_finite_difference_and_clean_endpoint[4]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_stepwise.py::test_joint_dependence_target_response_and_zero_gradient_counterexample": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_stepwise.py::test_reindexing_symmetry_and_incomplete_mask_rejection": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_stepwise.py::test_exact_support_saturation_and_kl_limits": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_stepwise.py::test_backtracking_failure_nonfinite_and_unresolvable_gradient": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_stepwise.py::test_off_original_rng_full_small_chain_and_interruption[False]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_stepwise.py::test_off_original_rng_full_small_chain_and_interruption[True]": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_stepwise.py::test_checkpoint_roundtrip_binding_tamper_and_pending_step": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_stepwise.py::test_model_arm_and_receipt_reject_wrong_native_weights": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_stepwise.py::test_proxy_is_not_expected_discrete_squared_error": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_stepwise.py::test_fresh_process_recovery": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    },
++    "tests/test_stepwise.py::test_underflow_and_factor_guard_never_normalize_untrusted_signal": {
++      "setup": "passed",
++      "call": "passed",
++      "teardown": "passed"
++    }
++  },
++  "full_suite_passed": true
++}--- /dev/null
++++ b/evidence_guard/tests.log
+@@ -0,0 +1,4 @@
++........................................................................ [ 54%]
++.............................................................            [100%]
++- generated xml file: /data2/lyh/gnn_project/DiHug/results/role_multiscale_tail_v1_2_20261018/native_suite/tests.xml -
++133 passed in 31.49s
+--- /dev/null
++++ b/evidence_guard/tests.xml
+@@ -0,0 +1 @@
++<?xml version="1.0" encoding="utf-8"?><testsuites><testsuite name="pytest" errors="0" failures="0" skipped="0" tests="133" time="31.464" timestamp="2026-10-18T16:11:08.303673" hostname="GPU-Node01"><testcase classname="tests.test_admission_suite" name="test_rejected_output_adds_no_file_to_protected_inputs[results]" file="tests/test_admission_suite.py" line="21" time="0.100" /><testcase classname="tests.test_admission_suite" name="test_rejected_output_adds_no_file_to_protected_inputs[symlink]" file="tests/test_admission_suite.py" line="21" time="0.097" /><testcase classname="tests.test_admission_suite" name="test_rejected_output_adds_no_file_to_protected_inputs[states]" file="tests/test_admission_suite.py" line="21" time="0.101" /><testcase classname="tests.test_admission_suite" name="test_rejected_output_adds_no_file_to_protected_inputs[weights]" file="tests/test_admission_suite.py" line="21" time="0.101" /><testcase classname="tests.test_admission_suite" name="test_rejected_output_adds_no_file_to_protected_inputs[short_input]" file="tests/test_admission_suite.py" line="21" time="0.101" /><testcase classname="tests.test_admission_suite" name="test_path_sibling_allowed_but_source_or_ancestor_rejected" file="tests/test_admission_suite.py" line="44" time="0.008" /><testcase classname="tests.test_admission_suite" name="test_unsealed_or_changed_ledger_rejected_without_writes[sealed_but_changed_file]" file="tests/test_admission_suite.py" line="52" time="0.093" /><testcase classname="tests.test_admission_suite" name="test_unsealed_or_changed_ledger_rejected_without_writes[self_computed_current_hash]" file="tests/test_admission_suite.py" line="52" time="0.095" /><testcase classname="tests.test_admission_suite" name="test_correct_sealed_value_checked_not_substituted" file="tests/test_admission_suite.py" line="63" time="0.003" /><testcase classname="tests.test_admission_suite" name="test_inherited_pytest_selection_and_plugin_environment_isolated" file="tests/test_admission_suite.py" line="73" time="0.001" /><testcase classname="tests.test_admission_suite" name="test_exact_collection_and_zero_skip_not_old_count_floor[old_85]" file="tests/test_admission_suite.py" line="93" time="0.007" /><testcase classname="tests.test_admission_suite" name="test_exact_collection_and_zero_skip_not_old_count_floor[old_112]" file="tests/test_admission_suite.py" line="93" time="0.005" /><testcase classname="tests.test_admission_suite" name="test_exact_collection_and_zero_skip_not_old_count_floor[same_count_wrong_identity]" file="tests/test_admission_suite.py" line="93" time="0.005" /><testcase classname="tests.test_admission_suite" name="test_exact_collection_and_zero_skip_not_old_count_floor[duplicate]" file="tests/test_admission_suite.py" line="93" time="0.005" /><testcase classname="tests.test_admission_suite" name="test_exact_collection_and_zero_skip_not_old_count_floor[skip]" file="tests/test_admission_suite.py" line="93" time="0.005" /><testcase classname="tests.test_admission_suite" name="test_exact_collection_and_zero_skip_not_old_count_floor[xfail]" file="tests/test_admission_suite.py" line="93" time="0.075" /><testcase classname="tests.test_admission_suite" name="test_exact_collection_and_zero_skip_not_old_count_floor[missing_teardown]" file="tests/test_admission_suite.py" line="93" time="0.005" /><testcase classname="tests.test_admission_suite" name="test_exact_collection_and_zero_skip_not_old_count_floor[deselected]" file="tests/test_admission_suite.py" line="93" time="0.005" /><testcase classname="tests.test_admission_suite" name="test_exact_collection_and_zero_skip_not_old_count_floor[empty_receipt]" file="tests/test_admission_suite.py" line="93" time="0.004" /><testcase classname="tests.test_admission_suite" name="test_exact_collection_and_zero_skip_not_old_count_floor[junit_skip]" file="tests/test_admission_suite.py" line="93" time="0.006" /><testcase classname="tests.test_admission_suite" name="test_manifest_checks_test_files_and_new_file_set" file="tests/test_admission_suite.py" line="111" time="0.003" /><testcase classname="tests.test_contract" name="test_decode_independent_combinations" file="tests/test_contract.py" line="15" time="0.003" /><testcase classname="tests.test_contract" name="test_uniform_full_coverage_and_weight[1]" file="tests/test_contract.py" line="27" time="0.002" /><testcase classname="tests.test_contract" name="test_uniform_full_coverage_and_weight[3]" file="tests/test_contract.py" line="27" time="0.002" /><testcase classname="tests.test_contract" name="test_uniform_full_coverage_and_weight[10]" file="tests/test_contract.py" line="27" time="0.004" /><testcase classname="tests.test_contract" name="test_uniform_full_coverage_and_weight[20]" file="tests/test_contract.py" line="27" time="0.006" /><testcase classname="tests.test_contract" name="test_random_reproducibility_cap_and_batch_independence" file="tests/test_contract.py" line="42" time="0.003" /><testcase classname="tests.test_contract" name="test_without_replacement_exact_subset_law" file="tests/test_contract.py" line="53" time="0.001" /><testcase classname="tests.test_contract" name="test_kernel_independent_joint_enumeration" file="tests/test_contract.py" line="67" time="0.011" /><testcase classname="tests.test_contract" name="test_fixed_support_and_clean_endpoint" file="tests/test_contract.py" line="87" time="0.002" /><testcase classname="tests.test_contract" name="test_full_sweep_frozen_context_and_clock" file="tests/test_contract.py" line="100" time="0.007" /><testcase classname="tests.test_contract" name="test_network_gradient_and_query_order" file="tests/test_contract.py" line="128" time="0.064" /><testcase classname="tests.test_contract" name="test_network_type_preserving_renumber_and_restore" file="tests/test_contract.py" line="142" time="0.124" /><testcase classname="tests.test_contract" name="test_network_rejects_duplicate_and_illegal_inputs" file="tests/test_contract.py" line="157" time="0.012" /><testcase classname="tests.test_contract" name="test_network_fixed_support_and_schema_mismatch" file="tests/test_contract.py" line="165" time="0.010" /><testcase classname="tests.test_contract" name="test_empty_inventory_and_fixed_slots_still_in_plan" file="tests/test_contract.py" line="180" time="0.001" /><testcase classname="tests.test_contract" name="test_active_family_chunks_concatenate_and_preserve_ce_scaling" file="tests/test_contract.py" line="188" time="0.003" /><testcase classname="tests.test_contract" name="test_active_sweep_skips_only_exact_fixed_families" file="tests/test_contract.py" line="209" time="0.003" /><testcase classname="tests.test_contract" name="test_global_forward_complement_exhaustive" file="tests/test_contract.py" line="228" time="0.008" /><testcase classname="tests.test_contract" name="test_global_noising_support_retention_and_relabel" file="tests/test_contract.py" line="240" time="0.007" /><testcase classname="tests.test_contract" name="test_explicit_large_recipe_dimensions" file="tests/test_contract.py" line="266" time="0.009" /><testcase classname="tests.test_fusion" name="test_joint_mechanism" file="tests/test_fusion.py" line="8" time="0.379" /><testcase classname="tests.test_fusion" name="test_cache_time_parameter_and_wedge_limits" file="tests/test_fusion.py" line="12" time="0.033" /><testcase classname="tests.test_fusion" name="test_mean_content_separate_from_log_count" file="tests/test_fusion.py" line="28" time="0.020" /><testcase classname="tests.test_fusion" name="test_old_checkpoint_rejected_and_empty_query" file="tests/test_fusion.py" line="42" time="0.023" /><testcase classname="tests.test_fusion" name="test_existing_role_guidance_remains_a_separate_t1_option" file="tests/test_fusion.py" line="53" time="0.209" /><testcase classname="tests.test_fusion" name="test_sampling_cannot_read_clean_identity_and_hidden_exposure_preserves_backbone" file="tests/test_fusion.py" line="79" time="0.076" /><testcase classname="tests.test_fusion" name="test_path_memory_chunks_preserve_values_and_gradients" file="tests/test_fusion.py" line="101" time="0.059" /><testcase classname="tests.test_legacy_repairs" name="test_old_mapping_canonical_slots_and_full_query_bytes" file="tests/test_legacy_repairs.py" line="42" time="0.024" /><testcase classname="tests.test_legacy_repairs" name="test_old_mapping_rejects_tampering[seed]" file="tests/test_legacy_repairs.py" line="51" time="0.015" /><testcase classname="tests.test_legacy_repairs" name="test_old_mapping_rejects_tampering[digest]" file="tests/test_legacy_repairs.py" line="51" time="0.024" /><testcase classname="tests.test_legacy_repairs" name="test_old_mapping_rejects_tampering[family_order]" file="tests/test_legacy_repairs.py" line="51" time="0.013" /><testcase classname="tests.test_legacy_repairs" name="test_old_mapping_rejects_tampering[q0]" file="tests/test_legacy_repairs.py" line="51" time="0.024" /><testcase classname="tests.test_legacy_repairs" name="test_old_mapping_rejects_tampering[coverage]" file="tests/test_legacy_repairs.py" line="51" time="0.024" /><testcase classname="tests.test_legacy_repairs" name="test_old_mapping_rejects_tampering[p0_digest]" file="tests/test_legacy_repairs.py" line="51" time="0.015" /><testcase classname="tests.test_legacy_repairs" name="test_old_mapping_rejects_tampering[alpha]" file="tests/test_legacy_repairs.py" line="51" time="0.013" /><testcase classname="tests.test_legacy_repairs" name="test_nested_scalar_original_CF_and_W1_replay_independent_algorithm" file="tests/test_legacy_repairs.py" line="64" time="0.050" /><testcase classname="tests.test_legacy_repairs" name="test_source_hash_and_final_IO_checks_reject_without_partial_commit" file="tests/test_legacy_repairs.py" line="88" time="0.065" /><testcase classname="tests.test_legacy_repairs" name="test_budget_restores_handlers_and_stop_precedes_commit" file="tests/test_legacy_repairs.py" line="104" time="0.003" /><testcase classname="tests.test_legacy_repairs" name="test_completed_label_alone_cannot_pass_evidence_gate[short]" file="tests/test_legacy_repairs.py" line="113" time="0.003" /><testcase classname="tests.test_legacy_repairs" name="test_completed_label_alone_cannot_pass_evidence_gate[export-legacy]" file="tests/test_legacy_repairs.py" line="113" time="0.002" /><testcase classname="tests.test_legacy_repairs" name="test_completed_label_alone_cannot_pass_evidence_gate[cost]" file="tests/test_legacy_repairs.py" line="113" time="0.001" /><testcase classname="tests.test_legacy_repairs" name="test_discover_actual_metadata_not_folder_names_and_reject_duplicate" file="tests/test_legacy_repairs.py" line="120" time="0.012" /><testcase classname="tests.test_legacy_repairs" name="test_short_six_labels_without_case_file_rejected" file="tests/test_legacy_repairs.py" line="137" time="0.001" /><testcase classname="tests.test_legacy_repairs" name="test_export_complete_manifest_without_array_rejected" file="tests/test_legacy_repairs.py" line="144" time="0.002" /><testcase classname="tests.test_loss_response" name="test_moderate_logits_match_original_objective_and_R_over_S" file="tests/test_loss_response.py" line="54" time="0.002"><properties><property name="evidence" value="{&quot;loss_max_abs&quot;: 2.7755575615628914e-17, &quot;gradient_max_abs&quot;: 1.3877787807814457e-17, &quot;analytic_gradient_max_abs&quot;: 6.938893903907228e-18, &quot;weighted_loss&quot;: 0.23800954340802108, &quot;ce_weight&quot;: 0.10714285714285714}" /></properties></testcase><testcase classname="tests.test_loss_response" name="test_extreme_wrong_confidence_retains_corrective_gradient" file="tests/test_loss_response.py" line="58" time="0.002"><properties><property name="evidence" value="{&quot;logits&quot;: [[1000.0, -1000.0], [-1000.0, 1000.0]], &quot;labels&quot;: [1.0, 0.0], &quot;old_probability_BCE&quot;: 200.0, &quot;old_gradient&quot;: [[0.0, -0.0], [-0.0, 0.0]], &quot;stable_CE&quot;: 4000.0, &quot;stable_gradient&quot;: [[1.0, -1.0], [-1.0, 1.0]], &quot;loss_after_negative_gradient_step&quot;: 3999.60009765625}" /></properties></testcase><testcase classname="tests.test_loss_response" name="test_exact_support_zero_loss_zero_gradient_and_empty" file="tests/test_loss_response.py" line="62" time="0.002" /><testcase classname="tests.test_loss_response" name="test_invalid_labels_or_support_rejected[labels0-prior0-support]" file="tests/test_loss_response.py" line="72" time="0.001" /><testcase classname="tests.test_loss_response" name="test_invalid_labels_or_support_rejected[labels1-prior1-support]" file="tests/test_loss_response.py" line="72" time="0.001" /><testcase classname="tests.test_loss_response" name="test_invalid_labels_or_support_rejected[labels2-prior2-binary]" file="tests/test_loss_response.py" line="72" time="0.001" /><testcase classname="tests.test_loss_response" name="test_invalid_labels_or_support_rejected[labels3-prior3-nonfinite]" file="tests/test_loss_response.py" line="72" time="0.001" /><testcase classname="tests.test_loss_response" name="test_invalid_labels_or_support_rejected[labels4-prior4-prior]" file="tests/test_loss_response.py" line="72" time="0.001" /><testcase classname="tests.test_loss_response" name="test_common_shift_is_not_a_decision_response" file="tests/test_loss_response.py" line="79" time="0.001"><properties><property name="evidence" value="{&quot;shared_shift&quot;: 8.0, &quot;direct&quot;: {&quot;interface_logits_max_abs&quot;: 8.0, &quot;logit_gap_max_abs&quot;: 0.0, &quot;p0_max_abs&quot;: 0.0}, &quot;pure_shared_shift_interaction&quot;: {&quot;interface_logits_max_abs&quot;: 8.0, &quot;logit_gap_max_abs&quot;: 0.0, &quot;p0_max_abs&quot;: 0.0}}" /></properties></testcase><testcase classname="tests.test_loss_response" name="test_decision_probability_uses_exact_supported_p0" file="tests/test_loss_response.py" line="83" time="0.001" /><testcase classname="tests.test_loss_response" name="test_actual_head_has_gap_probability_and_mixed_decision_responses" file="tests/test_loss_response.py" line="92" time="0.381"><properties><property name="evidence" value="{&quot;CN_feature_mask_logit_response&quot;: 0.04487988352775574, &quot;CN_feature_mask_decision_response&quot;: {&quot;interface_logits_max_abs&quot;: 0.04487988352775574, &quot;logit_gap_max_abs&quot;: 0.04383218288421631, &quot;p0_max_abs&quot;: 0.010913670063018799}, &quot;endpoint_swap_logit_max_abs&quot;: 0.0, &quot;independent_CN_counts&quot;: [[0.0, 1.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [0.0, 0.0, 0.0]], &quot;legal_global_input_only_logit_response&quot;: 0.0031882822513580322, &quot;legal_global_input_only_decision_response&quot;: {&quot;interface_logits_max_abs&quot;: 0.0031882822513580322, &quot;logit_gap_max_abs&quot;: 0.002321794629096985, &quot;p0_max_abs&quot;: 0.0005125999450683594}, &quot;CN_global_mixed_finite_difference_max&quot;: 0.0002031959593296051, &quot;CN_global_decision_mixed_response&quot;: {&quot;interface_logits_max_abs&quot;: 0.0002031959593296051, &quot;logit_gap_max_abs&quot;: 0.00025169551372528076, &quot;p0_max_abs&quot;: 6.22868537902832e-05}, &quot;middle_context_content_response&quot;: 0.005142584443092346, &quot;query_edges_not_CN_edges&quot;: true, &quot;no_architectural_positive_count_monotonicity&quot;: true, &quot;feature_abs_quantiles&quot;: [0.0, 0.17138135433197021, 1.0570337772369385, 2.0692169666290283, 2.521355152130127], &quot;logit_quantiles&quot;: [0.07937979698181152, 0.12311247736215591, 0.22492726147174835, 0.25626543164253235, 0.2597474157810211], &quot;probability_saturation_fraction&quot;: 0.0, &quot;renumber_logit_max_abs&quot;: 4.470348358154297e-08, &quot;phi_gradient_max&quot;: 0.003131398931145668, &quot;global_head_input_gradient_max&quot;: 0.01853274740278721, &quot;global_update_parameter_gradient_max&quot;: 0.006703103426843882, &quot;train_sample_probability_max_abs&quot;: 0.0, &quot;small_engineering_full_chain_steps&quot;: 4, &quot;status&quot;: &quot;passed&quot;, &quot;atol&quot;: 2e-06, &quot;scope&quot;: &quot;random-weight small CPU engineering; response is NOT learned coordination&quot;, &quot;new_scientific_graphs&quot;: 0, &quot;GPU_use&quot;: 0, &quot;old_weights_loaded&quot;: false}" /></properties></testcase><testcase classname="tests.test_loss_response" name="test_training_and_diagnostics_share_stable_CE_without_probability_BCE" file="tests/test_loss_response.py" line="99" time="0.377"><properties><property name="evidence" value="{&quot;loss&quot;: 0.5479567050933838, &quot;ce_weight&quot;: 0.10714285714285714, &quot;independent_sum_R_over_S&quot;: 0.5479567050933838, &quot;non_diagnostic_loss&quot;: 0.5479567050933838, &quot;diagnostic_groups&quot;: [{&quot;family&quot;: 0, &quot;clean_label&quot;: 0, &quot;count&quot;: 1, &quot;CE&quot;: 0.6379085183143616, &quot;p_present_mean&quot;: 0.4716036021709442, &quot;expected_birth&quot;: 0.025630720614681555, &quot;expected_death&quot;: 0.0, &quot;expected_net&quot;: 0.025630720614681555}, {&quot;family&quot;: 0, &quot;clean_label&quot;: 1, &quot;count&quot;: 0, &quot;CE&quot;: null, &quot;p_present_mean&quot;: null, &quot;expected_birth&quot;: 0.0, &quot;expected_death&quot;: 0.0, &quot;expected_net&quot;: 0.0}, {&quot;family&quot;: 1, &quot;clean_label&quot;: 0, &quot;count&quot;: 2, &quot;CE&quot;: 0.6311246156692505, &quot;p_present_mean&quot;: 0.46797487139701843, &quot;expected_birth&quot;: 0.05086701456146992, &quot;expected_death&quot;: 0.0, &quot;expected_net&quot;: 0.05086701456146992}, {&quot;family&quot;: 1, &quot;clean_label&quot;: 1, &quot;count&quot;: 0, &quot;CE&quot;: null, &quot;p_present_mean&quot;: null, &quot;expected_birth&quot;: 0.0, &quot;expected_death&quot;: 0.0, &quot;expected_net&quot;: 0.0}, {&quot;family&quot;: 2, &quot;clean_label&quot;: 0, &quot;count&quot;: 3, &quot;CE&quot;: 0.5984724760055542, &quot;p_present_mean&quot;: 0.45030473669370014, &quot;expected_birth&quot;: 0.0733676465475896, &quot;expected_death&quot;: 0.0, &quot;expected_net&quot;: 0.0733676465475896}, {&quot;family&quot;: 2, &quot;clean_label&quot;: 1, &quot;count&quot;: 0, &quot;CE&quot;: null, &quot;p_present_mean&quot;: null, &quot;expected_birth&quot;: 0.0, &quot;expected_death&quot;: 0.0, &quot;expected_net&quot;: 0.0}, {&quot;family&quot;: 3, &quot;clean_label&quot;: 0, &quot;count&quot;: 0, &quot;CE&quot;: null, &quot;p_present_mean&quot;: null, &quot;expected_birth&quot;: 0.0, &quot;expected_death&quot;: 0.0, &quot;expected_net&quot;: 0.0}, {&quot;family&quot;: 3, &quot;clean_label&quot;: 1, &quot;count&quot;: 0, &quot;CE&quot;: null, &quot;p_present_mean&quot;: null, &quot;expected_birth&quot;: 0.0, &quot;expected_death&quot;: 0.0, &quot;expected_net&quot;: 0.0}, {&quot;family&quot;: 4, &quot;clean_label&quot;: 0, &quot;count&quot;: 1, &quot;CE&quot;: 0.5784192681312561, &quot;p_present_mean&quot;: 0.43921586871147156, &quot;expected_birth&quot;: 0.023883151145295323, &quot;expected_death&quot;: 0.0, &quot;expected_net&quot;: 0.023883151145295323}, {&quot;family&quot;: 4, &quot;clean_label&quot;: 1, &quot;count&quot;: 1, &quot;CE&quot;: 0.8402678966522217, &quot;p_present_mean&quot;: 0.4315949082374573, &quot;expected_birth&quot;: 0.0, &quot;expected_death&quot;: 0.03090800449631681, &quot;expected_net&quot;: -0.03090800449631681}, {&quot;family&quot;: 5, &quot;clean_label&quot;: 0, &quot;count&quot;: 0, &quot;CE&quot;: null, &quot;p_present_mean&quot;: null, &quot;expected_birth&quot;: 0.0, &quot;expected_death&quot;: 0.0, &quot;expected_net&quot;: 0.0}, {&quot;family&quot;: 5, &quot;clean_label&quot;: 1, &quot;count&quot;: 0, &quot;CE&quot;: null, &quot;p_present_mean&quot;: null, &quot;expected_birth&quot;: 0.0, &quot;expected_death&quot;: 0.0, &quot;expected_net&quot;: 0.0}], &quot;optimizer_updates&quot;: 0}" /></properties></testcase><testcase classname="tests.test_multiscale" name="test_forward_noisy_target_and_conditional_statistics_enumeration[0]" file="tests/test_multiscale.py" line="43" time="0.214" /><testcase classname="tests.test_multiscale" name="test_forward_noisy_target_and_conditional_statistics_enumeration[1]" file="tests/test_multiscale.py" line="43" time="0.394" /><testcase classname="tests.test_multiscale" name="test_forward_noisy_target_and_conditional_statistics_enumeration[2]" file="tests/test_multiscale.py" line="43" time="0.396" /><testcase classname="tests.test_multiscale" name="test_forward_noisy_target_and_conditional_statistics_enumeration[3]" file="tests/test_multiscale.py" line="43" time="0.393" /><testcase classname="tests.test_multiscale" name="test_original_posterior_and_complete_objective_gradient[1]" file="tests/test_multiscale.py" line="60" time="0.294" /><testcase classname="tests.test_multiscale" name="test_original_posterior_and_complete_objective_gradient[2]" file="tests/test_multiscale.py" line="60" time="0.294" /><testcase classname="tests.test_multiscale" name="test_original_posterior_and_complete_objective_gradient[3]" file="tests/test_multiscale.py" line="60" time="0.292" /><testcase classname="tests.test_multiscale" name="test_tail_derivative_two_endpoints_and_probability_not_mean_degree" file="tests/test_multiscale.py" line="74" time="0.022" /><testcase classname="tests.test_multiscale" name="test_full_joint_information_frequencies_not_evaluation_bank_and_no_duplicates" file="tests/test_multiscale.py" line="93" time="0.149" /><testcase classname="tests.test_multiscale" name="test_renumber_endpoint_symmetry_support_and_no_global_rng" file="tests/test_multiscale.py" line="111" time="0.092" /><testcase classname="tests.test_multiscale" name="test_binomial_endpoints_underflow_and_untrusted_gradient_skip" file="tests/test_multiscale.py" line="126" time="0.144" /><testcase classname="tests.test_multiscale" name="test_controller_retained_and_failure_rollback" file="tests/test_multiscale.py" line="138" time="0.147" /><testcase classname="tests.test_multiscale" name="test_new_objective_existing_sampler_transaction_and_binding[False]" file="tests/test_multiscale.py" line="151" time="0.831" /><testcase classname="tests.test_multiscale" name="test_new_objective_existing_sampler_transaction_and_binding[True]" file="tests/test_multiscale.py" line="151" time="0.891" /><testcase classname="tests.test_multiscale" name="test_exact_one_support_and_internal_nonfinite_failure" file="tests/test_multiscale.py" line="187" time="0.047" /><testcase classname="tests.test_multiscale_evaluation" name="test_exact_pmf_against_enumeration_including_fixed_boundaries" file="tests/test_multiscale_evaluation.py" line="12" time="0.001" /><testcase classname="tests.test_multiscale_evaluation" name="test_W1_of_expected_distribution_not_expected_graph_W1" file="tests/test_multiscale_evaluation.py" line="21" time="0.007" /><testcase classname="tests.test_multiscale_evaluation" name="test_no_original64_substitute_and_predeclared_mixed_decision" file="tests/test_multiscale_evaluation.py" line="34" time="0.001" /><testcase classname="tests.test_multiscale_evaluation" name="test_missing_real_files_nonzero_no_fake_pass" file="tests/test_multiscale_evaluation.py" line="45" time="0.006" /><testcase classname="tests.test_multiscale_evaluation" name="test_safe_stop_without_inputs_does_not_start_work" file="tests/test_multiscale_evaluation.py" line="54" time="0.006" /><testcase classname="tests.test_multiscale_inputs" name="test_saved_probability_bindings_and_original_q" file="tests/test_multiscale_inputs.py" line="35" time="0.019" /><testcase classname="tests.test_multiscale_inputs" name="test_even_rehashed_wrong_mapping_or_schedule_rejected[slots]" file="tests/test_multiscale_inputs.py" line="46" time="0.010" /><testcase classname="tests.test_multiscale_inputs" name="test_even_rehashed_wrong_mapping_or_schedule_rejected[query_block]" file="tests/test_multiscale_inputs.py" line="46" time="0.013" /><testcase classname="tests.test_multiscale_inputs" name="test_even_rehashed_wrong_mapping_or_schedule_rejected[alpha]" file="tests/test_multiscale_inputs.py" line="46" time="0.010" /><testcase classname="tests.test_multiscale_inputs" name="test_even_rehashed_wrong_mapping_or_schedule_rejected[prior]" file="tests/test_multiscale_inputs.py" line="46" time="0.010" /><testcase classname="tests.test_multiscale_inputs" name="test_even_rehashed_wrong_mapping_or_schedule_rejected[types]" file="tests/test_multiscale_inputs.py" line="46" time="0.010" /><testcase classname="tests.test_runtime_repairs" name="test_target_cache_outer_inner_tail_and_flags_cannot_mutate" file="tests/test_runtime_repairs.py" line="13" time="0.042" /><testcase classname="tests.test_runtime_repairs" name="test_private_cache_corruption_detected_by_binding" file="tests/test_runtime_repairs.py" line="26" time="0.013" /><testcase classname="tests.test_runtime_repairs" name="test_exact_forward_PMF_cache_equals_uncached_and_is_readonly" file="tests/test_runtime_repairs.py" line="33" time="0.013" /><testcase classname="tests.test_runtime_repairs" name="test_owned_process_group_cleanup_and_status[timeout]" file="tests/test_runtime_repairs.py" line="50" time="2.667" /><testcase classname="tests.test_runtime_repairs" name="test_owned_process_group_cleanup_and_status[STOP]" file="tests/test_runtime_repairs.py" line="50" time="1.790" /><testcase classname="tests.test_runtime_repairs" name="test_owned_process_group_cleanup_and_status[SIGINT]" file="tests/test_runtime_repairs.py" line="50" time="1.779" /><testcase classname="tests.test_runtime_repairs" name="test_owned_process_group_cleanup_and_status[SIGTERM]" file="tests/test_runtime_repairs.py" line="50" time="1.790" /><testcase classname="tests.test_runtime_repairs" name="test_owned_process_group_cleanup_and_status[SIGHUP]" file="tests/test_runtime_repairs.py" line="50" time="1.780" /><testcase classname="tests.test_runtime_repairs" name="test_owned_process_group_cleanup_and_status[success]" file="tests/test_runtime_repairs.py" line="50" time="1.781" /><testcase classname="tests.test_runtime_repairs" name="test_owned_process_group_cleanup_and_status[missing]" file="tests/test_runtime_repairs.py" line="50" time="1.781" /><testcase classname="tests.test_stepwise" name="test_noisy_target_against_exhaustive_forward[0]" file="tests/test_stepwise.py" line="36" time="0.024" /><testcase classname="tests.test_stepwise" name="test_noisy_target_against_exhaustive_forward[1]" file="tests/test_stepwise.py" line="36" time="0.019" /><testcase classname="tests.test_stepwise" name="test_noisy_target_against_exhaustive_forward[2]" file="tests/test_stepwise.py" line="36" time="0.023" /><testcase classname="tests.test_stepwise" name="test_noisy_target_against_exhaustive_forward[3]" file="tests/test_stepwise.py" line="36" time="0.018" /><testcase classname="tests.test_stepwise" name="test_noisy_target_against_exhaustive_forward[4]" file="tests/test_stepwise.py" line="36" time="0.018" /><testcase classname="tests.test_stepwise" name="test_bridge_gradient_finite_difference_and_clean_endpoint[1]" file="tests/test_stepwise.py" line="59" time="0.091" /><testcase classname="tests.test_stepwise" name="test_bridge_gradient_finite_difference_and_clean_endpoint[2]" file="tests/test_stepwise.py" line="59" time="0.087" /><testcase classname="tests.test_stepwise" name="test_bridge_gradient_finite_difference_and_clean_endpoint[3]" file="tests/test_stepwise.py" line="59" time="0.087" /><testcase classname="tests.test_stepwise" name="test_bridge_gradient_finite_difference_and_clean_endpoint[4]" file="tests/test_stepwise.py" line="59" time="0.087" /><testcase classname="tests.test_stepwise" name="test_joint_dependence_target_response_and_zero_gradient_counterexample" file="tests/test_stepwise.py" line="80" time="0.059" /><testcase classname="tests.test_stepwise" name="test_reindexing_symmetry_and_incomplete_mask_rejection" file="tests/test_stepwise.py" line="95" time="0.084" /><testcase classname="tests.test_stepwise" name="test_exact_support_saturation_and_kl_limits" file="tests/test_stepwise.py" line="110" time="0.019" /><testcase classname="tests.test_stepwise" name="test_backtracking_failure_nonfinite_and_unresolvable_gradient" file="tests/test_stepwise.py" line="125" time="0.096" /><testcase classname="tests.test_stepwise" name="test_off_original_rng_full_small_chain_and_interruption[False]" file="tests/test_stepwise.py" line="155" time="0.869" /><testcase classname="tests.test_stepwise" name="test_off_original_rng_full_small_chain_and_interruption[True]" file="tests/test_stepwise.py" line="155" time="0.936" /><testcase classname="tests.test_stepwise" name="test_checkpoint_roundtrip_binding_tamper_and_pending_step" file="tests/test_stepwise.py" line="185" time="0.945" /><testcase classname="tests.test_stepwise" name="test_model_arm_and_receipt_reject_wrong_native_weights" file="tests/test_stepwise.py" line="215" time="0.026" /><testcase classname="tests.test_stepwise" name="test_proxy_is_not_expected_discrete_squared_error" file="tests/test_stepwise.py" line="225" time="0.126" /><testcase classname="tests.test_stepwise" name="test_fresh_process_recovery" file="tests/test_stepwise.py" line="234" time="3.703" /><testcase classname="tests.test_stepwise" name="test_underflow_and_factor_guard_never_normalize_untrusted_signal" file="tests/test_stepwise.py" line="250" time="0.342" /></testsuite></testsuites>--- /dev/null
++++ b/multiscale_role/entry_guard.py
+@@ -0,0 +1,73 @@
++"""Read-only admission checks, before any output directory/file is created."""
++import json
++from pathlib import Path
++from multiscale_role.runtime_guard import checked_sha
++
++SEALED_LEDGER_SHA256='961e6d93c8194396223ac9062b1658ac87232e82710b1ab3d36e722ed2c00196'
++
++
++def overlap(left,right):
++    left,right=Path(left).resolve(),Path(right).resolve()
++    return left==right or left in right.parents or right in left.parents
++
++
++def validate_output_path(action,out,root,*,legacy_run=None,legacy_zip=None,manifest=None,evaluation=None,check=lambda:None):
++    """Resolve symlink aliases and reject overlap in either direction.
++
++    A source ZIP is a protected file, not its whole containing directory:
++    sibling outputs beside an uploaded ZIP remain permitted. Original results,
++    state/checkpoint roots and converted input directories are protected trees.
++    Metadata is only read here, never repaired or written.
++    """
++    check();out=Path(out).resolve();trees=[Path(root).resolve()];files=[]
++    def trajectory_roots(activation):
++        if activation.is_file():
++            check();data=json.loads(activation.read_text());check()
++            for key in ('states','checkpoints'):
++                if key in data:trees.append(Path(data[key]).resolve())
++    if action=='export-legacy':
++        old=Path(legacy_run).resolve();trees.append(old)
++        if legacy_zip:files.append(Path(legacy_zip).resolve())
++        # Reject the known tree FIRST, even when its metadata is missing/bad.
++        if overlap(out,old):raise ValueError('output overlaps protected input tree: '+str(old))
++        trajectory_roots(old/'activation.json')
++    elif action=='short':
++        for arg in (manifest,evaluation):
++            if arg:trees.append(Path(arg).resolve().parent);files.append(Path(arg).resolve())
++        if manifest and Path(manifest).is_file():
++            parent=Path(manifest).resolve().parent
++            data=json.loads(Path(manifest).read_text())
++            for row in data.get('records',[]):
++                check()
++                for key in ('checkpoint','source_manifest','config','npz','metadata'):
++                    if key in row:
++                        p=Path(row[key]);p=(p if p.is_absolute() else parent/p).resolve();files.append(p)
++                        if key=='checkpoint':trees.append(p.parent)
++                meta_path=Path(row.get('metadata',''))
++                meta_path=(meta_path if meta_path.is_absolute() else parent/meta_path)
++                if meta_path.is_file():
++                    meta=json.loads(meta_path.read_text())
++                    for path in meta.get('original_input_hashes',{}):
++                        p=Path(path).resolve();files.append(p)
++                        if p.name=='evidence_hashes.json':
++                            trees.append(p.parent);trajectory_roots(p.parent/'activation.json')
++    for p in trees+files:
++        check()
++        if overlap(out,p):raise ValueError('output overlaps protected input: '+str(p))
++    return dict(output=str(out),protected_trees=sorted(set(map(str,trees))),protected_files=sorted(set(map(str,files))))
++
++
++def verify_sealed_ledger(root,expected,check=lambda:None):
++    if expected!=SEALED_LEDGER_SHA256:raise ValueError('ledger expected hash differs from user-supplied sealed value')
++    path=Path(root)/'evidence_hashes.json'
++    actual=checked_sha(path,check)
++    if actual!=expected:raise ValueError('sealed ledger mismatch; original ledger must not be rewritten')
++    return actual
++
++
++def test_environment(environ):
++    # Prevent inherited -k/-m/--ignore/--deselect, plugin or addopts injection.
++    result={k:v for k,v in environ.items() if not k.startswith('PYTEST_')}
++    result['PYTEST_DISABLE_PLUGIN_AUTOLOAD']='1'
++    result['PYTHONDONTWRITEBYTECODE']='1'
++    return result
+--- a/multiscale_role/legacy.py
++++ b/multiscale_role/legacy.py
+@@ -207,6 +207,8 @@
+     try:
+         root=Path(run_root).resolve()
+         if root==out.resolve() or root in out.resolve().parents:raise ValueError('export directory must be outside original results tree')
++        from multiscale_role.entry_guard import verify_sealed_ledger
++        verify_sealed_ledger(root,ledger_sha,check)
+         files,pins,inputs=source_archive(zip_path,check);pin(zip_path,ZIP_SHA)
+         ledger=read_json(root/'evidence_hashes.json');pin(root/'evidence_hashes.json',ledger_sha)
+         for name,h in ledger.items():pin(root/name,h)
+--- /dev/null
++++ b/multiscale_role/pytest_gate.py
+@@ -0,0 +1,56 @@
++"""Exact frozen collection + all three passed phases; no skipped/xfail cases."""
++import hashlib
++import json
++from pathlib import Path
++from multiscale_role.runtime_guard import atomic_json
++
++
++def contract(root):
++    root=Path(root);spec=json.loads((root/'TEST_SUITE.json').read_text())
++    ids=spec['nodeids']
++    if not ids or len(ids)!=len(set(ids)) or len(ids)!=spec['total'] or spec['version']!='bw_role_multiscale_tail_v1_2':
++        raise ValueError('invalid frozen test collection')
++    actual={str(p.relative_to(root)) for p in (root/'tests').rglob('*.py') if '__pycache__' not in p.parts}
++    if actual!=set(spec['test_file_sha256']):raise ValueError('frozen test file set differs')
++    for name,h in spec['test_file_sha256'].items():
++        if hashlib.sha256((root/name).read_bytes()).hexdigest()!=h:raise ValueError('frozen test source differs: '+name)
++    return spec
++
++
++def complete(spec,collected,deselected,reports):
++    expected=spec['nodeids']
++    if sorted(collected)!=expected or len(collected)!=len(expected) or deselected:return False
++    if set(reports)!=set(expected):return False
++    return all(r=={'setup':'passed','call':'passed','teardown':'passed'} for r in reports.values())
++
++
++class FullSuiteGate:
++    def __init__(self,root,output):
++        self.spec=contract(root);self.output=Path(output);self.collected=[];self.deselected=[];self.reports={}
++    def pytest_collection_finish(self,session):self.collected=[i.nodeid for i in session.items]
++    def pytest_deselected(self,items):self.deselected.extend(i.nodeid for i in items)
++    def pytest_runtest_logreport(self,report):
++        row=self.reports.setdefault(report.nodeid,{})
++        if report.when in row:row['duplicate_phase']='failed'
++        row[report.when]='xfail' if hasattr(report,'wasxfail') else report.outcome
++    def pytest_sessionfinish(self,session,exitstatus):
++        passed=exitstatus==0 and complete(self.spec,self.collected,self.deselected,self.reports)
++        atomic_json(self.output,dict(status='complete' if passed else 'incomplete',
++            expected_nodeids=self.spec['nodeids'],collected_nodeids=self.collected,deselected_nodeids=self.deselected,
++            reports=self.reports,full_suite_passed=passed))
++        if not passed:session.exitstatus=1
++
++
++def validate(root,out):
++    import xml.etree.ElementTree as ET
++    spec=contract(root);out=Path(out);record=json.loads((out/'test_execution.json').read_text())
++    if record.get('expected_nodeids')!=spec['nodeids'] or record.get('full_suite_passed') is not True or record.get('status')!='complete':
++        raise ValueError('full test collection receipt missing or incomplete')
++    if not complete(spec,record['collected_nodeids'],record['deselected_nodeids'],record['reports']):
++        raise ValueError('test identities/phases incomplete, skipped, deselected or duplicated')
++    suites=list(ET.parse(out/'tests.xml').getroot().iter('testsuite'))
++    cases=list(ET.parse(out/'tests.xml').getroot().iter('testcase'))
++    if sum(int(s.get('tests',0)) for s in suites)!=spec['total'] or len(cases)!=spec['total'] or any(int(s.get(k,0)) for s in suites for k in ('errors','failures','skipped')):
++        raise ValueError('JUnit does not cover the frozen complete test suite')
++    if any(c.find(k) is not None for c in cases for k in ('skipped','failure','error')):
++        raise ValueError('JUnit contains unsuccessful test cases')
+--- a/run_multiscale.py
++++ b/run_multiscale.py
+@@ -6,8 +6,10 @@
+ import os
+ from pathlib import Path
+ import sys
++sys.dont_write_bytecode=True
+ import uuid
+ from multiscale_role.runtime_guard import supervise,checked_sha,atomic_json
++from multiscale_role.entry_guard import validate_output_path,verify_sealed_ledger,test_environment
+ 
+ ROOT=Path(__file__).resolve().parent
+ 
+@@ -15,10 +17,8 @@
+ def validate_result(action,out,check):
+     check();out=Path(out)
+     if action=='test':
+-        import xml.etree.ElementTree as ET
+-        suites=list(ET.parse(out/'tests.xml').getroot().iter('testsuite'))
+-        if sum(int(s.get('tests',0)) for s in suites)<85 or any(int(s.get(k,0)) for s in suites for k in ('errors','failures','skipped')):
+-            raise ValueError('missing/incomplete regression evidence')
++        from multiscale_role.pytest_gate import validate
++        validate(ROOT,out)
+         return
+     summary=json.loads((out/'summary.json').read_text())
+     expected={'short':'complete','export-legacy':'exported','cost':'completed_synthetic_engineering_cost'}[action]
+@@ -81,11 +81,20 @@
+         p.error('pinned converted manifest and evaluation required')
+     if a.action=='export-legacy' and not all((a.legacy_zip,a.legacy_run,a.legacy_ledger_sha256)):
+         p.error('original ZIP, actual results root and pinned original evidence ledger required')
++    # No mkdir, activation, controller or other application write before this.
++    try:
++        def admission_check():
++            if time.monotonic()>=ENTRY_STARTED+a.seconds-12:raise TimeoutError('admission budget exhausted')
++        admission=validate_output_path(a.action,out,ROOT,legacy_run=a.legacy_run,legacy_zip=a.legacy_zip,
++                                       manifest=a.manifest,evaluation=a.evaluation,check=admission_check)
++        if a.action=='export-legacy':verify_sealed_ledger(a.legacy_run,a.legacy_ledger_sha256,admission_check)
++    except (ValueError,OSError,KeyError,TypeError) as exc:p.error(str(exc))
+     out.mkdir(parents=True,exist_ok=False)
+     deadline=ENTRY_STARTED+a.seconds;token=uuid.uuid4().hex
+     env=dict(os.environ,OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1',PYTHONUNBUFFERED='1',DIHUG_WORKER_TOKEN=token)
+     if a.action=='test':
+-        command=[sys.executable,'-m','pytest','-q','tests','--disable-warnings','--junitxml='+str(out/'tests.xml')]
++        env=test_environment(env)
++        command=[sys.executable,str(ROOT/'test_worker.py'),'--output',str(out)]
+     else:
+         command=[sys.executable,'-u',str(Path(__file__).resolve()),a.action,'--worker','--output',str(out),
+                  '--seconds',str(a.seconds),'--deadline',str(deadline-12),'--cleanup-deadline',str(deadline-4)]
+@@ -99,7 +108,7 @@
+             check();expected,name=line.split('  ',1)
+             if checked_sha(ROOT/name,check)!=expected:raise ValueError('bundle hash mismatch: '+name)
+         atomic_json(out/'activation.json',dict(action=a.action,worker_token=token,controller_pid=os.getpid(),
+-            absolute_old_deadline=None,single_run_seconds=a.seconds),check)
++            absolute_old_deadline=None,single_run_seconds=a.seconds,path_admission=admission),check)
+     def validate(check):
+         validate_result(a.action,out,check)
+     return supervise(command,out,a.seconds,validate,env,ENTRY_STARTED,preflight)
+--- /dev/null
++++ b/test_worker.py
+@@ -0,0 +1,21 @@
++"""Internal CPU test worker, isolated from inherited pytest selection."""
++import argparse
++import os
++from pathlib import Path
++import sys
++sys.dont_write_bytecode=True
++ROOT=Path(__file__).resolve().parent
++
++
++def main():
++    p=argparse.ArgumentParser();p.add_argument('--output',required=True);a=p.parse_args()
++    from multiscale_role.entry_guard import test_environment
++    env=test_environment(os.environ);os.environ.clear();os.environ.update(env);os.chdir(ROOT)
++    import pytest
++    from multiscale_role.pytest_gate import FullSuiteGate
++    return pytest.main(['-q','-c',str(ROOT/'pytest.ini'),'-o','addopts=',
++        '--confcutdir='+str(ROOT/'tests'),'tests','--disable-warnings',
++        '--junitxml='+str(Path(a.output)/'tests.xml')],plugins=[FullSuiteGate(ROOT,Path(a.output)/'test_execution.json')])
++
++
++if __name__=='__main__':raise SystemExit(main())
+--- /dev/null
++++ b/tests/test_admission_suite.py
+@@ -0,0 +1,117 @@
++"""Admission and exact-suite engineering negatives; no real diagnostic inputs."""
++import copy
++import hashlib
++import json
++import os
++from pathlib import Path
++import subprocess
++import sys
++import xml.etree.ElementTree as ET
++import pytest
++from multiscale_role.entry_guard import validate_output_path,verify_sealed_ledger,SEALED_LEDGER_SHA256,test_environment as clean_env
++from multiscale_role.pytest_gate import validate,complete
++
++ROOT=Path(__file__).resolve().parents[1]
++
++
++def snapshot(path):
++    return {str(p.relative_to(path)):('directory' if p.is_dir() else hashlib.sha256(p.read_bytes()).hexdigest())
++            for p in path.rglob('*')}
++
++
++@pytest.mark.parametrize('location',['results','symlink','states','weights','short_input'])
++def test_rejected_output_adds_no_file_to_protected_inputs(tmp_path,location):
++    old=tmp_path/'old';old.mkdir();states=tmp_path/'states';states.mkdir();weights=tmp_path/'weights';weights.mkdir()
++    (old/'activation.json').write_text(json.dumps(dict(states=str(states),checkpoints=str(weights))))
++    (old/'evidence_hashes.json').write_text('{"fixture":"no scientific input"}')
++    (states/'kept.bin').write_bytes(b'unchanged');(weights/'kept.bin').write_bytes(b'unchanged')
++    if location=='symlink':(tmp_path/'alias').symlink_to(old,target_is_directory=True)
++    parent={'results':old,'symlink':tmp_path/'alias','states':states,'weights':weights,'short_input':old}[location]
++    out=parent/'must_not_be_created'/'nested'
++    if location=='short_input':
++        (old/'manifest.json').write_text('{"records":[]}');(old/'evaluation.json').write_text('{}')
++        args=['short','--manifest',str(old/'manifest.json'),'--manifest-sha256','0'*64,
++              '--evaluation',str(old/'evaluation.json'),'--evaluation-sha256','0'*64]
++    else:args=['export-legacy','--legacy-run',str(old),'--legacy-zip',str(tmp_path/'not_read.zip'),
++               '--legacy-ledger-sha256',SEALED_LEDGER_SHA256]
++    before={str(p):snapshot(p) for p in (old,states,weights)}
++    env=dict(os.environ,PYTHONDONTWRITEBYTECODE='1')
++    result=subprocess.run([sys.executable,str(ROOT/'run_multiscale.py'),*args,'--output',str(out),'--seconds','30'],
++                          capture_output=True,text=True,env=env,timeout=10)
++    assert result.returncode!=0 and 'overlaps protected' in result.stderr
++    assert not out.parent.exists() and before=={str(p):snapshot(p) for p in (old,states,weights)}
++
++
++def test_path_sibling_allowed_but_source_or_ancestor_rejected(tmp_path):
++    source=tmp_path/'source';old=tmp_path/'old';old.mkdir();source.mkdir()
++    receipt=validate_output_path('export-legacy',tmp_path/'new',source,legacy_run=old,legacy_zip=tmp_path/'uploaded.zip')
++    assert receipt['output']==str(tmp_path/'new') and not (tmp_path/'new').exists()
++    for out in (source/'child',tmp_path):
++        with pytest.raises(ValueError,match='overlaps'):validate_output_path('export-legacy',out,source,legacy_run=old)
++
++
++@pytest.mark.parametrize('expected_kind',['sealed_but_changed_file','self_computed_current_hash'])
++def test_unsealed_or_changed_ledger_rejected_without_writes(tmp_path,expected_kind):
++    old=tmp_path/'old';old.mkdir();ledger=old/'evidence_hashes.json';ledger.write_text('{}')
++    expected=SEALED_LEDGER_SHA256 if expected_kind=='sealed_but_changed_file' else hashlib.sha256(ledger.read_bytes()).hexdigest()
++    before=snapshot(old);out=tmp_path/'new_output'
++    result=subprocess.run([sys.executable,str(ROOT/'run_multiscale.py'),'export-legacy','--legacy-run',str(old),
++        '--legacy-zip',str(tmp_path/'not_read.zip'),'--legacy-ledger-sha256',expected,'--output',str(out),'--seconds','30'],
++        capture_output=True,text=True,timeout=10)
++    assert result.returncode!=0 and 'ledger' in result.stderr and not out.exists() and snapshot(old)==before
++
++
++def test_correct_sealed_value_checked_not_substituted(monkeypatch,tmp_path):
++    import multiscale_role.entry_guard as guard
++    calls=[]
++    def hashed(path,check):calls.append(path);check();return SEALED_LEDGER_SHA256
++    monkeypatch.setattr(guard,'checked_sha',hashed)
++    assert verify_sealed_ledger(tmp_path,SEALED_LEDGER_SHA256)==SEALED_LEDGER_SHA256 and len(calls)==1
++    with pytest.raises(ValueError):verify_sealed_ledger(tmp_path,'0'*64)
++    assert len(calls)==1 # refuse replacement expected hash even before reading
++
++
++def test_inherited_pytest_selection_and_plugin_environment_isolated():
++    result=clean_env(dict(PYTEST_ADDOPTS='-k test_contract --deselect something',PYTEST_PLUGINS='bad',
++        PYTEST_DISABLE_PLUGIN_AUTOLOAD='0',PYTEST_CURRENT_TEST='parent',OMP_NUM_THREADS='1',KEEP='ok'))
++    assert result==dict(PYTEST_DISABLE_PLUGIN_AUTOLOAD='1',PYTHONDONTWRITEBYTECODE='1',OMP_NUM_THREADS='1',KEEP='ok')
++
++
++def fake_suite(root,out,total=115):
++    (root/'tests').mkdir(parents=True);source=root/'tests/test_fixture.py';source.write_text('# engineering receipt fixture only\n')
++    ids=['tests/test_fixture.py::test_%03d'%i for i in range(total)]
++    spec=dict(version='bw_role_multiscale_tail_v1_2',total=total,nodeids=ids,
++              test_file_sha256={'tests/test_fixture.py':hashlib.sha256(source.read_bytes()).hexdigest()})
++    (root/'TEST_SUITE.json').write_text(json.dumps(spec))
++    receipt=dict(status='complete',expected_nodeids=ids,collected_nodeids=ids.copy(),deselected_nodeids=[],full_suite_passed=True,
++                 reports={i:dict(setup='passed',call='passed',teardown='passed') for i in ids})
++    suite=ET.Element('testsuite',tests=str(total),errors='0',failures='0',skipped='0')
++    for i in ids:ET.SubElement(suite,'testcase',name=i)
++    out.mkdir();ET.ElementTree(suite).write(out/'tests.xml');(out/'test_execution.json').write_text(json.dumps(receipt))
++    return spec,receipt,suite
++
++
++@pytest.mark.parametrize('bad',['old_85','old_112','same_count_wrong_identity','duplicate','skip','xfail','missing_teardown','deselected','empty_receipt','junit_skip'])
++def test_exact_collection_and_zero_skip_not_old_count_floor(tmp_path,bad):
++    root=tmp_path/'package';out=tmp_path/'out';spec,record,xml=fake_suite(root,out)
++    validate(root,out)
++    ids=spec['nodeids']
++    if bad in ('old_85','old_112'):
++        n=85 if bad=='old_85' else 112;record['collected_nodeids']=ids[:n];record['reports']={k:v for k,v in record['reports'].items() if k in ids[:n]}
++    elif bad=='same_count_wrong_identity':record['collected_nodeids'][-1]='tests/test_fixture.py::unapproved_test'
++    elif bad=='duplicate':record['collected_nodeids'][-1]=ids[0]
++    elif bad in ('skip','xfail'):record['reports'][ids[0]]['call']='skipped' if bad=='skip' else 'xfail'
++    elif bad=='missing_teardown':record['reports'][ids[0]].pop('teardown')
++    elif bad=='deselected':record['deselected_nodeids']=[ids[0]]
++    elif bad=='empty_receipt':record={}
++    else:ET.SubElement(xml[0],'skipped');ET.ElementTree(xml).write(out/'tests.xml')
++    (out/'test_execution.json').write_text(json.dumps(record))
++    with pytest.raises((ValueError,KeyError)):validate(root,out)
++
++
++def test_manifest_checks_test_files_and_new_file_set(tmp_path):
++    root=tmp_path/'package';out=tmp_path/'out';fake_suite(root,out)
++    (root/'tests/test_added.py').write_text('# unrecorded file')
++    with pytest.raises(ValueError,match='file set'):validate(root,out)
++    (root/'tests/test_added.py').unlink();(root/'tests/test_fixture.py').write_text('# altered')
++    with pytest.raises(ValueError,match='source differs'):validate(root,out)

@@ -1,0 +1,68 @@
+{
+  "status": "passed_small_CPU_engineering_only",
+  "base_commit": "7049e64b108f2ef434c40815457c74037c4455eb",
+  "native_CPU_cases": 133,
+  "new_CPU_cases": 20,
+  "total_CPU_cases": 153,
+  "real_B1_tested": false,
+  "real_case05_metrics_reproduced": false,
+  "real_notebook_inputs_access": "unavailable PermissionError; no remote connection",
+  "missing_external_pins": [
+    "sealed summary.json SHA256",
+    "sealed case_05.json SHA256"
+  ],
+  "BW_connected": false,
+  "GPU_use": 0,
+  "model_calls_real": 0,
+  "training": 0,
+  "scientific_graphs": 0,
+  "new_small_test_wall_seconds": 5.42,
+  "new_small_test_CPU_seconds": 5.34,
+  "new_small_peak_RSS_MiB": 440.796875,
+  "native_test_wall_seconds": 32.37,
+  "native_test_CPU_seconds": 21.17,
+  "native_peak_RSS_MiB": 476.390625,
+  "numeric_witnesses": {
+    "scope": "SMALL deterministic CPU fixtures, NOT real B1/IMDB observations",
+    "gradient_sum": [
+      {
+        "max_abs_error": 4.336808689942018e-19,
+        "scale": 0.0016220620218240426,
+        "tolerance": 8.110310109120213e-14,
+        "relative_to_scale": 2.6736392515159106e-16,
+        "exact_zero_case": false,
+        "passed": true
+      },
+      {
+        "max_abs_error": 1.6263032587282567e-19,
+        "scale": 0.0005008420780483355,
+        "tolerance": 2.5042103902416776e-14,
+        "relative_to_scale": 3.247137830482575e-16,
+        "exact_zero_case": false,
+        "passed": true
+      },
+      {
+        "max_abs_error": 1.6940658945086007e-21,
+        "scale": 1.0311374152753105e-05,
+        "tolerance": 5.155687076376553e-16,
+        "relative_to_scale": 1.6429099258863478e-16,
+        "exact_zero_case": false,
+        "passed": true
+      }
+    ],
+    "component_logit_gradient_finite_difference_max_abs_error": 1.203674746680372e-13,
+    "independent_metric_logit_gradient_finite_difference_max_abs_error": 1.8822725496303594e-14,
+    "old_chosen_update_p_exact": true,
+    "old_chosen_update_q_exact": true,
+    "W1_interval_sum_error": 0.0,
+    "full_PMF_W1_existing_metric_error": 0.0,
+    "training": 0,
+    "scientific_graphs": 0,
+    "real_B1_executed": false,
+    "GPU_use": 0
+  },
+  "real_B1_runtime_seconds": "not measured; maximum allowed900s including verification/IO/cleanup",
+  "candidate_searches_real": 0,
+  "prediction_scope": "first-order fixed original denominator; not causal decomposition or generation quality",
+  "development_guard_rejection": "stale test manifest was rejected before testing; retained under results/b1_release_tests; refreshed frozen contract then full20 passed"
+}
