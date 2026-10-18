@@ -1,0 +1,59 @@
+{
+  "status": "protocol_failed",
+  "records": [],
+  "policy": {
+    "version": "six_state_development_v1",
+    "fixed_cases": [
+      [
+        "A",
+        500
+      ],
+      [
+        "A",
+        20
+      ],
+      [
+        "A",
+        1
+      ],
+      [
+        "B",
+        500
+      ],
+      [
+        "B",
+        20
+      ],
+      [
+        "B",
+        1
+      ]
+    ],
+    "q_bridge_atol": 5e-14,
+    "CF_atol": 2e-10,
+    "W1_atol": 1e-08,
+    "metric_rtol": 1e-09,
+    "W1_allowance_rule": "add before+after 64*eps*capacity*(capacity+nodes+role_rows+1)",
+    "full_panel_rule": "all six complete; neither Genre64 nor any Genre W1 channel worsens beyond numerical tolerance; at least one state improves BOTH Genre64 and a Genre W1 channel",
+    "mixed_rule": "any independent metric deterioration => tradeoff, not overall success",
+    "unresolved_rule": "no resolved independent gain => no evidence of gain; not equivalence",
+    "failure_rule": "missing/binding/numerical error or timeout => incomplete/protocol failure; never declare success from subset",
+    "meaning": "descriptive frozen-state evidence only, no generated-graph quality claim"
+  },
+  "model_calls": 0,
+  "GPU_use": 0,
+  "training_updates": 0,
+  "scientific_graphs": 0,
+  "backend": "numpy_float64_CPU_reference",
+  "gpu_peak_memory": null,
+  "gpu_decisions_verified": false,
+  "exception": "FileNotFoundError",
+  "reason": "[Errno 2] No such file or directory: '/tmp/DIHUG_MISSING_REAL_SIX_INPUT.json'",
+  "completed_records": 0,
+  "worker_wall_seconds": 0.00011899415403604507,
+  "worker_CPU_seconds": 0.00011759999999999549,
+  "worker_peak_rss_mib": 50.36328125,
+  "input_hashes_unchanged": null,
+  "input_hashes": {},
+  "input_hash_verification_complete": false
+}
