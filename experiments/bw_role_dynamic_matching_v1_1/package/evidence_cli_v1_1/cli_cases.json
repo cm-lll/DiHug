@@ -1,0 +1,45 @@
+{
+  "scope": "public CLI parent-child-supervisor; built-in four-slot ENGINEERING fixture only",
+  "cases": [
+    {
+      "scenario": "success",
+      "outer_exit_code": 0,
+      "controller_exit_code": 0,
+      "status": "completed",
+      "reason": "completed",
+      "owned_group_gone": true,
+      "artifact_present": true,
+      "wall_seconds": 0.6361229009926319
+    },
+    {
+      "scenario": "invalid",
+      "outer_exit_code": 1,
+      "controller_exit_code": 1,
+      "status": "failed",
+      "reason": "child_failed",
+      "owned_group_gone": true,
+      "artifact_present": false,
+      "wall_seconds": 0.5346268070861697
+    },
+    {
+      "scenario": "timeout",
+      "outer_exit_code": 124,
+      "controller_exit_code": 124,
+      "status": "incomplete",
+      "reason": "timeout",
+      "owned_group_gone": true,
+      "artifact_present": false,
+      "wall_seconds": 15.624668420292437
+    },
+    {
+      "scenario": "STOP",
+      "outer_exit_code": 75,
+      "controller_exit_code": 75,
+      "status": "stopped",
+      "reason": "STOP",
+      "owned_group_gone": true,
+      "artifact_present": false,
+      "wall_seconds": 2.068553250283003
+    }
+  ]
+}

@@ -1,0 +1,344 @@
+--- /dev/null
++++ b/CLI_REPAIR_V1_1.md
+@@ -0,0 +1,52 @@
++# Dynamic matching v1.1: CLI and release binding only
++
++Baseline review commit: **50c6ab1d9df245cd103fbacd42dfeb7298d417c9**.
++The v1 directory, ZIP, weights, historical evidence and main are preserved.
++
++## Changes
++
++- `run_dynamic.py` now propagates the INTEGER returned by the unchanged
++  `supervise` implementation. Status display reads `controller.json` separately;
++  it never treats an exit code as a dictionary or remaps all failures to1.
++- B1 and six-state receipts additionally bind the SHA256 of the complete
++  `DYNAMIC_SHA256SUMS` release checklist. The public parent still checks EVERY
++  listed file before spawn and after completion. This covers reused posterior,
++  sampling and evaluation code as well as `dynamic_role`. Target, portable input,
++  module fingerprint and Python/NumPy/SciPy bindings remain mandatory. Old B1
++  receipts without the new release field are rejected, not silently grandfathered.
++- Public `smoke` action is explicitly ENGINEERING ONLY: one fixed four-slot
++  probability test, no model, private weights, real-state input or graph sampling.
++  `invalid` supplies an illegal toy probability to exercise a genuine child
++  failure. `wait` emulates a stuck child so timeout/STOP must be handled by the
++  original parent supervisor. It cannot run beyond the unchanged inclusive bound.
++
++No dynamic-matching mathematics, objective normalization, support, controller
++settings, scientific policy, model/loss, noise, posterior, T1000 or query plan
++changes. Old133+39 test cases remain present. Earlier evidence directories describe
++the baseline runs; current evidence is in `evidence_cli_v1_1` and release receipts.
++
++## Safe CPU command after extracting this NEW ZIP
++
++```bash
++env OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 CUDA_VISIBLE_DEVICES='' \
++  /usr/local/bin/python3.11 run_dynamic.py smoke \
++  --output /tmp/dynamic_role_cli_smoke_01 --max-seconds 20
++echo $?
++```
++
++Success requires exit0, controller status completed, child status complete and
++the hash-verified `engineering_result.json`. This is not a six-state run.
++
++```bash
++python verify_dynamic.py --output /tmp/dynamic_role_v1_1_full_tests_01
++```
++
++The full test wrapper freezes the exact complete test collection and requires
++zero skipped/failed/missing cases. Public CLI tests genuinely start parent,
++child and supervisor for success, invalid input, timeout124 and STOP75. Tests
++use only their own process groups and fresh temporary engineering outputs.
++SIGKILL/machine loss remain uncatchable; no new claim is made about them.
++
++Existing scientific `pack/check/b1/six` arguments and900-second maximum remain
++unchanged. This repair does NOT authorize running those real-data commands,
++BW, training or full chains. No real six-state inputs were read for this ticket.
+--- /dev/null
++++ b/dynamic_role/cli_smoke.py
+@@ -0,0 +1,39 @@
++"""Built-in four-slot ENGINEERING fixture for the public CLI, not six states.
++
++No model/weights, graph sampling, scientific input, or alternative mathematics.
++The wait fixture intentionally emulates a child stuck outside cooperative
++checks so the unchanged parent supervisor's timeout/STOP cleanup is exercised.
++"""
++import time
++import numpy as np
++from .core import Layout,MatchingGuide,freeze
++from hsgd.kernel import MarginalKernel
++from role_degree.role_statistics import joint_profile
++from multiscale_role.runtime_guard import atomic_json,checked_sha
++
++
++def run(args,out,check):
++    check()
++    atomic_json(out/'smoke_started.json',dict(scope='ENGINEERING_ONLY',mode=args.smoke_mode),check)
++    if args.smoke_mode=='wait':
++        # No scientific computation here. Parent must terminate/reap this
++        # noncooperative fixture within its ORIGINAL inclusive budget.
++        while True:time.sleep(.025)
++    layout=Layout.canonical([0,0,1,2],[(0,1),(0,2)],[.5,.5])
++    clean=np.array([[0,0],[2,3]],dtype=np.int64)
++    profile=joint_profile(layout.types,clean,np.array([0,1]),layout.pairs)
++    kernel=MarginalKernel(layout.prior,[1.,.8,.4,0.])
++    guide=MatchingGuide(layout,freeze(profile,layout,kernel.alpha,'0'*64))
++    p=np.array([.17,.63,.46,.81]);state=np.array([1,0,0,1],dtype=np.uint8)
++    if args.smoke_mode=='invalid':p=np.array([1.1,.63,.46,.81])
++    pp,q,record=guide.apply(p,state,kernel,1,check)
++    checks=dict(resolved_descent=record['status']=='accepted',
++        finite_probabilities=bool(np.isfinite(pp).all() and np.isfinite(q).all()),
++        exact_t1_correspondence=bool(np.array_equal(pp,q)),
++        reoptimized_not_above_fixed=bool(record['loss_after_reoptimized']<=record['loss_after_fixed']+record['reoptimization_allowance']))
++    if not all(checks.values()):raise ValueError('toy engineering smoke check failed')
++    atomic_json(out/'engineering_result.json',dict(scope='ENGINEERING_ONLY_NOT_SIX_STATES',
++        checks=checks,p0_before=p.tolist(),p0_after=pp.tolist(),q=q.tolist(),guidance=record),check)
++    return dict(status='complete',scope='engineering_cli_smoke',checks=checks,
++        artifact_sha256=checked_sha(out/'engineering_result.json',check),
++        model_calls=0,training_updates=0,scientific_graphs=0,GPU_use=0)
+--- a/dynamic_role/runner.py
++++ b/dynamic_role/runner.py
+@@ -26,6 +26,27 @@
+ def fingerprint():
+     root=Path(__file__).resolve().parent
+     return signature({p.name:checked_sha(p,lambda:None) for p in sorted(root.glob('*.py'))})
++
++
++def stage_binding(target_sha256,portable_sha256,numeric_runtime,check=lambda:None):
++    """Bind all shipped bytes via the complete release checklist, not only us.
++
++    The public parent verifies every listed payload before spawn and after the
++    worker completes. Hashing the checklist also covers its binding to the
++    reused posterior/sampling/evaluation sources. Recheck it at worker exit.
++    """
++    checklist=Path(__file__).resolve().parents[1]/'DYNAMIC_SHA256SUMS'
++    return dict(implementation_sha256=fingerprint(),target_sha256=target_sha256,
++        portable_sha256=portable_sha256,numeric_runtime=numeric_runtime,
++        release_checklist_sha256=checked_sha(checklist,check))
++
++
++def require_b1_binding(receipt,current):
++    if receipt.get('status')!='complete' or receipt.get('scope')!='b1':
++        raise ValueError('completed B1 receipt required')
++    for key,value in current.items():
++        if receipt.get(key)!=value:
++            raise ValueError('B1 receipt binding differs: '+key)
+ 
+ 
+ def distributions(p,layout):
+@@ -103,12 +124,15 @@
+     kernel=MarginalKernel(layout.prior,guide.alpha);cache=ForwardPMFCache()
+     import platform,scipy
+     numeric_runtime=dict(python=platform.python_version(),numpy=np.__version__,scipy=scipy.__version__)
+-    implementation=fingerprint();result.update(implementation_sha256=implementation,target_sha256=target['sha256'],environment=c.environment('cpu'),numeric_runtime=numeric_runtime)
++    current_binding=stage_binding(target['sha256'],args.portable_sha256,numeric_runtime,check)
++    implementation=current_binding['implementation_sha256']
++    result.update(current_binding,environment=c.environment('cpu'))
+     if args.action=='six':
+         if not args.b1_receipt or not args.b1_receipt_sha256:raise ValueError('B1 development receipt required before frozen six-state run')
+         receipt=json.loads(Path(args.b1_receipt).read_text())
+-        if checked_sha(args.b1_receipt,check)!=args.b1_receipt_sha256 or receipt.get('status')!='complete' or receipt.get('scope')!='b1' or receipt.get('implementation_sha256')!=implementation or receipt.get('target_sha256')!=target['sha256'] or receipt.get('portable_sha256')!=args.portable_sha256 or receipt.get('numeric_runtime')!=numeric_runtime:
+-            raise ValueError('B1 receipt source/target/input not same frozen implementation')
++        if checked_sha(args.b1_receipt,check)!=args.b1_receipt_sha256:
++            raise ValueError('B1 receipt hash differs')
++        require_b1_binding(receipt,current_binding)
+     for index,row in enumerate(bundle.original['records']):
+         if args.action=='b1' and (row['arm'],row['t'])!=('B',1):continue
+         check();print(json.dumps(dict(event='case_start',arm=row['arm'],t=row['t'],index=index)),flush=True)
+@@ -136,7 +160,7 @@
+         atomic_json(out/('case_%02d.json'%index),rec,check);records.append(rec)
+         check();print(json.dumps(dict(event='case_done',arm=row['arm'],t=row['t'],status=diagnostic['status'],wall_seconds=rec['case_wall_seconds'])),flush=True)
+     check();bundle.rehash();check()
+-    if fingerprint()!=implementation or checked_sha(c.PACKAGE/'data/IMDB_movie_reference.npz',check)!=reference_sha:
++    if stage_binding(target['sha256'],args.portable_sha256,numeric_runtime,check)!=current_binding or checked_sha(c.PACKAGE/'data/IMDB_movie_reference.npz',check)!=reference_sha:
+         raise ValueError('used implementation/reference changed during computation')
+     result.update(status='complete',completed_records=len(records),portable_sha256=args.portable_sha256,
+         wall_seconds=time.monotonic()-started,cpu_seconds=time.process_time()-cpu,
+--- /dev/null
++++ b/matching_tests/test_cli_repairs.py
+@@ -0,0 +1,126 @@
++"""Public CLI/process tests and complete-release phase binding.
++
++Only a built-in four-slot engineering fixture is used. No real/imitated six
++state arrays, notebooks, models, weights, training, or scientific chain.
++"""
++import copy
++import hashlib
++import json
++import os
++from pathlib import Path
++import shutil
++import subprocess
++import sys
++import time
++import pytest
++from dynamic_role import runner
++
++ROOT=Path(__file__).resolve().parents[1]
++
++
++@pytest.mark.parametrize('scenario,expected_code,expected_status,expected_reason',[
++    ('success',0,'completed','completed'),
++    ('invalid',1,'failed','child_failed'),
++    ('timeout',124,'incomplete','timeout'),
++    ('STOP',75,'stopped','STOP'),
++])
++def test_public_cli_parent_child_supervisor(scenario,expected_code,expected_status,expected_reason,tmp_path,record_property):
++    out=tmp_path/'fresh_output';log=tmp_path/'public_cli.log'
++    env=os.environ.copy();env.update(CUDA_VISIBLE_DEVICES='',OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1',PYTHONDONTWRITEBYTECODE='1')
++    mode='wait' if scenario in ('timeout','STOP') else scenario
++    command=[sys.executable,str(ROOT/'run_dynamic.py'),'smoke','--smoke-mode',mode,
++             '--output',str(out),'--max-seconds','20']
++    start=time.monotonic()
++    with log.open('w') as stream:
++        proc=subprocess.Popen(command,cwd=ROOT,env=env,stdout=stream,stderr=subprocess.STDOUT)
++        try:
++            if scenario=='STOP':
++                until=time.monotonic()+12
++                while not (out/'smoke_started.json').is_file():
++                    if proc.poll() is not None or time.monotonic()>until:
++                        pytest.fail('real smoke child did not start: '+log.read_text())
++                    time.sleep(.025)
++                (out/'STOP').touch()
++            code=proc.wait(timeout=35)
++        finally:
++            # Clean only the process this fixture owns if the test itself fails.
++            if proc.poll() is None:
++                if out.is_dir():(out/'STOP').touch()
++                proc.terminate()
++                try:proc.wait(timeout=8)
++                except subprocess.TimeoutExpired:
++                    proc.kill();proc.wait(timeout=3)
++                    if (out/'controller_child.json').exists():
++                        import signal
++                        pgid=json.loads((out/'controller_child.json').read_text())['pgid']
++                        try:os.killpg(pgid,signal.SIGKILL)
++                        except ProcessLookupError:pass
++    assert code==expected_code,log.read_text()
++    receipt=json.loads((out/'controller.json').read_text())
++    assert receipt['exit_code']==code and receipt['status']==expected_status and receipt['reason']==expected_reason
++    assert receipt['single_run_limit_seconds']==20 and all(receipt['cleanup'].values())
++    child=json.loads((out/'controller_child.json').read_text())
++    assert child['pid']!=proc.pid and child['pgid']==child['pid']
++    with pytest.raises(ProcessLookupError):os.killpg(child['pgid'],0)
++    artifact=out/'engineering_result.json'
++    if scenario=='success':
++        summary=json.loads((out/'summary.json').read_text());result=json.loads(artifact.read_text())
++        assert summary['status']=='complete' and summary['scope']=='engineering_cli_smoke'
++        assert summary['checks'] and all(summary['checks'].values())
++        assert hashlib.sha256(artifact.read_bytes()).hexdigest()==summary['artifact_sha256']
++        assert result['scope']=='ENGINEERING_ONLY_NOT_SIX_STATES'
++        assert result['checks']==summary['checks'] and result['q']==result['p0_after']
++        assert result['guidance']['status']=='accepted' and result['guidance']['loss_after_fixed']<result['guidance']['loss_before']
++    else:
++        assert not artifact.exists()
++        if (out/'summary.json').exists():assert json.loads((out/'summary.json').read_text())['status']!='complete'
++    record_property('scenario',scenario);record_property('outer_exit_code',code)
++    record_property('controller_exit_code',receipt['exit_code']);record_property('status',receipt['status'])
++    record_property('reason',receipt['reason']);record_property('owned_group_gone',receipt['cleanup']['owned_group_gone'])
++    record_property('artifact_present',artifact.exists());record_property('wall_seconds',time.monotonic()-start)
++
++
++def current_binding():
++    return runner.stage_binding('1'*64,'2'*64,dict(python='engineering',numpy='engineering',scipy='engineering'))
++
++
++def test_phase_binding_accepts_exact_match_and_rejects_old_receipt():
++    binding=current_binding();receipt=dict(status='complete',scope='b1',**binding)
++    assert len(binding['release_checklist_sha256'])==64
++    runner.require_b1_binding(receipt,binding)
++    del receipt['release_checklist_sha256']
++    with pytest.raises(ValueError,match='release_checklist_sha256'):runner.require_b1_binding(receipt,binding)
++
++
++@pytest.mark.parametrize('field',['release_checklist_sha256','implementation_sha256','target_sha256','portable_sha256','numeric_runtime'])
++def test_phase_binding_rejects_each_changed_component(field):
++    binding=current_binding();receipt=dict(status='complete',scope='b1',**copy.deepcopy(binding))
++    receipt[field]={'scipy':'changed'} if field=='numeric_runtime' else 'f'*64
++    with pytest.raises(ValueError,match=field):runner.require_b1_binding(receipt,binding)
++
++
++@pytest.mark.parametrize('reused_source',['hsgd/kernel.py','stepwise_role/sampling.py','multiscale_role/evaluation.py'])
++def test_reused_source_change_keeps_module_hash_but_changes_release_binding(reused_source,tmp_path,monkeypatch):
++    # Copy real released source bytes into an ENGINEERING package, not fake
++    # notebook manifests. A comment mutation stands for a different release.
++    package=tmp_path/'engineering_package';module=package/'dynamic_role';module.mkdir(parents=True)
++    for src in (ROOT/'dynamic_role').glob('*.py'):shutil.copyfile(src,module/src.name)
++    relevant=['hsgd/kernel.py','stepwise_role/sampling.py','multiscale_role/evaluation.py']
++    for name in relevant:
++        dest=package/name;dest.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(ROOT/name,dest)
++    def seal():
++        names=sorted([str(p.relative_to(package)) for p in module.glob('*.py')]+relevant)
++        (package/'DYNAMIC_SHA256SUMS').write_text(''.join(hashlib.sha256((package/n).read_bytes()).hexdigest()+'  '+n+'\n' for n in names))
++    seal();monkeypatch.setattr(runner,'__file__',str(module/'runner.py'))
++    before=current_binding();receipt=dict(status='complete',scope='b1',**before)
++    with (package/reused_source).open('a') as f:f.write('\n# ENGINEERING different-release fixture only\n')
++    seal();after=current_binding()
++    assert before['implementation_sha256']==after['implementation_sha256']
++    assert before['release_checklist_sha256']!=after['release_checklist_sha256']
++    with pytest.raises(ValueError,match='release_checklist_sha256'):runner.require_b1_binding(receipt,after)
++
++
++def test_actual_release_checklist_covers_reused_sources():
++    files={line.split('  ',1)[1] for line in (ROOT/'DYNAMIC_SHA256SUMS').read_text().splitlines()}
++    assert {'hsgd/kernel.py','hsgd/runtime.py','stepwise_role/sampling.py',
++            'multiscale_role/evaluation.py','dynamic_role/core.py','run_dynamic.py'}<=files
+--- a/run_dynamic.py
++++ b/run_dynamic.py
+@@ -18,10 +18,12 @@
+ 
+ def parser():
+     p=argparse.ArgumentParser(description=__doc__)
+-    p.add_argument('action',choices=['pack','check','b1','six'])
++    p.add_argument('action',choices=['pack','check','b1','six','smoke'])
+     p.add_argument('--export');p.add_argument('--short-run');p.add_argument('--portable');p.add_argument('--portable-sha256')
+     p.add_argument('--b1-receipt');p.add_argument('--b1-receipt-sha256')
+     p.add_argument('--output',required=True);p.add_argument('--max-seconds',type=float,default=900)
++    p.add_argument('--smoke-mode',choices=['success','invalid','wait'],default='success',
++                   help='smoke only: built-in toy success, invalid input, or supervisor cleanup fixture')
+     p.add_argument('--worker',action='store_true',help=argparse.SUPPRESS)
+     p.add_argument('--deadline',type=float,help=argparse.SUPPRESS);p.add_argument('--cleanup-deadline',type=float,help=argparse.SUPPRESS)
+     return p
+@@ -32,7 +34,7 @@
+     if not 20<=args.max_seconds<=900:raise ValueError('inclusive budget must be 20..900 seconds')
+     if args.action=='pack':
+         if not args.export or not args.short_run:raise ValueError('pack requires original export and short-run paths')
+-    elif not args.portable or not args.portable_sha256:raise ValueError('pinned portable manifest required')
++    elif args.action!='smoke' and (not args.portable or not args.portable_sha256):raise ValueError('pinned portable manifest required')
+     from multiscale_role.runtime_guard import supervise,Budget,atomic_json
+     if not args.worker:
+         check_release()
+@@ -80,9 +82,20 @@
+             if data.get('status')!='complete':raise ValueError('missing/incomplete worker result')
+             if args.action in ('six','check') and data.get('completed_records')!=6:raise ValueError('partial panel cannot pass')
+             if args.action=='b1' and data.get('completed_records')!=1:raise ValueError('B1 evidence absent')
++            if args.action=='smoke':
++                from multiscale_role.runtime_guard import checked_sha
++                if (data.get('scope')!='engineering_cli_smoke' or not data.get('checks') or
++                    not all(v is True for v in data['checks'].values()) or
++                    checked_sha(out/'engineering_result.json',check)!=data.get('artifact_sha256')):
++                    raise ValueError('missing/invalid engineering smoke evidence')
+             return data
+-        result=supervise(command,out,args.max_seconds,validate,env,started=started)
+-        print(json.dumps(result,ensure_ascii=False));return 0 if result.get('status')=='completed' else 1
++        exit_code=supervise(command,out,args.max_seconds,validate,env,started=started)
++        # supervise returns an INTEGER process exit code. Its status/evidence
++        # is in controller.json; never treat the exit code as a result dict.
++        if not isinstance(exit_code,int):raise TypeError('supervise must return an integer exit code')
++        try:print((out/'controller.json').read_text(),end='')
++        except OSError as exc:print('controller receipt unavailable: '+str(exc),file=sys.stderr)
++        return exit_code
+     if args.deadline is None or args.cleanup_deadline is None:raise ValueError('worker requires supervisor deadlines')
+     owner=Path(args.output)/'controller_child.json'
+     for _ in range(20):
+@@ -93,7 +106,10 @@
+     budget=Budget(args.deadline,Path(args.output)/'STOP',args.cleanup_deadline);budget.install()
+     summary=dict(status='incomplete',scope=args.action,model_calls=0,training_updates=0,scientific_graphs=0,GPU_use=0)
+     try:
+-        if args.action=='pack':
++        if args.action=='smoke':
++            from dynamic_role.cli_smoke import run
++            summary=run(args,out=Path(args.output),check=budget.check)
++        elif args.action=='pack':
+             from dynamic_role.portable import pack
+             summary=pack(args.export,args.short_run,args.output,budget.check)
+         else:

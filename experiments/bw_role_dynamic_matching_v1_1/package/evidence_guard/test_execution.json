@@ -1,0 +1,942 @@
+{
+  "status": "complete",
+  "expected_nodeids": [
+    "tests/test_admission_suite.py::test_correct_sealed_value_checked_not_substituted",
+    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[deselected]",
+    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[duplicate]",
+    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[empty_receipt]",
+    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[junit_skip]",
+    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[missing_teardown]",
+    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[old_112]",
+    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[old_85]",
+    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[same_count_wrong_identity]",
+    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[skip]",
+    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[xfail]",
+    "tests/test_admission_suite.py::test_inherited_pytest_selection_and_plugin_environment_isolated",
+    "tests/test_admission_suite.py::test_manifest_checks_test_files_and_new_file_set",
+    "tests/test_admission_suite.py::test_path_sibling_allowed_but_source_or_ancestor_rejected",
+    "tests/test_admission_suite.py::test_rejected_output_adds_no_file_to_protected_inputs[results]",
+    "tests/test_admission_suite.py::test_rejected_output_adds_no_file_to_protected_inputs[short_input]",
+    "tests/test_admission_suite.py::test_rejected_output_adds_no_file_to_protected_inputs[states]",
+    "tests/test_admission_suite.py::test_rejected_output_adds_no_file_to_protected_inputs[symlink]",
+    "tests/test_admission_suite.py::test_rejected_output_adds_no_file_to_protected_inputs[weights]",
+    "tests/test_admission_suite.py::test_unsealed_or_changed_ledger_rejected_without_writes[sealed_but_changed_file]",
+    "tests/test_admission_suite.py::test_unsealed_or_changed_ledger_rejected_without_writes[self_computed_current_hash]",
+    "tests/test_contract.py::test_active_family_chunks_concatenate_and_preserve_ce_scaling",
+    "tests/test_contract.py::test_active_sweep_skips_only_exact_fixed_families",
+    "tests/test_contract.py::test_decode_independent_combinations",
+    "tests/test_contract.py::test_empty_inventory_and_fixed_slots_still_in_plan",
+    "tests/test_contract.py::test_explicit_large_recipe_dimensions",
+    "tests/test_contract.py::test_fixed_support_and_clean_endpoint",
+    "tests/test_contract.py::test_full_sweep_frozen_context_and_clock",
+    "tests/test_contract.py::test_global_forward_complement_exhaustive",
+    "tests/test_contract.py::test_global_noising_support_retention_and_relabel",
+    "tests/test_contract.py::test_kernel_independent_joint_enumeration",
+    "tests/test_contract.py::test_network_fixed_support_and_schema_mismatch",
+    "tests/test_contract.py::test_network_gradient_and_query_order",
+    "tests/test_contract.py::test_network_rejects_duplicate_and_illegal_inputs",
+    "tests/test_contract.py::test_network_type_preserving_renumber_and_restore",
+    "tests/test_contract.py::test_random_reproducibility_cap_and_batch_independence",
+    "tests/test_contract.py::test_uniform_full_coverage_and_weight[10]",
+    "tests/test_contract.py::test_uniform_full_coverage_and_weight[1]",
+    "tests/test_contract.py::test_uniform_full_coverage_and_weight[20]",
+    "tests/test_contract.py::test_uniform_full_coverage_and_weight[3]",
+    "tests/test_contract.py::test_without_replacement_exact_subset_law",
+    "tests/test_fusion.py::test_cache_time_parameter_and_wedge_limits",
+    "tests/test_fusion.py::test_existing_role_guidance_remains_a_separate_t1_option",
+    "tests/test_fusion.py::test_joint_mechanism",
+    "tests/test_fusion.py::test_mean_content_separate_from_log_count",
+    "tests/test_fusion.py::test_old_checkpoint_rejected_and_empty_query",
+    "tests/test_fusion.py::test_path_memory_chunks_preserve_values_and_gradients",
+    "tests/test_fusion.py::test_sampling_cannot_read_clean_identity_and_hidden_exposure_preserves_backbone",
+    "tests/test_legacy_repairs.py::test_budget_restores_handlers_and_stop_precedes_commit",
+    "tests/test_legacy_repairs.py::test_completed_label_alone_cannot_pass_evidence_gate[cost]",
+    "tests/test_legacy_repairs.py::test_completed_label_alone_cannot_pass_evidence_gate[export-legacy]",
+    "tests/test_legacy_repairs.py::test_completed_label_alone_cannot_pass_evidence_gate[short]",
+    "tests/test_legacy_repairs.py::test_discover_actual_metadata_not_folder_names_and_reject_duplicate",
+    "tests/test_legacy_repairs.py::test_export_complete_manifest_without_array_rejected",
+    "tests/test_legacy_repairs.py::test_nested_scalar_original_CF_and_W1_replay_independent_algorithm",
+    "tests/test_legacy_repairs.py::test_old_mapping_canonical_slots_and_full_query_bytes",
+    "tests/test_legacy_repairs.py::test_old_mapping_rejects_tampering[alpha]",
+    "tests/test_legacy_repairs.py::test_old_mapping_rejects_tampering[coverage]",
+    "tests/test_legacy_repairs.py::test_old_mapping_rejects_tampering[digest]",
+    "tests/test_legacy_repairs.py::test_old_mapping_rejects_tampering[family_order]",
+    "tests/test_legacy_repairs.py::test_old_mapping_rejects_tampering[p0_digest]",
+    "tests/test_legacy_repairs.py::test_old_mapping_rejects_tampering[q0]",
+    "tests/test_legacy_repairs.py::test_old_mapping_rejects_tampering[seed]",
+    "tests/test_legacy_repairs.py::test_short_six_labels_without_case_file_rejected",
+    "tests/test_legacy_repairs.py::test_source_hash_and_final_IO_checks_reject_without_partial_commit",
+    "tests/test_loss_response.py::test_actual_head_has_gap_probability_and_mixed_decision_responses",
+    "tests/test_loss_response.py::test_common_shift_is_not_a_decision_response",
+    "tests/test_loss_response.py::test_decision_probability_uses_exact_supported_p0",
+    "tests/test_loss_response.py::test_exact_support_zero_loss_zero_gradient_and_empty",
+    "tests/test_loss_response.py::test_extreme_wrong_confidence_retains_corrective_gradient",
+    "tests/test_loss_response.py::test_invalid_labels_or_support_rejected[labels0-prior0-support]",
+    "tests/test_loss_response.py::test_invalid_labels_or_support_rejected[labels1-prior1-support]",
+    "tests/test_loss_response.py::test_invalid_labels_or_support_rejected[labels2-prior2-binary]",
+    "tests/test_loss_response.py::test_invalid_labels_or_support_rejected[labels3-prior3-nonfinite]",
+    "tests/test_loss_response.py::test_invalid_labels_or_support_rejected[labels4-prior4-prior]",
+    "tests/test_loss_response.py::test_moderate_logits_match_original_objective_and_R_over_S",
+    "tests/test_loss_response.py::test_training_and_diagnostics_share_stable_CE_without_probability_BCE",
+    "tests/test_multiscale.py::test_binomial_endpoints_underflow_and_untrusted_gradient_skip",
+    "tests/test_multiscale.py::test_controller_retained_and_failure_rollback",
+    "tests/test_multiscale.py::test_exact_one_support_and_internal_nonfinite_failure",
+    "tests/test_multiscale.py::test_forward_noisy_target_and_conditional_statistics_enumeration[0]",
+    "tests/test_multiscale.py::test_forward_noisy_target_and_conditional_statistics_enumeration[1]",
+    "tests/test_multiscale.py::test_forward_noisy_target_and_conditional_statistics_enumeration[2]",
+    "tests/test_multiscale.py::test_forward_noisy_target_and_conditional_statistics_enumeration[3]",
+    "tests/test_multiscale.py::test_full_joint_information_frequencies_not_evaluation_bank_and_no_duplicates",
+    "tests/test_multiscale.py::test_new_objective_existing_sampler_transaction_and_binding[False]",
+    "tests/test_multiscale.py::test_new_objective_existing_sampler_transaction_and_binding[True]",
+    "tests/test_multiscale.py::test_original_posterior_and_complete_objective_gradient[1]",
+    "tests/test_multiscale.py::test_original_posterior_and_complete_objective_gradient[2]",
+    "tests/test_multiscale.py::test_original_posterior_and_complete_objective_gradient[3]",
+    "tests/test_multiscale.py::test_renumber_endpoint_symmetry_support_and_no_global_rng",
+    "tests/test_multiscale.py::test_tail_derivative_two_endpoints_and_probability_not_mean_degree",
+    "tests/test_multiscale_evaluation.py::test_W1_of_expected_distribution_not_expected_graph_W1",
+    "tests/test_multiscale_evaluation.py::test_exact_pmf_against_enumeration_including_fixed_boundaries",
+    "tests/test_multiscale_evaluation.py::test_missing_real_files_nonzero_no_fake_pass",
+    "tests/test_multiscale_evaluation.py::test_no_original64_substitute_and_predeclared_mixed_decision",
+    "tests/test_multiscale_evaluation.py::test_safe_stop_without_inputs_does_not_start_work",
+    "tests/test_multiscale_inputs.py::test_even_rehashed_wrong_mapping_or_schedule_rejected[alpha]",
+    "tests/test_multiscale_inputs.py::test_even_rehashed_wrong_mapping_or_schedule_rejected[prior]",
+    "tests/test_multiscale_inputs.py::test_even_rehashed_wrong_mapping_or_schedule_rejected[query_block]",
+    "tests/test_multiscale_inputs.py::test_even_rehashed_wrong_mapping_or_schedule_rejected[slots]",
+    "tests/test_multiscale_inputs.py::test_even_rehashed_wrong_mapping_or_schedule_rejected[types]",
+    "tests/test_multiscale_inputs.py::test_saved_probability_bindings_and_original_q",
+    "tests/test_runtime_repairs.py::test_exact_forward_PMF_cache_equals_uncached_and_is_readonly",
+    "tests/test_runtime_repairs.py::test_owned_process_group_cleanup_and_status[SIGHUP]",
+    "tests/test_runtime_repairs.py::test_owned_process_group_cleanup_and_status[SIGINT]",
+    "tests/test_runtime_repairs.py::test_owned_process_group_cleanup_and_status[SIGTERM]",
+    "tests/test_runtime_repairs.py::test_owned_process_group_cleanup_and_status[STOP]",
+    "tests/test_runtime_repairs.py::test_owned_process_group_cleanup_and_status[missing]",
+    "tests/test_runtime_repairs.py::test_owned_process_group_cleanup_and_status[success]",
+    "tests/test_runtime_repairs.py::test_owned_process_group_cleanup_and_status[timeout]",
+    "tests/test_runtime_repairs.py::test_private_cache_corruption_detected_by_binding",
+    "tests/test_runtime_repairs.py::test_target_cache_outer_inner_tail_and_flags_cannot_mutate",
+    "tests/test_stepwise.py::test_backtracking_failure_nonfinite_and_unresolvable_gradient",
+    "tests/test_stepwise.py::test_bridge_gradient_finite_difference_and_clean_endpoint[1]",
+    "tests/test_stepwise.py::test_bridge_gradient_finite_difference_and_clean_endpoint[2]",
+    "tests/test_stepwise.py::test_bridge_gradient_finite_difference_and_clean_endpoint[3]",
+    "tests/test_stepwise.py::test_bridge_gradient_finite_difference_and_clean_endpoint[4]",
+    "tests/test_stepwise.py::test_checkpoint_roundtrip_binding_tamper_and_pending_step",
+    "tests/test_stepwise.py::test_exact_support_saturation_and_kl_limits",
+    "tests/test_stepwise.py::test_fresh_process_recovery",
+    "tests/test_stepwise.py::test_joint_dependence_target_response_and_zero_gradient_counterexample",
+    "tests/test_stepwise.py::test_model_arm_and_receipt_reject_wrong_native_weights",
+    "tests/test_stepwise.py::test_noisy_target_against_exhaustive_forward[0]",
+    "tests/test_stepwise.py::test_noisy_target_against_exhaustive_forward[1]",
+    "tests/test_stepwise.py::test_noisy_target_against_exhaustive_forward[2]",
+    "tests/test_stepwise.py::test_noisy_target_against_exhaustive_forward[3]",
+    "tests/test_stepwise.py::test_noisy_target_against_exhaustive_forward[4]",
+    "tests/test_stepwise.py::test_off_original_rng_full_small_chain_and_interruption[False]",
+    "tests/test_stepwise.py::test_off_original_rng_full_small_chain_and_interruption[True]",
+    "tests/test_stepwise.py::test_proxy_is_not_expected_discrete_squared_error",
+    "tests/test_stepwise.py::test_reindexing_symmetry_and_incomplete_mask_rejection",
+    "tests/test_stepwise.py::test_underflow_and_factor_guard_never_normalize_untrusted_signal"
+  ],
+  "collected_nodeids": [
+    "tests/test_admission_suite.py::test_rejected_output_adds_no_file_to_protected_inputs[results]",
+    "tests/test_admission_suite.py::test_rejected_output_adds_no_file_to_protected_inputs[symlink]",
+    "tests/test_admission_suite.py::test_rejected_output_adds_no_file_to_protected_inputs[states]",
+    "tests/test_admission_suite.py::test_rejected_output_adds_no_file_to_protected_inputs[weights]",
+    "tests/test_admission_suite.py::test_rejected_output_adds_no_file_to_protected_inputs[short_input]",
+    "tests/test_admission_suite.py::test_path_sibling_allowed_but_source_or_ancestor_rejected",
+    "tests/test_admission_suite.py::test_unsealed_or_changed_ledger_rejected_without_writes[sealed_but_changed_file]",
+    "tests/test_admission_suite.py::test_unsealed_or_changed_ledger_rejected_without_writes[self_computed_current_hash]",
+    "tests/test_admission_suite.py::test_correct_sealed_value_checked_not_substituted",
+    "tests/test_admission_suite.py::test_inherited_pytest_selection_and_plugin_environment_isolated",
+    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[old_85]",
+    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[old_112]",
+    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[same_count_wrong_identity]",
+    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[duplicate]",
+    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[skip]",
+    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[xfail]",
+    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[missing_teardown]",
+    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[deselected]",
+    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[empty_receipt]",
+    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[junit_skip]",
+    "tests/test_admission_suite.py::test_manifest_checks_test_files_and_new_file_set",
+    "tests/test_contract.py::test_decode_independent_combinations",
+    "tests/test_contract.py::test_uniform_full_coverage_and_weight[1]",
+    "tests/test_contract.py::test_uniform_full_coverage_and_weight[3]",
+    "tests/test_contract.py::test_uniform_full_coverage_and_weight[10]",
+    "tests/test_contract.py::test_uniform_full_coverage_and_weight[20]",
+    "tests/test_contract.py::test_random_reproducibility_cap_and_batch_independence",
+    "tests/test_contract.py::test_without_replacement_exact_subset_law",
+    "tests/test_contract.py::test_kernel_independent_joint_enumeration",
+    "tests/test_contract.py::test_fixed_support_and_clean_endpoint",
+    "tests/test_contract.py::test_full_sweep_frozen_context_and_clock",
+    "tests/test_contract.py::test_network_gradient_and_query_order",
+    "tests/test_contract.py::test_network_type_preserving_renumber_and_restore",
+    "tests/test_contract.py::test_network_rejects_duplicate_and_illegal_inputs",
+    "tests/test_contract.py::test_network_fixed_support_and_schema_mismatch",
+    "tests/test_contract.py::test_empty_inventory_and_fixed_slots_still_in_plan",
+    "tests/test_contract.py::test_active_family_chunks_concatenate_and_preserve_ce_scaling",
+    "tests/test_contract.py::test_active_sweep_skips_only_exact_fixed_families",
+    "tests/test_contract.py::test_global_forward_complement_exhaustive",
+    "tests/test_contract.py::test_global_noising_support_retention_and_relabel",
+    "tests/test_contract.py::test_explicit_large_recipe_dimensions",
+    "tests/test_fusion.py::test_joint_mechanism",
+    "tests/test_fusion.py::test_cache_time_parameter_and_wedge_limits",
+    "tests/test_fusion.py::test_mean_content_separate_from_log_count",
+    "tests/test_fusion.py::test_old_checkpoint_rejected_and_empty_query",
+    "tests/test_fusion.py::test_existing_role_guidance_remains_a_separate_t1_option",
+    "tests/test_fusion.py::test_sampling_cannot_read_clean_identity_and_hidden_exposure_preserves_backbone",
+    "tests/test_fusion.py::test_path_memory_chunks_preserve_values_and_gradients",
+    "tests/test_legacy_repairs.py::test_old_mapping_canonical_slots_and_full_query_bytes",
+    "tests/test_legacy_repairs.py::test_old_mapping_rejects_tampering[seed]",
+    "tests/test_legacy_repairs.py::test_old_mapping_rejects_tampering[digest]",
+    "tests/test_legacy_repairs.py::test_old_mapping_rejects_tampering[family_order]",
+    "tests/test_legacy_repairs.py::test_old_mapping_rejects_tampering[q0]",
+    "tests/test_legacy_repairs.py::test_old_mapping_rejects_tampering[coverage]",
+    "tests/test_legacy_repairs.py::test_old_mapping_rejects_tampering[p0_digest]",
+    "tests/test_legacy_repairs.py::test_old_mapping_rejects_tampering[alpha]",
+    "tests/test_legacy_repairs.py::test_nested_scalar_original_CF_and_W1_replay_independent_algorithm",
+    "tests/test_legacy_repairs.py::test_source_hash_and_final_IO_checks_reject_without_partial_commit",
+    "tests/test_legacy_repairs.py::test_budget_restores_handlers_and_stop_precedes_commit",
+    "tests/test_legacy_repairs.py::test_completed_label_alone_cannot_pass_evidence_gate[short]",
+    "tests/test_legacy_repairs.py::test_completed_label_alone_cannot_pass_evidence_gate[export-legacy]",
+    "tests/test_legacy_repairs.py::test_completed_label_alone_cannot_pass_evidence_gate[cost]",
+    "tests/test_legacy_repairs.py::test_discover_actual_metadata_not_folder_names_and_reject_duplicate",
+    "tests/test_legacy_repairs.py::test_short_six_labels_without_case_file_rejected",
+    "tests/test_legacy_repairs.py::test_export_complete_manifest_without_array_rejected",
+    "tests/test_loss_response.py::test_moderate_logits_match_original_objective_and_R_over_S",
+    "tests/test_loss_response.py::test_extreme_wrong_confidence_retains_corrective_gradient",
+    "tests/test_loss_response.py::test_exact_support_zero_loss_zero_gradient_and_empty",
+    "tests/test_loss_response.py::test_invalid_labels_or_support_rejected[labels0-prior0-support]",
+    "tests/test_loss_response.py::test_invalid_labels_or_support_rejected[labels1-prior1-support]",
+    "tests/test_loss_response.py::test_invalid_labels_or_support_rejected[labels2-prior2-binary]",
+    "tests/test_loss_response.py::test_invalid_labels_or_support_rejected[labels3-prior3-nonfinite]",
+    "tests/test_loss_response.py::test_invalid_labels_or_support_rejected[labels4-prior4-prior]",
+    "tests/test_loss_response.py::test_common_shift_is_not_a_decision_response",
+    "tests/test_loss_response.py::test_decision_probability_uses_exact_supported_p0",
+    "tests/test_loss_response.py::test_actual_head_has_gap_probability_and_mixed_decision_responses",
+    "tests/test_loss_response.py::test_training_and_diagnostics_share_stable_CE_without_probability_BCE",
+    "tests/test_multiscale.py::test_forward_noisy_target_and_conditional_statistics_enumeration[0]",
+    "tests/test_multiscale.py::test_forward_noisy_target_and_conditional_statistics_enumeration[1]",
+    "tests/test_multiscale.py::test_forward_noisy_target_and_conditional_statistics_enumeration[2]",
+    "tests/test_multiscale.py::test_forward_noisy_target_and_conditional_statistics_enumeration[3]",
+    "tests/test_multiscale.py::test_original_posterior_and_complete_objective_gradient[1]",
+    "tests/test_multiscale.py::test_original_posterior_and_complete_objective_gradient[2]",
+    "tests/test_multiscale.py::test_original_posterior_and_complete_objective_gradient[3]",
+    "tests/test_multiscale.py::test_tail_derivative_two_endpoints_and_probability_not_mean_degree",
+    "tests/test_multiscale.py::test_full_joint_information_frequencies_not_evaluation_bank_and_no_duplicates",
+    "tests/test_multiscale.py::test_renumber_endpoint_symmetry_support_and_no_global_rng",
+    "tests/test_multiscale.py::test_binomial_endpoints_underflow_and_untrusted_gradient_skip",
+    "tests/test_multiscale.py::test_controller_retained_and_failure_rollback",
+    "tests/test_multiscale.py::test_new_objective_existing_sampler_transaction_and_binding[False]",
+    "tests/test_multiscale.py::test_new_objective_existing_sampler_transaction_and_binding[True]",
+    "tests/test_multiscale.py::test_exact_one_support_and_internal_nonfinite_failure",
+    "tests/test_multiscale_evaluation.py::test_exact_pmf_against_enumeration_including_fixed_boundaries",
+    "tests/test_multiscale_evaluation.py::test_W1_of_expected_distribution_not_expected_graph_W1",
+    "tests/test_multiscale_evaluation.py::test_no_original64_substitute_and_predeclared_mixed_decision",
+    "tests/test_multiscale_evaluation.py::test_missing_real_files_nonzero_no_fake_pass",
+    "tests/test_multiscale_evaluation.py::test_safe_stop_without_inputs_does_not_start_work",
+    "tests/test_multiscale_inputs.py::test_saved_probability_bindings_and_original_q",
+    "tests/test_multiscale_inputs.py::test_even_rehashed_wrong_mapping_or_schedule_rejected[slots]",
+    "tests/test_multiscale_inputs.py::test_even_rehashed_wrong_mapping_or_schedule_rejected[query_block]",
+    "tests/test_multiscale_inputs.py::test_even_rehashed_wrong_mapping_or_schedule_rejected[alpha]",
+    "tests/test_multiscale_inputs.py::test_even_rehashed_wrong_mapping_or_schedule_rejected[prior]",
+    "tests/test_multiscale_inputs.py::test_even_rehashed_wrong_mapping_or_schedule_rejected[types]",
+    "tests/test_runtime_repairs.py::test_target_cache_outer_inner_tail_and_flags_cannot_mutate",
+    "tests/test_runtime_repairs.py::test_private_cache_corruption_detected_by_binding",
+    "tests/test_runtime_repairs.py::test_exact_forward_PMF_cache_equals_uncached_and_is_readonly",
+    "tests/test_runtime_repairs.py::test_owned_process_group_cleanup_and_status[timeout]",
+    "tests/test_runtime_repairs.py::test_owned_process_group_cleanup_and_status[STOP]",
+    "tests/test_runtime_repairs.py::test_owned_process_group_cleanup_and_status[SIGINT]",
+    "tests/test_runtime_repairs.py::test_owned_process_group_cleanup_and_status[SIGTERM]",
+    "tests/test_runtime_repairs.py::test_owned_process_group_cleanup_and_status[SIGHUP]",
+    "tests/test_runtime_repairs.py::test_owned_process_group_cleanup_and_status[success]",
+    "tests/test_runtime_repairs.py::test_owned_process_group_cleanup_and_status[missing]",
+    "tests/test_stepwise.py::test_noisy_target_against_exhaustive_forward[0]",
+    "tests/test_stepwise.py::test_noisy_target_against_exhaustive_forward[1]",
+    "tests/test_stepwise.py::test_noisy_target_against_exhaustive_forward[2]",
+    "tests/test_stepwise.py::test_noisy_target_against_exhaustive_forward[3]",
+    "tests/test_stepwise.py::test_noisy_target_against_exhaustive_forward[4]",
+    "tests/test_stepwise.py::test_bridge_gradient_finite_difference_and_clean_endpoint[1]",
+    "tests/test_stepwise.py::test_bridge_gradient_finite_difference_and_clean_endpoint[2]",
+    "tests/test_stepwise.py::test_bridge_gradient_finite_difference_and_clean_endpoint[3]",
+    "tests/test_stepwise.py::test_bridge_gradient_finite_difference_and_clean_endpoint[4]",
+    "tests/test_stepwise.py::test_joint_dependence_target_response_and_zero_gradient_counterexample",
+    "tests/test_stepwise.py::test_reindexing_symmetry_and_incomplete_mask_rejection",
+    "tests/test_stepwise.py::test_exact_support_saturation_and_kl_limits",
+    "tests/test_stepwise.py::test_backtracking_failure_nonfinite_and_unresolvable_gradient",
+    "tests/test_stepwise.py::test_off_original_rng_full_small_chain_and_interruption[False]",
+    "tests/test_stepwise.py::test_off_original_rng_full_small_chain_and_interruption[True]",
+    "tests/test_stepwise.py::test_checkpoint_roundtrip_binding_tamper_and_pending_step",
+    "tests/test_stepwise.py::test_model_arm_and_receipt_reject_wrong_native_weights",
+    "tests/test_stepwise.py::test_proxy_is_not_expected_discrete_squared_error",
+    "tests/test_stepwise.py::test_fresh_process_recovery",
+    "tests/test_stepwise.py::test_underflow_and_factor_guard_never_normalize_untrusted_signal"
+  ],
+  "deselected_nodeids": [],
+  "reports": {
+    "tests/test_admission_suite.py::test_rejected_output_adds_no_file_to_protected_inputs[results]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_admission_suite.py::test_rejected_output_adds_no_file_to_protected_inputs[symlink]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_admission_suite.py::test_rejected_output_adds_no_file_to_protected_inputs[states]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_admission_suite.py::test_rejected_output_adds_no_file_to_protected_inputs[weights]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_admission_suite.py::test_rejected_output_adds_no_file_to_protected_inputs[short_input]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_admission_suite.py::test_path_sibling_allowed_but_source_or_ancestor_rejected": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_admission_suite.py::test_unsealed_or_changed_ledger_rejected_without_writes[sealed_but_changed_file]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_admission_suite.py::test_unsealed_or_changed_ledger_rejected_without_writes[self_computed_current_hash]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_admission_suite.py::test_correct_sealed_value_checked_not_substituted": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_admission_suite.py::test_inherited_pytest_selection_and_plugin_environment_isolated": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[old_85]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[old_112]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[same_count_wrong_identity]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[duplicate]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[skip]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[xfail]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[missing_teardown]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[deselected]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[empty_receipt]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_admission_suite.py::test_exact_collection_and_zero_skip_not_old_count_floor[junit_skip]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_admission_suite.py::test_manifest_checks_test_files_and_new_file_set": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_contract.py::test_decode_independent_combinations": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_contract.py::test_uniform_full_coverage_and_weight[1]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_contract.py::test_uniform_full_coverage_and_weight[3]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_contract.py::test_uniform_full_coverage_and_weight[10]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_contract.py::test_uniform_full_coverage_and_weight[20]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_contract.py::test_random_reproducibility_cap_and_batch_independence": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_contract.py::test_without_replacement_exact_subset_law": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_contract.py::test_kernel_independent_joint_enumeration": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_contract.py::test_fixed_support_and_clean_endpoint": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_contract.py::test_full_sweep_frozen_context_and_clock": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_contract.py::test_network_gradient_and_query_order": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_contract.py::test_network_type_preserving_renumber_and_restore": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_contract.py::test_network_rejects_duplicate_and_illegal_inputs": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_contract.py::test_network_fixed_support_and_schema_mismatch": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_contract.py::test_empty_inventory_and_fixed_slots_still_in_plan": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_contract.py::test_active_family_chunks_concatenate_and_preserve_ce_scaling": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_contract.py::test_active_sweep_skips_only_exact_fixed_families": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_contract.py::test_global_forward_complement_exhaustive": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_contract.py::test_global_noising_support_retention_and_relabel": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_contract.py::test_explicit_large_recipe_dimensions": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_fusion.py::test_joint_mechanism": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_fusion.py::test_cache_time_parameter_and_wedge_limits": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_fusion.py::test_mean_content_separate_from_log_count": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_fusion.py::test_old_checkpoint_rejected_and_empty_query": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_fusion.py::test_existing_role_guidance_remains_a_separate_t1_option": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_fusion.py::test_sampling_cannot_read_clean_identity_and_hidden_exposure_preserves_backbone": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_fusion.py::test_path_memory_chunks_preserve_values_and_gradients": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_legacy_repairs.py::test_old_mapping_canonical_slots_and_full_query_bytes": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_legacy_repairs.py::test_old_mapping_rejects_tampering[seed]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_legacy_repairs.py::test_old_mapping_rejects_tampering[digest]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_legacy_repairs.py::test_old_mapping_rejects_tampering[family_order]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_legacy_repairs.py::test_old_mapping_rejects_tampering[q0]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_legacy_repairs.py::test_old_mapping_rejects_tampering[coverage]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_legacy_repairs.py::test_old_mapping_rejects_tampering[p0_digest]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_legacy_repairs.py::test_old_mapping_rejects_tampering[alpha]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_legacy_repairs.py::test_nested_scalar_original_CF_and_W1_replay_independent_algorithm": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_legacy_repairs.py::test_source_hash_and_final_IO_checks_reject_without_partial_commit": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_legacy_repairs.py::test_budget_restores_handlers_and_stop_precedes_commit": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_legacy_repairs.py::test_completed_label_alone_cannot_pass_evidence_gate[short]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_legacy_repairs.py::test_completed_label_alone_cannot_pass_evidence_gate[export-legacy]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_legacy_repairs.py::test_completed_label_alone_cannot_pass_evidence_gate[cost]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_legacy_repairs.py::test_discover_actual_metadata_not_folder_names_and_reject_duplicate": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_legacy_repairs.py::test_short_six_labels_without_case_file_rejected": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_legacy_repairs.py::test_export_complete_manifest_without_array_rejected": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_loss_response.py::test_moderate_logits_match_original_objective_and_R_over_S": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_loss_response.py::test_extreme_wrong_confidence_retains_corrective_gradient": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_loss_response.py::test_exact_support_zero_loss_zero_gradient_and_empty": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_loss_response.py::test_invalid_labels_or_support_rejected[labels0-prior0-support]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_loss_response.py::test_invalid_labels_or_support_rejected[labels1-prior1-support]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_loss_response.py::test_invalid_labels_or_support_rejected[labels2-prior2-binary]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_loss_response.py::test_invalid_labels_or_support_rejected[labels3-prior3-nonfinite]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_loss_response.py::test_invalid_labels_or_support_rejected[labels4-prior4-prior]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_loss_response.py::test_common_shift_is_not_a_decision_response": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_loss_response.py::test_decision_probability_uses_exact_supported_p0": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_loss_response.py::test_actual_head_has_gap_probability_and_mixed_decision_responses": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_loss_response.py::test_training_and_diagnostics_share_stable_CE_without_probability_BCE": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_multiscale.py::test_forward_noisy_target_and_conditional_statistics_enumeration[0]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_multiscale.py::test_forward_noisy_target_and_conditional_statistics_enumeration[1]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_multiscale.py::test_forward_noisy_target_and_conditional_statistics_enumeration[2]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_multiscale.py::test_forward_noisy_target_and_conditional_statistics_enumeration[3]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_multiscale.py::test_original_posterior_and_complete_objective_gradient[1]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_multiscale.py::test_original_posterior_and_complete_objective_gradient[2]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_multiscale.py::test_original_posterior_and_complete_objective_gradient[3]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_multiscale.py::test_tail_derivative_two_endpoints_and_probability_not_mean_degree": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_multiscale.py::test_full_joint_information_frequencies_not_evaluation_bank_and_no_duplicates": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_multiscale.py::test_renumber_endpoint_symmetry_support_and_no_global_rng": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_multiscale.py::test_binomial_endpoints_underflow_and_untrusted_gradient_skip": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_multiscale.py::test_controller_retained_and_failure_rollback": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_multiscale.py::test_new_objective_existing_sampler_transaction_and_binding[False]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_multiscale.py::test_new_objective_existing_sampler_transaction_and_binding[True]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_multiscale.py::test_exact_one_support_and_internal_nonfinite_failure": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_multiscale_evaluation.py::test_exact_pmf_against_enumeration_including_fixed_boundaries": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_multiscale_evaluation.py::test_W1_of_expected_distribution_not_expected_graph_W1": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_multiscale_evaluation.py::test_no_original64_substitute_and_predeclared_mixed_decision": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_multiscale_evaluation.py::test_missing_real_files_nonzero_no_fake_pass": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_multiscale_evaluation.py::test_safe_stop_without_inputs_does_not_start_work": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_multiscale_inputs.py::test_saved_probability_bindings_and_original_q": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_multiscale_inputs.py::test_even_rehashed_wrong_mapping_or_schedule_rejected[slots]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_multiscale_inputs.py::test_even_rehashed_wrong_mapping_or_schedule_rejected[query_block]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_multiscale_inputs.py::test_even_rehashed_wrong_mapping_or_schedule_rejected[alpha]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_multiscale_inputs.py::test_even_rehashed_wrong_mapping_or_schedule_rejected[prior]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_multiscale_inputs.py::test_even_rehashed_wrong_mapping_or_schedule_rejected[types]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_runtime_repairs.py::test_target_cache_outer_inner_tail_and_flags_cannot_mutate": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_runtime_repairs.py::test_private_cache_corruption_detected_by_binding": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_runtime_repairs.py::test_exact_forward_PMF_cache_equals_uncached_and_is_readonly": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_runtime_repairs.py::test_owned_process_group_cleanup_and_status[timeout]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_runtime_repairs.py::test_owned_process_group_cleanup_and_status[STOP]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_runtime_repairs.py::test_owned_process_group_cleanup_and_status[SIGINT]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_runtime_repairs.py::test_owned_process_group_cleanup_and_status[SIGTERM]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_runtime_repairs.py::test_owned_process_group_cleanup_and_status[SIGHUP]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_runtime_repairs.py::test_owned_process_group_cleanup_and_status[success]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_runtime_repairs.py::test_owned_process_group_cleanup_and_status[missing]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_stepwise.py::test_noisy_target_against_exhaustive_forward[0]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_stepwise.py::test_noisy_target_against_exhaustive_forward[1]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_stepwise.py::test_noisy_target_against_exhaustive_forward[2]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_stepwise.py::test_noisy_target_against_exhaustive_forward[3]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_stepwise.py::test_noisy_target_against_exhaustive_forward[4]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_stepwise.py::test_bridge_gradient_finite_difference_and_clean_endpoint[1]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_stepwise.py::test_bridge_gradient_finite_difference_and_clean_endpoint[2]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_stepwise.py::test_bridge_gradient_finite_difference_and_clean_endpoint[3]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_stepwise.py::test_bridge_gradient_finite_difference_and_clean_endpoint[4]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_stepwise.py::test_joint_dependence_target_response_and_zero_gradient_counterexample": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_stepwise.py::test_reindexing_symmetry_and_incomplete_mask_rejection": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_stepwise.py::test_exact_support_saturation_and_kl_limits": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_stepwise.py::test_backtracking_failure_nonfinite_and_unresolvable_gradient": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_stepwise.py::test_off_original_rng_full_small_chain_and_interruption[False]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_stepwise.py::test_off_original_rng_full_small_chain_and_interruption[True]": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_stepwise.py::test_checkpoint_roundtrip_binding_tamper_and_pending_step": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_stepwise.py::test_model_arm_and_receipt_reject_wrong_native_weights": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_stepwise.py::test_proxy_is_not_expected_discrete_squared_error": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_stepwise.py::test_fresh_process_recovery": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    },
+    "tests/test_stepwise.py::test_underflow_and_factor_guard_never_normalize_untrusted_signal": {
+      "setup": "passed",
+      "call": "passed",
+      "teardown": "passed"
+    }
+  },
+  "full_suite_passed": true
+}

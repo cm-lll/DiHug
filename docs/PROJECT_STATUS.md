@@ -1,3 +1,16 @@
+# Current scoped review: dynamic matching v1.1 CLI repair
+
+2026-10-19，基于50c6ab1独立目录experiments/bw_role_dynamic_matching_v1_1，旧版保留。
+确认v1监督器返回整数，入口误用字典接口；v1.1原样返回退出码，状态另读controller.json。
+B1→六状态新增整个DYNAMIC_SHA256SUMS的SHA绑定，保留目标/输入/数值依赖/模块绑定；
+父入口仍核验清单全部文件。数学、模型、噪声、后验、步长、查询和科学判据不改。
+旧172＋新14共186项CPU通过，零跳过，59.97秒墙钟、31.48秒子进程CPU。
+4个真实公开CLI父→子→监督器工程场景：成功0、子失败1、超时124、STOP75，
+产物和状态一致，所属进程组均清理；不是内部mock或真实六状态。
+141个旧文件逐字节保护，runner科学POLICY及评价函数AST保持。
+证据results/dynamic_role_matching_v1_1_20261019；未读取真实六状态，未连接BW，无训练或完整科学链。
+本轮仅工程修复，发布后停止等待复审，不自动后继。
+
 # Scoped review status: multiscale-tail v1.1 repair
 
 2026-10-18 v1.2三项保护修复：入口在任何输出写入前拒绝输入树重叠，

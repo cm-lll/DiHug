@@ -1,0 +1,237 @@
+{
+  "CPU_regression": "passed",
+  "original_cases": 85,
+  "new_cases": 27,
+  "total_cases": 112,
+  "base_commit": "d1e1d9a48f4b275c158e9d5d4048a833e2e28f89",
+  "regression_wall_seconds": 30.28,
+  "command_wall_seconds": 31.16,
+  "command_CPU_seconds": 20.01,
+  "command_peak_RSS_MiB": 485.5390625,
+  "old_source_zip_verified": true,
+  "old_source_zip_sha256": "c0fc3a8dade80a66f550a0506e405bf62bf80b3c1fb9f902d6a8baebf861194b",
+  "old_source_worker_and_evaluator_audited": true,
+  "synthetic_old_CF_W1_alignment": {
+    "CF_error": 1.0515016549197519e-21,
+    "W1_error": 1.5265566588595902e-16,
+    "CF_tolerance": 2.0000000015629072e-10,
+    "W1_tolerance": 1.0011007571964748e-08,
+    "old_CF": 1.5629071194509008e-10,
+    "recomputed_CF": 1.5629071194403858e-10,
+    "old_W1": 0.010623878887438362,
+    "recomputed_W1": 0.01062387888743821,
+    "passed": true
+  },
+  "synthetic_cost": [
+    {
+      "pass_name": "cold",
+      "timings": {
+        "next_time_target_seconds": 0.014294816181063652,
+        "baseline_posterior_seconds": 0.0003874460235238075,
+        "apply_total_seconds": 0.10792700946331024,
+        "all_apply_posterior_seconds": 0.0015828488394618034,
+        "statistics_gradient_controller_seconds": 0.06103990226984024,
+        "backtracking_total_seconds": 0.046280160546302795,
+        "exact_all_channel_W1_evaluation_seconds": 0.019592556171119213
+      },
+      "posterior_calls": 5,
+      "target_cache_hits": 20,
+      "target_cache_misses": 20,
+      "total_pass_seconds": 0.14274805318564177,
+      "process_peak_rss_mib": 404.52734375,
+      "memory_scope": "cumulative process RSS high-water; NOT per-phase allocation or device memory",
+      "IO_seconds": 0.01653674617409706
+    },
+    {
+      "pass_name": "warm_reuse",
+      "timings": {
+        "next_time_target_seconds": 7.569789886474609e-06,
+        "baseline_posterior_seconds": 0.0006244685500860214,
+        "apply_total_seconds": 0.11022123042494059,
+        "all_apply_posterior_seconds": 0.002107609063386917,
+        "statistics_gradient_controller_seconds": 0.0636341692879796,
+        "backtracking_total_seconds": 0.04586466774344444,
+        "exact_all_channel_W1_evaluation_seconds": 0.014429605565965176
+      },
+      "posterior_calls": 5,
+      "target_cache_hits": 60,
+      "target_cache_misses": 20,
+      "total_pass_seconds": 0.1258654510602355,
+      "process_peak_rss_mib": 404.52734375,
+      "memory_scope": "cumulative process RSS high-water; NOT per-phase allocation or device memory",
+      "IO_seconds": 0.01904241181910038
+    }
+  ],
+  "static_six_state_work": {
+    "channels": [
+      {
+        "type": "0",
+        "families": [
+          1
+        ],
+        "capacity": 494,
+        "nodes": 410,
+        "role_rows": 19,
+        "predicted_coefficient_updates": 50128650,
+        "target_coefficient_updates": 2323035
+      },
+      {
+        "type": "0",
+        "families": [
+          2
+        ],
+        "capacity": 726,
+        "nodes": 410,
+        "role_rows": 19,
+        "predicted_coefficient_updates": 108199410,
+        "target_coefficient_updates": 5014119
+      },
+      {
+        "type": "0",
+        "families": [
+          1,
+          2
+        ],
+        "capacity": 1220,
+        "nodes": 410,
+        "role_rows": 19,
+        "predicted_coefficient_updates": 305372100,
+        "target_coefficient_updates": 14151390
+      },
+      {
+        "type": "1",
+        "families": [
+          1
+        ],
+        "capacity": 410,
+        "nodes": 494,
+        "role_rows": 27,
+        "predicted_coefficient_updates": 41621970,
+        "target_coefficient_updates": 2274885
+      },
+      {
+        "type": "1",
+        "families": [
+          4
+        ],
+        "capacity": 493,
+        "nodes": 494,
+        "role_rows": 27,
+        "predicted_coefficient_updates": 60154874,
+        "target_coefficient_updates": 3287817
+      },
+      {
+        "type": "1",
+        "families": [
+          5
+        ],
+        "capacity": 726,
+        "nodes": 494,
+        "role_rows": 27,
+        "predicted_coefficient_updates": 130367094,
+        "target_coefficient_updates": 7125327
+      },
+      {
+        "type": "1",
+        "families": [
+          1,
+          4,
+          5
+        ],
+        "capacity": 1629,
+        "nodes": 494,
+        "role_rows": 27,
+        "predicted_coefficient_updates": 655851690,
+        "target_coefficient_updates": 35846145
+      },
+      {
+        "type": "2",
+        "families": [
+          2
+        ],
+        "capacity": 410,
+        "nodes": 726,
+        "role_rows": 20,
+        "predicted_coefficient_updates": 61169130,
+        "target_coefficient_updates": 1685100
+      },
+      {
+        "type": "2",
+        "families": [
+          5
+        ],
+        "capacity": 494,
+        "nodes": 726,
+        "role_rows": 20,
+        "predicted_coefficient_updates": 88764390,
+        "target_coefficient_updates": 2445300
+      },
+      {
+        "type": "2",
+        "families": [
+          8
+        ],
+        "capacity": 23,
+        "nodes": 726,
+        "role_rows": 20,
+        "predicted_coefficient_updates": 200376,
+        "target_coefficient_updates": 5520
+      },
+      {
+        "type": "2",
+        "families": [
+          2,
+          5,
+          8
+        ],
+        "capacity": 927,
+        "nodes": 726,
+        "role_rows": 20,
+        "predicted_coefficient_updates": 312272928,
+        "target_coefficient_updates": 8602560
+      },
+      {
+        "type": "3",
+        "families": [
+          8
+        ],
+        "capacity": 726,
+        "nodes": 23,
+        "role_rows": 19,
+        "predicted_coefficient_updates": 6069723,
+        "target_coefficient_updates": 5014119
+      }
+    ],
+    "one_evaluation_predicted_updates": 1820172335,
+    "one_evaluation_target_updates": 87775317,
+    "six_states_before_after_uncached_updates": 22895371824,
+    "with_shared_target_cache_updates": 22105393971,
+    "largest_single_PMF_array_bytes": 6441760,
+    "excludes_p0_updates": true,
+    "meaning": "static arithmetic count, NOT measured seconds or proof of timeout"
+  },
+  "cached_uncached_W1_exact_on_small_fixture": true,
+  "owned_process_tests": [
+    "timeout",
+    "STOP",
+    "SIGINT",
+    "SIGTERM",
+    "SIGHUP",
+    "normal_completion",
+    "missing_evidence"
+  ],
+  "source_and_numeric_scope": "old source inspected; tiny synthetic arrays; NO actual six-state conversion or short test",
+  "real_six_states_tested": false,
+  "real_source_compatibility": "pending actual baseline/collection/report/provenance/state/checkpoint files",
+  "BW_connected": false,
+  "GPU_use": 0,
+  "scientific_model_calls": 0,
+  "training_updates": 0,
+  "scientific_graphs": 0,
+  "tests_include_CPU_toy_model_calls": true,
+  "no_new_scientific_evidence": true,
+  "remote_protection_before": {
+    "main": "ef782c293e39ff0517d0847703bba0c7b079f05e",
+    "old_review": "d1e1d9a48f4b275c158e9d5d4048a833e2e28f89"
+  }
+}

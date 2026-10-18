@@ -1,0 +1,1023 @@
+--- /dev/null
++++ b/STEPWISE_ROLE_README.md
+@@ -0,0 +1,131 @@
++# 逐步匿名联合角色度引导 v1
++
++基于固定 joint CN v1.1 `dd53b6431303263e740abedf67e01d7dfc13d15b`。
++这是独立采样适配器；hsgd、原 role_degree、原39项测试均逐字节保留。
++旧 role_degree/role_sampling.py 仍是历史 t=1 版本，不是本轮入口。
++本轮入口为 stepwise_role/sampling.py，所有 t 都调用引导。
++不训练、不运行正式完整链、不读取 BW 私有权重，不联网、不安装依赖。
++旧 run.sh/build_release.py/说明等保留为历史来源；请使用新的 stepwise.sh。
++
++## 定义
++
++按类型 c 保存完整关系度向量 d 的压缩频数 rho_c(d)，不保存节点分配。
++容量 N_cr 由完整类型对 schema 决定，同类型不含自环；缺失或节点特定合法槽
++暂不支持，Layout 会明确拒绝，不套用统一容量。精确 prior=0/1 保持固定。
++目标只来自允许的训练参考，属于已知目标分布的引导生成。
++
++下一时刻 s=t-1，b_r=a_s+(1-a_s)pi_r，z_r=(1-a_s)pi_r：
++
++Phi*_c,k(s) = sum_d rho_c(d) product_r
++  (1+b_r(expm1(i omega_crk)))^d_r
++  (1+z_r(expm1(i omega_crk)))^(N_cr-d_r).
++
++先在每个完整角色向量内相乘，再按频数平均；不是分别匹配一维直方图。
++复用旧冻结 K=32、seed=2026101603：按关系的尺度 1+RMS目标度，
++先每个可动入射关系轴方向，再每类型独立 SeedSequence 的 uniform(-.5,.5)
++联合方向，全部除以该尺度。C/D 和所有时刻相同。完整目标表预计算1001时刻。
++
++给定当前完整 Xt，原后验 q_e(p0_e) 条件独立抽样下：
++Phi_c,k(q) = (1/n_c) sum_(v:type c) product_(e incident v)
++  [1+q_e expm1(i omega_crk)].
++L(q,s) = mean_(c,k) |Phi_c,k(q)-Phi*_c,k(s)|^2。
++一条无向边一个变量，同时影响两端。原后验对 p0 仿射，
++q=b0+(b1-b0)p0，其中 b0/b1 用未修改的 kernel.reverse 在可行基点算出，
++每次核对仿射重建误差<=5e-14。
++梯度 g_e=dL/dq_e*(b1-b0)*p0_e*(1-p0_e)。
++
++使用收齐的受支持 p0 的 Bernoulli logit 坐标 z=logit(p0)，
++不是对神经网络激活反传；这也避免把 FP32 softmax 重新用 FP64算一遍造成
++未记录的基点改变。数值 p0=0/1（包括非结构性饱和）保持不动并单列。
++原始两 logits 共同平移与此坐标无关。
++
++delta_t=.1*a_s；z' = z - delta_t*g/||g||inf；最多8个候选
++delta_t/2^j, j=0..7；不是初试后另加8次。接受条件：
++Lnew < Lold - (1e-12+1e-9*abs(Lold))。
++||g||inf<=1e-14、线性化下降预测 delta_t*sum(g^2)/||g||inf 不超过
++该数值门槛、无可动槽或出现乘积下溢，均不归一化放大，明确跳过。
++所有候选失败原样返回。非有限数值标记 numerical_failure，采样适配器停止并回滚 RNG。
++除频率受限的非零单因子外不作任何除法：
++Re(1+q*expm1(i omega))>=cos(.5)>0，先检查界再除；
++绝不除以可能下溢的整项乘积。不加 epsilon 或裁剪概率。
++
++## 数据流与 API
++
++1. 构造一次 Layout、匿名 profile、freeze(profile,layout,alpha) 和 StepwiseGuide。
++2. model.eval()；每步 reverse_step(...,arm='C'或'D',guide=guide)：
++   固定Xt和模型版本→原plan→原先抽全槽uniform→同一FrozenTypedContext内20块预测。
++3. 收齐p0并核对活跃槽恰好一次，非活跃槽保留精确支持；关闭上下文，释放网络图。
++4. 原后验→全图统计/梯度/有限回溯→原后验→原uniform采样→返回完整待提交状态。
++5. 调用方仅在整步成功后原子保存/提交，再进入t-1。任何异常含中断均恢复本步前所有RNG。
++   不能跨查询块缓存普通主干隐藏表示；原CN上下文缓存生命周期不变。
++
++```python
++from stepwise_role.core import Layout, freeze, StepwiseGuide
++from role_degree.role_statistics import joint_profile
++from stepwise_role.sampling import reverse_step, binding, save_checkpoint, load_checkpoint
++layout = Layout.canonical(case['space'].types, case['space'].pairs, case['prior'])
++families = case['space'].encode(case['clean'])[0]
++profile = joint_profile(layout.types, case['clean'], families, layout.pairs)
++frozen = freeze(profile, layout, kernel.alpha)
++guide = StepwiseGuide(layout, frozen)
++# model为原生加载的joint CN v1.1 A或B权重，不改变任何参数
++model.eval()
++next_state, record = reverse_step(model, case, state, kernel, t, 20, seed, rng,
++                                  device, arm='D', guide=guide)
++```
++
++A/C共用原生无CN权重；B/D共用原生CN权重。A为匹配联合框架，不是旧v9。
++关闭引导 A/B 直接委托原 reverse_step，连随机数消耗也不改。
++引导不消耗额外RNG。角色引导对全部时刻生效，但早期微弱梯度可以安全跳过。
++本地只有小图随机权重；6000更新两套BW最终权重尚未导入或验收。
++validate_arm 对调用者传入的6000更新最终权重receipt只检查元数据和原生架构；
++不是独立权重来源证书。真实checkpoint/source/config/data哈希须由外部已验收加载入口核对，
++本包不根据自报receipt声称已读BW权重。
++
++binding/save_checkpoint/load_checkpoint 绑定代码、模型状态、架构、数据、
++Python/Torch/PyG/NumPy实际版本、模式、完整目标/频率/时间表、backend、seed和20块规则。
++原子保存已提交状态、剩余时间、全部相关RNG；SHA覆盖包含RNG的序列化载荷。
++普通模式恢复只保证加载的保存内容和合同一致，后续轨迹不保证逐位等同。
++仅信任本地产生的Torch检查点（pickle），不可载入来源不明文件。
++
++## 测试和成本
++
++CPU入口，总上限480秒，失败非零退出，不会自动开始BW、正式训练或完整链：
++
++```bash
++bash stepwise.sh test --output /root/private_data/gnn_projects/stepwise_role_checks/check01 --max-seconds 480
++bash stepwise.sh inventory --output /root/private_data/gnn_projects/stepwise_role_checks/inventory01 --max-seconds 120
++```
++
++test 仅小图工程网络调用，无优化器更新；含原39回归、前向目标枚举、后验梯度、
++两种模型关闭等价、4步工程链、部分步中断和新进程续跑等。不同Torch/设备尚未实测。
++inventory只读取完整IMDB、冻结匿名目标，绝不调用模型或生成图。
++
++cost仅接受已有完整状态/对应p0的NPZ，绝不代为运行完整链补输入：
++state和p0为全1365378槽同序数组；t为1..1000标量；alpha为原1001项日程；
++data_sha256为参考文件SHA字符串；source_record为具体生成来源/权重/查询/状态绑定说明。
++这些来源须独立核实，命令只核对用户确认哈希并记录来源文本，不把文本当数学来源证书。
++
++```bash
++bash stepwise.sh cost --input /root/private_data/gnn_projects/FIXED_SAVED_INPUT.npz \
++  --expected-sha256 REPLACE_WITH_VERIFIED_INPUT_SHA256 \
++  --output /root/private_data/gnn_projects/stepwise_role_checks/cost01 --max-seconds 480
++```
++
++这个CPU概率短测只测统计/梯度/回溯与进程峰RSS，不包含网络收集和设备显存。
++没有合法匹配输入时不要执行cost，不要拿其他T/其他模型的q冒充p0。
++网络收集使用 StepPredictor 的既有分项计时，sampling.reverse_step(trace=True)
++可记录真实单步构图/前向/导出开销，但本轮未获得匹配IMDB状态，未运行该设备短测。
++未预留真实长链的授权或入口，不自动搜索步长/频率/时间表。
++
++## 科研边界与后继（未执行）
++
++Phi*为前向总体目标，q条件于单张Xt；即使模型正确也不要求逐状态相等。
++有限32频率不确定唯一分布，L(E[经验CF])不同于E[离散统计平方误差]。
++代理下降、每步logit<=.1或每步raw条件KL均不保证整链扰动小或生成质量好。
++这是新引导律，不是原分布或目标条件律的精确采样，也不是CID/MASK直接复现。
++未增加末端修边、补连、边数/度硬限制或共同邻居截断。
++
++下一阶段先在用户确认的固定真实状态做有界IMDB概率收集+引导成本检查；
++再另行决定四组同种子同预算生成。共同评价离散联合角色分布、关系边数、度尾部、
++LCC/连通和类型闭合，记录逐步规模；不能只看用于优化的32频率。
+--- /dev/null
++++ b/stepwise.sh
+@@ -0,0 +1,7 @@
++#!/usr/bin/env bash
++set -euo pipefail
++cd "$(dirname "${BASH_SOURCE[0]}")"
++test -s SHA256SUMS
++sha256sum --quiet -c SHA256SUMS
++export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
++exec "${PYTHON_BIN:-/usr/local/bin/python3.11}" -u -m stepwise_role.cli "$@"
+--- /dev/null
++++ b/stepwise_role/__init__.py
+@@ -0,0 +1 @@
++"""Stepwise anonymous joint-role guidance; no neural or noise changes."""
+--- /dev/null
++++ b/stepwise_role/audit.py
+@@ -0,0 +1,73 @@
++"""Reproducible numeric witnesses; small probability/engineering fixtures only."""
++import copy
++import itertools
++import json
++import resource
++import sys
++import time
++from pathlib import Path
++import numpy as np
++sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'tests'))
++from test_stepwise import setup_small,case_guide
++from stepwise_role.core import freeze,StepwiseGuide
++from stepwise_role.sampling import reverse_step
++
++
++def main():
++    start,cpu=time.perf_counter(),time.process_time()
++    _,l,pf,k,g,state=setup_small();p=np.array([.17,.63,.46,.81])
++    gradients=[];worst=0.
++    for t in (1,2,3,4):
++        q,loss,grad,_,affine=g.posterior_gradient(p,state,k,t)
++        z=np.log(p)-np.log1p(-p);numeric=[]
++        for i in range(4):
++            zz=z.copy();zz[i]+=1e-5
++            plus=g.statistic(k.reverse(1/(1+np.exp(-zz)),state,l.families,t-1,t),t-1)[0]
++            zz[i]-=2e-5
++            minus=g.statistic(k.reverse(1/(1+np.exp(-zz)),state,l.families,t-1,t),t-1)[0]
++            numeric.append((plus-minus)/2e-5)
++        error=float(np.max(abs(grad-numeric)));worst=max(worst,error)
++        _,_,record=g.apply(p,state,k,t)
++        gradients.append(dict(t=t,gradient_finite_difference_max_abs=error,posterior_affine_error=affine,guidance=record))
++    other=copy.deepcopy(pf);other['groups']['0']['rows']=[[0,1],[1,0]];other['groups']['0']['counts']=[1,1]
++    gg=StepwiseGuide(l,freeze(other,l,k.alpha))
++    _,a,ra=g.apply(p,state,k,1);_,b,rb=gg.apply(p,state,k,1)
++    _,_,zero=g.apply(np.full(4,.5),state,k,1)
++    forward_max=0.
++    clean=np.array([1,0,1,0])
++    for s in range(5):
++        pp=k.alpha[s]*clean+(1-k.alpha[s])*l.prior[l.families]
++        for c0,w in g.omega.items():
++            cf=np.zeros(32,dtype=complex)
++            for bits in itertools.product((0,1),repeat=4):
++                bits=np.array(bits);mass=np.prod(np.where(bits,pp,1-pp))
++                deg=np.zeros((len(l.types),len(l.pairs)),int)
++                for e,(u,v) in enumerate(l.slots.T):
++                    deg[u,l.families[e]]+=bits[e];deg[v,l.families[e]]+=bits[e]
++                cf+=mass*np.exp(1j*deg[l.types==int(c0)]@w.T).mean(0)
++            forward_max=max(forward_max,float(abs(cf-g.targets[c0][s]).max()))
++    expected_discrete_loss=0.
++    for bits in itertools.product((0,1),repeat=4):
++        bits=np.array(bits);expected_discrete_loss+=float(np.prod(np.where(bits,p,1-p)))*g.statistic(bits,0)[0]
++    chains=[]
++    for cn in (False,True):
++        case,model,kk,guide,x=case_guide(cn);rng=np.random.default_rng(1789)
++        steps=[]
++        for t in range(4,0,-1):
++            x,report=reverse_step(model,case,x,kk,t,20,1789,rng,'cpu',arm='D' if cn else 'C',guide=guide)
++            steps.append(report)
++        chains.append(dict(arm='D' if cn else 'C',steps=steps,neural_backward=False,optimizer_updates=0,
++                           scope='untrained small CPU engineering chain, NOT quality evidence'))
++    result=dict(status='passed_engineering_witnesses',gradient_max_abs=worst,
++                exhaustive_forward_target_max_abs=forward_max,
++                proxy_vs_expected_discrete_loss=dict(proxy=g.statistic(p,0)[0],expected_discrete=expected_discrete_loss),
++                different_joint_targets_q_max_abs=float(abs(a-b).max()),same_marginal_target_responses=[ra,rb],
++                positive_loss_zero_gradient=zero,small_probability_steps=gradients,engineering_chains=chains,
++                wall_seconds=time.perf_counter()-start,cpu_seconds=time.process_time()-cpu,
++                peak_rss_mib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024,
++                training_updates=0,scientific_graphs=0,GPU_use=0)
++    Path(sys.argv[1]).write_text(json.dumps(result,indent=2,allow_nan=False))
++    print(json.dumps({k:v for k,v in result.items() if k not in ('engineering_chains','small_probability_steps','same_marginal_target_responses')},indent=2))
++
++
++if __name__=='__main__':main()
+--- /dev/null
++++ b/stepwise_role/cli.py
+@@ -0,0 +1,107 @@
++"""Bounded engineering tests / saved-probability cost. Never a scientific chain."""
++import argparse
++import hashlib
++import json
++import os
++from pathlib import Path
++import resource
++import signal
++import subprocess
++import sys
++import time
++import numpy as np
++
++
++def main():
++    p=argparse.ArgumentParser(description=__doc__)
++    p.add_argument('action',choices=['test','inventory','cost'])
++    p.add_argument('--output',required=True)
++    p.add_argument('--max-seconds',type=int,default=480)
++    p.add_argument('--input',help='trusted saved NPZ: state,p0,t; no synthetic or regenerated scientific input')
++    p.add_argument('--expected-sha256',help='user verified saved NPZ hash')
++    args=p.parse_args()
++    if not 1<=args.max_seconds<=570: p.error('bounded check requires 1..570 seconds')
++    out=Path(args.output)
++    out.mkdir(parents=True,exist_ok=False)
++    def timeout(*_):raise TimeoutError('bounded engineering wall limit reached')
++    signal.signal(signal.SIGALRM,timeout);signal.alarm(args.max_seconds)
++    start,cpu=time.perf_counter(),time.process_time()
++    from hsgd.bw_preflight import common as c
++    import torch
++    torch.set_num_threads(1)
++    torch.set_float32_matmul_precision('highest')
++    torch.backends.cuda.matmul.allow_tf32=False;torch.backends.cudnn.allow_tf32=False
++    torch.use_deterministic_algorithms(False,warn_only=False)
++    report=dict(status='incomplete',action=args.action,environment=c.environment('cpu'),
++                GPU_use=0,model_calls=0,optimizer_updates=0,scientific_graphs=0)
++    def resources():
++        child=resource.getrusage(resource.RUSAGE_CHILDREN)
++        own=time.process_time()-cpu
++        return dict(cpu_seconds_self=own,cpu_seconds_children=child.ru_utime+child.ru_stime,
++                    cpu_seconds_total=own+child.ru_utime+child.ru_stime,
++                    peak_rss_mib_self=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024.,
++                    peak_rss_mib_child_max=child.ru_maxrss/1024.,
++                    memory_scope='per-process peaks, not simultaneous process-tree memory')
++    try:
++        if args.action=='test':
++            command=[sys.executable,'-m','pytest','-q','tests','--disable-warnings','--junitxml='+str(out/'tests.xml')]
++            with (out/'tests.log').open('w') as f:
++                child=subprocess.Popen(command,stdout=f,stderr=subprocess.STDOUT,start_new_session=True)
++                try:code=child.wait(timeout=max(1,args.max_seconds-(time.perf_counter()-start)))
++                except BaseException:
++                    os.killpg(child.pid,signal.SIGTERM)
++                    try:child.wait(timeout=3)
++                    except subprocess.TimeoutExpired:os.killpg(child.pid,signal.SIGKILL);child.wait()
++                    raise
++            report.update(status='passed' if code==0 else 'failed',exit_code=code,
++                          model_calls='small CPU engineering fixtures only; see test scopes',
++                          scientific_graphs=0,optimizer_updates=0)
++            if code:raise RuntimeError('CPU regression failure; see tests.log')
++        else:
++            from role_degree.role_statistics import joint_profile
++            from stepwise_role.core import Layout,freeze,StepwiseGuide
++            from hsgd.kernel import MarginalKernel
++            case=c.imdb_case(c.PACKAGE/'data/IMDB_movie_reference.npz',c.config())
++            l=Layout.canonical(case['space'].types,case['space'].pairs,case['prior'])
++            f=case['space'].encode(case['clean'])[0]
++            profile=joint_profile(l.types,case['clean'],f,l.pairs)
++            tick=time.perf_counter();frozen=freeze(profile,l,c.schedule(1000));g=StepwiseGuide(l,frozen)
++            report.update(target_initialization_seconds=time.perf_counter()-tick,nodes=len(l.types),
++                          reference_edges=case['clean'].shape[1],all_slots=len(l.families),
++                          active_slots=int(case['space'].counts[case['active']].sum()),
++                          target_shape={key:list(value.shape) for key,value in g.targets.items()},
++                          guidance_binding=g.binding(),target_CF_bytes=sum(a.nbytes for a in g.targets.values()))
++            c.json_save(out/'frozen_guidance.json',frozen)
++            if args.action=='cost':
++                if not args.input or not args.expected_sha256:raise ValueError('cost requires a saved complete input AND verified hash')
++                path=Path(args.input)
++                if hashlib.sha256(path.read_bytes()).hexdigest()!=args.expected_sha256:raise ValueError('saved input hash mismatch')
++                with np.load(path,allow_pickle=False) as z:
++                    if not {'state','p0','t','data_sha256','alpha','source_record'}.issubset(z.files):
++                        raise ValueError('saved input lacks required provenance/arrays; do not regenerate to fill')
++                    state=z['state'].copy();p0=z['p0'].copy();t=int(z['t'])
++                    if str(z['data_sha256'].item())!=c.config()['imdb_sha256'] or not np.array_equal(z['alpha'],g.alpha):
++                        raise ValueError('saved input data/T1000 schedule differs')
++                    source=str(z['source_record'].item())
++                if not source.strip():raise ValueError('empty saved input source record')
++                if state.shape!=p0.shape or not np.isin(state,[0,1]).all():raise ValueError('saved frozen state invalid')
++                print(json.dumps(dict(event='statistic_cost_start',t=t,slots=len(p0))),flush=True)
++                _,_,result=g.apply(p0,state,MarginalKernel(case['prior'],g.alpha),t)
++                report.update(status='measured_probability_only',guidance=result,input_sha256=args.expected_sha256,
++                              input_source_record=source,provenance_boundary='source text recorded, not independently reconstructed',
++                              probability_collection_seconds=None,collection_reason='not included: pre-saved p0 only',
++                              GPU_inference_not_measured=True)
++                if result['status']=='numerical_failure':raise FloatingPointError(result['reason'])
++            else:report['status']='inventory_only_not_model_cost'
++        report.update(wall_seconds=time.perf_counter()-start,**resources())
++        c.json_save(out/'summary.json',report)
++        print(json.dumps(report,ensure_ascii=False),flush=True)
++    except BaseException as exc:
++        report.update(status='incomplete' if isinstance(exc,(TimeoutError,KeyboardInterrupt)) else 'failed',
++                      exception=type(exc).__name__,reason=str(exc),wall_seconds=time.perf_counter()-start,**resources())
++        c.json_save(out/'summary.json',report)
++        raise
++    finally:signal.alarm(0)
++
++
++if __name__=='__main__':main()
+--- /dev/null
++++ b/stepwise_role/core.py
+@@ -0,0 +1,229 @@
++"""Float64 conditional-product statistic and ORIGINAL-posterior logit gradient.
++
++All arrays are full legal unordered slots. No network gradient, node assignment,
++sampling RNG, epsilon, probability clipping, truncation or graph repair.
++"""
++import copy
++import hashlib
++import sys
++import time
++from pathlib import Path
++import numpy as np
++
++sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'role_degree'))
++from role_guidance import Layout, freeze_target, signature
++
++SETTINGS = dict(version='stepwise_role_v1', delta_max=.1, max_trials=8,
++                descent_atol=1e-12, descent_rtol=1e-9, gradient_floor=1e-14,
++                finite_difference_atol=2e-8, finite_difference_rtol=2e-5,
++                renumber_atol=2e-10, renumber_rtol=1e-9,
++                posterior_atol=5e-14, frequency_bound=.5)
++
++
++def freeze(profile, layout, alpha):
++    from hsgd.kernel import MarginalKernel
++    alpha = MarginalKernel(layout.prior, alpha).alpha
++    old = freeze_target(profile, layout)  # EXACT old K32, seed, scales and rule
++    capacities = {}
++    for c in layout.sizes:
++        capacities[str(c)] = [int(layout.sizes.get(int(b if c == a else a), 0) - (a == b))
++                              if c in (a, b) else 0 for a, b in layout.pairs]
++    payload = dict(settings=SETTINGS.copy(), frequencies=old, alpha=alpha.tolist(),
++                   prior=layout.prior.tolist(), capacities=capacities,
++                   legal_support='complete type-pair slots; node-specific masks unsupported',
++                   time='t descends T..1; s=t-1; clean=0',
++                   coordinate='logit of collected supported p0; numerical 0/1 stay fixed',
++                   condition='known training-reference anonymous joint distribution')
++    return dict(payload=payload, sha256=signature(payload))
++
++
++def transition_kl(p, q):
++    """KL(Bernoulli(p)||Bernoulli(q)), natural log, exact limits, no epsilon."""
++    p, q = np.asarray(p), np.asarray(q)
++    if ((q == 0) & (p > 0) | (q == 1) & (p < 1)).any():
++        raise FloatingPointError('guided transition left baseline support')
++    value = np.zeros_like(p, dtype=np.float64)
++    for a, b in ((p, q), (1-p, 1-q)):
++        take = a > 0
++        value[take] += a[take] * (np.log(a[take])-np.log(b[take]))
++    # Keep roundoff visible, do not silently clamp a tiny negative KL.
++    return dict(sum=float(value.sum()), max_slot=float(value.max(initial=0)),
++                minimum_slot=float(value.min(initial=0)),
++                summation_roundoff_bound=float(32*np.finfo(float).eps*len(p)))
++
++
++class StepwiseGuide:
++    def __init__(self, layout, frozen):
++        self.layout = layout
++        if signature(frozen['payload']) != frozen['sha256']:
++            raise ValueError('guidance artifact hash mismatch')
++        expected = freeze(frozen['payload']['frequencies']['payload']['profile'], layout,
++                          frozen['payload']['alpha'])
++        if expected != frozen:
++            raise ValueError('target/frequency/config/schedule/prior binding mismatch')
++        self.frozen = copy.deepcopy(frozen)
++        self.settings = dict(SETTINGS)
++        self.alpha = np.array(frozen['payload']['alpha'])
++        source = frozen['payload']['frequencies']['payload']
++        self.omega = {c: np.array(w) for c, w in source['omega'].items()}
++        self.targets = {}
++        for c, g in source['profile']['groups'].items():
++            rows = np.asarray(g['rows'], dtype=np.int64)
++            counts = np.asarray(g['counts'], dtype=np.float64) / g['nodes']
++            cap = np.asarray(frozen['payload']['capacities'][c])
++            w = self.omega[c]
++            if np.abs(w).max(initial=0) > self.settings['frequency_bound']:
++                raise ValueError('unguarded frequency range')
++            h = np.expm1(1j*w)
++            result = np.empty((len(self.alpha), len(w)), dtype=np.complex128)
++            for s, a in enumerate(self.alpha):
++                b = a + (1-a)*layout.prior
++                z = (1-a)*layout.prior
++                # Powers 0 included exactly. No log of zero; bound above
++                # guarantees nonzero individual factors for all valid p.
++                products = ((1+b*h)[None, :, :] ** rows[:, None, :] *
++                            (1+z*h)[None, :, :] ** (cap-rows)[:, None, :]).prod(axis=2)
++                result[s] = (counts[:, None]*products).sum(axis=0)
++            self.targets[c] = result
++        for v in [self.alpha, *self.omega.values(), *self.targets.values()]:
++            v.flags.writeable = False
++
++    def binding(self):
++        # Recheck public mutable dictionaries so later mutation cannot silently
++        # change a resumed law. Arrays themselves are readonly.
++        if self.settings != SETTINGS or signature(self.frozen['payload']) != self.frozen['sha256']:
++            raise ValueError('guidance configuration changed after freezing')
++        def digest(v):
++            return dict(shape=list(v.shape),dtype=str(v.dtype),sha256=hashlib.sha256(v.tobytes()).hexdigest())
++        derived = dict(alpha=digest(self.alpha), omega={c:digest(w) for c,w in self.omega.items()},
++                       target={c:digest(v) for c,v in self.targets.items()},
++                       layout={k:digest(getattr(self.layout,k)) for k in ('types','slots','families','pairs','prior')})
++        return dict(frozen_sha256=self.frozen['sha256'], derived_sha256=signature(derived))
++
++    def statistic(self, q, s, gradient=False):
++        """E[empirical CF] under independent edge variables, NOT CF(E[degree]).
++
++        Workspace O(S+N), K loop. A single unordered edge contributes to both
++        endpoints. Factors have real part >=cos(.5)>0; explicitly check this
++        BEFORE division. Never divide by a product (which may underflow).
++        """
++        q = self.layout.probability(q)
++        if not 0 <= s < len(self.alpha): raise ValueError('next-state time outside schedule')
++        gp = np.zeros_like(q) if gradient else None
++        loss, underflow, small, minimum = 0., 0, 0, 0.
++        means = {}
++        K, C = 32, len(self.targets)
++        for c, (ids, node) in self.layout.endpoints.items():
++            n = self.layout.sizes[int(c)]
++            f, values = self.layout.families[ids], q[ids]
++            means[c] = []
++            for k in range(K):
++                h = np.expm1(1j*self.omega[c][k])[f]
++                factor = 1+values*h
++                if (factor.real < np.cos(.5)-1e-14).any() or not np.isfinite(factor).all():
++                    raise FloatingPointError('factor lower bound violated; refusing division')
++                logs = np.log1p(values*h)
++                lr = np.bincount(node, weights=logs.real, minlength=n)
++                li = np.bincount(node, weights=logs.imag, minlength=n)
++                phi = np.exp(lr+1j*li)
++                mean = phi.mean(); means[c].append(mean)
++                residual = mean-self.targets[c][s,k]
++                loss += float(abs(residual)**2)/(C*K)
++                underflow += int((phi == 0).sum())
++                small += int((np.abs(phi) < 1e-12).sum())
++                minimum = min(minimum, float(lr.min(initial=0)))
++                if gradient:
++                    v = 2/(C*K*n)*np.real(np.conj(residual)*phi[node]*h/factor)
++                    gp += np.bincount(ids, weights=v, minlength=len(q))
++        if not np.isfinite(loss) or gp is not None and not np.isfinite(gp).all():
++            raise FloatingPointError('nonfinite statistic/gradient')
++        return loss, gp, dict(underflow_node_frequencies=underflow,
++                              small_node_frequencies=small, min_log_modulus=minimum,
++                              mean_cf=means)
++
++    def posterior_gradient(self, p0, state, kernel, t):
++        """Original reverse is affine in p0: q=b0+(b1-b0)p0.
++
++        Evaluate its slope using the ORIGINAL implementation on feasible basis
++        inputs. Structural fixed support stays fixed. Impossible conditioning
++        is rejected by kernel.reverse, never assigned a made-up posterior.
++        """
++        if not np.array_equal(kernel.alpha, self.alpha) or not np.array_equal(kernel.prior, self.layout.prior):
++            raise ValueError('posterior/schedule/prior mismatch')
++        p = self.layout.probability(p0)
++        f = self.layout.families
++        q = kernel.reverse(p, state, f, t-1, t)
++        lo = np.zeros_like(p); hi = np.ones_like(p)
++        lo[self.layout.fixed1] = 1; hi[self.layout.fixed0] = 0
++        b0 = kernel.reverse(lo, state, f, t-1, t)
++        b1 = kernel.reverse(hi, state, f, t-1, t)
++        error = float(np.max(np.abs(q-(b0+(b1-b0)*p)), initial=0))
++        if error > self.settings['posterior_atol']:
++            raise FloatingPointError('posterior affine check exceeded predeclared tolerance')
++        loss, gp, detail = self.statistic(q, t-1, True)
++        g = gp*(b1-b0)*p*(1-p)
++        g[self.layout.fixed0 | self.layout.fixed1] = 0.
++        return q, loss, g, detail, error
++
++    def apply(self, p0, state, kernel, t, check_time=None):
++        p = self.layout.probability(p0)
++        if not 1 <= t < len(self.alpha): raise ValueError('reverse time outside schedule')
++        started = time.perf_counter()
++        q0 = kernel.reverse(p, state, self.layout.families, t-1, t)
++        guided_p, guided_q = p.copy(), q0.copy()
++        free = (p>0)&(p<1)&~self.layout.fixed0&~self.layout.fixed1
++        record = dict(status='skipped', time=int(t), next_time=int(t-1),
++            delta_max=self.settings['delta_max'], proposed_delta=float(self.settings['delta_max']*self.alpha[t-1]),
++            accepted_delta=0., trials=0, backtracks=0, effective_movable_slots=int(free.sum()),
++            structural_fixed_slots=int((self.layout.fixed0|self.layout.fixed1).sum()),
++            numerical_saturated_slots=int(((p==0)|(p==1)).sum()-(self.layout.fixed0|self.layout.fixed1).sum()),
++            configuration_sha256=self.frozen['sha256'], statistics_gradient_seconds=0.,
++            backtracking_seconds=0., new_sampling_law=True)
++        try:
++            if check_time: check_time()
++            tick = time.perf_counter()
++            _, loss, g, detail, error = self.posterior_gradient(p, state, kernel, t)
++            detail.pop('mean_cf')
++            record.update(loss_before=loss, loss_after=loss, posterior_affine_error=error,
++                          statistics_gradient_seconds=time.perf_counter()-tick, **detail)
++            norm = float(np.max(np.abs(g), initial=0))
++            threshold = self.settings['descent_atol']+self.settings['descent_rtol']*abs(loss)
++            predicted = record['proposed_delta']*float(np.dot(g,g))/norm if norm else 0.
++            record.update(raw_logit_gradient_max=norm, raw_logit_gradient_l1=float(np.abs(g).sum()),
++                          raw_logit_gradient_l2=float(np.linalg.norm(g)), descent_threshold=threshold,
++                          first_order_descent_prediction=predicted)
++            # Conservative reliability gates; do not amplify underflowed or
++            # unresolvable gradients into a full-size normalized step.
++            if record['underflow_node_frequencies']: record['reason']='underflow_untrusted_gradient'
++            elif not free.any(): record['reason']='no_movable_probabilities'
++            elif norm <= self.settings['gradient_floor']: record['reason']='zero_or_roundoff_gradient'
++            elif predicted <= threshold: record['reason']='predicted_descent_below_resolution'
++            else:
++                z = np.log(p[free])-np.log1p(-p[free])
++                direction = g[free]/norm
++                tick = time.perf_counter()
++                for j in range(self.settings['max_trials']):
++                    if check_time: check_time()
++                    step = record['proposed_delta']/(2**j)
++                    candidate = p.copy()
++                    candidate[free] = np.exp(-np.logaddexp(0., -(z-step*direction)))
++                    q = kernel.reverse(candidate, state, self.layout.families, t-1, t)
++                    after, _, _ = self.statistic(q, t-1)
++                    record.update(trials=j+1, backtracks=j, trial_loss=after)
++                    if after < loss-threshold:
++                        guided_p, guided_q = candidate, q
++                        record.update(status='accepted', reason='resolved_proxy_decrease',
++                                      loss_after=after, accepted_delta=step)
++                        break
++                else: record['reason']='no_verified_descent'
++                record['backtracking_seconds']=time.perf_counter()-tick
++        except FloatingPointError as exc:
++            guided_p, guided_q = p.copy(), q0.copy()
++            record.update(status='numerical_failure', reason=str(exc))
++        record.update(clean_probability_l1=float(np.abs(guided_p-p).sum()),
++                      clean_probability_max=float(np.abs(guided_p-p).max(initial=0)),
++                      transition_probability_l1=float(np.abs(guided_q-q0).sum()),
++                      transition_probability_max=float(np.abs(guided_q-q0).max(initial=0)),
++                      transition_kl=transition_kl(guided_q, q0),
++                      wall_seconds=time.perf_counter()-started)
++        return guided_p, guided_q, record
+--- /dev/null
++++ b/stepwise_role/sampling.py
+@@ -0,0 +1,168 @@
++"""Atomic frozen-Xt sampling adapter. No full-chain scientific runner."""
++import time
++import numpy as np
++from stepwise_role.core import signature
++
++ARMS = {'A':(False,False),'B':(True,False),'C':(False,True),'D':(True,True)}
++
++
++def validate_arm(model, arm, receipt=None, formal=False):
++    """Architecture + caller receipt sanity, NOT an independent weight importer.
++
++    This adapter receives an already loaded model. The external caller must
++    verify the actual checkpoint hash/source/config/data before giving a receipt.
++    No BW weight import has been executed or certified by this package.
++    """
++    if arm not in ARMS: raise ValueError('unknown arm')
++    cn, enabled = ARMS[arm]
++    actual = model.common_neighbor is not None
++    weights = any(k.startswith('common_neighbor.') for k in model.state_dict())
++    if actual != cn or actual != weights: raise ValueError('native architecture/arm mismatch')
++    if formal:
++        # The user reports two native final 6000-update runs. Do NOT silently
++        # accept the historical terminal module's 10000-update protocol.
++        if not receipt or receipt.get('formal_training') is not True or receipt.get('completed_updates') != 6000:
++            raise ValueError('native final 6000-update provenance required')
++        if receipt.get('experiment_arm') != ('cn' if cn else 'baseline') or receipt.get('final') is not True:
++            raise ValueError('native final architecture receipt required')
++        for field in ('checkpoint_sha256','source_sha256','config_sha256','data_sha256'):
++            value=receipt.get(field)
++            if not isinstance(value,str) or len(value)!=64 or any(c not in '0123456789abcdef' for c in value):
++                raise ValueError('missing final weight provenance: '+field)
++    return enabled
++
++
++def reverse_step(model, case, state, kernel, t, rounds, seed, rng, device, *, arm,
++                 guide=None, receipt=None, formal=False, trace=False, interrupt_block=None,
++                 event=None, check_time=None):
++    from hsgd.runtime import reverse_step as original, StepPredictor
++    from hsgd.bw_preflight.common import plan_for, rng_save, rng_restore
++    enabled = validate_arm(model,arm,receipt,formal)
++    if not enabled:
++        return original(model,case,state,kernel,t,rounds,seed,rng,device,backend='upstream',
++                        trace=trace,interrupt_block=interrupt_block,event=event,check_time=check_time)
++    if guide is None: raise ValueError('guidance artifact required')
++    if model.training: raise ValueError('guided inference requires model.eval()')
++    l = guide.layout; state = np.asarray(state)
++    if not np.array_equal(l.types,case['space'].types) or not np.array_equal(l.pairs,np.asarray(case['space'].pairs)):
++        raise ValueError('schema/inventory binding mismatch')
++    if not np.array_equal(l.prior,case['prior']) or not np.array_equal(guide.alpha,kernel.alpha):
++        raise ValueError('prior/schedule binding mismatch')
++    l.probability(state) # binary and fixed support checked below
++    if not np.isin(state,[0,1]).all(): raise ValueError('nonbinary frozen state')
++    f,local=case['space'].encode(l.slots)
++    if not np.array_equal(case['space'].offsets[f]+local,np.arange(case['space'].total)):
++        raise ValueError('full canonical slot order required')
++    before=rng_save(rng,device); callback=None; start=time.perf_counter()
++    versions=tuple(p._version for p in model.parameters())
++    def check():
++        if tuple(p._version for p in model.parameters())!=versions: raise ValueError('weights changed during frozen step')
++        if check_time: check_time()
++    try:
++        check()
++        plan=plan_for(case,[seed,t,61],rounds)
++        uniform=rng.random(case['space'].total) # identical original order/count
++        tick=time.perf_counter()
++        callback=StepPredictor(model,case,state,kernel,t,'upstream',event,check,profile=trace)
++        p0=np.repeat(kernel.prior,case['space'].counts).copy()
++        coverage=np.zeros(len(p0),dtype=np.uint8)
++        for r in range(rounds):
++            ids,fam,query=plan.block(r)
++            if not len(ids): continue
++            if coverage[ids].any(): raise AssertionError('duplicate slot coverage')
++            p0[ids]=callback(state,ids,fam,query);coverage[ids]+=1
++            if interrupt_block is not None and callback.blocks==interrupt_block:
++                raise InterruptedError('injected partial step; state/RNG not committed')
++        expected=np.repeat(case['active'].astype(np.uint8),case['space'].counts)
++        if not np.array_equal(coverage,expected): raise AssertionError('incomplete slot coverage')
++        check(); blocks=callback.blocks; timings=callback.times or {}
++        callback.close();callback=None # release neural activations/context BEFORE statistics
++        collection=time.perf_counter()-tick
++        guided,q,report=guide.apply(p0,state,kernel,t,check_time=check)
++        if report['status']=='numerical_failure': raise FloatingPointError(report['reason'])
++        check();tick=time.perf_counter()
++        result=(uniform<q).astype(np.uint8)
++        l.probability(result)
++        record=dict(time=int(t),remaining_time=int(t-1),backend='upstream',arm=arm,
++                    blocks=blocks,query_rounds=rounds,covered_slots=int(coverage.sum()),exact_coverage=True,
++                    probability_collection_seconds=collection,guidance=report,timings=timings,
++                    sampling_seconds=time.perf_counter()-tick,step_seconds=time.perf_counter()-start,
++                    raw_edges=int(result.sum()),new_sampling_law=True)
++        if trace: record['trace']=dict(p0=p0,p_guided=guided,q=q,uniform=uniform,coverage=coverage,state=result.copy())
++        return result,record
++    except BaseException:
++        rng_restore(before,rng,device)
++        raise
++    finally:
++        if callback is not None: callback.close()
++
++
++def binding(model, case, kernel, guide, arm, rounds, seed, receipt=None):
++    """Checkpoints bind code/runtime/model/data/law/plan. No private upload."""
++    import hashlib
++    import platform
++    import torch
++    import torch_geometric
++    from pathlib import Path
++    validate_arm(model,arm,receipt,formal=receipt is not None)
++    root=Path(__file__).resolve().parents[1]
++    code={str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest()
++          for sub in ('hsgd','role_degree','stepwise_role') for p in sorted((root/sub).rglob('*.py'))}
++    def digest(array):
++        a=np.asarray(array)
++        return signature(dict(shape=list(a.shape),dtype=str(a.dtype),sha256=hashlib.sha256(a.tobytes()).hexdigest()))
++    weights={k:digest(v.detach().cpu().numpy()) for k,v in model.state_dict().items()}
++    return dict(code_sha256=signature(code),model_sha256=signature(weights),
++                architecture_sha256=signature(str(model)),backend='upstream',
++                time_steps=len(kernel.alpha)-1,slots=int(case['space'].total),
++                data_sha256=digest(case['clean']),types_sha256=digest(case['space'].types),
++                guide=guide.binding(),alpha_sha256=digest(kernel.alpha),prior_sha256=digest(kernel.prior),
++                arm=arm,rounds=int(rounds),seed=int(seed),receipt_sha256=signature(receipt),
++                python=platform.python_version(),torch_runtime_version=torch.__version__,
++                pyg=torch_geometric.__version__,numpy=np.__version__,
++                deterministic=torch.are_deterministic_algorithms_enabled(),
++                tf32_matmul=torch.backends.cuda.matmul.allow_tf32,
++                tf32_cudnn=torch.backends.cudnn.allow_tf32)
++
++
++def save_checkpoint(path, state, remaining_time, rng, device, bound):
++    """Call ONLY after a whole step commits; reject invalid counters/state."""
++    import hashlib
++    import io
++    import os
++    import torch
++    from pathlib import Path
++    from hsgd.bw_preflight.common import rng_save
++    a=np.asarray(state)
++    if a.shape!=(bound['slots'],) or not np.isin(a,[0,1]).all() or not 0<=remaining_time<=bound['time_steps']:
++        raise ValueError('invalid committed checkpoint')
++    packet=dict(state=a.astype(np.uint8),remaining_time=int(remaining_time),binding=bound,
++                rng=rng_save(rng,device),committed=True)
++    stream=io.BytesIO();torch.save(packet,stream);raw=stream.getvalue()
++    outer=dict(raw=raw,sha256=hashlib.sha256(raw).hexdigest())
++    path=Path(path);path.parent.mkdir(parents=True,exist_ok=True)
++    temporary=path.with_name(path.name+'.tmp')
++    with temporary.open('wb') as f:
++        torch.save(outer,f);f.flush();os.fsync(f.fileno())
++    os.replace(temporary,path)
++
++
++def load_checkpoint(path, rng, device, expected, slots, total_time, expected_remaining=None):
++    import hashlib
++    import io
++    import torch
++    from hsgd.bw_preflight.common import rng_restore
++    def load(x):
++        try: return torch.load(x,map_location='cpu',weights_only=False)
++        except TypeError: return torch.load(x,map_location='cpu')
++    # Trusted locally produced files only (Torch pickle), never arbitrary input.
++    outer=load(path)
++    if hashlib.sha256(outer['raw']).hexdigest()!=outer['sha256']: raise ValueError('checkpoint payload digest differs')
++    packet=load(io.BytesIO(outer['raw']))
++    if packet['binding']!=expected or packet.get('committed') is not True: raise ValueError('checkpoint binding/commit differs')
++    state=np.asarray(packet['state']);s=packet['remaining_time']
++    if slots!=expected['slots'] or total_time!=expected['time_steps'] or state.shape!=(slots,) or not np.isin(state,[0,1]).all() or not 0<=s<=total_time:
++        raise ValueError('checkpoint state/count invalid')
++    if expected_remaining is not None and s!=expected_remaining: raise ValueError('completed-step count differs')
++    rng_restore(packet['rng'],rng,device)
++    return state.copy(),s
+--- /dev/null
++++ b/tests/stepwise_resume_worker.py
+@@ -0,0 +1,17 @@
++"""Fresh-process small fixture checkpoint continuation, never a BW runner."""
++import sys
++from pathlib import Path
++sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
++sys.path.insert(0,str(Path(__file__).resolve().parent))
++import numpy as np
++import torch
++from test_stepwise import case_guide
++from stepwise_role.sampling import binding,reverse_step,load_checkpoint
++torch.set_num_threads(1)
++case,model,k,g,state=case_guide(False)
++rng=np.random.default_rng(999999)
++bound=binding(model,case,k,g,'C',20,1789)
++state,s=load_checkpoint(sys.argv[1],rng,'cpu',bound,len(state),4,2)
++for t in range(s,0,-1):
++    state,_=reverse_step(model,case,state,k,t,20,1789,rng,'cpu',arm='C',guide=g)
++np.savez(sys.argv[2],state=state,uniform_after=rng.random(10))
+--- /dev/null
++++ b/tests/test_stepwise.py
+@@ -0,0 +1,263 @@
++"""Deterministic engineering fixtures only; no scientific outputs or updates."""
++import copy
++import itertools
++import json
++import numpy as np
++import pytest
++import torch
++from hsgd.bw_preflight import common as c
++from hsgd.fusion_checks import fixture,make,rng_equal
++from hsgd.kernel import MarginalKernel
++from role_degree.role_statistics import joint_profile,independent_degree_cf,target_cf
++from stepwise_role.core import Layout,freeze,StepwiseGuide,transition_kl
++from stepwise_role.sampling import reverse_step,binding,save_checkpoint,load_checkpoint,validate_arm
++
++
++def setup_small():
++    case=c.make_case(np.array([0,0,1,2]),np.array([[0,0],[2,3]]),((0,1),(0,2)))
++    l=Layout.canonical(case['space'].types,case['space'].pairs,case['prior'])
++    profile=joint_profile(l.types,case['clean'],case['space'].encode(case['clean'])[0],l.pairs)
++    k=MarginalKernel(case['prior'],[1.,.8,.4,.1,0.])
++    guide=StepwiseGuide(l,freeze(profile,l,k.alpha))
++    state=np.array([1,0,0,1],dtype=np.uint8)
++    return case,l,profile,k,guide,state
++
++
++def direct_cf(l,p,w):
++    """Independent direct edge-product implementation, NOT log/bincount engine."""
++    result=[]
++    for node in np.flatnonzero(l.types==0):
++        products=np.ones(len(w),dtype=complex)
++        for e,(u,v) in enumerate(l.slots.T):
++            if node in (u,v): products*=1-p[e]+p[e]*np.exp(1j*w[:,l.families[e]])
++        result.append(products)
++    return np.mean(result,axis=0)
++
++
++@pytest.mark.parametrize('s',[0,1,2,3,4])
++def test_noisy_target_against_exhaustive_forward(s):
++    _,l,_,k,g,_=setup_small()
++    clean=np.array([1,0,1,0]) # actual reference: same type-0 node has both roles
++    p=k.alpha[s]*clean+(1-k.alpha[s])*l.prior[l.families]
++    maximum=0.
++    for c0,w in g.omega.items():
++        enumerated=np.zeros(32,dtype=complex)
++        for bits in itertools.product((0,1),repeat=4):
++            bits=np.array(bits);mass=np.prod(np.where(bits,p,1-p))
++            deg=np.zeros((len(l.types),len(l.pairs)),int)
++            for e,(u,v) in enumerate(l.slots.T):
++                deg[u,l.families[e]]+=bits[e];deg[v,l.families[e]]+=bits[e]
++            enumerated+=mass*np.exp(1j*deg[l.types==int(c0)]@w.T).mean(0)
++        maximum=max(maximum,float(np.max(abs(enumerated-g.targets[c0][s]))))
++    assert maximum<3e-14
++    if s==0:
++        exact=target_cf(g.frozen['payload']['frequencies']['payload']['profile'],g.omega['0'])
++        assert np.max(abs(exact['0']-g.targets['0'][0]))<1e-14
++    if s==4: # endpoint independent of clean role dependence
++        assert np.max(abs(direct_cf(l,p,g.omega['0'])-g.targets['0'][s]))<1e-14
++
++
++@pytest.mark.parametrize('t',[1,2,3,4])
++def test_bridge_gradient_finite_difference_and_clean_endpoint(t):
++    _,l,_,k,g,state=setup_small();p=np.array([.18,.64,.39,.72])
++    q,loss,grad,_,error=g.posterior_gradient(p,state,k,t)
++    z=np.log(p)-np.log1p(-p);numeric=[];eps=1e-5
++    for e in range(4):
++        zz=z.copy();zz[e]+=eps;pp=1/(1+np.exp(-zz))
++        a=g.statistic(k.reverse(pp,state,l.families,t-1,t),t-1)[0]
++        zz[e]-=2*eps;pp=1/(1+np.exp(-zz))
++        b=g.statistic(k.reverse(pp,state,l.families,t-1,t),t-1)[0]
++        numeric.append((a-b)/(2*eps))
++    assert np.allclose(grad,numeric,atol=2e-8,rtol=2e-5)
++    assert error<5e-14
++    assert np.max(abs(q-p))<1e-14 if t==1 else True
++    # Expected empirical CF agrees with an independent multiplication engine.
++    details=g.statistic(q,t-1)[2]
++    for c0,w in g.omega.items():
++        direct=independent_degree_cf(l.types,l.slots,l.families,q,l.pairs,w)[c0]
++        assert np.max(abs(direct-details['mean_cf'][c0]))<2e-14
++
++
++def test_joint_dependence_target_response_and_zero_gradient_counterexample():
++    _,l,pf,k,g,state=setup_small()
++    other=copy.deepcopy(pf);other['groups']['0']['rows']=[[0,1],[1,0]];other['groups']['0']['counts']=[1,1]
++    gg=StepwiseGuide(l,freeze(other,l,k.alpha))
++    # Same per-relation degree marginals AND same frequency scales, different joint law.
++    assert np.array_equal(g.omega['0'],gg.omega['0'])
++    p=np.array([.17,.63,.46,.81])
++    a,qa,ra=g.apply(p,state,k,1);b,qb,rb=gg.apply(p,state,k,1)
++    assert ra['status']==rb['status']=='accepted'
++    assert np.max(abs(qa-qb))>1e-6
++    _,_,zero=g.apply(np.full(4,.5),state,k,1)
++    assert zero['loss_before']>0 and zero['raw_logit_gradient_max']<1e-14
++    assert zero['status']=='skipped' # positive discrepancy, no invented response
++
++
++def test_reindexing_symmetry_and_incomplete_mask_rejection():
++    _,l,profile,k,g,state=setup_small();p=np.array([.17,.63,.46,.81]);perm=np.array([1,0,2,3])
++    edges=np.sort(perm[l.slots],axis=0)
++    ll=Layout(l.types,edges,l.families,l.pairs,l.prior)
++    gg=StepwiseGuide(ll,freeze(profile,ll,k.alpha))
++    for t in (1,3):
++        a,qa,ra=g.apply(p,state,k,t);b,qb,rb=gg.apply(p,state,k,t)
++        assert abs(ra['loss_before']-rb['loss_before'])<2e-10
++        assert np.allclose(qa,qb,atol=2e-10,rtol=1e-9)
++    # Reversing storage orientation then canonicalizing cannot change variables.
++    assert np.array_equal(np.sort(l.slots[::-1],axis=0),l.slots)
++    with pytest.raises(ValueError,match='complete legal'):
++        Layout(l.types,l.slots[:,:-1],l.families[:-1],l.pairs,l.prior)
++
++
++def test_exact_support_saturation_and_kl_limits():
++    l=Layout.canonical(np.array([0,0,1,1]),[(0,0),(0,1),(1,1)],[0.,.5,1.])
++    edge=l.slots[:,[1,5]];fam=l.families[[1,5]]
++    profile=joint_profile(l.types,edge,fam,l.pairs)
++    k=MarginalKernel(l.prior,[1.,.7,0.]);g=StepwiseGuide(l,freeze(profile,l,k.alpha))
++    p=np.array([0.,0.,.3,.8,1.,1.]);state=np.array([0,1,0,1,0,1])
++    pp,q,r=g.apply(p,state,k,1)
++    assert np.array_equal(pp[[0,1,4,5]],p[[0,1,4,5]])
++    assert r['numerical_saturated_slots']==2 and q[0]==0 and q[-1]==1
++    assert transition_kl(p,p)['sum']==0
++    with pytest.raises(FloatingPointError): transition_kl(np.array([.1]),np.array([0.]))
++    with pytest.raises(ValueError):g.apply(np.full(6,.5),state,k,1)
++    with pytest.raises(ValueError):g.apply(np.array([0.,np.nan,.3,.8,1.,1.]),state,k,1)
++
++
++def test_backtracking_failure_nonfinite_and_unresolvable_gradient(monkeypatch):
++    _,_,_,k,g,state=setup_small();p=np.array([.17,.63,.46,.81])
++    original=g.statistic
++    def fail_candidates(q,s,gradient=False):
++        loss,grad,detail=original(q,s,gradient)
++        return (10. if not gradient else loss),grad,detail
++    monkeypatch.setattr(g,'statistic',fail_candidates)
++    pp,q,r=g.apply(p,state,k,1)
++    assert r['reason']=='no_verified_descent' and r['trials']==8
++    assert np.array_equal(pp,p)
++    def nonfinite(*args,**kwargs):raise FloatingPointError('injected numerical guard')
++    monkeypatch.setattr(g,'statistic',nonfinite)
++    pp,q,r=g.apply(p,state,k,1)
++    assert r['status']=='numerical_failure' and np.array_equal(pp,p)
++    monkeypatch.setattr(g,'statistic',original)
++    tiny=MarginalKernel(k.prior,[1.,1e-10,1e-20,0.]);tinyg=StepwiseGuide(g.layout,freeze(g.frozen['payload']['frequencies']['payload']['profile'],g.layout,tiny.alpha))
++    pp,q,r=tinyg.apply(p,state,tiny,3)
++    assert r['status']=='skipped' and np.array_equal(pp,p)
++
++
++def case_guide(cn=False):
++    case=fixture()[0];model,_=make(case,cn);model.eval()
++    l=Layout.canonical(case['space'].types,case['space'].pairs,case['prior'])
++    f=case['space'].encode(case['clean'])[0]
++    profile=joint_profile(l.types,case['clean'],f,l.pairs)
++    k=MarginalKernel(case['prior'],c.schedule(4));g=StepwiseGuide(l,freeze(profile,l,k.alpha))
++    state=np.zeros(case['space'].total,dtype=np.uint8);state[case['clean_ids']]=1
++    return case,model,k,g,state
++
++
++@pytest.mark.parametrize('cn',[False,True])
++def test_off_original_rng_full_small_chain_and_interruption(cn):
++    from hsgd.runtime import reverse_step as original
++    case,model,k,g,state=case_guide(cn)
++    arm='D' if cn else 'C';off='B' if cn else 'A';seed=1789
++    rng=np.random.default_rng(seed);before=c.rng_save(rng,'cpu')
++    a,ra=original(model,case,state,k,4,20,seed,rng,'cpu',trace=True)
++    arng=c.rng_save(rng,'cpu');c.rng_restore(before,rng,'cpu')
++    b,rb=reverse_step(model,case,state,k,4,20,seed,rng,'cpu',arm=off,trace=True)
++    assert np.array_equal(a,b);rng_equal(arng,c.rng_save(rng,'cpu'))
++    c.rng_restore(before,rng,'cpu')
++    saved=state.copy()
++    with pytest.raises(InterruptedError):reverse_step(model,case,state,k,4,20,seed,rng,'cpu',arm=arm,guide=g,interrupt_block=2)
++    assert np.array_equal(state,saved);rng_equal(before,c.rng_save(rng,'cpu'))
++    for t in range(4,0,-1):
++        rbefore=c.rng_save(rng,'cpu')
++        value,record=reverse_step(model,case,state,k,t,20,seed,rng,'cpu',arm=arm,guide=g,trace=True)
++        after=c.rng_save(rng,'cpu')
++        # Guide uses no random input beyond original one full-slot uniform.
++        c.rng_restore(rbefore,rng,'cpu');uniform=rng.random(case['space'].total)
++        rng_equal(after,c.rng_save(rng,'cpu'))
++        assert record['guidance']['time']==t and record['guidance']['next_time']==t-1
++        assert np.array_equal(record['trace']['uniform'],uniform)
++        assert record['exact_coverage']
++        assert np.array_equal(value,uniform<record['trace']['q'])
++        assert np.array_equal(state,saved) if t==4 else True
++        state=value
++    assert record['remaining_time']==0
++
++
++def test_checkpoint_roundtrip_binding_tamper_and_pending_step(tmp_path):
++    case,model,k,g,state=case_guide(False);rng=np.random.default_rng(1789)
++    bound=binding(model,case,k,g,'C',20,1789)
++    path=tmp_path/'committed.pt';start=c.rng_save(rng,'cpu')
++    states=[]
++    for t in range(4,0,-1):
++        state,_=reverse_step(model,case,state,k,t,20,1789,rng,'cpu',arm='C',guide=g)
++        states.append(state.copy())
++        if t==3:save_checkpoint(path,state,2,rng,'cpu',bound)
++    ending=c.rng_save(rng,'cpu')
++    state,s=load_checkpoint(path,rng,'cpu',bound,len(state),4,2)
++    with pytest.raises(InterruptedError):
++        reverse_step(model,case,state,k,s,20,1789,rng,'cpu',arm='C',guide=g,interrupt_block=2)
++    state,s=load_checkpoint(path,rng,'cpu',bound,len(state),4,2)
++    for t in range(s,0,-1):
++        state,_=reverse_step(model,case,state,k,t,20,1789,rng,'cpu',arm='C',guide=g)
++        assert np.array_equal(state,states[4-t])
++    rng_equal(ending,c.rng_save(rng,'cpu'))
++    for field in ('python','torch_runtime_version','guide','alpha_sha256','seed','model_sha256','receipt_sha256'):
++        wrong=copy.deepcopy(bound);wrong[field]='tampered'
++        with pytest.raises(ValueError,match='binding'):load_checkpoint(path,rng,'cpu',wrong,len(state),4)
++    with pytest.raises(ValueError,match='count'):load_checkpoint(path,rng,'cpu',bound,len(state),4,3)
++    packet=torch.load(path,weights_only=False)
++    packet['raw']=packet['raw']+b'corrupted RNG/payload'
++    torch.save(packet,tmp_path/'corrupted.pt')
++    with pytest.raises(ValueError,match='digest'):load_checkpoint(tmp_path/'corrupted.pt',rng,'cpu',bound,len(state),4)
++    g.settings['delta_max']=.2
++    with pytest.raises(ValueError,match='changed'):g.binding()
++
++
++def test_model_arm_and_receipt_reject_wrong_native_weights():
++    case,model,k,g,state=case_guide(False)
++    with pytest.raises(ValueError):validate_arm(model,'D')
++    with pytest.raises(ValueError):validate_arm(model,'C',{'completed_updates':10000},True)
++    # Receipt shape is checked; actual BW import/verification is not claimed.
++    receipt=dict(formal_training=True,completed_updates=6000,final=True,experiment_arm='baseline',
++                 **{x:'a'*64 for x in ('checkpoint_sha256','source_sha256','config_sha256','data_sha256')})
++    assert validate_arm(model,'C',receipt,True)
++
++
++def test_proxy_is_not_expected_discrete_squared_error():
++    _,l,_,k,g,state=setup_small();p=np.array([.17,.63,.46,.81])
++    proxy=g.statistic(p,0)[0];expected=0.
++    for bits in itertools.product((0,1),repeat=4):
++        bits=np.array(bits);mass=np.prod(np.where(bits,p,1-p))
++        expected+=mass*g.statistic(bits,0)[0]
++    assert expected>proxy+1e-6
++
++
++def test_fresh_process_recovery(tmp_path):
++    import subprocess
++    import sys
++    from pathlib import Path
++    case,model,k,g,state=case_guide(False);rng=np.random.default_rng(1789)
++    bound=binding(model,case,k,g,'C',20,1789);path=tmp_path/'two_steps.pt'
++    for t in range(4,0,-1):
++        state,_=reverse_step(model,case,state,k,t,20,1789,rng,'cpu',arm='C',guide=g)
++        if t==3:save_checkpoint(path,state,2,rng,'cpu',bound)
++    expected=rng.random(10)
++    output=tmp_path/'continued.npz'
++    subprocess.run([sys.executable,str(Path(__file__).with_name('stepwise_resume_worker.py')),str(path),str(output)],check=True,timeout=60)
++    with np.load(output) as z:
++        assert np.array_equal(z['state'],state) and np.array_equal(z['uniform_after'],expected)
++
++
++def test_underflow_and_factor_guard_never_normalize_untrusted_signal():
++    # Probability-only engineering fixture: 30000 slots, not a sampled graph.
++    types=np.r_[0,np.ones(30000,dtype=int)]
++    l=Layout.canonical(types,[(0,1)],[.5])
++    profile=joint_profile(types,np.empty((2,0),dtype=int),np.empty(0,dtype=int),l.pairs)
++    k=MarginalKernel([.5],[1.,.5,0.]);g=StepwiseGuide(l,freeze(profile,l,k.alpha))
++    p=np.full(30000,.5);state=np.zeros(30000,dtype=np.uint8)
++    pp,q,r=g.apply(p,state,k,1)
++    assert r['underflow_node_frequencies']>0 and r['reason']=='underflow_untrusted_gradient'
++    assert np.array_equal(pp,p)
++    g.omega['0']=np.full((32,1),np.pi) # injected contract violation, not a setting change
++    with pytest.raises(FloatingPointError,match='factor lower bound'):
++        g.statistic(p,0,True)
