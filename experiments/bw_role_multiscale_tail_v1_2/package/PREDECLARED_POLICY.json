@@ -1,0 +1,60 @@
+{
+  "design": {
+    "version": "multiscale_role_tail_v1",
+    "K_per_scale": 32,
+    "scales": [
+      0.5,
+      1.0,
+      2.0
+    ],
+    "frequency_seed": 2026101801,
+    "CF_weight": 0.5,
+    "tail_weight": 0.5,
+    "CF_divisor": 4.0,
+    "quantile": 0.9,
+    "thinning_max": 0.5,
+    "tail_threshold": 3,
+    "mass_atol": 5e-11,
+    "frequency_bound": 2.0
+  },
+  "short_test_policy": {
+    "version": "six_state_development_v1",
+    "fixed_cases": [
+      [
+        "A",
+        500
+      ],
+      [
+        "A",
+        20
+      ],
+      [
+        "A",
+        1
+      ],
+      [
+        "B",
+        500
+      ],
+      [
+        "B",
+        20
+      ],
+      [
+        "B",
+        1
+      ]
+    ],
+    "q_bridge_atol": 5e-14,
+    "CF_atol": 2e-10,
+    "W1_atol": 1e-08,
+    "metric_rtol": 1e-09,
+    "W1_allowance_rule": "add before+after 64*eps*capacity*(capacity+nodes+role_rows+1)",
+    "full_panel_rule": "all six complete; neither Genre64 nor any Genre W1 channel worsens beyond numerical tolerance; at least one state improves BOTH Genre64 and a Genre W1 channel",
+    "mixed_rule": "any independent metric deterioration => tradeoff, not overall success",
+    "unresolved_rule": "no resolved independent gain => no evidence of gain; not equivalence",
+    "failure_rule": "missing/binding/numerical error or timeout => incomplete/protocol failure; never declare success from subset",
+    "meaning": "descriptive frozen-state evidence only, no generated-graph quality claim"
+  },
+  "frozen_before_real_six_state_access": true
+}
