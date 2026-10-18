@@ -1,0 +1,899 @@
+{
+  "toy": {
+    "label": "SIX-NODE ENGINEERING TOY ONLY",
+    "draws": 4096,
+    "seed": 2026101901,
+    "reference_role_counts": [
+      {
+        "vector": [
+          1
+        ],
+        "count": 5
+      },
+      {
+        "vector": [
+          5
+        ],
+        "count": 1
+      }
+    ],
+    "probability_before": [
+      0.23,
+      0.23,
+      0.23,
+      0.23,
+      0.23,
+      0.11,
+      0.11,
+      0.11,
+      0.11,
+      0.11,
+      0.11,
+      0.11,
+      0.11,
+      0.11,
+      0.11
+    ],
+    "probability_after": [
+      0.24818586601938747,
+      0.24818586601938747,
+      0.24818586601938747,
+      0.24818586601938747,
+      0.24818586601938747,
+      0.11085741799347752,
+      0.11085741799347752,
+      0.11085741799347752,
+      0.11085741799347752,
+      0.11085741799347752,
+      0.11085741799347752,
+      0.11085741799347752,
+      0.11085741799347752,
+      0.11085741799347752,
+      0.11085741799347752
+    ],
+    "guidance": {
+      "status": "accepted",
+      "time": 1,
+      "next_time": 0,
+      "coordinate": "CLEAN p0 logits, not q",
+      "proposed_delta": 0.1,
+      "accepted_delta": 0.1,
+      "trials": 1,
+      "backtracks": 0,
+      "effective_movable_slots": 15,
+      "structural_fixed_slots": 0,
+      "numerical_saturated_slots": 0,
+      "matching_seconds": 0.0013552550226449966,
+      "gradient_seconds": 0.00042634550482034683,
+      "backtracking_seconds": 0.0005702860653400421,
+      "new_sampling_law": true,
+      "matching": {
+        "0": {
+          "algorithm": "exact 1D rearrangement sorting",
+          "nodes": 6,
+          "distinct_roles": 2,
+          "role_copies": 6,
+          "effective_dimensions": 1,
+          "cost_sum": 1.4674179237200913,
+          "normalized_type_loss": 0.24456965395334854,
+          "seconds": 0.0012675179168581963,
+          "status": "duplicate_roles_only_at_declared_resolution",
+          "equality_tolerance": 1.8003606370817738e-10,
+          "dual_max_violation": 0.0,
+          "assignment_objective_lower_bound": 1.4674179237200913,
+          "primal_dual_gap_bound": 0.0,
+          "potential_iterations": 2,
+          "duplicate_only_components": 1,
+          "distinct_role_components": 0,
+          "witnesses": [],
+          "strict_uniqueness_claim": false,
+          "arithmetic_scope": "FP64 cost/dual residual audit; not a rigorous interval certificate or exact-real uniqueness proof",
+          "tie_rule": "SciPy current row order / canonical lexicographic expanded roles; no persistent node-role binding; tied gradients need not be equivariant"
+        }
+      },
+      "loss_before": 0.24456965395334845,
+      "loss_after_fixed": 0.23246001334917188,
+      "loss_after_reoptimized": 0.23246001334917188,
+      "type_before": {
+        "0": {
+          "loss": 0.24456965395334845,
+          "standardized_residual_rms_by_relation": [
+            0.4945398406128151
+          ],
+          "expected_degree_mean": [
+            0.75
+          ],
+          "effective_dimensions": [
+            0
+          ]
+        }
+      },
+      "type_after_fixed": {
+        "0": {
+          "loss": 0.23246001334917188,
+          "standardized_residual_rms_by_relation": [
+            0.48214107204133927
+          ],
+          "expected_degree_mean": [
+            0.7831678366772375
+          ],
+          "effective_dimensions": [
+            0
+          ]
+        }
+      },
+      "raw_logit_gradient_max": 0.023563419573017108,
+      "raw_logit_gradient_l2": 0.05308929923933211,
+      "descent_threshold": 2.4556965395334844e-10,
+      "first_order_descent_prediction": 0.011961225258454564,
+      "trial_loss": 0.23246001334917188,
+      "reason": "resolved_fixed_matching_decrease",
+      "type_after_reoptimized": {
+        "0": {
+          "loss": 0.23246001334917188,
+          "standardized_residual_rms_by_relation": [
+            0.48214107204133927
+          ],
+          "expected_degree_mean": [
+            0.7831678366772375
+          ],
+          "effective_dimensions": [
+            0
+          ]
+        }
+      },
+      "reoptimized_matching": {
+        "0": {
+          "algorithm": "exact 1D rearrangement sorting",
+          "nodes": 6,
+          "distinct_roles": 2,
+          "role_copies": 6,
+          "effective_dimensions": 1,
+          "cost_sum": 1.3947600800950313,
+          "normalized_type_loss": 0.23246001334917188,
+          "seconds": 0.0009345375001430511,
+          "status": "duplicate_roles_only_at_declared_resolution",
+          "equality_tolerance": 1.7825301459248983e-10,
+          "dual_max_violation": 0.0,
+          "assignment_objective_lower_bound": 1.3947600800950313,
+          "primal_dual_gap_bound": 0.0,
+          "potential_iterations": 2,
+          "duplicate_only_components": 1,
+          "distinct_role_components": 0,
+          "witnesses": [],
+          "strict_uniqueness_claim": false,
+          "arithmetic_scope": "FP64 cost/dual residual audit; not a rigorous interval certificate or exact-real uniqueness proof",
+          "tie_rule": "SciPy current row order / canonical lexicographic expanded roles; no persistent node-role binding; tied gradients need not be equivariant"
+        }
+      },
+      "reoptimization_seconds": 0.0012255767360329628,
+      "reoptimization_excess": 0.0,
+      "reoptimization_allowance": 1.01e-10,
+      "clean_probability_l1": 0.09950351003171251,
+      "clean_probability_max": 0.01818586601938746,
+      "posterior_seconds": 0.0007528355345129967,
+      "numerical_saturated_slots_after": 0,
+      "transition_probability_l1": 0.09950351003171251,
+      "transition_probability_max": 0.01818586601938746,
+      "transition_kl": {
+        "sum": 0.00462347607528696,
+        "max_slot": 0.0009172028946001116,
+        "minimum_slot": 0.0,
+        "summation_roundoff_bound": 1.0658141036401503e-13
+      },
+      "wall_seconds": 0.00475680734962225,
+      "statistics_meaning": "expected clean degrees matched to hard anonymous roles; NOT sampled degree-distribution matching"
+    },
+    "before": {
+      "expected_degrees": [
+        1.1500000000000001,
+        0.67,
+        0.67,
+        0.67,
+        0.67,
+        0.67
+      ],
+      "empirical_mean": [
+        1.1337890625,
+        0.684814453125,
+        0.6708984375,
+        0.66552734375,
+        0.66796875,
+        0.676025390625
+      ],
+      "analytic_sd": [
+        0.9410100955887775,
+        0.7541220060441148,
+        0.7541220060441148,
+        0.7541220060441148,
+        0.7541220060441148,
+        0.7541220060441148
+      ],
+      "empirical_sd": [
+        0.9263244837827461,
+        0.7638844147946122,
+        0.7503858209681594,
+        0.7561228684685243,
+        0.7575204817517726,
+        0.7640426399130589
+      ],
+      "mean_sorted_discrete_role_squared_error": 2.513590494791667,
+      "discrete_error_P10_P90": [
+        1.3333333333333333,
+        3.3333333333333335
+      ],
+      "exactly_target_sorted_degree_fraction": 0.0009765625
+    },
+    "after": {
+      "expected_degrees": [
+        1.2409293300969373,
+        0.6916155379932976,
+        0.6916155379932974,
+        0.6916155379932974,
+        0.6916155379932976,
+        0.6916155379932976
+      ],
+      "empirical_mean": [
+        1.218017578125,
+        0.705322265625,
+        0.69189453125,
+        0.68701171875,
+        0.690673828125,
+        0.695556640625
+      ],
+      "analytic_sd": [
+        0.965892442064835,
+        0.7621429297741873,
+        0.7621429297741873,
+        0.7621429297741873,
+        0.7621429297741873,
+        0.7621429297741873
+      ],
+      "empirical_sd": [
+        0.9466107179054701,
+        0.7736069849985954,
+        0.7592481405155648,
+        0.765903811388983,
+        0.764042327864208,
+        0.7726651969368522
+      ],
+      "mean_sorted_discrete_role_squared_error": 2.445719401041667,
+      "discrete_error_P10_P90": [
+        1.0,
+        3.3333333333333335
+      ],
+      "exactly_target_sorted_degree_fraction": 0.0009765625
+    },
+    "warning": "expected-degree matching is not sampled-degree-distribution matching; tied role selection can break symmetry"
+  },
+  "reference_size_cost": {
+    "label": "IMDB-size engineering probabilities .8*reference_indicator+.2*prior; NOT REAL SIX STATES",
+    "nodes": 1653,
+    "slots": 1365378,
+    "data_sha256": "10f1dbbbe55c6a069594b2dcb590d1b8295ca5436320ef4597cd30e6b7f73e42",
+    "prepare_seconds": 0.10697002802044153,
+    "total_guide_seconds": 1.9051055498421192,
+    "report": {
+      "status": "accepted",
+      "time": 20,
+      "next_time": 19,
+      "coordinate": "CLEAN p0 logits, not q",
+      "proposed_delta": 0.09983859052135453,
+      "accepted_delta": 0.09983859052135453,
+      "trials": 1,
+      "backtracks": 0,
+      "effective_movable_slots": 997313,
+      "structural_fixed_slots": 368065,
+      "numerical_saturated_slots": 0,
+      "matching_seconds": 0.14957734942436218,
+      "gradient_seconds": 0.09798965137451887,
+      "backtracking_seconds": 0.6448545455932617,
+      "new_sampling_law": true,
+      "matching": {
+        "0": {
+          "algorithm": "scipy.optimize.linear_sum_assignment (modified Jonker-Volgenant)",
+          "nodes": 410,
+          "distinct_roles": 19,
+          "role_copies": 410,
+          "effective_dimensions": 2,
+          "cost_sum": 2.5394426423376384,
+          "normalized_type_loss": 0.006193762542286923,
+          "seconds": 0.015678963623940945,
+          "status": "duplicate_roles_only_at_declared_resolution",
+          "equality_tolerance": 1.6515659686105532e-09,
+          "dual_max_violation": 6.106226635438361e-16,
+          "assignment_objective_lower_bound": 2.539442642337388,
+          "primal_dual_gap_bound": 2.503552920529728e-13,
+          "potential_iterations": 8,
+          "duplicate_only_components": 10,
+          "distinct_role_components": 0,
+          "witnesses": [],
+          "strict_uniqueness_claim": false,
+          "arithmetic_scope": "FP64 cost/dual residual audit; not a rigorous interval certificate or exact-real uniqueness proof",
+          "tie_rule": "SciPy current row order / canonical lexicographic expanded roles; no persistent node-role binding; tied gradients need not be equivariant"
+        },
+        "1": {
+          "algorithm": "scipy.optimize.linear_sum_assignment (modified Jonker-Volgenant)",
+          "nodes": 494,
+          "distinct_roles": 27,
+          "role_copies": 494,
+          "effective_dimensions": 3,
+          "cost_sum": 2.9819911447250833,
+          "normalized_type_loss": 0.0060364193213058364,
+          "seconds": 0.023391110822558403,
+          "status": "duplicate_roles_only_at_declared_resolution",
+          "equality_tolerance": 8.021755943989627e-10,
+          "dual_max_violation": 5.551115123125783e-16,
+          "assignment_objective_lower_bound": 2.981991144724809,
+          "primal_dual_gap_bound": 2.7422508708241367e-13,
+          "potential_iterations": 10,
+          "duplicate_only_components": 14,
+          "distinct_role_components": 0,
+          "witnesses": [],
+          "strict_uniqueness_claim": false,
+          "arithmetic_scope": "FP64 cost/dual residual audit; not a rigorous interval certificate or exact-real uniqueness proof",
+          "tie_rule": "SciPy current row order / canonical lexicographic expanded roles; no persistent node-role binding; tied gradients need not be equivariant"
+        },
+        "2": {
+          "algorithm": "scipy.optimize.linear_sum_assignment (modified Jonker-Volgenant)",
+          "nodes": 726,
+          "distinct_roles": 20,
+          "role_copies": 726,
+          "effective_dimensions": 3,
+          "cost_sum": 1.1150214983804454,
+          "normalized_type_loss": 0.001535842284270586,
+          "seconds": 0.04069907497614622,
+          "status": "duplicate_roles_only_at_declared_resolution",
+          "equality_tolerance": 1.01e-10,
+          "dual_max_violation": 0.0,
+          "assignment_objective_lower_bound": 1.1150214983804454,
+          "primal_dual_gap_bound": 0.0,
+          "potential_iterations": 5,
+          "duplicate_only_components": 17,
+          "distinct_role_components": 0,
+          "witnesses": [],
+          "strict_uniqueness_claim": false,
+          "arithmetic_scope": "FP64 cost/dual residual audit; not a rigorous interval certificate or exact-real uniqueness proof",
+          "tie_rule": "SciPy current row order / canonical lexicographic expanded roles; no persistent node-role binding; tied gradients need not be equivariant"
+        },
+        "3": {
+          "algorithm": "exact 1D rearrangement sorting",
+          "nodes": 23,
+          "distinct_roles": 19,
+          "role_copies": 23,
+          "effective_dimensions": 1,
+          "cost_sum": 0.49281791961588817,
+          "normalized_type_loss": 0.02142686607025601,
+          "seconds": 0.001698508858680725,
+          "status": "duplicate_roles_only_at_declared_resolution",
+          "equality_tolerance": 1.258766346636184e-09,
+          "dual_max_violation": 0.0,
+          "assignment_objective_lower_bound": 0.49281791961588817,
+          "primal_dual_gap_bound": 0.0,
+          "potential_iterations": 13,
+          "duplicate_only_components": 4,
+          "distinct_role_components": 0,
+          "witnesses": [],
+          "strict_uniqueness_claim": false,
+          "arithmetic_scope": "FP64 cost/dual residual audit; not a rigorous interval certificate or exact-real uniqueness proof",
+          "tie_rule": "SciPy current row order / canonical lexicographic expanded roles; no persistent node-role binding; tied gradients need not be equivariant"
+        }
+      },
+      "loss_before": 0.00879822255452984,
+      "loss_after_fixed": 0.008362154561243644,
+      "loss_after_reoptimized": 0.008362154561243644,
+      "type_before": {
+        "0": {
+          "loss": 0.006193762542286924,
+          "standardized_residual_rms_by_relation": [
+            0.0,
+            0.0734511746223773,
+            0.08362087078694465,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "expected_degree_mean": [
+            0.0,
+            1.4731707317073224,
+            1.5658536585365777,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "effective_dimensions": [
+            1,
+            2
+          ]
+        },
+        "1": {
+          "loss": 0.006036419321305837,
+          "standardized_residual_rms_by_relation": [
+            0.0,
+            0.0829729760265731,
+            0.0,
+            0.0,
+            0.05455460450867205,
+            0.09082146409364691,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "expected_degree_mean": [
+            0.0,
+            1.222672064777322,
+            0.0,
+            0.0,
+            0.06072874493927092,
+            1.4959514170040715,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "effective_dimensions": [
+            1,
+            4,
+            5
+          ]
+        },
+        "2": {
+          "loss": 0.0015358422842705862,
+          "standardized_residual_rms_by_relation": [
+            0.0,
+            0.0,
+            0.03296975867946335,
+            0.0,
+            0.0,
+            0.014978551835530388,
+            0.0,
+            0.0,
+            0.05741223606810674,
+            0.0
+          ],
+          "expected_degree_mean": [
+            0.0,
+            0.0,
+            0.8842975206611554,
+            0.0,
+            0.0,
+            1.017906336088158,
+            0.0,
+            0.0,
+            2.863636363636366,
+            0.0
+          ],
+          "effective_dimensions": [
+            2,
+            5,
+            8
+          ]
+        },
+        "3": {
+          "loss": 0.02142686607025601,
+          "standardized_residual_rms_by_relation": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.14637918591881843,
+            0.0
+          ],
+          "expected_degree_mean": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            90.3913043478256,
+            0.0
+          ],
+          "effective_dimensions": [
+            8
+          ]
+        }
+      },
+      "type_after_fixed": {
+        "0": {
+          "loss": 0.005817914448783811,
+          "standardized_residual_rms_by_relation": [
+            0.0,
+            0.07114644091060417,
+            0.08108028640379569,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "expected_degree_mean": [
+            0.0,
+            1.4751422064757882,
+            1.5673783117842053,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "effective_dimensions": [
+            1,
+            2
+          ]
+        },
+        "1": {
+          "loss": 0.005729007316852001,
+          "standardized_residual_rms_by_relation": [
+            0.0,
+            0.08128203674010517,
+            0.0,
+            0.0,
+            0.05118657165470035,
+            0.08921988195561817,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "expected_degree_mean": [
+            0.0,
+            1.2243083090183564,
+            0.0,
+            0.0,
+            0.06137279563258628,
+            1.4968815565550841,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "effective_dimensions": [
+            1,
+            4,
+            5
+          ]
+        },
+        "2": {
+          "loss": 0.0015220881765069445,
+          "standardized_residual_rms_by_relation": [
+            0.0,
+            0.0,
+            0.03282801351666401,
+            0.0,
+            0.0,
+            0.014732044287422124,
+            0.0,
+            0.0,
+            0.057197490584675055,
+            0.0
+          ],
+          "expected_degree_mean": [
+            0.0,
+            0.0,
+            0.8851585507321321,
+            0.0,
+            0.0,
+            1.0185392409617307,
+            0.0,
+            0.0,
+            2.867629768491668,
+            0.0
+          ],
+          "effective_dimensions": [
+            2,
+            5,
+            8
+          ]
+        },
+        "3": {
+          "loss": 0.02037960830283182,
+          "standardized_residual_rms_by_relation": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.14275716550433404,
+            0.0
+          ],
+          "expected_degree_mean": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            90.51735704021516,
+            0.0
+          ],
+          "effective_dimensions": [
+            8
+          ]
+        }
+      },
+      "raw_logit_gradient_max": 3.889161879211465e-05,
+      "raw_logit_gradient_l2": 0.00041859414945633993,
+      "descent_threshold": 9.79822255452984e-12,
+      "first_order_descent_prediction": 0.00044980960934431585,
+      "trial_loss": 0.008362154561243644,
+      "reason": "resolved_fixed_matching_decrease",
+      "type_after_reoptimized": {
+        "0": {
+          "loss": 0.005817914448783811,
+          "standardized_residual_rms_by_relation": [
+            0.0,
+            0.07114644091060417,
+            0.08108028640379569,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "expected_degree_mean": [
+            0.0,
+            1.4751422064757882,
+            1.5673783117842053,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "effective_dimensions": [
+            1,
+            2
+          ]
+        },
+        "1": {
+          "loss": 0.005729007316852001,
+          "standardized_residual_rms_by_relation": [
+            0.0,
+            0.08128203674010517,
+            0.0,
+            0.0,
+            0.05118657165470035,
+            0.08921988195561817,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "expected_degree_mean": [
+            0.0,
+            1.2243083090183564,
+            0.0,
+            0.0,
+            0.06137279563258628,
+            1.4968815565550841,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "effective_dimensions": [
+            1,
+            4,
+            5
+          ]
+        },
+        "2": {
+          "loss": 0.0015220881765069445,
+          "standardized_residual_rms_by_relation": [
+            0.0,
+            0.0,
+            0.03282801351666401,
+            0.0,
+            0.0,
+            0.014732044287422124,
+            0.0,
+            0.0,
+            0.057197490584675055,
+            0.0
+          ],
+          "expected_degree_mean": [
+            0.0,
+            0.0,
+            0.8851585507321321,
+            0.0,
+            0.0,
+            1.0185392409617307,
+            0.0,
+            0.0,
+            2.867629768491668,
+            0.0
+          ],
+          "effective_dimensions": [
+            2,
+            5,
+            8
+          ]
+        },
+        "3": {
+          "loss": 0.02037960830283182,
+          "standardized_residual_rms_by_relation": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.14275716550433404,
+            0.0
+          ],
+          "expected_degree_mean": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            90.51735704021516,
+            0.0
+          ],
+          "effective_dimensions": [
+            8
+          ]
+        }
+      },
+      "reoptimized_matching": {
+        "0": {
+          "algorithm": "scipy.optimize.linear_sum_assignment (modified Jonker-Volgenant)",
+          "nodes": 410,
+          "distinct_roles": 19,
+          "role_copies": 410,
+          "effective_dimensions": 2,
+          "cost_sum": 2.385344924001363,
+          "normalized_type_loss": 0.005817914448783812,
+          "seconds": 0.015198195353150368,
+          "status": "duplicate_roles_only_at_declared_resolution",
+          "equality_tolerance": 1.6516257540418323e-09,
+          "dual_max_violation": 1.1102230246251565e-16,
+          "assignment_objective_lower_bound": 2.385344924001317,
+          "primal_dual_gap_bound": 4.551914400963142e-14,
+          "potential_iterations": 8,
+          "duplicate_only_components": 10,
+          "distinct_role_components": 0,
+          "witnesses": [],
+          "strict_uniqueness_claim": false,
+          "arithmetic_scope": "FP64 cost/dual residual audit; not a rigorous interval certificate or exact-real uniqueness proof",
+          "tie_rule": "SciPy current row order / canonical lexicographic expanded roles; no persistent node-role binding; tied gradients need not be equivariant"
+        },
+        "1": {
+          "algorithm": "scipy.optimize.linear_sum_assignment (modified Jonker-Volgenant)",
+          "nodes": 494,
+          "distinct_roles": 27,
+          "role_copies": 494,
+          "effective_dimensions": 3,
+          "cost_sum": 2.830129614524888,
+          "normalized_type_loss": 0.005729007316852001,
+          "seconds": 0.0238316236063838,
+          "status": "duplicate_roles_only_at_declared_resolution",
+          "equality_tolerance": 8.021882535526144e-10,
+          "dual_max_violation": 4.440892098500626e-16,
+          "assignment_objective_lower_bound": 2.830129614524669,
+          "primal_dual_gap_bound": 2.1938006966593093e-13,
+          "potential_iterations": 10,
+          "duplicate_only_components": 14,
+          "distinct_role_components": 0,
+          "witnesses": [],
+          "strict_uniqueness_claim": false,
+          "arithmetic_scope": "FP64 cost/dual residual audit; not a rigorous interval certificate or exact-real uniqueness proof",
+          "tie_rule": "SciPy current row order / canonical lexicographic expanded roles; no persistent node-role binding; tied gradients need not be equivariant"
+        },
+        "2": {
+          "algorithm": "scipy.optimize.linear_sum_assignment (modified Jonker-Volgenant)",
+          "nodes": 726,
+          "distinct_roles": 20,
+          "role_copies": 726,
+          "effective_dimensions": 3,
+          "cost_sum": 1.1050360161440418,
+          "normalized_type_loss": 0.0015220881765069447,
+          "seconds": 0.03839420527219772,
+          "status": "duplicate_roles_only_at_declared_resolution",
+          "equality_tolerance": 1.01e-10,
+          "dual_max_violation": 0.0,
+          "assignment_objective_lower_bound": 1.1050360161440418,
+          "primal_dual_gap_bound": 0.0,
+          "potential_iterations": 5,
+          "duplicate_only_components": 17,
+          "distinct_role_components": 0,
+          "witnesses": [],
+          "strict_uniqueness_claim": false,
+          "arithmetic_scope": "FP64 cost/dual residual audit; not a rigorous interval certificate or exact-real uniqueness proof",
+          "tie_rule": "SciPy current row order / canonical lexicographic expanded roles; no persistent node-role binding; tied gradients need not be equivariant"
+        },
+        "3": {
+          "algorithm": "exact 1D rearrangement sorting",
+          "nodes": 23,
+          "distinct_roles": 19,
+          "role_copies": 23,
+          "effective_dimensions": 1,
+          "cost_sum": 0.4687309909651319,
+          "normalized_type_loss": 0.02037960830283182,
+          "seconds": 0.0016893530264496803,
+          "status": "duplicate_roles_only_at_declared_resolution",
+          "equality_tolerance": 1.2588949075749287e-09,
+          "dual_max_violation": 0.0,
+          "assignment_objective_lower_bound": 0.4687309909651319,
+          "primal_dual_gap_bound": 0.0,
+          "potential_iterations": 13,
+          "duplicate_only_components": 4,
+          "distinct_role_components": 0,
+          "witnesses": [],
+          "strict_uniqueness_claim": false,
+          "arithmetic_scope": "FP64 cost/dual residual audit; not a rigorous interval certificate or exact-real uniqueness proof",
+          "tie_rule": "SciPy current row order / canonical lexicographic expanded roles; no persistent node-role binding; tied gradients need not be equivariant"
+        }
+      },
+      "reoptimization_seconds": 0.21969511453062296,
+      "reoptimization_excess": 0.0,
+      "reoptimization_allowance": 1.01e-10,
+      "clean_probability_l1": 6.409082997913673,
+      "clean_probability_max": 0.015495671441794978,
+      "posterior_seconds": 1.0932656405493617,
+      "numerical_saturated_slots_after": 0,
+      "transition_probability_l1": 0.4900262225587403,
+      "transition_probability_max": 0.0011849722574882593,
+      "transition_kl": {
+        "sum": 0.005344695190482448,
+        "max_slot": 4.7857237353848055e-05,
+        "minimum_slot": -2.9020777197325987e-18,
+        "summation_roundoff_bound": 9.70159419466654e-09
+      },
+      "wall_seconds": 1.9041498135775328,
+      "statistics_meaning": "expected clean degrees matched to hard anonymous roles; NOT sampled degree-distribution matching"
+    },
+    "no_probability_collection_performed": true,
+    "no_quality_claim": true
+  },
+  "environment": {
+    "python": "3.9.23",
+    "numpy": "1.26.4",
+    "scipy": "1.11.0",
+    "torch": "2.1.0",
+    "pyg": "2.3.1",
+    "pytest": "7.4.4"
+  },
+  "wall_seconds": 4.408287656493485,
+  "cpu_seconds": 4.319497925,
+  "peak_rss_mib": 891.8828125,
+  "model_calls": 0,
+  "GPU_use": 0,
+  "training_updates": 0,
+  "new_scientific_graphs": 0,
+  "engineering_bernoulli_draws": 8192
+}

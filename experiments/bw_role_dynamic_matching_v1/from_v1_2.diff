@@ -1,0 +1,1577 @@
+--- /dev/null
++++ b/DYNAMIC_INPUT_CONTRACT.md
+@@ -0,0 +1,62 @@
++# Portable offline inputs (real arrays currently NOT available locally)
++
++Three immutable user pins are in `dynamic_role/portable.py`:
++
++- six_states.json: 25bc708337898e84cf22ceffaa8e39ed815adf4fc916b684503c0afa3c35d7dd
++- original_evaluation.json: 198ff9bfcba007a04f36662fc66a9399578b6772b6a5c19be2394544b9b8ffe0
++- old summary.json: aba246f8cf156f16f5271a1160a63ede4475d87dbf13689665e8f6d74ad1b924
++
++Notebook source directories are historical **remote paths**, not local access:
++`/root/private_data/gnn_projects/role_mt_v1_2_export_20261018T091055Z`
++and `/root/private_data/gnn_projects/role_mt_v1_2_short_20261018T091510Z`.
++
++Minimum transfer bundle, resolved from actual manifests rather than guessed
++case filenames:
++
++1. Unchanged original six_states manifest and independent evaluation spec.
++2. All six original converted NPZ and metadata: state, CLEAN p0, ORIGINAL next
++   posterior q, canonical slots, families, types, prior, full alpha[0..1000],
++   query_block, t, original array hashes and field-origin receipts.
++3. Original collection.json per case with full query-byte hash; legacy baseline
++   Genre reports and nested original64 bank artifact (not regenerated).
++4. Original source_manifest/config JSON, original completed summary, six case
++   JSON, frozen_objective and policy. Case metrics must equal pinned summary.
++5. Public complete IMDB reference NPZ, checked against package pin.
++
++NO private checkpoints, model tensors, original edge identity as guidance input,
++notebook credentials or substitute files. Targets are extracted from the allowed
++training reference into anonymous vector counts; reference adjacency is not
++consulted while guide.apply computes a step. The public reference is used for
++target preparation and evaluation, not per-slot reference labels.
++
++`pack` performs read-only original-pin/source checks and a new migration mapping;
++it copies all original artifacts unchanged and creates portable.json plus
++portable_inputs.zip. Every actual payload hash is mapped to original path/hash.
++Original manifest is NEVER rewritten. Original checkpoint hashes remain
++HISTORICAL RECEIPTS ONLY; no claim of rechecking unavailable private weights.
++This explicit offline contract deliberately does not call the old loader that
++requires private weight files, does not fake those files, and does not claim
++fully reauthenticated model provenance.
++
++Consumer requires externally supplied portable.json SHA256, checks pins,
++payload hashes, producer/old-summary receipts, array signatures, native arm and
++6000-update final receipts. Rebuild original uniform query plan using seed
++2026101701, [seed,t,61],20 blocks; hash raw ids/families/query bytes in original
++order, not just counts. Check canonical slot/family/type order, exact supports,
++prior/schedule, original posterior q, original independent64 bank and all old
++baseline metrics before reporting new-method comparisons. Missing evidence
++fails; no model predictions or replacement chain is permitted.
++
++All output directories must be fresh, disjoint from source package, all actual
++input evidence roots, portable bundle and B1 receipt directory. Paths are checked
++before mkdir/controller writes. Runtime max900 seconds includes import,
++verification, target/assignment/gradient/backtracking, exact evaluation,
++input rehash, save and cleanup. Work stops12 seconds early for bounded cleanup.
++Touch OUTPUT/STOP for safe stop. Partial panel cannot pass. If exact full
++evaluation cannot finish, a separate user decision is needed; no approximation
++or metric deletion is authorized here.
++
++The portable fixture tests substitute pins ONLY inside pytest's monkeypatch
++scope, label their inputs ENGINEERING and are not source evidence for real6.
++Real conversion and compatibility remain unverified until the actual payloads
++are provided. This package itself contains no private six-state arrays.
+--- /dev/null
++++ b/DYNAMIC_README_CN.md
+@@ -0,0 +1,67 @@
++# 动态匿名联合角色匹配 v1：仅实现与有界诊断
++
++此包**不训练、不调用真实模型、不启动1000步链、不连接BW**。
++旧121个文件保持原样；新入口是run_dynamic.py。不要用继承的旧入口
++代替本版入口。CPU需要当前已有NumPy、SciPy；不自动安装任何依赖。
++本地实测依赖及证据在evidence_dynamic，不能当成BW或真实六状态结果。
++
++## 本地/已审核CPU环境：完整工程回归
++
++```bash
++python verify_dynamic.py --output /tmp/dihug_dynamic_tests_01
++```
++
++入口核验包文件、完整冻结用例集合和零跳过，并隔离继承PYTEST筛选环境。
++结果目录必须新建；测试包含小图神经前向与4步工程链，不是科学样本。
++
++## 待审查后：只读导出可移植真实输入（不会跑引导）
++
++下面命令由有权限读取notebook文件的人手动执行；Sol本轮没有连接BW。
++导出只哈希/复制数组和收据，不调用模型、训练或生成。输出必须换成
++全新路径，且不能在旧输入目录里面。预计体积以实际NPZ为准；按常见
++数组dtype估计六份解压载荷约400MB，ZIP实际大小取决于压缩。
++
++```bash
++env OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 CUDA_VISIBLE_DEVICES='' \
++  /usr/local/bin/python3.11 run_dynamic.py pack \
++  --export /root/private_data/gnn_projects/role_mt_v1_2_export_20261018T091055Z \
++  --short-run /root/private_data/gnn_projects/role_mt_v1_2_short_20261018T091510Z \
++  --output /root/private_data/gnn_projects/dynamic_role_portable_01 \
++  --max-seconds 900
++```
++
++交付portable_inputs.zip及summary.json中的transfer_zip_sha256、
++portable_sha256到Sol可读位置即可；不需要上传任何私有权重。
++原manifest/metadata不变，私有权重仅保留历史哈希收据，明确未重新认证。
++
++## 输入到达Sol并复审后：先核验，再B1，再冻结六状态
++
++以下路径及SHA请填实际导出回执值，不可自算后当成原来源认证。
++max-seconds900涵盖所有步骤，不是每项评价各900秒。每次新输出目录。
++本轮未在真实输入执行以下命令；不应把它们当成已通过。
++
++```bash
++python run_dynamic.py check --portable /path/portable/portable.json \
++  --portable-sha256 EXPORT_RECEIPT_SHA --output /tmp/dynamic_check_01 --max-seconds 900
++python run_dynamic.py b1 --portable /path/portable/portable.json \
++  --portable-sha256 EXPORT_RECEIPT_SHA --output /tmp/dynamic_B1_01 --max-seconds 900
++python run_dynamic.py six --portable /path/portable/portable.json \
++  --portable-sha256 EXPORT_RECEIPT_SHA \
++  --b1-receipt /tmp/dynamic_B1_01/summary.json --b1-receipt-sha256 B1_RECEIPT_SHA \
++  --output /tmp/dynamic_six_01 --max-seconds 900
++```
++
++check核对六状态但不做引导/完整PMF评价；B1开发检查之后six强制绑定
++相同源码、目标和输入。没有搜索步长、频率或重新挑状态的入口。
++
++```bash
++touch /tmp/dynamic_six_01/STOP
++```
++
++安全停止不承诺完成所有指标，部分文件不算通过。每次独立诊断可在
++固定输入上重做同一步，但没有续跑原完整链的入口。小图采样接口另经
++完整提交、局部中断回滚和新进程恢复测试；普通GPU非确定性仍未测。
++
++设计、归一化、梯度及并列限制见DYNAMIC_ROLE_DESIGN.md；关键限制是
++不同角色等成本时具体梯度可能随存储顺序变化，且匹配期望度不等于
++匹配离散图的联合度分布。代理下降不构成保真成功。
+--- /dev/null
++++ b/DYNAMIC_ROLE_DESIGN.md
+@@ -0,0 +1,125 @@
++# Dynamic anonymous joint-role matching v1
++
++Base: **7049e64b108f2ef434c40815457c74037c4455eb**. This directory is independent.
++All 121 baseline package files are preserved byte-for-byte; only new files are
++added. Historical entry points remain historical, not the new method's launcher.
++No training, full scientific chain, model-weight import, GPU or BW execution is
++authorized by these entry points. Small neural fixtures are engineering tests.
++
++## Anonymous target and exact hard assignment
++
++For type c, store distinct complete R-dimensional integer degree vectors v_cj
++and positive integer frequencies k_cj summing to n_c. Store no node assignment,
++node ID or edge identity. The artifact binds the reference hash and schema.
++Canonical lexicographic row ordering is serialization, not a fixed node role.
++
++S_cr = 1 + sqrt(sum_j k_cj v_cjr^2 / n_c), frozen from training reference.
++I_c contains incident relations with positive capacity and positive prior.
++Exact-one prior dimensions remain included (their residual is identically zero);
++zero-prior dimensions remain in full vectors but not the normalization. All C
++node types have equal weight, including zero-dimensional types (zero loss).
++
++mu_ir = sum_{e incident to i, family(e)=r} p0_e.
++
++L(p0,sigma) = (1/C) sum_c (1/(n_c |I_c|))
++                 sum_{i:type(i)=c} sum_{r in I_c}
++                    ((mu_ir - v_c,sigma(i),r)/S_cr)^2.
++
++Minimize jointly within each type, subject to each expanded role copy being used
++exactly once. Never separately sort multiple relation dimensions. SciPy
++`linear_sum_assignment` is the trusted exact combinatorial algorithm on the
++computed FP64 costs (modified Jonker–Volgenant); one effective dimension uses
++the rearrangement inequality and stable ascending sort. Counts are expanded,
++not soft-averaged. Cost workspace O(max_c n_c^2), solver worst-case cubic;
++full probabilities/expectations remain O(S+NR). This is not a learned N×N head
++and not a claim of end-to-end linear space.
++
++The implementation audits a dual lower bound of its FP64 cost matrix through
++difference-constraint potentials and equality-graph SCCs. This is a residual
++audit, not rigorous interval arithmetic or proof of strict real uniqueness.
++Cost tolerance = 1e-12 + 1e-10 * max(1, max absolute cost). Any dual residual
++above this limit is a numerical failure, not a silent fallback counted as success.
++The reported lower bound subtracts n times the maximum dual violation; original
++and normalized objective values and audit limits remain visible.
++
++## Derivative and controller
++
++One new optimal assignment is computed for each call/timestep; stop gradient
++through the solver and retain this assignment during every backtracking trial.
++For e=(u,v), r=family(e), define
++
++b_ir = 2 (mu_ir - assigned_role_ir) / (C n_type(i) |I_type(i)| S_type(i),r^2).
++
++dL/dp0_e = b_ur + b_vr, including both endpoints for same-type edges.
++dL/dz_e = (dL/dp0_e) p0_e (1-p0_e), z=logit(p0).
++
++These are signed residual contributions, not two positive rewards. The loss is
++on CLEAN p0, NOT q and NOT the next noisy target used by the old CF objective.
++
++Preserve max step delta_t=.1*alpha[t-1], infinity-norm gradient normalization,
++8 candidates delta_t/2^j (j=0..7), descent threshold 1e-12+1e-9*abs(L),
++gradient floor1e-14 and predicted-descent reliability gate. No new tuning.
++Only a resolved fixed-assignment decrease accepts. Recompute optimum afterward
++for audit, never for candidate selection; it must be <= fixed loss within the
++declared assignment allowance. All skip/failure reasons are retained.
++No epsilon, clipping, flips, repair, inertia, random ties or evaluation feedback.
++Structural prior0/1 and numerical exact0/1 are fixed and counted separately.
++
++## Sampling interface
++
++`dynamic_role.sampling.reverse_step` reuses the original stepwise adapter:
++freeze full Xt → original20 query blocks → collect p0 → release neural graphs →
++match and adjust clean logits → ORIGINAL Bayes posterior q → original saved
++uniforms → atomic whole-state commit. Recompute at next time. No hidden-state
++cache across blocks; no new sampling RNG consumption. Disabled A/B dispatch
++unchanged original runtime. A/C share native no-CN weights; B/D share native CN
++weights. A is the joint-framework no-CN control, not old v9. No weight file is
++loaded by the offline diagnostic. Native runtime and checkpoint bindings include
++target, layout, model, code, schedule, backend, query seed, runtime and RNG.
++
++## Ties: a real limitation, not silently repaired
++
++Identical role copies can be interchanged without changing residuals. Distinct
++roles at equal optimal cost can yield different gradients. Stable sort / SciPy
++uses current row storage order for a representative solution; there is no
++permanent reference-ID mapping. The equality-SCC audit distinguishes duplicate-
++only components, exact-zero FP64 two-cycle witnesses, numerically unresolved
++two-cycles and unresolved larger cycles. A missing witness is NOT a uniqueness
++proof. Unique/separated small cases are checked under type-preserving relabeling.
++An explicitly symmetric distinct-role counterexample is retained: objective is
++invariant, selected gradient need not be equivariant. No randomized tie-breaker
++or averaging of hard roles is introduced. This limitation must be assessed before
++scientific deployment, especially high-noise symmetric predictions.
++
++## Meaning and risks
++
++This matches expected CLEAN relation degrees to roles; it is NOT a distance
++between sampled degree distributions and not exact conditional generation.
++Posterior means can legitimately shrink at high noise; hard one-to-one targets
++may force premature differentiation or arbitrary symmetry breaking. Even if
++proxy decreases, degree variance, topology, connectivity and closure may worsen.
++Independent Genre64 and exact degree-law W1 are evaluation only. No CF/tail
++term remains in the new objective; old modules are only preserved/evaluation.
++
++## Frozen tolerances and scientific decision
++
++Finite difference: atol2e-8/rtol2e-5. Unique-case relabeling:
++atol2e-10/rtol1e-9. Saved original Bayes q: atol5e-14.
++Metric baseline reproduction/decisions: CF atol2e-10, W1 atol1e-8,
++rtol1e-9, existing full-PMF operation-count allowances explicitly retained.
++Old64 frequency bank, original normalizer1, unscaled W1 of expected empirical
++integer-degree PMFs are unchanged. Not E[W1 of a sampled graph].
++
++B1 is development first; six-state entry requires a successful B1 receipt with
++identical implementation, target and portable-input hashes. It then freezes
++ALL A/B×500/20/1, no tuning. A valid full panel requires all6 complete;
++all skipped means no effect. Any resolved Genre64 or Genre-W1 worsening means
++tradeoff/deterioration, not overall repair. Only no worsening in any state plus
++at least one dual improvement supports a limited frozen-panel gain. No result
++proves full-chain stability, generated quality or unseen-reference generalization.
++
++Full exact PMF evaluation remains O(nodes*capacity^2), potentially dominant.
++Do not silently drop channels, approximate, truncate or enlarge900 seconds.
++Timeout/STOP leaves partial evidence explicitly incomplete. There is no old
++absolute deadline. Parent cleans/reaps only its child group for INT/TERM/HUP,
++STOP/timeout; SIGKILL and machine loss cannot execute Python cleanup.
+--- /dev/null
++++ b/dynamic_role/__init__.py
+@@ -0,0 +1,3 @@
++"""Dynamic hard anonymous JOINT role matching; no neural/model calls."""
++from .core import MatchingGuide, freeze, SETTINGS
++
+--- /dev/null
++++ b/dynamic_role/core.py
+@@ -0,0 +1,272 @@
++"""FP64 clean-p0 role matching and signed two-endpoint logit gradients.
++
++SciPy exact linear assignment (floating-point costs), no soft OT, role sampling,
++node-ID feature, random tie breaker, posterior-statistic loss or neural gradient.
++"""
++import copy
++import hashlib
++import time
++import numpy as np
++from scipy.optimize import linear_sum_assignment
++from scipy.sparse import csr_matrix
++from scipy.sparse.csgraph import connected_components
++from stepwise_role.core import Layout, signature, transition_kl
++
++SETTINGS = dict(version='dynamic_anonymous_joint_role_v1', delta_max=.1,
++    max_trials=8, descent_atol=1e-12, descent_rtol=1e-9,
++    gradient_floor=1e-14, finite_difference_atol=2e-8,
++    finite_difference_rtol=2e-5, renumber_atol=2e-10,
++    renumber_rtol=1e-9, posterior_atol=5e-14,
++    assignment_atol=1e-12, assignment_rtol=1e-10)
++
++
++def freeze(profile, layout, alpha, reference_sha256):
++    """Canonical anonymous multiset only; no original node assignment survives."""
++    from hsgd.kernel import MarginalKernel
++    alpha = MarginalKernel(layout.prior, alpha).alpha
++    if (profile.get('format') != 'anonymous-joint-relation-degree-v1' or
++        profile.get('family_pairs') != layout.pairs.tolist() or
++        set(profile.get('groups', {})) != set(layout.endpoints)):
++        raise ValueError('target schema/type inventory differs')
++    if len(reference_sha256) != 64 or any(c not in '0123456789abcdef' for c in reference_sha256):
++        raise ValueError('explicit training-reference SHA256 required')
++    groups, totals = {}, {}
++    for c in sorted(profile['groups'], key=int):
++        g = profile['groups'][c]; rows = np.asarray(g['rows']); counts = np.asarray(g['counts'])
++        n = layout.sizes[int(c)]
++        if (rows.ndim != 2 or rows.shape[1] != len(layout.pairs) or counts.shape != (len(rows),)
++            or not np.issubdtype(rows.dtype, np.integer) or not np.issubdtype(counts.dtype, np.integer)
++            or (rows < 0).any() or (counts <= 0).any() or counts.sum() != n or g['nodes'] != n
++            or len(np.unique(rows, axis=0)) != len(rows)):
++            raise ValueError('invalid integer joint-role multiset')
++        cap = np.array([max(0, layout.sizes.get(int(b if int(c) == a else a), 0)-(a == b))
++                        if int(c) in (a,b) else 0 for a,b in layout.pairs])
++        if ((rows > cap).any() or (rows[:,layout.prior == 0] != 0).any() or
++            (rows[:,layout.prior == 1] != cap[layout.prior == 1]).any()):
++            raise ValueError('role outside capacity/exact support')
++        order = sorted(range(len(rows)), key=lambda i: tuple(rows[i]))
++        rows, counts = rows[order], counts[order]
++        scales = 1+np.sqrt(np.sum(rows.astype(float)**2*counts[:,None], axis=0)/n)
++        dims = np.flatnonzero((cap > 0) & (layout.prior > 0))
++        groups[c] = dict(nodes=n, rows=rows.tolist(), counts=counts.tolist(),
++                         scale=scales.tolist(), effective_dimensions=dims.tolist())
++        totals[int(c)] = (rows*counts[:,None]).sum(0)
++    for r,(a,b) in enumerate(layout.pairs):
++        if a == b:
++            if totals[int(a)][r] % 2: raise ValueError('odd homogeneous degree total')
++        elif totals[int(a)][r] != totals[int(b)][r]:
++            raise ValueError('cross-type endpoint degree totals disagree')
++    payload = dict(format='dynamic-anonymous-joint-role-v1', groups=groups,
++        family_pairs=layout.pairs.tolist(), prior=layout.prior.tolist(), alpha=alpha.tolist(),
++        reference_sha256=reference_sha256, settings=SETTINGS.copy(),
++        coordinate='clean p0; fixed matching during line search; no solver gradient',
++        normalization='mean over incident active dimensions, nodes, then ALL types; empty dimension type contributes zero',
++        support='complete canonical type-pair slots; prior=0/1 exact; node-specific masks unsupported')
++    return dict(payload=payload, sha256=signature(payload))
++
++
++def _tie_audit(cost, assignment, roles, check):
++    """Dual-feasible difference potentials + equality SCC, NOT strict uniqueness.
++
++    Columns are permuted to the selected assignment. With W_ij=C_i,sigma(j)
++    - C_i,sigma(i), shortest-path potentials certify reduced costs >= -tol.
++    Alternating equality cycles changing role VALUE imply alternative gradients.
++    Numerical equality is explicitly distinguished from exact algebraic equality.
++    """
++    n = len(assignment); tol = SETTINGS['assignment_atol']+SETTINGS['assignment_rtol']*max(1., float(abs(cost).max(initial=0)))
++    w = cost[:,assignment]-cost[np.arange(n),assignment,None]
++    d = np.zeros(n)
++    for iterations in range(n):
++        check(); nd = np.minimum(d, np.min(d[:,None]+w, axis=0))
++        improvement = float(np.max(d-nd, initial=0)); d = nd
++        if improvement <= tol/16: break
++    reduced = w+d[:,None]-d[None,:]
++    residual = float(max(0., -reduced.min(initial=0)))
++    gap = float(n*residual)
++    graph = abs(reduced) <= tol
++    _, labels = connected_components(csr_matrix(graph), directed=True, connection='strong')
++    selected = roles[assignment]
++    duplicate, distinct = [], []
++    for lab in np.unique(labels):
++        ix = np.flatnonzero(labels == lab)
++        if len(ix) > 1:
++            (distinct if len(np.unique(selected[ix],axis=0)) > 1 else duplicate).append(ix)
++    witnesses=[]
++    # Cheap exact two-cycle witness (larger alternating cycles stay unresolved).
++    for ix in distinct:
++        check()
++        for i in ix:
++            js=ix[np.any(selected[ix] != selected[i], axis=1)]
++            candidates=js[graph[i,js] & graph[js,i]]
++            if len(candidates):
++                j=int(candidates[0]); delta=float(w[i,j]+w[j,i])
++                witnesses.append(dict(rows=[int(i),j], objective_difference=delta,
++                    exact_float_zero=(delta == 0.), roles=[selected[i].tolist(),selected[j].tolist()]))
++                break
++    if residual > tol:
++        status='dual_audit_unresolved'
++    elif distinct:
++        status=('nonidentical_role_tie_witness' if any(x['exact_float_zero'] for x in witnesses)
++                else 'numerically_indistinguishable_role_tie_witness' if witnesses else 'possible_nonidentical_tie_unresolved')
++    elif duplicate:
++        status='duplicate_roles_only_at_declared_resolution'
++    else:
++        status='separated_at_declared_resolution'
++    # Sum_i C_i,sigma(i)+sum_i d_i-sum_j d_j, relaxed by n*residual,
++    # gives an applicable dual lower bound even when reduced costs slightly <0.
++    return dict(status=status, equality_tolerance=tol, dual_max_violation=residual,
++        assignment_objective_lower_bound=float(cost[np.arange(n),assignment].sum()-gap),
++        primal_dual_gap_bound=gap, potential_iterations=iterations+1,
++        duplicate_only_components=len(duplicate), distinct_role_components=len(distinct),
++        witnesses=witnesses, strict_uniqueness_claim=False,
++        arithmetic_scope='FP64 cost/dual residual audit; not a rigorous interval certificate or exact-real uniqueness proof',
++        tie_rule='SciPy current row order / canonical lexicographic expanded roles; no persistent node-role binding; tied gradients need not be equivariant')
++
++
++def exact_match(mu, roles, scale, dims, *, method='auto', check=lambda:None):
++    n = len(mu); d = len(dims)
++    if roles.shape != mu.shape or not n or not np.isfinite(mu).all(): raise ValueError('invalid matching input')
++    tick=time.perf_counter()
++    if not d:
++        assignment=np.arange(n); cost=np.zeros((n,n)); algorithm='zero-dimensional identity storage assignment'
++    else:
++        # Sum squared differences explicitly; avoid cancellation in ||x||²+||y||²-2xy.
++        cost=np.zeros((n,n))
++        for r in dims:
++            check(); cost += ((mu[:,r,None]-roles[None,:,r])/scale[r])**2/d
++        if d == 1 and method != 'generic':
++            r=dims[0]; ii=np.argsort(mu[:,r],kind='stable'); jj=np.argsort(roles[:,r],kind='stable')
++            assignment=np.empty(n,int); assignment[ii]=jj; algorithm='exact 1D rearrangement sorting'
++        else:
++            check(); ii,jj=linear_sum_assignment(cost); assignment=np.empty(n,int); assignment[ii]=jj
++            algorithm='scipy.optimize.linear_sum_assignment (modified Jonker-Volgenant)'
++    check(); audit=_tie_audit(cost,assignment,roles,check)
++    upper=float(cost[np.arange(n),assignment].sum())
++    if audit['dual_max_violation'] > audit['equality_tolerance']:
++        raise FloatingPointError('assignment dual audit failed at frozen tolerance')
++    return assignment, dict(algorithm=algorithm, nodes=n, distinct_roles=len(np.unique(roles,axis=0)),
++        role_copies=n, effective_dimensions=d, cost_sum=upper, normalized_type_loss=upper/n,
++        seconds=time.perf_counter()-tick, **audit)
++
++
++class MatchingGuide:
++    def __init__(self, layout, artifact):
++        self.layout=layout
++        if signature(artifact['payload']) != artifact['sha256']: raise ValueError('target artifact hash mismatch')
++        p=artifact['payload']
++        profile=dict(format='anonymous-joint-relation-degree-v1',family_pairs=p['family_pairs'],
++            groups={c:{k:g[k] for k in ('nodes','rows','counts')} for c,g in p['groups'].items()})
++        if freeze(profile,layout,p['alpha'],p['reference_sha256']) != artifact: raise ValueError('artifact binding differs')
++        self._artifact=copy.deepcopy(artifact); self.alpha=np.array(p['alpha'])
++        self._groups={}
++        for c,g in p['groups'].items():
++            self._groups[c]=dict(nodes=np.flatnonzero(layout.types==int(c)),
++                roles=np.repeat(np.array(g['rows'],float),g['counts'],axis=0),
++                scale=np.array(g['scale']),dims=np.array(g['effective_dimensions'],int))
++        self._initial=self._derived()
++
++    @property
++    def frozen(self): return copy.deepcopy(self._artifact)
++
++    def _derived(self):
++        def digest(a):return dict(shape=list(a.shape),dtype=str(a.dtype),sha256=hashlib.sha256(a.tobytes()).hexdigest())
++        return signature(dict(alpha=digest(self.alpha), groups={c:{k:digest(v) for k,v in g.items()} for c,g in self._groups.items()},
++            layout={k:digest(getattr(self.layout,k)) for k in ('types','slots','families','pairs','prior','fixed0','fixed1')}))
++
++    def binding(self):
++        if signature(self._artifact['payload'])!=self._artifact['sha256'] or self._derived()!=self._initial:
++            raise ValueError('target/layout/schedule mutation detected')
++        return dict(target_sha256=self._artifact['sha256'], derived_sha256=self._initial,
++                    implementation_sha256=hashlib.sha256(__import__('pathlib').Path(__file__).read_bytes()).hexdigest())
++
++    def expected_degrees(self,p):
++        p=self.layout.probability(p); mu=np.zeros((len(self.layout.types),len(self.layout.pairs)))
++        for end in self.layout.slots: np.add.at(mu,(end,self.layout.families),p)
++        return mu
++
++    def match(self,p,check=lambda:None):
++        mu=self.expected_degrees(p); assignments={}; report={}
++        for c,g in self._groups.items():
++            check(); assignments[c],report[c]=exact_match(mu[g['nodes']],g['roles'],g['scale'],g['dims'],check=check)
++        return assignments,report
++
++    def loss_gradient(self,p,assignments,gradient=True):
++        mu=self.expected_degrees(p); derivative=np.zeros_like(mu); loss=0.; detail={}
++        C=len(self._groups)
++        for c,g in self._groups.items():
++            nodes,dims=g['nodes'],g['dims']; assigned=g['roles'][assignments[c]]
++            residual=(mu[nodes]-assigned)/g['scale']; weighted=np.zeros_like(residual)
++            if len(dims):
++                weighted[:,dims]=residual[:,dims]**2/(len(nodes)*len(dims))
++                if gradient:
++                    derivative[np.ix_(nodes,dims)]=2*residual[:,dims]/g['scale'][dims]/(C*len(nodes)*len(dims))
++            value=float(weighted.sum()); loss+=value/C
++            detail[c]=dict(loss=value, standardized_residual_rms_by_relation=np.sqrt(np.mean(residual**2,axis=0)).tolist(),
++                           expected_degree_mean=mu[nodes].mean(0).tolist(), effective_dimensions=dims.tolist())
++        gp=None
++        if gradient:
++            gp=derivative[self.layout.slots[0],self.layout.families]+derivative[self.layout.slots[1],self.layout.families]
++        if not np.isfinite(loss) or gradient and not np.isfinite(gp).all(): raise FloatingPointError('nonfinite clean-role loss/gradient')
++        return loss,gp,detail
++
++    def apply(self,p0,state,kernel,t,check_time=None):
++        start=time.perf_counter()
++        check=check_time or (lambda:None); self.binding(); check()
++        if not np.array_equal(kernel.alpha,self.alpha) or not np.array_equal(kernel.prior,self.layout.prior): raise ValueError('posterior binding differs')
++        if not 1<=t<len(self.alpha): raise ValueError('reverse time outside schedule')
++        p=self.layout.probability(p0); f=self.layout.families
++        tick=time.perf_counter();q0=kernel.reverse(p,state,f,t-1,t);posterior_seconds=time.perf_counter()-tick
++        out,qout=p.copy(),q0.copy()
++        free=(p>0)&(p<1)&~self.layout.fixed0&~self.layout.fixed1
++        record=dict(status='skipped',time=int(t),next_time=int(t-1),coordinate='CLEAN p0 logits, not q',
++            proposed_delta=float(.1*self.alpha[t-1]),accepted_delta=0.,trials=0,backtracks=0,
++            effective_movable_slots=int(free.sum()),structural_fixed_slots=int((self.layout.fixed0|self.layout.fixed1).sum()),
++            numerical_saturated_slots=int((~free & ~(self.layout.fixed0|self.layout.fixed1)).sum()),
++            matching_seconds=0.,gradient_seconds=0.,backtracking_seconds=0.,new_sampling_law=True)
++        try:
++            tick=time.perf_counter(); assignments,audit=self.match(p,check)
++            record.update(matching_seconds=time.perf_counter()-tick,matching=audit)
++            tick=time.perf_counter(); loss,gp,detail=self.loss_gradient(p,assignments)
++            g=gp*p*(1-p); g[~free]=0; norm=float(abs(g).max(initial=0))
++            if not np.isfinite(loss) or not np.isfinite(g).all():raise FloatingPointError('nonfinite clean-role logit gradient')
++            threshold=SETTINGS['descent_atol']+SETTINGS['descent_rtol']*abs(loss)
++            pred=record['proposed_delta']*float(g@g)/norm if norm else 0.
++            if not np.isfinite(pred):raise FloatingPointError('nonfinite predicted descent')
++            record.update(loss_before=loss,loss_after_fixed=loss,loss_after_reoptimized=loss,
++                type_before=detail,type_after_fixed=detail,gradient_seconds=time.perf_counter()-tick,
++                raw_logit_gradient_max=norm,raw_logit_gradient_l2=float(np.linalg.norm(g)),
++                descent_threshold=threshold,first_order_descent_prediction=pred)
++            if not free.any():record['reason']='no_movable_probabilities'
++            elif norm<=SETTINGS['gradient_floor']:record['reason']='zero_or_roundoff_gradient'
++            elif pred<=threshold:record['reason']='predicted_descent_below_resolution'
++            else:
++                z=np.log(p[free])-np.log1p(-p[free]); direction=g[free]/norm; tick=time.perf_counter()
++                for j in range(8):
++                    check(); step=record['proposed_delta']/(2**j); candidate=p.copy()
++                    candidate[free]=np.exp(-np.logaddexp(0.,-(z-step*direction)))
++                    after,_,after_detail=self.loss_gradient(candidate,assignments,False)
++                    record.update(trials=j+1,backtracks=j,trial_loss=after)
++                    if after<loss-threshold:
++                        out=candidate;post_tick=time.perf_counter();qout=kernel.reverse(out,state,f,t-1,t)
++                        posterior_seconds+=time.perf_counter()-post_tick
++                        record.update(status='accepted',reason='resolved_fixed_matching_decrease',
++                            loss_after_fixed=after,type_after_fixed=after_detail,accepted_delta=step)
++                        break
++                else:record['reason']='no_verified_descent'
++                record['backtracking_seconds']=time.perf_counter()-tick
++            check(); tick=time.perf_counter(); rematch,re_audit=self.match(out,check)
++            re_loss,_,re_detail=self.loss_gradient(out,rematch,False)
++            allowance=SETTINGS['assignment_atol']+SETTINGS['assignment_rtol']*max(1.,abs(record['loss_after_fixed']))
++            if re_loss>record['loss_after_fixed']+allowance: raise FloatingPointError('reoptimized loss exceeds feasible fixed assignment')
++            record.update(loss_after_reoptimized=re_loss,type_after_reoptimized=re_detail,
++                reoptimized_matching=re_audit,reoptimization_seconds=time.perf_counter()-tick,
++                reoptimization_excess=re_loss-record['loss_after_fixed'],reoptimization_allowance=allowance)
++        except FloatingPointError as exc:
++            out,qout=p.copy(),q0.copy();record.update(status='numerical_failure',reason=str(exc))
++        record.update(clean_probability_l1=float(abs(out-p).sum()),clean_probability_max=float(abs(out-p).max(initial=0)),
++            posterior_seconds=posterior_seconds,
++            numerical_saturated_slots_after=int((((out==0)|(out==1)) & ~(self.layout.fixed0|self.layout.fixed1)).sum()),
++            transition_probability_l1=float(abs(qout-q0).sum()),transition_probability_max=float(abs(qout-q0).max(initial=0)),
++            transition_kl=transition_kl(qout,q0),wall_seconds=time.perf_counter()-start,
++            statistics_meaning='expected clean degrees matched to hard anonymous roles; NOT sampled degree-distribution matching')
++        return out,qout,record
+--- /dev/null
++++ b/dynamic_role/engineering.py
+@@ -0,0 +1,77 @@
++"""Explicit engineering demonstrations, NOT the six historical frozen states."""
++import argparse
++import json
++import platform
++import resource
++import time
++from pathlib import Path
++import numpy as np
++import scipy
++from .core import Layout,MatchingGuide,freeze
++from role_degree.role_statistics import joint_profile
++from hsgd.kernel import MarginalKernel
++
++
++def toy():
++    # Reference: six nodes, one degree-5 hub and five degree-1 roles.
++    # Input: fixed heterogeneous probabilities, not a sampled scientific graph.
++    l=Layout.canonical(np.zeros(6,int),[(0,0)],[1/3])
++    edges=l.slots[:,l.slots[0]==0]
++    pf=joint_profile(l.types,edges,np.zeros(5,int),l.pairs)
++    g=MatchingGuide(l,freeze(pf,l,[1.,.7,0.],'0'*64));k=MarginalKernel(l.prior,g.alpha)
++    p=np.array([.23 if 0 in e else .11 for e in l.slots.T]);state=np.zeros(len(p),np.uint8)
++    before=g.expected_degrees(p)[:,0];pp,q,report=g.apply(p,state,k,1)
++    # Independent fixed engineering Monte Carlo to show nonzero sampling noise.
++    # Shared uniforms solely for descriptive pairing; not used in the controller.
++    rng=np.random.default_rng(2026101901);u=rng.random((4096,len(p)))
++    output={}
++    for label,prob in [('before',p),('after',pp)]:
++        draws=u<prob;degrees=np.zeros((len(u),6),int)
++        for e,(v,w) in enumerate(l.slots.T):degrees[:,v]+=draws[:,e];degrees[:,w]+=draws[:,e]
++        expected=g.expected_degrees(prob)[:,0];variance=np.zeros(6)
++        for e,(v,w) in enumerate(l.slots.T):variance[[v,w]]+=prob[e]*(1-prob[e])
++        sorted_error=np.mean((np.sort(degrees,axis=1)-np.array([1,1,1,1,1,5]))**2,axis=1)
++        output[label]=dict(expected_degrees=expected.tolist(),empirical_mean=degrees.mean(0).tolist(),
++            analytic_sd=np.sqrt(variance).tolist(),empirical_sd=degrees.std(0).tolist(),
++            mean_sorted_discrete_role_squared_error=float(sorted_error.mean()),
++            discrete_error_P10_P90=np.quantile(sorted_error,[.1,.9]).tolist(),
++            exactly_target_sorted_degree_fraction=float(np.mean(np.all(np.sort(degrees,axis=1)==[1,1,1,1,1,5],axis=1))))
++    return dict(label='SIX-NODE ENGINEERING TOY ONLY',draws=4096,seed=2026101901,
++        reference_role_counts=[dict(vector=[1],count=5),dict(vector=[5],count=1)],
++        probability_before=p.tolist(),probability_after=pp.tolist(),guidance=report,**output,
++        warning='expected-degree matching is not sampled-degree-distribution matching; tied role selection can break symmetry')
++
++
++def reference_cost():
++    from hsgd.bw_preflight import common as c
++    case=c.imdb_case(c.PACKAGE/'data/IMDB_movie_reference.npz',c.config());l=Layout.canonical(case['space'].types,case['space'].pairs,case['prior'])
++    pf=joint_profile(l.types,case['clean'],case['space'].encode(case['clean'])[0],l.pairs)
++    start=time.perf_counter();g=MatchingGuide(l,freeze(pf,l,c.schedule(1000),c.config()['imdb_sha256']))
++    prepare=time.perf_counter()-start
++    # Analytic reference-derived test probabilities ONLY; neither p0 from a
++    # trained model nor one of the six real frozen states. Never quality evidence.
++    p=np.repeat(case['prior'],case['space'].counts)*.2;p[case['clean_ids']]+=.8
++    state=np.zeros(len(p),np.uint8);state[case['clean_ids']]=1
++    start=time.perf_counter();pp,q,r=g.apply(p,state,MarginalKernel(l.prior,g.alpha),20)
++    return dict(label='IMDB-size engineering probabilities .8*reference_indicator+.2*prior; NOT REAL SIX STATES',
++        nodes=len(l.types),slots=len(p),data_sha256=c.config()['imdb_sha256'],prepare_seconds=prepare,
++        total_guide_seconds=time.perf_counter()-start,report=r,
++        no_probability_collection_performed=True,no_quality_claim=True)
++
++
++def main():
++    p=argparse.ArgumentParser();p.add_argument('--output',required=True);a=p.parse_args();path=Path(a.output)
++    if path.exists():raise FileExistsError('engineering output must be fresh')
++    start=time.perf_counter();cpu=time.process_time();result=dict(toy=toy(),reference_size_cost=reference_cost())
++    import torch,torch_geometric,pytest
++    result.update(environment=dict(python=platform.python_version(),numpy=np.__version__,scipy=scipy.__version__,
++        torch=torch.__version__,pyg=torch_geometric.__version__,pytest=pytest.__version__),
++        wall_seconds=time.perf_counter()-start,cpu_seconds=time.process_time()-cpu,
++        peak_rss_mib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024,
++        model_calls=0,GPU_use=0,training_updates=0,new_scientific_graphs=0,
++        engineering_bernoulli_draws=8192)
++    path.parent.mkdir(parents=True,exist_ok=True);path.write_text(json.dumps(result,indent=2,allow_nan=False)+'\n')
++    print(json.dumps({k:v for k,v in result.items() if k not in ('toy','reference_size_cost')},indent=2))
++
++
++if __name__=='__main__':main()
+--- /dev/null
++++ b/dynamic_role/portable.py
+@@ -0,0 +1,191 @@
++"""Read-only portable migration. Never loads private weights or a denoiser.
++
++Payload hashes are verified; unavailable checkpoint hashes remain explicitly
++HISTORICAL RECEIPTS, never a claim that model provenance was reauthenticated.
++Original manifests/metadata are copied unchanged, with a separate mapping.
++"""
++import json
++import os
++import zipfile
++from pathlib import Path
++import numpy as np
++from multiscale_role.runtime_guard import checked_sha,atomic_json
++from multiscale_role.short import read_pinned,resolve,array_sha,verify_original_q
++
++PINS=dict(six_states='25bc708337898e84cf22ceffaa8e39ed815adf4fc916b684503c0afa3c35d7dd',
++    original_evaluation='198ff9bfcba007a04f36662fc66a9399578b6772b6a5c19be2394544b9b8ffe0',
++    summary='aba246f8cf156f16f5271a1160a63ede4475d87dbf13689665e8f6d74ad1b924')
++BASE='7049e64b108f2ef434c40815457c74037c4455eb'
++
++
++def protect(output,inputs):
++    """Run before ANY mkdir/write; ancestor, descendant and symlink overlaps."""
++    out=Path(output).resolve()
++    for inp in inputs:
++        p=Path(inp).resolve()
++        if out==p or out in p.parents or p in out.parents:
++            raise ValueError('output overlaps protected input: '+str(p))
++    if out.exists():raise FileExistsError('fresh independent output directory required')
++    return out
++
++
++def pack(export,short_run,output,check):
++    export,short=Path(export).resolve(),Path(short_run).resolve();out=Path(output)
++    # Outer launcher checks paths before output creation. This function is only
++    # called inside the launcher's owned fresh output directory.
++    manifest=read_pinned(export/'six_states.json',PINS['six_states'],check)
++    spec=read_pinned(export/'original_evaluation.json',PINS['original_evaluation'],check)
++    summary=read_pinned(short/'summary.json',PINS['summary'],check)
++    if summary.get('status')!='complete' or summary.get('completed_records')!=6 or summary.get('input_hashes_unchanged') is not True or summary.get('input_hash_verification_complete') is not True:
++        raise ValueError('sealed original complete six-state receipt required')
++    if manifest.get('format')!='legacy_export_v1_1' or manifest.get('base_commit')!='acbbddb5cdbcbaa2ae129bcd59e434e6a298b130':
++        raise ValueError('original export format/source differs')
++    expected={str(Path(p).resolve()):h for p,h in summary['input_hashes'].items()}
++    mapping={};receipts={}
++    def add(path,sha=None,require_receipt=True):
++        check();path=Path(path).resolve();key=str(path)
++        if require_receipt:
++            if key not in expected or sha is not None and expected[key]!=sha:raise ValueError('sealed summary has no matching source receipt: '+key)
++            sha=expected[key]
++        actual=checked_sha(path,check)
++        if sha is not None and actual!=sha:raise ValueError('source hash changed: '+key)
++        if key not in mapping:
++            rel='payload/'+actual+'_'+path.name
++            dest=out/rel;dest.parent.mkdir(parents=True,exist_ok=True)
++            if path.suffix.lower() in ('.pt','.pth','.ckpt','.pkl','.pickle'):raise ValueError('private/unsafe payload refused')
++            # Two unchanged source files may have identical content and name.
++            # Content-addressed storage shares the verified payload, never
++            # overwrites it, and retains BOTH original path mappings.
++            if not dest.exists():
++                with path.open('rb') as src,dest.open('xb') as dst:
++                    while True:
++                        check();block=src.read(1024*1024)
++                        if not block:break
++                        dst.write(block)
++            if checked_sha(dest,check)!=actual:raise ValueError('copy verification failed')
++            mapping[key]=dict(path=rel,sha256=actual,authentication='actual bytes checked against sealed receipt' if require_receipt else 'actual bytes; binding described by parent receipt')
++        return mapping[key]
++    add(export/'six_states.json',PINS['six_states']);add(export/'original_evaluation.json',PINS['original_evaluation'])
++    add(short/'summary.json',PINS['summary'],False)
++    if sorted((r['arm'],r['t']) for r in manifest['records'])!=sorted((a,t) for a in ('A','B') for t in (500,20,1)):
++        raise ValueError('exact six original requests required')
++    for row in manifest['records']:
++        for key in ('npz','metadata','source_manifest','config'):
++            add(resolve(export,row[key]),row[key+'_sha256'])
++        meta=json.loads(resolve(export,row['metadata']).read_text())
++        for key in ('legacy_collection','legacy_report'):add(meta[key],meta[key+'_sha256'])
++        # No private checkpoint copy or read. Keep its *original* expected hash.
++        cp=str(resolve(export,row['checkpoint']).resolve())
++        if expected.get(cp)!=row['checkpoint_sha256'] or meta.get('checkpoint_sha256')!=row['checkpoint_sha256']:
++            raise ValueError('historical checkpoint receipts disagree')
++        receipts[cp]=dict(sha256=row['checkpoint_sha256'],status='historical receipt only; actual private weight bytes NOT checked or included')
++    origin=resolve(export,spec['original_artifact_source']);add(origin,spec['original_artifact_sha256'])
++    # Original case JSON is compared to the pinned summary, not freshly promoted
++    # to independent provenance. Include unchanged historical method results.
++    for i,record in enumerate(summary['records']):
++        path=short/('case_%02d.json'%i)
++        if json.loads(path.read_text())!=record:raise ValueError('old per-case result differs from sealed summary')
++        add(path,require_receipt=False)
++    for name in ('frozen_objective.json','policy.json'):add(short/name,require_receipt=False)
++    from hsgd.bw_preflight import common as c
++    add(c.PACKAGE/'data/IMDB_movie_reference.npz',c.config()['imdb_sha256'],False)
++    # The original source manifests are content receipts. No model weights or
++    # original executable package is required to run the offline probability test.
++    for path,info in mapping.items():
++        if checked_sha(path,check)!=info['sha256']:raise ValueError('input changed during migration')
++    result=dict(format='dynamic_role_portable_v1',base_commit=BASE,pins=PINS,
++        export_original=str(export),short_original=str(short),mapping=mapping,
++        private_weight_receipts=receipts,source_authentication='array/reference/query/posterior checked; model provenance historical receipts only',
++        converter_sha256=checked_sha(__file__,check),no_model_calls=True)
++    atomic_json(out/'portable.json',result,check)
++    # A transfer ZIP, not a deployment ZIP. Only explicitly mapped public/data
++    # payloads, never checkpoint paths or filesystem-wide globbing.
++    temporary=out/'portable_inputs.zip.tmp';archive=out/'portable_inputs.zip'
++    with zipfile.ZipFile(temporary,'x',zipfile.ZIP_DEFLATED) as z:
++        paths=[out/'portable.json']+sorted(set(out/v['path'] for v in mapping.values()))
++        for path in paths:
++            check()
++            with path.open('rb') as src,z.open(str(path.relative_to(out)),'w') as dst:
++                while True:
++                    check();chunk=src.read(1024*1024)
++                    if not chunk:break
++                    dst.write(chunk)
++    check();os.replace(temporary,archive)
++    return dict(status='complete',payloads=len(mapping),private_weights_included=0,
++        portable_sha256=checked_sha(out/'portable.json',check),transfer_zip_sha256=checked_sha(archive,check),
++        transfer_zip_bytes=archive.stat().st_size,source_authentication=result['source_authentication'])
++
++
++class Portable:
++    def __init__(self,path,expected_sha,check=lambda:None):
++        self.path=Path(path).resolve();self.root=self.path.parent;self.check=check;self.hashed={}
++        self.manifest=read_pinned(self.path,expected_sha,check);self.hashed[self.path]=expected_sha
++        if self.manifest.get('format')!='dynamic_role_portable_v1' or self.manifest.get('pins')!=PINS or self.manifest.get('base_commit')!=BASE:
++            raise ValueError('portable input contract differs')
++        self.mapping=self.manifest['mapping']
++        self.export=Path(self.manifest['export_original']);self.short=Path(self.manifest['short_original'])
++        self.original=self.json(self.export/'six_states.json',PINS['six_states'])
++        self.spec=self.json(self.export/'original_evaluation.json',PINS['original_evaluation'])
++        self.old=self.json(self.short/'summary.json',PINS['summary'])
++        if self.old.get('status')!='complete' or self.old.get('completed_records')!=6:raise ValueError('old panel incomplete')
++        if (self.old.get('input_hashes_unchanged') is not True or self.old.get('input_hash_verification_complete') is not True or
++            sorted((r['arm'],r['t']) for r in self.old.get('records',[]))!=sorted((a,t) for a in ('A','B') for t in (500,20,1))):
++            raise ValueError('sealed old panel receipt has missing/duplicate cases or incomplete verification')
++        for p,entry in self.mapping.items():self.file(p,entry['sha256'])
++        if sorted((r['arm'],r['t']) for r in self.original['records'])!=sorted((a,t) for a in ('A','B') for t in (500,20,1)):
++            raise ValueError('exact six original records required')
++        expected={str(Path(p)):h for p,h in self.old['input_hashes'].items()}
++        for name in ('six_states','original_evaluation'):
++            if expected.get(str(self.export/(name+'.json')))!=PINS[name]:raise ValueError('original summary/manifest pin mismatch')
++        for row in self.original['records']:
++            for key in ('npz','metadata','source_manifest','config'):
++                orig=resolve(self.export,row[key]);self.file(orig,row[key+'_sha256'])
++                if expected.get(str(orig))!=row[key+'_sha256']:raise ValueError('payload vs old sealed summary mismatch')
++            cp=str(resolve(self.export,row['checkpoint']))
++            if expected.get(cp)!=row['checkpoint_sha256'] or self.manifest['private_weight_receipts'].get(cp,{}).get('sha256')!=row['checkpoint_sha256']:
++                raise ValueError('historical-only checkpoint receipt mismatch')
++
++    def file(self,original,expected=None):
++        key=str(original)
++        if key not in self.mapping:raise ValueError('missing portable payload mapping: '+key)
++        item=self.mapping[key];path=(self.root/item['path']).resolve()
++        if self.root not in path.parents:raise ValueError('payload escapes portable root')
++        if expected is not None and item['sha256']!=expected:raise ValueError('payload expected hash differs')
++        if path not in self.hashed:self.hashed[path]=checked_sha(path,self.check)
++        if self.hashed[path]!=item['sha256']:raise ValueError('portable payload hash mismatch')
++        return path
++
++    def json(self,original,sha=None):return json.loads(self.file(original,sha).read_text())
++
++    def rehash(self):
++        for p,h in self.hashed.items():
++            if checked_sha(p,self.check)!=h:raise ValueError('portable input mutated during diagnostic')
++
++    def record(self,row,case,kernel,layout):
++        from hsgd.bw_preflight.common import schedule
++        from multiscale_role.legacy import original_query,ZIP_SHA
++        meta=self.json(resolve(self.export,row['metadata']),row['metadata_sha256'])
++        for k,v in dict(arm=row['arm'],model_arm=row['arm'],t=row['t'],T=1000,query_rounds=20,
++                        sampling_seed=2026101701,completed_updates=6000,final_weight=True,
++                        reference_sha256=row['reference_sha256']).items():
++            if meta.get(k)!=v:raise ValueError('metadata binding differs: '+k)
++        for key in ('checkpoint','config','source_manifest'):
++            if meta.get(key+'_sha256')!=row[key+'_sha256']:raise ValueError('producer source/config binding differs')
++        with np.load(self.file(resolve(self.export,row['npz']),row['npz_sha256']),allow_pickle=False) as z:
++            required=('state','p0','q','slots','families','types','prior','alpha','query_block','t')
++            if not set(required).issubset(z.files):raise ValueError('missing required offline array')
++            data={k:z[k].copy() for k in required}
++        for k,v in data.items():
++            if meta['array_sha256'].get(k)!=array_sha(v):raise ValueError('original array signature mismatch: '+k)
++        for k,v in dict(slots=layout.slots,families=layout.families,types=layout.types,prior=layout.prior,alpha=schedule(1000)).items():
++            if not np.array_equal(data[k],v):raise ValueError('canonical layout/schedule differs: '+k)
++        from hsgd.bw_preflight.common import config
++        if int(data['t'])!=row['t'] or row['reference_sha256']!=config()['imdb_sha256']:
++            raise ValueError('time/reference differs')
++        col=self.json(meta['legacy_collection'],meta['legacy_collection_sha256'])
++        block,coverage,qhash=original_query(case,row['t'],col,self.check)
++        if not np.array_equal(block,data['query_block']) or meta['legacy_query_sha256']!=qhash or meta['conversion']['source_zip_sha256']!=ZIP_SHA:
++            raise ValueError('full ids/families/query byte digest or provenance differs')
++        p,q,error=verify_original_q(data,kernel,layout,row['t'])
++        return data,meta,dict(q_max_error=error,full_query_sha256=qhash,
++            source_authentication='actual arrays, reference, metadata, query, posterior verified; private weights historical receipts ONLY')
+--- /dev/null
++++ b/dynamic_role/runner.py
+@@ -0,0 +1,153 @@
++"""Bounded CPU-only frozen probability diagnostics; no model or new graph."""
++import json
++import resource
++import time
++from pathlib import Path
++import numpy as np
++from .core import MatchingGuide,freeze,Layout,signature,SETTINGS
++from .portable import Portable
++from multiscale_role.runtime_guard import atomic_json,checked_sha
++
++POLICY=dict(version='dynamic_role_frozen_state_development_v1',
++    baseline='7049e64b108f2ef434c40815457c74037c4455eb',
++    cases=[[a,t] for a in ('A','B') for t in (500,20,1)],
++    CF_atol=2e-10,W1_atol=1e-8,metric_rtol=1e-9,
++    W1_allowance='add existing FP64 operation-count allowances; not interval proof',
++    matching='fixed-assignment descent >1e-12+1e-9*abs(loss); rematch <= fixed within assignment tolerance',
++    all_skipped='ineffective at these states, never successful',
++    full_panel='all six valid; no independent Genre64 or Genre W1 worsening beyond tolerance AND at least one state improves both',
++    tradeoff='any independent deterioration => tradeoff/deterioration, never overall repair',
++    unresolved='no resolved dual gain => evidence insufficient, not equivalence',
++    incomplete='missing input, mismatch, timeout or partial panel => incomplete; no subset success',
++    no_tuning='B1 engineering check then freeze code/target/controller before six; no frequency, step or state selection',
++    scope='development frozen-state evidence, not full-chain quality or generalization')
++
++
++def fingerprint():
++    root=Path(__file__).resolve().parent
++    return signature({p.name:checked_sha(p,lambda:None) for p in sorted(root.glob('*.py'))})
++
++
++def distributions(p,layout):
++    p=layout.probability(p);entropy=np.zeros_like(p)
++    take=p>0;entropy[take]-=p[take]*np.log(p[take]);take=p<1;entropy[take]-=(1-p[take])*np.log1p(-p[take])
++    return dict(mean_entropy=float(entropy.mean()),exact_zero=int((p==0).sum()),exact_one=int((p==1).sum()),
++        near_saturation_fraction=float(((p<=1e-6)|(p>=1-1e-6)).mean()),
++        expected_relation_edges=np.bincount(layout.families,weights=p,minlength=len(layout.pairs)).tolist())
++
++
++def genre_law(q,oldguide,s,check):
++    """Exact integer-degree PMFs for P(D>153), not W1 of expected degrees."""
++    from multiscale_role.evaluation import full_pmf_rows
++    l=oldguide.layout;c='3';ids,node=oldguide.tail_layout[c][0];n=l.sizes[3]
++    counts=np.bincount(node,minlength=n);cap=int(counts[0])
++    if not np.all(counts==cap):raise ValueError('Genre node-specific capacity unsupported')
++    start=np.r_[0,np.cumsum(counts)[:-1]];pos=np.arange(len(ids))-np.repeat(start,counts)
++    mat=np.zeros((n,cap));mat[node,pos]=q[ids]
++    pmf,err=full_pmf_rows(mat,check);pmf=pmf.mean(0)
++    g=oldguide.frozen['payload']['profile']['groups'][c];rows=np.array(g['rows']);weights=np.array(g['counts'])/g['nodes']
++    a=oldguide.alpha[s];pi=l.prior[8];b=a+(1-a)*pi;z=(1-a)*pi
++    targetmat=np.full((len(rows),cap),z)
++    for i,d in enumerate(rows[:,8]):targetmat[i,:d]=b
++    target,te=full_pmf_rows(targetmat,check);target=weights@target
++    return dict(predicted_P_D_gt_153=float(pmf[154:].sum()),target_P_D_gt_153=float(target[154:].sum()),
++        predicted_mean=float(pmf@np.arange(cap+1)),target_mean=float(target@np.arange(cap+1)),
++        predicted_PMF=pmf.tolist(),target_PMF=target.tolist(),predicted_mass_error=err,target_mass_error=te)
++
++
++def compare(current,old,path='metrics'):
++    """All numeric definitions and channels of old before metrics must agree."""
++    if isinstance(old,dict):
++        if set(current)!=set(old):raise ValueError('metric definition keys differ: '+path)
++        return [x for k in old for x in compare(current[k],old[k],path+'.'+k)]
++    if isinstance(old,list):
++        if len(current)!=len(old):raise ValueError('metric length differs: '+path)
++        return [x for i,(a,b) in enumerate(zip(current,old)) for x in compare(a,b,path+'.'+str(i))]
++    if isinstance(old,(int,float)) and not isinstance(old,bool):
++        tol=(POLICY['W1_atol'] if any(k in path for k in ('W1','degree','edges')) else POLICY['CF_atol'])+POLICY['metric_rtol']*abs(old)
++        if not np.isfinite(current) or abs(current-old)>tol:raise ValueError('old baseline metric failed reproduction: '+path)
++        return [dict(field=path,error=abs(current-old),tolerance=tol)]
++    if current!=old:raise ValueError('metric definition differs: '+path)
++    return []
++
++
++def run(args,out,check):
++    from hsgd.bw_preflight import common as c
++    from hsgd.kernel import MarginalKernel
++    from role_degree.role_statistics import joint_profile
++    from multiscale_role.core import MultiScaleGuide,freeze as oldfreeze
++    from multiscale_role.evaluation import validate_spec,evaluate,ForwardPMFCache
++    from multiscale_role.legacy import extract_frequency,baseline_alignment
++    from multiscale_role.short import classify
++    out=Path(out);started=time.monotonic();cpu=time.process_time();records=[]
++    result=dict(status='incomplete',scope=args.action,records=records,policy=POLICY,settings=SETTINGS,
++        model_calls=0,training_updates=0,scientific_graphs=0,GPU_use=0,
++        source_authentication='actual delivered payloads checked; private weights historical receipts only')
++    bundle=Portable(args.portable,args.portable_sha256,check)
++    case=c.imdb_case(c.PACKAGE/'data/IMDB_movie_reference.npz',c.config());reference_sha=c.config()['imdb_sha256']
++    layout=Layout.canonical(case['space'].types,case['space'].pairs,case['prior'])
++    profile=joint_profile(layout.types,case['clean'],case['space'].encode(case['clean'])[0],layout.pairs)
++    target=freeze(profile,layout,c.schedule(1000),reference_sha);guide=MatchingGuide(layout,target)
++    atomic_json(out/'anonymous_target.json',target,check)
++    tick=time.monotonic();oldguide=MultiScaleGuide(layout,oldfreeze(profile,layout,c.schedule(1000)),check)
++    result['old_evaluation_target_prepare_seconds']=time.monotonic()-tick
++    oldobjective=bundle.json(bundle.short/'frozen_objective.json');oldpolicy=bundle.json(bundle.short/'policy.json')
++    from multiscale_role.short import POLICY as OLDPOLICY
++    if oldobjective!=oldguide.frozen or oldpolicy!=OLDPOLICY or bundle.old['objective_sha256']!=oldguide.frozen['sha256']:
++        raise ValueError('old objective/policy/summary not the pinned definition')
++    validate_spec(bundle.spec,oldguide,reference_sha)
++    artifact=resolve_original(bundle.export,bundle.spec['original_artifact_source'])
++    omega,path=extract_frequency(bundle.json(artifact,bundle.spec['original_artifact_sha256']),layout)
++    if not np.array_equal(omega,bundle.spec['omega64']) or path!=bundle.spec['frequency_field_path'] or bundle.spec['CF_normalizer']!=1:
++        raise ValueError('old independent Genre64 bank differs')
++    kernel=MarginalKernel(layout.prior,guide.alpha);cache=ForwardPMFCache()
++    implementation=fingerprint();result.update(implementation_sha256=implementation,target_sha256=target['sha256'],environment=c.environment('cpu'))
++    if args.action=='six':
++        if not args.b1_receipt or not args.b1_receipt_sha256:raise ValueError('B1 development receipt required before frozen six-state run')
++        receipt=json.loads(Path(args.b1_receipt).read_text())
++        if checked_sha(args.b1_receipt,check)!=args.b1_receipt_sha256 or receipt.get('status')!='complete' or receipt.get('scope')!='b1' or receipt.get('implementation_sha256')!=implementation or receipt.get('target_sha256')!=target['sha256'] or receipt.get('portable_sha256')!=args.portable_sha256:
++            raise ValueError('B1 receipt source/target/input not same frozen implementation')
++    for index,row in enumerate(bundle.original['records']):
++        if args.action=='b1' and (row['arm'],row['t'])!=('B',1):continue
++        check();print(json.dumps(dict(event='case_start',arm=row['arm'],t=row['t'],index=index)),flush=True)
++        tick=time.monotonic();data,meta,certificate=bundle.record(row,case,kernel,layout)
++        if args.action=='check':
++            records.append(dict(arm=row['arm'],t=row['t'],binding=certificate));continue
++        p=data['p0'];q=data['q'];tick_eval=time.monotonic()
++        before=evaluate(q,oldguide,row['t']-1,bundle.spec,check,cache)
++        old_record=next(x for x in bundle.old['records'] if (x['arm'],x['t'])==(row['arm'],row['t']))
++        proofs=compare(before,old_record['before'])
++        baseline_alignment(before,bundle.json(meta['legacy_report'],meta['legacy_report_sha256']))
++        baseline_seconds=time.monotonic()-tick_eval
++        pp,qq,diagnostic=guide.apply(p,data['state'],kernel,row['t'],check)
++        if diagnostic['status']=='numerical_failure':raise FloatingPointError(diagnostic['reason'])
++        tick_eval=time.monotonic();after=evaluate(qq,oldguide,row['t']-1,bundle.spec,check,cache)
++        laws_before=genre_law(q,oldguide,row['t']-1,check);laws_after=genre_law(qq,oldguide,row['t']-1,check)
++        evaluation_seconds=time.monotonic()-tick_eval+baseline_seconds
++        rec=dict(index=index,arm=row['arm'],t=row['t'],binding=certificate,guidance=diagnostic,
++            no_guidance=before,old_multiscale_tail=old_record['after'],new_role_matching=after,
++            old_baseline_reproduction=proofs,Genre_law_before=laws_before,Genre_law_after=laws_after,
++            clean_before=distributions(p,layout),clean_after=distributions(pp,layout),
++            transition_before=distributions(q,layout),transition_after=distributions(qq,layout),
++            decision=classify(before,after,bundle.spec),evaluation_seconds=evaluation_seconds,
++            case_wall_seconds=time.monotonic()-tick)
++        atomic_json(out/('case_%02d.json'%index),rec,check);records.append(rec)
++        check();print(json.dumps(dict(event='case_done',arm=row['arm'],t=row['t'],status=diagnostic['status'],wall_seconds=rec['case_wall_seconds'])),flush=True)
++    check();bundle.rehash();check()
++    if fingerprint()!=implementation or checked_sha(c.PACKAGE/'data/IMDB_movie_reference.npz',check)!=reference_sha:
++        raise ValueError('used implementation/reference changed during computation')
++    result.update(status='complete',completed_records=len(records),portable_sha256=args.portable_sha256,
++        wall_seconds=time.monotonic()-started,cpu_seconds=time.process_time()-cpu,
++        cpu_total_process_seconds=time.process_time(),
++        peak_rss_mib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024,input_hashes_unchanged=True)
++    if args.action!='check':
++        accepted=sum(r['guidance']['status']=='accepted' for r in records)
++        result['accepted']=accepted
++        result['conclusion']=('all_skipped_no_effect' if not accepted else
++            'tradeoff_or_deterioration' if any(r['decision']['any_deterioration'] for r in records) else
++            'frozen_panel_dual_gain' if args.action=='six' and len(records)==6 and any(r['decision']['dual_improvement'] for r in records) else 'partial_or_unresolved')
++    return result
++
++
++def resolve_original(parent,path):
++    p=Path(path);return p if p.is_absolute() else parent/p
+--- /dev/null
++++ b/dynamic_role/sampling.py
+@@ -0,0 +1,24 @@
++"""Reuse original frozen-Xt 20-block adapter; replace ONLY its guide object.
++
++No runnable scientific chain here. A/C share native no-CN weights; B/D share
++native joint-CN weights. Model import/provenance remains the caller's duty.
++"""
++from .core import MatchingGuide
++
++
++def reverse_step(*args,**kwargs):
++    from stepwise_role.sampling import reverse_step as original
++    if kwargs.get('arm') in ('C','D') and not isinstance(kwargs.get('guide'),MatchingGuide):
++        raise ValueError('dynamic matching guide required for enabled arms')
++    return original(*args,**kwargs)
++
++
++def binding(model,case,kernel,guide,arm,rounds,seed,receipt=None):
++    from stepwise_role.sampling import binding as original
++    from .runner import fingerprint
++    result=original(model,case,kernel,guide,arm,rounds,seed,receipt)
++    result['dynamic_module_sha256']=fingerprint()
++    return result
++
++
++from stepwise_role.sampling import save_checkpoint,load_checkpoint
+--- /dev/null
++++ b/matching_tests/helpers.py
+@@ -0,0 +1,20 @@
++import numpy as np
++from hsgd.bw_preflight import common as c
++from role_degree.role_statistics import joint_profile
++from dynamic_role.core import MatchingGuide,Layout,freeze
++from hsgd.kernel import MarginalKernel
++
++REFERENCE='0'*64 # Explicit toy engineering reference, not IMDB provenance.
++
++def setup():
++    case=c.make_case(np.array([0,0,1,2]),np.array([[0,0],[2,3]]),((0,1),(0,2)))
++    l=Layout.canonical(case['space'].types,case['space'].pairs,case['prior'])
++    profile=joint_profile(l.types,case['clean'],case['space'].encode(case['clean'])[0],l.pairs)
++    k=MarginalKernel(l.prior,[1.,.8,.4,.1,0.]);g=MatchingGuide(l,freeze(profile,l,k.alpha,REFERENCE))
++    p=np.array([.17,.63,.46,.81]);state=np.array([1,0,0,1],np.uint8)
++    return case,l,profile,k,g,p,state
++
++def chain_setup(cn=False):
++    from hsgd.fusion_checks import make
++    case,l,pf,k,g,p,state=setup();model,_=make(case,cn);model.eval()
++    return case,model,k,g,state
+--- /dev/null
++++ b/matching_tests/resume_worker.py
+@@ -0,0 +1,14 @@
++import sys
++from pathlib import Path
++sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
++sys.path.insert(0,str(Path(__file__).resolve().parent))
++import numpy as np
++import torch
++from helpers import chain_setup
++from dynamic_role.sampling import binding,reverse_step,load_checkpoint
++torch.set_num_threads(1)
++case,model,k,g,_=chain_setup();rng=np.random.default_rng(987)
++bound=binding(model,case,k,g,'C',20,1789)
++state,s=load_checkpoint(sys.argv[1],rng,'cpu',bound,case['space'].total,4,2)
++for t in range(s,0,-1):state,_=reverse_step(model,case,state,k,t,20,1789,rng,'cpu',arm='C',guide=g)
++np.savez(sys.argv[2],state=state,next_uniform=rng.random(10))
+--- /dev/null
++++ b/matching_tests/test_matching.py
+@@ -0,0 +1,246 @@
++"""Small ENGINEERING fixtures; no scientific model/sample or private BW inputs."""
++import copy
++import itertools
++import json
++import os
++from pathlib import Path
++import subprocess
++import sys
++import numpy as np
++import pytest
++import torch
++from dynamic_role.core import exact_match,MatchingGuide,Layout,freeze,SETTINGS
++from helpers import setup,chain_setup,REFERENCE
++
++
++@pytest.mark.parametrize('seed',range(5))
++def test_exhaustive_joint_assignment_and_bounds(seed):
++    rng=np.random.default_rng(seed);mu=rng.random((5,3))*3;roles=rng.integers(0,4,(5,3)).astype(float);scale=np.array([2.,3.,4.]);dims=np.arange(3)
++    a,r=exact_match(mu,roles,scale,dims)
++    costs=[float((((mu-roles[list(p)])/scale)**2).sum()/3) for p in itertools.permutations(range(5))]
++    assert abs(r['cost_sum']-min(costs))<1e-12
++    assert r['assignment_objective_lower_bound']<=r['cost_sum']+1e-12
++    assert r['primal_dual_gap_bound']<1e-10
++
++
++@pytest.mark.parametrize('seed',range(5))
++def test_sorting_equals_generic_exact_cost(seed):
++    rng=np.random.default_rng(seed);mu=rng.random((9,2));roles=rng.integers(0,5,(9,2)).astype(float)
++    a,x=exact_match(mu,roles,np.array([3.,5.]),np.array([1]))
++    b,y=exact_match(mu,roles,np.array([3.,5.]),np.array([1]),method='generic')
++    assert abs(x['cost_sum']-y['cost_sum'])<1e-12
++
++
++def test_target_integer_multiplicity_joint_information_and_no_ids():
++    _,l,pf,k,g,p,state=setup();bad=copy.deepcopy(pf);bad['groups']['0']['counts']=[1.5, .5]
++    with pytest.raises(ValueError):freeze(bad,l,k.alpha,REFERENCE)
++    bad=copy.deepcopy(pf);bad['groups']['0']['counts']=[1,2]
++    with pytest.raises(ValueError):freeze(bad,l,k.alpha,REFERENCE)
++    other=copy.deepcopy(pf);other['groups']['0']['rows']=[[0,1],[1,0]]
++    gg=MatchingGuide(l,freeze(other,l,k.alpha,REFERENCE))
++    # Equal one-dimensional histograms, different JOINT target and decisions.
++    assert g.frozen['payload']['groups']['0']['scale']==gg.frozen['payload']['groups']['0']['scale']
++    a,qa,ra=g.apply(p,state,k,1);b,qb,rb=gg.apply(p,state,k,1)
++    assert ra['status']==rb['status']=='accepted'
++    assert np.max(abs(qa-qb))>1e-6
++    assert set(g.frozen['payload']['groups']['0'])=={'nodes','rows','counts','scale','effective_dimensions'}
++
++
++def test_clean_gradient_finite_difference_including_both_endpoints():
++    _,l,_,k,g,p,_=setup();assignment,_=g.match(p);loss,gp,_=g.loss_gradient(p,assignment)
++    z=np.log(p)-np.log1p(-p);glogit=gp*p*(1-p)
++    numeric=[]
++    for j in range(len(p)):
++        zz=z.copy();zz[j]+=1e-5;a=g.loss_gradient(1/(1+np.exp(-zz)),assignment,False)[0]
++        zz[j]-=2e-5;b=g.loss_gradient(1/(1+np.exp(-zz)),assignment,False)[0]
++        numeric.append((a-b)/2e-5)
++    assert np.allclose(numeric,glogit,atol=SETTINGS['finite_difference_atol'],rtol=SETTINGS['finite_difference_rtol'])
++    # Independent endpoint loop differentiates all type-normalized residuals.
++    mu=g.expected_degrees(p);ref=np.zeros_like(p)
++    for e,(u,v) in enumerate(l.slots.T):
++        r=l.families[e]
++        for node in (u,v):
++            c=str(l.types[node]);spec=g._groups[c];i=np.flatnonzero(spec['nodes']==node)[0]
++            ref[e]+=2*(mu[node,r]-spec['roles'][assignment[c][i],r])/spec['scale'][r]**2/(len(g._groups)*len(spec['nodes'])*len(spec['dims']))
++    assert np.allclose(gp,ref,atol=1e-15)
++
++
++def test_same_type_two_endpoint_gradient():
++    from role_degree.role_statistics import joint_profile
++    l=Layout.canonical([0,0,0],[(0,0)],[.5]);p=np.array([.2,.4,.8])
++    profile=joint_profile(l.types,l.slots[:,[0,1]],np.array([0,0]),l.pairs)
++    g=MatchingGuide(l,freeze(profile,l,[1.,.5,0.],REFERENCE));a,_=g.match(p)
++    loss,gradient,_=g.loss_gradient(p,a)
++    for e in range(3):
++        pp=p.copy();pp[e]+=1e-5;aa=g.loss_gradient(pp,a,False)[0];pp[e]-=2e-5;bb=g.loss_gradient(pp,a,False)[0]
++        assert abs((aa-bb)/2e-5-gradient[e])<2e-8
++
++
++def test_unique_matching_renumbering_and_endpoint_symmetry():
++    _,l,pf,k,g,p,state=setup();perm=np.array([1,0,2,3])
++    ll=Layout(l.types,np.sort(perm[l.slots],axis=0),l.families,l.pairs,l.prior)
++    gg=MatchingGuide(ll,freeze(pf,ll,k.alpha,REFERENCE))
++    aa,ar=g.match(p);bb,br=gg.match(p)
++    assert ar['0']['status']=='separated_at_declared_resolution'
++    assert np.array_equal(aa['0'][::-1],bb['0'])
++    a,qa,ra=g.apply(p,state,k,3);b,qb,rb=gg.apply(p,state,k,3)
++    assert np.allclose(a,b,atol=2e-10,rtol=1e-9)
++    assert np.allclose(qa,qb,atol=2e-10,rtol=1e-9)
++    assert abs(ra['loss_before']-rb['loss_before'])<2e-10
++    assert np.array_equal(np.sort(l.slots[::-1],axis=0),l.slots)
++
++
++def test_different_role_tie_counterexample_and_duplicate_roles():
++    mu=np.array([[.5],[.5]]);roles=np.array([[0.],[1.]])
++    a,r=exact_match(mu,roles,np.ones(1),np.array([0]));b,rr=exact_match(mu[::-1],roles,np.ones(1),np.array([0]))
++    assert r['status']=='nonidentical_role_tie_witness' and r['witnesses'][0]['exact_float_zero']
++    assert np.array_equal(a,b) and not np.array_equal(a[::-1],b)
++    assert not np.array_equal(mu-roles[a],(mu[::-1]-roles[b])[::-1])
++    _,dup=exact_match(mu,np.ones((2,1)),np.ones(1),np.array([0]))
++    assert dup['status']=='duplicate_roles_only_at_declared_resolution'
++
++
++def test_symmetric_graph_tied_gradients_are_not_claimed_equivariant():
++    _,l,pf,k,g,p,state=setup();p=np.full(4,.5)
++    a,audit=g.match(p);loss,gp,_=g.loss_gradient(p,a)
++    assert audit['0']['status']=='nonidentical_role_tie_witness'
++    assert loss>0 and np.max(abs(gp))>0 # hard selection can break symmetry
++    assert not np.array_equal(gp[:2],gp[:2][::-1])
++
++
++@pytest.mark.parametrize('t',[1,2,3,4])
++def test_controller_fixed_vs_reoptimized_and_original_posterior(t):
++    _,l,_,k,g,p,state=setup();pp,q,r=g.apply(p,state,k,t)
++    assert r['status']=='accepted'
++    assert r['loss_after_fixed']<r['loss_before']-r['descent_threshold']
++    assert r['loss_after_reoptimized']<=r['loss_after_fixed']+r['reoptimization_allowance']
++    assert np.allclose(q,k.reverse(pp,state,l.families,t-1,t),atol=5e-14,rtol=0)
++    if t==1:assert np.allclose(q,pp,atol=5e-14,rtol=0)
++    # Same p -> same CLEAN target loss/gradient independent of t/state.
++    assert r['loss_before']==g.apply(p,1-state,k,1)[2]['loss_before']
++
++
++def test_exact_support_saturation_zero_gradient_and_incomplete_slots():
++    from role_degree.role_statistics import joint_profile
++    from hsgd.kernel import MarginalKernel
++    l=Layout.canonical(np.array([0,0,1,1]),[(0,0),(0,1),(1,1)],[0.,.5,1.])
++    profile=joint_profile(l.types,l.slots[:,[1,5]],l.families[[1,5]],l.pairs)
++    k=MarginalKernel(l.prior,[1.,.7,0.]);g=MatchingGuide(l,freeze(profile,l,k.alpha,REFERENCE))
++    p=np.array([0.,0.,.3,.8,1.,1.]);state=np.array([0,1,0,1,0,1])
++    pp,q,r=g.apply(p,state,k,1)
++    assert np.array_equal(pp[[0,1,4,5]],p[[0,1,4,5]]) and r['numerical_saturated_slots']==2
++    binary=np.array([0.,0.,0.,1.,1.,1.]);out,q,rr=g.apply(binary,state,k,1)
++    assert rr['status']=='skipped' and rr['reason']=='no_movable_probabilities'
++    assert np.array_equal(out,binary)
++    with pytest.raises(ValueError):Layout(l.types,l.slots[:,:-1],l.families[:-1],l.pairs,l.prior)
++    with pytest.raises(ValueError):g.apply(np.full(len(p),.5),state,k,1)
++    with pytest.raises(ValueError):g.apply(np.full(len(p),np.nan),state,k,1)
++
++
++def test_backtracking_failure_nonfinite_and_zero_gradient(monkeypatch):
++    _,_,_,k,g,p,state=setup();original=g.loss_gradient
++    def stuck(pp,assignments,gradient=True):
++        loss,gp,detail=original(pp,assignments,gradient)
++        return (loss if gradient else 1e6),gp,detail
++    monkeypatch.setattr(g,'loss_gradient',stuck)
++    # Forced engineering failure affects rematch too -> numerical failure retained.
++    out,q,r=g.apply(p,state,k,1)
++    assert r['status']=='numerical_failure' and np.array_equal(out,p)
++    def zero(pp,assignments,gradient=True):
++        loss,gp,detail=original(pp,assignments,gradient)
++        return loss,np.zeros_like(pp) if gradient else None,detail
++    monkeypatch.setattr(g,'loss_gradient',zero)
++    out,q,r=g.apply(p,state,k,1)
++    assert r['status']=='skipped' and r['reason']=='zero_or_roundoff_gradient'
++    def nonfinite(*args,**kwargs):raise FloatingPointError('engineering injected nonfinite')
++    monkeypatch.setattr(g,'loss_gradient',nonfinite)
++    out,q,r=g.apply(p,state,k,1)
++    assert r['status']=='numerical_failure' and np.array_equal(out,p)
++
++
++def test_target_external_mutation_cannot_change_cached_roles():
++    _,_,_,_,g,p,_=setup();a,ar=g.match(p);before=g.binding();copy_target=g.frozen
++    copy_target['payload']['groups']['0']['rows'][0][0]=99
++    assert before==g.binding()
++    g._groups['0']['roles'][0,0]=99
++    with pytest.raises(ValueError,match='mutation'):g.binding()
++
++
++@pytest.mark.parametrize('cn',[False,True])
++def test_original_disabled_path_rng_coverage_and_partial_step_rollback(cn):
++    from dynamic_role.sampling import reverse_step
++    from hsgd.runtime import reverse_step as original
++    from hsgd.bw_preflight.common import rng_save
++    from hsgd.fusion_checks import rng_equal
++    case,m,k,g,state=chain_setup(cn);a=np.random.default_rng(91);b=np.random.default_rng(91)
++    x,r=original(m,case,state,k,4,20,1789,a,'cpu',backend='upstream',trace=True)
++    y,s=reverse_step(m,case,state,k,4,20,1789,b,'cpu',arm='B' if cn else 'A',guide=None,trace=True)
++    assert np.array_equal(x,y) and a.bit_generator.state==b.bit_generator.state
++    rng=np.random.default_rng(62);before=rng_save(rng,'cpu')
++    with pytest.raises(InterruptedError):reverse_step(m,case,state,k,4,20,1789,rng,'cpu',arm='D' if cn else 'C',guide=g,interrupt_block=1)
++    rng_equal(before,rng_save(rng,'cpu'))
++    z,r=reverse_step(m,case,state,k,4,20,1789,rng,'cpu',arm='D' if cn else 'C',guide=g,trace=True)
++    assert r['exact_coverage'] and r['covered_slots']==case['space'].total
++    assert np.array_equal(r['trace']['coverage'],np.ones(case['space'].total))
++
++
++def test_small_full_chain_and_fresh_process_resume(tmp_path):
++    from dynamic_role.sampling import reverse_step,binding,save_checkpoint,load_checkpoint
++    case,m,k,g,state=chain_setup();rng=np.random.default_rng(91)
++    bound=binding(m,case,k,g,'C',20,1789)
++    for t in (4,3):state,_=reverse_step(m,case,state,k,t,20,1789,rng,'cpu',arm='C',guide=g)
++    ck=tmp_path/'commit.pt';save_checkpoint(ck,state,2,rng,'cpu',bound)
++    for t in (2,1):state,_=reverse_step(m,case,state,k,t,20,1789,rng,'cpu',arm='C',guide=g)
++    nxt=rng.random(10);dest=tmp_path/'resumed.npz'
++    env=os.environ.copy();env.update(CUDA_VISIBLE_DEVICES='',OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1')
++    subprocess.run([sys.executable,str(Path(__file__).with_name('resume_worker.py')),str(ck),str(dest)],check=True,env=env,timeout=60)
++    with np.load(dest) as z:assert np.array_equal(z['state'],state) and np.array_equal(z['next_uniform'],nxt)
++    bad=copy.deepcopy(bound);bad['guide']['target_sha256']='x'*64
++    with pytest.raises(ValueError):load_checkpoint(ck,np.random.default_rng(3),'cpu',bad,case['space'].total,4,2)
++
++
++def test_output_overlap_rejected_before_any_write(tmp_path):
++    source=tmp_path/'source';source.mkdir();(source/'evidence').write_text('preserve')
++    before=list(source.rglob('*'))
++    cmd=[sys.executable,str(Path(__file__).resolve().parents[1]/'run_dynamic.py'),'pack',
++         '--export',str(source),'--short-run',str(tmp_path/'short'),'--output',str(source/'bad')]
++    r=subprocess.run(cmd,capture_output=True,text=True,timeout=10)
++    assert r.returncode!=0 and list(source.rglob('*'))==before
++
++
++def test_probability_entropy_exact_boundaries():
++    from dynamic_role.runner import distributions
++    _,l,_,_,_,_,_=setup();r=distributions(np.array([0.,1.,.5,.5]),l)
++    assert abs(r['mean_entropy']-np.log(2)/2)<1e-15 and r['exact_zero']==r['exact_one']==1
++
++
++def test_near_boundary_probabilities_no_epsilon_and_no_product_underflow():
++    _,l,_,k,g,p,state=setup();p=np.array([np.nextafter(0.,1.),np.nextafter(1.,0.),0.,1.])
++    pp,q,r=g.apply(p,state,k,1)
++    assert pp[2]==0 and pp[3]==1 and np.isfinite(pp).all() and np.isfinite(q).all()
++    assert r['numerical_saturated_slots']==2
++    a,_=g.match(p);loss,gradient,_=g.loss_gradient(p,a)
++    assert np.isfinite(loss) and np.isfinite(gradient).all()
++
++
++def test_controller_has_no_rng_consumption_and_recomputes_matching(monkeypatch):
++    import random
++    from hsgd.bw_preflight.common import rng_save
++    from hsgd.fusion_checks import rng_equal
++    _,_,_,k,g,p,state=setup();rng=np.random.default_rng(125);before=rng_save(rng,'cpu')
++    original=g.match;calls=[]
++    def watch(prob,check=lambda:None):calls.append(prob.copy());return original(prob,check)
++    monkeypatch.setattr(g,'match',watch)
++    pp,q,r=g.apply(p,state,k,1);g.apply(p,state,k,2)
++    assert len(calls)==4 and np.array_equal(calls[0],p) and np.array_equal(calls[2],p)
++    rng_equal(before,rng_save(rng,'cpu'))
++
++
++def test_direct_hidden_worker_cannot_write_existing_evidence(tmp_path):
++    out=tmp_path/'historical';out.mkdir();(out/'evidence.json').write_text('{"preserve":true}')
++    before={p.name:p.read_bytes() for p in out.iterdir()}
++    command=[sys.executable,str(Path(__file__).resolve().parents[1]/'run_dynamic.py'),'check',
++        '--portable',str(tmp_path/'missing.json'),'--portable-sha256','0'*64,'--output',str(out),
++        '--worker','--deadline','12345','--cleanup-deadline','12351']
++    result=subprocess.run(command,capture_output=True,text=True,timeout=10)
++    assert result.returncode!=0 and {p.name:p.read_bytes() for p in out.iterdir()}==before
+--- /dev/null
++++ b/matching_tests/test_portable.py
+@@ -0,0 +1,111 @@
++"""Small explicitly synthetic provenance fixtures; NOT genuine notebook arrays."""
++import hashlib
++import json
++from pathlib import Path
++import numpy as np
++import pytest
++from dynamic_role import portable as p
++from helpers import setup
++from multiscale_role.short import array_sha
++
++
++def sha(path):return hashlib.sha256(Path(path).read_bytes()).hexdigest()
++
++
++def write(path,value):
++    path.parent.mkdir(parents=True,exist_ok=True);path.write_text(json.dumps(value));return path
++
++
++def engineering_export(tmp_path,monkeypatch):
++    from hsgd.bw_preflight import common as c
++    from hsgd.kernel import MarginalKernel
++    from multiscale_role.legacy import ZIP_SHA
++    case,l,pf,k,g,prob,state=setup();kernel=MarginalKernel(l.prior,c.schedule(1000))
++    root=tmp_path/'old_export';root.mkdir();short=tmp_path/'old_short';short.mkdir();source=tmp_path/'old_source';source.mkdir()
++    package=tmp_path/'engineering_package';reference=package/'data/IMDB_movie_reference.npz';reference.parent.mkdir(parents=True)
++    np.savez(reference,fixture=np.array([1]))
++    refsha=sha(reference);monkeypatch.setattr(c,'PACKAGE',package);monkeypatch.setattr(c,'config',lambda:dict(imdb_sha256=refsha))
++    inputs={};rows=[];oldrecords=[]
++    def add(path):inputs[str(path.resolve())]=sha(path)
++    for index,(arm,t) in enumerate((a,t) for a in ('A','B') for t in (500,20,1)):
++        folder=source/(arm+str(t));folder.mkdir();plan=c.plan_for(case,[2026101701,t,61],20);h=hashlib.sha256();block=np.full(l.families.shape,-1,np.int64)
++        for r in range(20):
++            ids,f,query=plan.block(r);h.update(ids.tobytes());h.update(f.tobytes());h.update(query.tobytes());block[ids]=r
++        collection=write(folder/'collection.json',dict(query_seed=[2026101701,t,61],time=t,next_time=t-1,query_rounds=20,query_sha256=h.hexdigest()))
++        report=write(folder/'genre_baseline.json',dict(ENGINEERING=True))
++        config=write(folder/'config.json',dict(ENGINEERING=True));src=write(folder/'source_manifest.json',dict(ENGINEERING=True))
++        checkpoint=folder/'private_checkpoint_NOT_DELIVERED.pt';cp_sha='c'*64
++        data=dict(state=state,p0=prob,q=kernel.reverse(prob,state,l.families,t-1,t),slots=l.slots,families=l.families,
++            types=l.types,prior=l.prior,alpha=kernel.alpha,query_block=block,t=np.array(t))
++        array=root/(arm+str(t)+'.npz');np.savez(array,**data)
++        meta=dict(arm=arm,model_arm=arm,t=t,T=1000,query_rounds=20,sampling_seed=2026101701,completed_updates=6000,final_weight=True,
++            reference_sha256=refsha,checkpoint_sha256=cp_sha,config_sha256=sha(config),source_manifest_sha256=sha(src),
++            legacy_collection=str(collection),legacy_collection_sha256=sha(collection),legacy_report=str(report),legacy_report_sha256=sha(report),
++            legacy_query_sha256=h.hexdigest(),conversion=dict(source_zip_sha256=ZIP_SHA),array_sha256={k:array_sha(v) for k,v in data.items()})
++        metadata=write(root/(arm+str(t)+'.json'),meta)
++        row=dict(arm=arm,t=t,reference_sha256=refsha,npz=array.name,npz_sha256=sha(array),metadata=metadata.name,metadata_sha256=sha(metadata),
++            config=str(config),config_sha256=sha(config),source_manifest=str(src),source_manifest_sha256=sha(src),checkpoint=str(checkpoint),checkpoint_sha256=cp_sha)
++        rows.append(row)
++        for path in (array,metadata,config,src,collection,report):add(path)
++        inputs[str(checkpoint)]=cp_sha
++        old=dict(index=index,arm=arm,t=t,ENGINEERING=True);oldrecords.append(old);write(short/('case_%02d.json'%index),old)
++    m=write(root/'six_states.json',dict(format='legacy_export_v1_1',base_commit='acbbddb5cdbcbaa2ae129bcd59e434e6a298b130',reference_sha256=refsha,records=rows));add(m)
++    artifact=write(source/'independent_bank.json',dict(ENGINEERING=True))
++    spec=write(root/'original_evaluation.json',dict(original_artifact_source=str(artifact),original_artifact_sha256=sha(artifact)));add(spec);add(artifact)
++    summary=write(short/'summary.json',dict(status='complete',completed_records=6,input_hashes_unchanged=True,input_hash_verification_complete=True,input_hashes=inputs,records=oldrecords))
++    write(short/'frozen_objective.json',dict(ENGINEERING=True));write(short/'policy.json',dict(ENGINEERING=True))
++    # Only this synthetic fixture substitutes the pinned hashes. Released CLI
++    # constants remain the three actual user-supplied immutable SHA values.
++    monkeypatch.setattr(p,'PINS',dict(six_states=sha(m),original_evaluation=sha(spec),summary=sha(summary)))
++    out=tmp_path/'portable';out.mkdir();result=p.pack(root,short,out,lambda:None)
++    bundle=p.Portable(out/'portable.json',sha(out/'portable.json'))
++    return case,l,kernel,bundle,rows,result
++
++
++def test_portable_actual_array_query_and_historical_only_weight_contract(tmp_path,monkeypatch):
++    case,l,k,b,rows,result=engineering_export(tmp_path,monkeypatch)
++    assert result['status']=='complete' and result['private_weights_included']==0
++    for row in rows:
++        data,meta,receipt=b.record(row,case,k,l)
++        assert receipt['q_max_error']<5e-14 and 'historical receipts ONLY' in receipt['source_authentication']
++    assert not list(b.root.rglob('*.pt'))
++    b.rehash()
++
++
++@pytest.mark.parametrize('mutation',['seed','slots','families','source_hash','p0'])
++def test_reject_semantic_or_array_tampering(tmp_path,monkeypatch,mutation):
++    case,l,k,b,rows,_=engineering_export(tmp_path,monkeypatch);row=rows[-1]
++    old_json=b.json
++    if mutation in ('seed','source_hash'):
++        def changed(path,sha=None):
++            value=old_json(path,sha)
++            if str(path)==str(b.export/row['metadata']):
++                if mutation=='seed':value['sampling_seed']+=1
++                else:value['source_manifest_sha256']='d'*64
++            return value
++        monkeypatch.setattr(b,'json',changed)
++    else:
++        dest=b.file(b.export/row['npz']);z=dict(np.load(dest))
++        if mutation=='slots':z['slots']=z['slots'][:,::-1]
++        elif mutation=='families':z['families']=z['families'][::-1]
++        else:z['p0']=z['p0']+.01
++        np.savez(dest,**z)
++        # Force current bytes past the outer-file hash to exercise independent
++        # original per-array signatures and semantic checks, not just one gate.
++        b.hashed[dest]=sha(dest);b.mapping[str(b.export/row['npz'])]['sha256']=sha(dest);row['npz_sha256']=sha(dest)
++    with pytest.raises(ValueError):b.record(row,case,k,l)
++
++
++def test_portable_payload_mutation_and_receipt_change_refused(tmp_path,monkeypatch):
++    case,l,k,b,rows,_=engineering_export(tmp_path,monkeypatch)
++    dest=b.file(b.export/rows[0]['metadata']);dest.write_text('{}')
++    with pytest.raises(ValueError):b.rehash()
++    manifest=json.loads(b.path.read_text());manifest['pins']['six_states']='x'*64;b.path.write_text(json.dumps(manifest))
++    with pytest.raises(ValueError):p.Portable(b.path,sha(b.path))
++
++
++def test_protected_directory_and_symlink_no_write(tmp_path):
++    old=tmp_path/'old';old.mkdir();link=tmp_path/'link';link.symlink_to(old,target_is_directory=True)
++    for out in (old/'new',link/'new',old.parent):
++        with pytest.raises((ValueError,FileExistsError)):p.protect(out,[old])
++    assert list(old.iterdir())==[]
+--- /dev/null
++++ b/run_dynamic.py
+@@ -0,0 +1,115 @@
++#!/usr/bin/env python3
++"""900-second inclusive supervised jobs; no neural calls or BW connection."""
++import argparse
++import json
++import os
++import sys
++import time
++from pathlib import Path
++
++
++def check_release(check=lambda:None):
++    from multiscale_role.runtime_guard import checked_sha
++    root=Path(__file__).resolve().parent
++    for line in (root/'DYNAMIC_SHA256SUMS').read_text().splitlines():
++        check();h,name=line.split('  ',1);path=(root/name).resolve()
++        if root not in path.parents or checked_sha(path,check)!=h:raise ValueError('release binding differs: '+name)
++
++
++def parser():
++    p=argparse.ArgumentParser(description=__doc__)
++    p.add_argument('action',choices=['pack','check','b1','six'])
++    p.add_argument('--export');p.add_argument('--short-run');p.add_argument('--portable');p.add_argument('--portable-sha256')
++    p.add_argument('--b1-receipt');p.add_argument('--b1-receipt-sha256')
++    p.add_argument('--output',required=True);p.add_argument('--max-seconds',type=float,default=900)
++    p.add_argument('--worker',action='store_true',help=argparse.SUPPRESS)
++    p.add_argument('--deadline',type=float,help=argparse.SUPPRESS);p.add_argument('--cleanup-deadline',type=float,help=argparse.SUPPRESS)
++    return p
++
++
++def main():
++    started=time.monotonic();args=parser().parse_args()
++    if not 20<=args.max_seconds<=900:raise ValueError('inclusive budget must be 20..900 seconds')
++    if args.action=='pack':
++        if not args.export or not args.short_run:raise ValueError('pack requires original export and short-run paths')
++    elif not args.portable or not args.portable_sha256:raise ValueError('pinned portable manifest required')
++    from multiscale_role.runtime_guard import supervise,Budget,atomic_json
++    if not args.worker:
++        check_release()
++        # No output creation before path validation. Avoid heavy NumPy import in
++        # parent so signal supervision covers numerical imports too.
++        out=Path(args.output).resolve()
++        inputs=[Path(__file__).resolve().parent]
++        inputs += [Path(p) for p in (args.export,args.short_run) if p]
++        if args.portable:inputs.append(Path(args.portable).resolve().parent)
++        if args.b1_receipt:inputs.append(Path(args.b1_receipt).resolve().parent)
++        if args.action=='pack':
++            # Discover external referenced evidence roots BEFORE creating the
++            # output/controller files. No source path is made writable.
++            from dynamic_role.portable import PINS
++            import hashlib
++            def read_before_write(path,expected):
++                if time.monotonic()>=started+args.max_seconds-12:raise TimeoutError('deadline during read-only path preflight')
++                raw=Path(path).read_bytes()
++                if hashlib.sha256(raw).hexdigest()!=expected:raise ValueError('sealed path-preflight input differs: '+str(path))
++                return json.loads(raw)
++            export=Path(args.export).resolve();short=Path(args.short_run).resolve()
++            source=read_before_write(export/'six_states.json',PINS['six_states'])
++            spec=read_before_write(export/'original_evaluation.json',PINS['original_evaluation'])
++            receipt=read_before_write(short/'summary.json',PINS['summary'])
++            def original_path(p):
++                p=Path(p);return p if p.is_absolute() else export/p
++            inputs += [Path(p).parent for p in receipt['input_hashes']]
++            inputs.append(original_path(spec['original_artifact_source']).parent)
++            for row in source['records']:
++                meta=read_before_write(original_path(row['metadata']),row['metadata_sha256'])
++                inputs += [original_path(row[k]).parent for k in ('checkpoint','source_manifest','config','npz','metadata')]
++                inputs += [Path(meta[k]).parent for k in ('legacy_collection','legacy_report')]
++        for p in inputs:
++            p=p.resolve()
++            if out==p or out in p.parents or p in out.parents:raise ValueError('output overlaps protected input: '+str(p))
++        if out.exists():raise FileExistsError('fresh independent output required')
++        out.mkdir(parents=True)
++        command=[sys.executable,str(Path(__file__).resolve()),*sys.argv[1:],'--worker',
++            '--deadline',str(started+args.max_seconds-12),'--cleanup-deadline',str(started+args.max_seconds-6)]
++        env=os.environ.copy();env.update(OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1',CUDA_VISIBLE_DEVICES='',PYTHONDONTWRITEBYTECODE='1')
++        def validate(check):
++            check()
++            check_release(check)
++            data=json.loads((out/'summary.json').read_text())
++            if data.get('status')!='complete':raise ValueError('missing/incomplete worker result')
++            if args.action in ('six','check') and data.get('completed_records')!=6:raise ValueError('partial panel cannot pass')
++            if args.action=='b1' and data.get('completed_records')!=1:raise ValueError('B1 evidence absent')
++            return data
++        result=supervise(command,out,args.max_seconds,validate,env,started=started)
++        print(json.dumps(result,ensure_ascii=False));return 0 if result.get('status')=='completed' else 1
++    if args.deadline is None or args.cleanup_deadline is None:raise ValueError('worker requires supervisor deadlines')
++    owner=Path(args.output)/'controller_child.json'
++    for _ in range(20):
++        if owner.exists():break
++        time.sleep(.025)
++    if not owner.exists() or json.loads(owner.read_text()).get('pid')!=os.getpid():
++        raise ValueError('worker requires this supervisor-owned fresh output; no direct worker execution')
++    budget=Budget(args.deadline,Path(args.output)/'STOP',args.cleanup_deadline);budget.install()
++    summary=dict(status='incomplete',scope=args.action,model_calls=0,training_updates=0,scientific_graphs=0,GPU_use=0)
++    try:
++        if args.action=='pack':
++            from dynamic_role.portable import pack
++            summary=pack(args.export,args.short_run,args.output,budget.check)
++        else:
++            from dynamic_role.runner import run
++            summary=run(args,args.output,budget.check)
++        budget.check();atomic_json(Path(args.output)/'summary.json',summary,budget.check)
++        return 0
++    except BaseException as exc:
++        summary.update(status='stopped' if isinstance(exc,(KeyboardInterrupt,InterruptedError)) else 'incomplete' if isinstance(exc,TimeoutError) else 'failed',
++                       error=type(exc).__name__+': '+str(exc))
++        # Cleanup receipt writes are bounded separately; never promote partial
++        # scientific records to complete. SIGKILL cannot run Python finally.
++        try:atomic_json(Path(args.output)/'summary.json',summary,budget.cleanup_check)
++        except BaseException:pass
++        raise
++    finally:budget.restore()
++
++
++if __name__=='__main__':sys.exit(main())
+--- /dev/null
++++ b/verify_dynamic.py
+@@ -0,0 +1,52 @@
++#!/usr/bin/env python3
++"""Verify release bytes AND exact frozen test collection, zero skips required."""
++import argparse
++import hashlib
++import json
++import os
++from pathlib import Path
++import resource
++import subprocess
++import sys
++import time
++import xml.etree.ElementTree as ET
++
++ROOT=Path(__file__).resolve().parent
++
++
++def main():
++    p=argparse.ArgumentParser();p.add_argument('--output',required=True);a=p.parse_args()
++    start=time.monotonic();out=Path(a.output).resolve()
++    if out==ROOT or ROOT in out.parents or out in ROOT.parents:raise ValueError('output must not overlap deployment')
++    if out.exists():raise FileExistsError('fresh test evidence directory required')
++    for line in (ROOT/'DYNAMIC_SHA256SUMS').read_text().splitlines():
++        h,n=line.split('  ',1)
++        if hashlib.sha256((ROOT/n).read_bytes()).hexdigest()!=h:raise ValueError('release hash differs: '+n)
++    frozen=json.loads((ROOT/'dynamic_test_suite.json').read_text());expected=frozen['nodeids']
++    env={k:v for k,v in os.environ.items() if not k.startswith('PYTEST_')}
++    env.update(PYTEST_DISABLE_PLUGIN_AUTOLOAD='1',PYTHONDONTWRITEBYTECODE='1',
++               CUDA_VISIBLE_DEVICES='',OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1',PYTHONPATH=str(ROOT))
++    command=[sys.executable,'-m','pytest','tests','matching_tests','-q']
++    def run(extra):
++        left=300-(time.monotonic()-start)
++        if left<=0:raise TimeoutError('300 second local regression bound')
++        return subprocess.run(command+extra,cwd=ROOT,env=env,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=left)
++    collected=run(['--collect-only']);nodeids=[s for s in collected.stdout.splitlines() if '::' in s and not s.startswith(' ')]
++    if collected.returncode or nodeids!=expected:raise ValueError('actual full test collection differs from frozen release')
++    out.mkdir(parents=True)
++    test=run(['--junitxml='+str(out/'tests.xml')]);(out/'tests.log').write_text(test.stdout)
++    if test.returncode:raise ValueError('CPU regression failed; inspect tests.log')
++    tree=ET.parse(out/'tests.xml');cases=tree.findall('.//testcase')
++    if len(cases)!=len(expected) or tree.findall('.//skipped') or tree.findall('.//failure') or tree.findall('.//error'):
++        raise ValueError('missing/failed/skipped tests cannot pass')
++    observed=[x.attrib['classname']+'.'+x.attrib['name'] for x in cases]
++    identities=[s.split('::')[0].replace('/','.').removesuffix('.py')+'.'+'.'.join(s.split('::')[1:]) for s in expected]
++    if observed!=identities:raise ValueError('executed test identities differ')
++    result=dict(status='passed',cases=len(cases),skipped=0,exact_collection=True,environment_filters_isolated=True,
++        cpu_child_seconds=resource.getrusage(resource.RUSAGE_CHILDREN).ru_utime+resource.getrusage(resource.RUSAGE_CHILDREN).ru_stime,
++        peak_child_rss_mib=resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss/1024,
++        wall_seconds=time.monotonic()-start,scope='CPU engineering tests only, no actual frozen6/BW verification')
++    (out/'acceptance.json').write_text(json.dumps(result,indent=2)+'\n');print(json.dumps(result))
++
++
++if __name__=='__main__':main()
