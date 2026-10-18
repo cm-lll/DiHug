@@ -269,7 +269,7 @@
 +
 --- /dev/null
 +++ b/dynamic_role/core.py
-@@ -0,0 +1,272 @@
+@@ -0,0 +1,274 @@
 +"""FP64 clean-p0 role matching and signed two-endpoint logit gradients.
 +
 +SciPy exact linear assignment (floating-point costs), no soft OT, role sampling,
@@ -446,9 +446,11 @@
 +            layout={k:digest(getattr(self.layout,k)) for k in ('types','slots','families','pairs','prior','fixed0','fixed1')}))
 +
 +    def binding(self):
++        import scipy
 +        if signature(self._artifact['payload'])!=self._artifact['sha256'] or self._derived()!=self._initial:
 +            raise ValueError('target/layout/schedule mutation detected')
 +        return dict(target_sha256=self._artifact['sha256'], derived_sha256=self._initial,
++                    scipy_runtime_version=scipy.__version__,numpy_runtime_version=np.__version__,
 +                    implementation_sha256=hashlib.sha256(__import__('pathlib').Path(__file__).read_bytes()).hexdigest())
 +
 +    def expected_degrees(self,p):
@@ -818,7 +820,7 @@
 +            source_authentication='actual arrays, reference, metadata, query, posterior verified; private weights historical receipts ONLY')
 --- /dev/null
 +++ b/dynamic_role/runner.py
-@@ -0,0 +1,153 @@
+@@ -0,0 +1,155 @@
 +"""Bounded CPU-only frozen probability diagnostics; no model or new graph."""
 +import json
 +import resource
@@ -922,11 +924,13 @@
 +    if not np.array_equal(omega,bundle.spec['omega64']) or path!=bundle.spec['frequency_field_path'] or bundle.spec['CF_normalizer']!=1:
 +        raise ValueError('old independent Genre64 bank differs')
 +    kernel=MarginalKernel(layout.prior,guide.alpha);cache=ForwardPMFCache()
-+    implementation=fingerprint();result.update(implementation_sha256=implementation,target_sha256=target['sha256'],environment=c.environment('cpu'))
++    import platform,scipy
++    numeric_runtime=dict(python=platform.python_version(),numpy=np.__version__,scipy=scipy.__version__)
++    implementation=fingerprint();result.update(implementation_sha256=implementation,target_sha256=target['sha256'],environment=c.environment('cpu'),numeric_runtime=numeric_runtime)
 +    if args.action=='six':
 +        if not args.b1_receipt or not args.b1_receipt_sha256:raise ValueError('B1 development receipt required before frozen six-state run')
 +        receipt=json.loads(Path(args.b1_receipt).read_text())
-+        if checked_sha(args.b1_receipt,check)!=args.b1_receipt_sha256 or receipt.get('status')!='complete' or receipt.get('scope')!='b1' or receipt.get('implementation_sha256')!=implementation or receipt.get('target_sha256')!=target['sha256'] or receipt.get('portable_sha256')!=args.portable_sha256:
++        if checked_sha(args.b1_receipt,check)!=args.b1_receipt_sha256 or receipt.get('status')!='complete' or receipt.get('scope')!='b1' or receipt.get('implementation_sha256')!=implementation or receipt.get('target_sha256')!=target['sha256'] or receipt.get('portable_sha256')!=args.portable_sha256 or receipt.get('numeric_runtime')!=numeric_runtime:
 +            raise ValueError('B1 receipt source/target/input not same frozen implementation')
 +    for index,row in enumerate(bundle.original['records']):
 +        if args.action=='b1' and (row['arm'],row['t'])!=('B',1):continue
@@ -1041,7 +1045,7 @@
 +np.savez(sys.argv[2],state=state,next_uniform=rng.random(10))
 --- /dev/null
 +++ b/matching_tests/test_matching.py
-@@ -0,0 +1,246 @@
+@@ -0,0 +1,248 @@
 +"""Small ENGINEERING fixtures; no scientific model/sample or private BW inputs."""
 +import copy
 +import itertools
@@ -1240,6 +1244,8 @@
 +    subprocess.run([sys.executable,str(Path(__file__).with_name('resume_worker.py')),str(ck),str(dest)],check=True,env=env,timeout=60)
 +    with np.load(dest) as z:assert np.array_equal(z['state'],state) and np.array_equal(z['next_uniform'],nxt)
 +    bad=copy.deepcopy(bound);bad['guide']['target_sha256']='x'*64
++    with pytest.raises(ValueError):load_checkpoint(ck,np.random.default_rng(3),'cpu',bad,case['space'].total,4,2)
++    bad=copy.deepcopy(bound);bad['guide']['scipy_runtime_version']='different'
 +    with pytest.raises(ValueError):load_checkpoint(ck,np.random.default_rng(3),'cpu',bad,case['space'].total,4,2)
 +
 +

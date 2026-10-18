@@ -197,6 +197,8 @@ def test_small_full_chain_and_fresh_process_resume(tmp_path):
     with np.load(dest) as z:assert np.array_equal(z['state'],state) and np.array_equal(z['next_uniform'],nxt)
     bad=copy.deepcopy(bound);bad['guide']['target_sha256']='x'*64
     with pytest.raises(ValueError):load_checkpoint(ck,np.random.default_rng(3),'cpu',bad,case['space'].total,4,2)
+    bad=copy.deepcopy(bound);bad['guide']['scipy_runtime_version']='different'
+    with pytest.raises(ValueError):load_checkpoint(ck,np.random.default_rng(3),'cpu',bad,case['space'].total,4,2)
 
 
 def test_output_overlap_rejected_before_any_write(tmp_path):

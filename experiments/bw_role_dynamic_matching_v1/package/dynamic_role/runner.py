@@ -101,11 +101,13 @@ def run(args,out,check):
     if not np.array_equal(omega,bundle.spec['omega64']) or path!=bundle.spec['frequency_field_path'] or bundle.spec['CF_normalizer']!=1:
         raise ValueError('old independent Genre64 bank differs')
     kernel=MarginalKernel(layout.prior,guide.alpha);cache=ForwardPMFCache()
-    implementation=fingerprint();result.update(implementation_sha256=implementation,target_sha256=target['sha256'],environment=c.environment('cpu'))
+    import platform,scipy
+    numeric_runtime=dict(python=platform.python_version(),numpy=np.__version__,scipy=scipy.__version__)
+    implementation=fingerprint();result.update(implementation_sha256=implementation,target_sha256=target['sha256'],environment=c.environment('cpu'),numeric_runtime=numeric_runtime)
     if args.action=='six':
         if not args.b1_receipt or not args.b1_receipt_sha256:raise ValueError('B1 development receipt required before frozen six-state run')
         receipt=json.loads(Path(args.b1_receipt).read_text())
-        if checked_sha(args.b1_receipt,check)!=args.b1_receipt_sha256 or receipt.get('status')!='complete' or receipt.get('scope')!='b1' or receipt.get('implementation_sha256')!=implementation or receipt.get('target_sha256')!=target['sha256'] or receipt.get('portable_sha256')!=args.portable_sha256:
+        if checked_sha(args.b1_receipt,check)!=args.b1_receipt_sha256 or receipt.get('status')!='complete' or receipt.get('scope')!='b1' or receipt.get('implementation_sha256')!=implementation or receipt.get('target_sha256')!=target['sha256'] or receipt.get('portable_sha256')!=args.portable_sha256 or receipt.get('numeric_runtime')!=numeric_runtime:
             raise ValueError('B1 receipt source/target/input not same frozen implementation')
     for index,row in enumerate(bundle.original['records']):
         if args.action=='b1' and (row['arm'],row['t'])!=('B',1):continue

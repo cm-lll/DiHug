@@ -174,9 +174,11 @@ class MatchingGuide:
             layout={k:digest(getattr(self.layout,k)) for k in ('types','slots','families','pairs','prior','fixed0','fixed1')}))
 
     def binding(self):
+        import scipy
         if signature(self._artifact['payload'])!=self._artifact['sha256'] or self._derived()!=self._initial:
             raise ValueError('target/layout/schedule mutation detected')
         return dict(target_sha256=self._artifact['sha256'], derived_sha256=self._initial,
+                    scipy_runtime_version=scipy.__version__,numpy_runtime_version=np.__version__,
                     implementation_sha256=hashlib.sha256(__import__('pathlib').Path(__file__).read_bytes()).hexdigest())
 
     def expected_degrees(self,p):
