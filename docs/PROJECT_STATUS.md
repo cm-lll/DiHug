@@ -9,7 +9,8 @@
 来源仅历史权重收据，不重新认证私有权重字节。没有notebook/SSH/BW/模型/训练/完整链或IMDB规模重跑。
 80项不以旧77项替代；最终ZIP独立解包81项通过，5.100秒墙钟、109.43MiB峰RSS。
 嵌套manifest文件入口0.549秒成功，所属子进程清理通过；全部清单文件哈希一致。
-本票仅GitHub交付后停止等待审查，不自动真实运行。
+本地ZIP交付完成；GitHub首个blob上传403 Resource not accessible by integration，未创建远端分支。
+现有连接缺仓库写权限，本地无HTTPS凭据；遵守不连SSH，不尝试notebook/BW。发布阻塞已留证，停止等待审查。
 机器证据results/anonymous_role_decode_local_v11_20261019。
 
 # Previous scoped review: anonymous joint-role discrete decoding CPU prototype
