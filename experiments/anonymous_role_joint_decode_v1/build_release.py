@@ -26,7 +26,7 @@ def main():
     if a.prepare:
         env={k:v for k,v in os.environ.items() if not k.startswith('PYTEST_')}
         env.update(PYTEST_DISABLE_PLUGIN_AUTOLOAD='1',PYTHONDONTWRITEBYTECODE='1',OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1',CUDA_VISIBLE_DEVICES='')
-        r=subprocess.run([sys.executable,'-m','pytest','--rootdir',str(ROOT),'-c',os.devnull,'tests','-q','--collect-only'],cwd=ROOT,env=env,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=60,check=True)
+        r=subprocess.run([sys.executable,'-m','pytest','--rootdir',str(ROOT),'-c',os.devnull,'-p','no:cacheprovider','tests','-q','--collect-only'],cwd=ROOT,env=env,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=60,check=True)
         ids=[s for s in r.stdout.splitlines() if '::' in s and not s.startswith(' ')]
         (ROOT/'test_suite.json').write_text(json.dumps(dict(nodeids=ids),indent=2)+'\n')
     files={str(p.relative_to(ROOT)):p.read_bytes() for p in sorted(ROOT.rglob('*')) if p.is_file() and '__pycache__' not in p.parts and '.pytest_cache' not in p.parts and p.name not in ('manifest.json','SHA256SUMS')}
