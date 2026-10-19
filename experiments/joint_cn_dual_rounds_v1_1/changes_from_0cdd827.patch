@@ -1,0 +1,1617 @@
+diff --git a/package/README_zh.md b/package/README_zh.md
+index 54cce95..6c15f21 100644
+--- a/package/README_zh.md
++++ b/package/README_zh.md
+@@ -1,6 +1,7 @@
+ # IMDB／PubMed 联合 CN：双卡独立训练与轮次对照
+ 
+-本包基于 dd53b6431303263e740abedf67e01d7dfc13d15b 的 joint CN v1.1。
++本小修基于0cdd8274d7359c4cc189685735fbe77c60c712c7；模型仍为joint CN v1.1。
++迁移、事务和时限说明见 RECOVERY_V11.md。
+ `hsgd/`、原三份核心测试及其兼容性测试依赖 `role_degree/` 均逐字保留；
+ 生产入口 `dual/` 不导入角色引导。没有 M/K、硬解码、补连、度修复或闭合修复。
+ 仅已做本地 CPU 小图工程验收，未运行 BW、真实图网络前向、正式训练或完整科学生成链。
+@@ -23,11 +24,13 @@ FP32 网络／CE、float64 概率核，TF32 关闭，线程 1；正式训练和
+ 优化器：AdamW，lr=2e-4、weight_decay=1e-12、betas=(0.9,0.999)、eps=1e-8、
+ amsgrad=False；无调度器、无 LR warmup、无梯度裁剪。
+ 这套优化器能追到固定基线的 **fusion_preflight 工程入口**。
+-**本地没有找到旧 6000 步正式 launcher、resolved_config 及优化器／种子回执**，
+-故不能声称已独立验证与旧正式实验严格同配置。文件中明确记为未核对；
+-启动命令的 `--accept-config-provenance-gap` 是对这一已披露边界的显式确认，
+-不是恢复旧权重或更改方法的开关。旧实验实际种子尚未认证，新 IMDB seed
+-2026101901 与本地已知历史 seed 2026101407／1603 不同。
++用户已提供旧正式binding的只读审查收据，SHA256：
++95b8c32c5ab649ab017d5ff2ef2a975a14b2b97893e5164b2fb5658e3bf1a513。
++历史seed=2026101407，AdamW lr=2e-4、weight_decay=1e-12、amsgrad=False，无裁剪/调度器。
++本地没有旧文件字节及构造源码；betas/eps仍未独立核实，不声称完整来源认证。
++新IMDB seed2026101901不同于该历史seed。启动仍保留
++`--accept-config-provenance-gap`，确认剩余来源边界；没有改科学配置。
++配置文件中原来源文字是封存历史记录，由data/formal_provenance_update.json补充。
+ 
+ IMDB/PubMed 训练 seed 分别 2026101901/2026101902；验证 seed
+ 2026101911/2026101912；采样 seed 2026101921/2026101922。
+@@ -58,7 +61,7 @@ CN reference wedges：IMDB217005，PubMed1164378。独立前向噪声下每个 t
+ 
+ ## 先检查，再由另一侧决定真实启动
+ 
+-解压后进入 `dihug_joint_cn_dual_rounds_v1`。默认 Python
++解压后进入 `dihug_joint_cn_dual_rounds_v1_1`。默认 Python
+ `/usr/local/bin/python3.11`，保留 BW 厂商 Torch、已有 PyG，不安装或升级依赖。
+ 所有路径示例是**新实验路径**；不要使用旧 v9／CN v2 输出目录。
+ 
+@@ -71,9 +74,9 @@ bash run.sh inventory --dataset PubMed > /root/private_data/pubmed_inventory_new
+ # 两项短测依次执行，每项含进程启动最多570秒，清理通常额外不超过3秒；
+ # 这些索引是平台当前可见范围内的本地索引，绝不解除设备隔离。
+ bash run.sh short-test --dataset PubMed --device-index 0 \
+-  --output /root/private_data/joint_cn_rounds_preflight/PubMed_check01 --max-seconds 570
++  --output /root/private_data/joint_cn_rounds_v1_1_preflight/PubMed_check01 --max-seconds 570
+ bash run.sh short-test --dataset IMDB --device-index 1 \
+-  --output /root/private_data/joint_cn_rounds_preflight/IMDB_check01 --max-seconds 570
++  --output /root/private_data/joint_cn_rounds_v1_1_preflight/IMDB_check01 --max-seconds 570
+ ```
+ 
+ 短测只有6次丢弃的工程更新（前三次预热、后三次稳定），一个完整20块反向步和
+@@ -89,7 +92,7 @@ bash run.sh short-test --dataset IMDB --device-index 1 \
+ nohup env OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
+   /usr/local/bin/python3.11 -u launch_pair.py \
+   --pubmed-device 0 --imdb-device 1 \
+-  --root /root/private_data/joint_cn_rounds_v1_run01 \
++  --root /root/private_data/joint_cn_rounds_v1_1_run01 \
+   --accept-config-provenance-gap \
+   > /root/private_data/joint_cn_rounds_v1_pair01.log 2>&1 < /dev/null &
+ ```
+@@ -101,11 +104,11 @@ nohup env OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
+ 
+ ```bash
+ bash run.sh pipeline --dataset PubMed --device-index 0 --fresh-start \
+-  --output /root/private_data/joint_cn_rounds_v1_run01/PubMed_seed2026101902 \
++  --output /root/private_data/joint_cn_rounds_v1_1_run01/PubMed_seed2026101902 \
+   --accept-config-provenance-gap
+ # 另一获配设备／容器；同容器第二张卡时改为 --device-index 1
+ bash run.sh pipeline --dataset IMDB --device-index 0 --fresh-start \
+-  --output /root/private_data/joint_cn_rounds_v1_run01/IMDB_seed2026101901 \
++  --output /root/private_data/joint_cn_rounds_v1_1_run01/IMDB_seed2026101901 \
+   --accept-config-provenance-gap
+ ```
+ 
+@@ -127,13 +130,13 @@ bash run.sh pipeline --dataset IMDB --device-index 0 --fresh-start \
+ ## 进度、安全停止、恢复及单独采样
+ 
+ ```bash
+-tail -n 5 /root/private_data/joint_cn_rounds_v1_run01/IMDB.log
++tail -n 5 /root/private_data/joint_cn_rounds_v1_1_run01/IMDB.log
+ bash run.sh progress --dataset IMDB \
+-  --output /root/private_data/joint_cn_rounds_v1_run01/IMDB_seed2026101901
++  --output /root/private_data/joint_cn_rounds_v1_1_run01/IMDB_seed2026101901
+ bash run.sh stop --dataset IMDB \
+-  --output /root/private_data/joint_cn_rounds_v1_run01/IMDB_seed2026101901
++  --output /root/private_data/joint_cn_rounds_v1_1_run01/IMDB_seed2026101901
+ # 采样期间要停止当前采样目录（不重跑已提交反向步）
+-touch /root/private_data/joint_cn_rounds_v1_run01/IMDB_seed2026101901/samples/u003000/STOP
++touch /root/private_data/joint_cn_rounds_v1_1_run01/IMDB_seed2026101901/samples/u003000/STOP
+ ```
+ 
+ 等待日志显示 stopped、安全检查点已写出及进程退出。STOP只作用于指定新任务；
+@@ -141,14 +144,14 @@ SIGINT／TERM／HUP同样请求安全退出，不保证能捕获SIGKILL或机器
+ 先确认原进程已退出，明确删除**本次**STOP，然后恢复：
+ 
+ ```bash
+-rm /root/private_data/joint_cn_rounds_v1_run01/IMDB_seed2026101901/STOP
++rm /root/private_data/joint_cn_rounds_v1_1_run01/IMDB_seed2026101901/STOP
+ bash run.sh pipeline --dataset IMDB --device-index 1 --resume \
+-  --output /root/private_data/joint_cn_rounds_v1_run01/IMDB_seed2026101901 \
++  --output /root/private_data/joint_cn_rounds_v1_1_run01/IMDB_seed2026101901 \
+   --accept-config-provenance-gap
+ 
+ # 只训练、不自动采样：首次用 train --fresh-start，续训用 resume。
+ bash run.sh sample-checkpoint --dataset IMDB --device-index 1 \
+-  --run /root/private_data/joint_cn_rounds_v1_run01/IMDB_seed2026101901 \
++  --run /root/private_data/joint_cn_rounds_v1_1_run01/IMDB_seed2026101901 \
+   --update 6000 --output /root/private_data/joint_cn_rounds_manual_samples/IMDB_u6000
+ # 续采样同一目录，另加 --resume；不要更换seed或擅自换检查点。
+ ```
+diff --git a/new/package/RECOVERY_V11.md b/package/RECOVERY_V11.md
+new file mode 100644
+index 0000000..77ee2cd
+--- /dev/null
++++ b/package/RECOVERY_V11.md
+@@ -0,0 +1,71 @@
++# v1.1：只修事务、设备迁移与短测时限
++
++基线0cdd8274d7359c4cc189685735fbe77c60c712c7。模型、损失、两份数据及完整科学配置
++JSON逐字保留；仍为12000更新、千步永久保存、3000/6000/9000/10000/12000五评价点。
++旧版本及ZIP不改。本包不运行训练或完整链来验证这些工程变化。
++
++## 检查点事务
++
++写入顺序：私有prepared载荷→包含完整内容摘要和实际字节SHA256的intent→
++发布不可变checkpoint→latest→milestones。恢复先核对所有事务、载荷及已有指针，
++再修缺失项；冲突不覆盖。校验覆盖模型、优化器、全部所存RNG、绑定、计数及extra，
++不是只验模型权重。有效已有文件在内容完全一致时幂等接纳，不重新序列化覆盖。
++prepared、文件已发布但latest缺失、latest完成但milestone缺失均可恢复；
++u0在冻结面板落盘之前中断，按原已绑定seed/config确定性重建，非零更新缺面板仍拒绝。
++
++没有intent且没有独立可信收据的孤立文件，单凭自算哈希不能在load时认证。
++只有save调用方持有完整已知内存快照、与全部载荷逐项摘要一致时才可接纳。
++这不是绕过v1到v1.1的源码绑定检查。正式续训只接受同一新版发行绑定。
++持久化使用原子rename及fsync；仍不能承诺所有平台故障/磁盘损坏都可恢复，冲突保留留证。
++
++## 显式设备迁移
++
++默认严格；另加`--allow-device-migration`才允许UUID/index/visibility和设备名称改变。
++源码提交、完整release manifest、config、data、run_id、backend、Python、Torch实际版本、
++HIP/CUDA构建、数值依赖版本、执行模式均必须相同。该选项不允许不同源码版本续训，
++也不能用于fresh-start。原binding.json和旧权重不改写；迁移回执单独保存在migrations/。
++新检查点extra记录本次实际execution_binding，后续在该设备恢复可继续默认严格检查。
++
++```bash
++bash run.sh pipeline --dataset IMDB --device-index 0 --resume \
++  --output /root/private_data/joint_cn_rounds_v1_1_run01/IMDB_seed2026101901 \
++  --accept-config-provenance-gap --allow-device-migration
++
++bash run.sh sample-checkpoint --dataset IMDB --device-index 0 --resume \
++  --run /root/private_data/joint_cn_rounds_v1_1_run01/IMDB_seed2026101901 \
++  --update 6000 --output /root/private_data/joint_cn_rounds_v1_1_sample01 \
++  --allow-device-migration
++```
++
++第二条用于已存在的采样状态；第一次指定检查点采样去掉--resume。
++跨设备读取仍保存在旧设备上的源检查点，每次都须显式给迁移选项。
++恢复CPU、Python、NumPy及**所选卡**RNG；不要求恢复后跨设备轨迹逐位相同。
++新入口不调用get_rng_state_all/set_rng_state_all/manual_seed_all，也不改变可见性变量。
++为保持核心文件不改，只在同步reverse_step调用期间把原回滚RNG帮助函数接到所选卡实现，
++随后恢复原帮助函数。这是单工作线程接口，不声称线程并发安全。多卡实机验证尚未执行。
++
++## 570秒覆盖范围
++
++`dual.cli`现在是标准库轻入口。数值库导入、数据核验/载入、CUDA初始化、取得设备锁、
++全部计算、worker保存及父进程完成证据核验均在同一570秒期限内。
++结束后单独记录cleanup_seconds及cleanup_budget_seconds=3；只终止本监督器启动的进程组。
++SIGKILL不可捕获；超时/STOP/信号或证据缺失均非零，不将部分产物标为完成。
++
++```bash
++bash run.sh short-test --dataset PubMed --device-index 0 \
++  --output /root/private_data/joint_cn_rounds_v1_1_preflight/PubMed_check01 \
++  --max-seconds 570
++```
++
++本地超时测试用合成小进程模拟加载/CUDA/锁阶段；设备RNG迁移测试用明确的API mock
++及CPU小图，不冒称真实BW兼容、显存或跨卡恢复已经通过。
++
++## 来源补充
++
++用户只读审查提供旧正式binding收据，预期SHA256为
++95b8c32c5ab649ab017d5ff2ef2a975a14b2b97893e5164b2fb5658e3bf1a513。
++旧seed2026101407；AdamW lr0.0002/weight_decay1e-12/amsgradFalse，无裁剪/调度器。
++本地没有该文件字节及旧构造源码，因此沿用用户历史收据，不声称重新认证远端文件。
++betas/eps仍未独立核实；当前配置不变。详情data/formal_provenance_update.json。
++原expected_tests.json仍封存原59个测试ID；full_expected_tests_v11.json冻结本版完整集合，
++零跳过且集合完全一致才通过。原幂等保存测试按本票新合同改为同内容接纳，测试ID保留。
+diff --git a/new/package/data/formal_provenance_update.json b/package/data/formal_provenance_update.json
+new file mode 100644
+index 0000000..5d36c7a
+--- /dev/null
++++ b/package/data/formal_provenance_update.json
+@@ -0,0 +1,14 @@
++{
++  "source_kind": "human user supplied read-only audit receipt, not local reauthentication",
++  "historical_binding_path": "/root/private_data/gnn_projects/bw_joint_cn_v1_1/formal_v1/train6000/binding.json",
++  "expected_historical_binding_sha256": "95b8c32c5ab649ab017d5ff2ef2a975a14b2b97893e5164b2fb5658e3bf1a513",
++  "historical_binding_bytes_available_locally": false,
++  "train_seed": 2026101407,
++  "optimizer": {"type": "AdamW", "lr": 0.0002, "weight_decay": 1e-12, "amsgrad": false},
++  "gradient_clipping": null,
++  "scheduler": null,
++  "betas_independently_verified": false,
++  "epsilon_independently_verified": false,
++  "old_constructor_source_available": false,
++  "scope": "supplements older config provenance text without changing any science configuration or falsely authenticating remote bytes"
++}
+diff --git a/package/dual/cli.py b/package/dual/cli.py
+index ceef197..df350eb 100644
+--- a/package/dual/cli.py
++++ b/package/dual/cli.py
+@@ -1,174 +1,15 @@
+-import argparse
+-import json
+-import os
+-from pathlib import Path
+-import subprocess
+-import sys
++"""Light entry: start the deadline BEFORE any numerical imports or device work."""
+ import time
+-import fcntl
+-import numpy as np
+-import torch
+-from hsgd.bw_preflight import common as c
+-from hsgd.kernel import MarginalKernel
+-from hsgd.runtime import reverse_step
+-from .data import ROOT,load,inventory,risk,digest
+-from .io import (Control,Stopped,atomic_json,configure,optimizer,protect,verify_release,device_lock)
+-from .engine import run_train,sample,preflight,verify_completed_sample
+-from . import validation
+-from .metrics import graph,compare
+-
+-def gate_command(args,output):
+-    command=[sys.executable,'-m','dual.cli','gate','--dataset',args.dataset,'--output',str(output),
+-             '--device',args.device,'--device-index',str(args.device_index)]
+-    return command
+-
+-def bounded_child(command,seconds,output):
+-    """Entire disposable device process, with bounded cleanup and explicit receipt."""
+-    import signal
+-    out=protect(output)
+-    if out.exists():raise ValueError('bounded output exists')
+-    out.parent.mkdir(parents=True,exist_ok=True)
+-    proc=subprocess.Popen(command,start_new_session=True)
+-    handlers={};received=[];start=time.monotonic();reason=None
+-    for sig in (signal.SIGINT,signal.SIGTERM,signal.SIGHUP):
+-        handlers[sig]=signal.signal(sig,lambda s,f:received.append(s))
+-    try:
+-        while proc.poll() is None:
+-            if received or time.monotonic()-start>=seconds or (out/'STOP').exists():
+-                reason='signal' if received else 'STOP' if (out/'STOP').exists() else 'timeout'
+-                os.killpg(proc.pid,signal.SIGTERM)
+-                try:proc.wait(timeout=3)
+-                except subprocess.TimeoutExpired:os.killpg(proc.pid,signal.SIGKILL);proc.wait()
+-                break
+-            time.sleep(.1)
+-        rc=proc.wait()
+-        if reason:rc=124 if reason=='timeout' else 130
+-        return rc
+-    finally:
+-        if proc.poll() is None:
+-            os.killpg(proc.pid,signal.SIGKILL);proc.wait()
+-        for sig,h in handlers.items():signal.signal(sig,h)
+-        # No writes to protected package tree; out is a dedicated new test directory.
+-        out.mkdir(exist_ok=True)
+-        atomic_json(out/'supervisor.json',dict(exit_code=proc.returncode,reason=reason,
+-                    wall_seconds=time.monotonic()-start,cap_seconds=seconds,completed=proc.returncode==0 and reason is None))
+-
+-def short_test(case,cfg,args):
+-    out=protect(args.output)
+-    if out.exists():raise ValueError('short test output exists')
+-    out.mkdir(parents=True);env=configure(args.device,False);c.seed_all(cfg['train_seed'])
+-    rng=np.random.default_rng(cfg['train_seed']);started=time.monotonic()
+-    model=c.make_model(case,cfg,args.device);opt=optimizer(model,cfg);init=time.monotonic()-started
+-    records=[];status='incomplete'
+-    try:
+-        with Control(out,args.max_seconds-10) as ctl:
+-            for j,t in enumerate([1,500,1000,20,500,1000]):
+-                ctl.check();s=time.monotonic()
+-                inp=c.train_input(case,cfg['T'],cfg['rounds'],cfg['train_seed'],j,rng,force_t=t)
+-                r=c.update(model,opt,case,inp,cfg['T'],args.device,backend=cfg['backend'])
+-                r.update(total_seconds=time.monotonic()-s,warmup=j<3);records.append(r)
+-                atomic_json(out/'partial.json',dict(phase='training_updates',initialization_seconds=init,updates=records))
+-                print(json.dumps(dict(short_update=j+1,seconds=r['total_seconds'],loss=r['loss'])),flush=True)
+-            model.eval();pi=np.repeat(case['prior'],case['space'].counts)
+-            state=(rng.random(case['space'].total)<pi).astype(np.uint8)
+-            with torch.no_grad():
+-                _,step=reverse_step(model,case,state,MarginalKernel(case['prior'],c.schedule(cfg['T'])),cfg['T'],
+-                    cfg['rounds'],cfg['sample_seed'],rng,args.device,check_time=ctl.check,trace=True)
+-            step.pop('trace')
+-            atomic_json(out/'partial.json',dict(phase='full_sweep_complete',initialization_seconds=init,updates=records,sweep=step))
+-            # Full five-time-panel cost, not a single-block extrapolation.
+-            val=validation.run(model,case,cfg,args.device,validation.panel(case,cfg),ctl.check)
+-            stable=[r['total_seconds'] for r in records[3:]]
+-            estimate=dict(training_12000_seconds=float(np.median(stable)*12000),
+-                validation_13_panels_seconds=val['seconds']*13,
+-                five_T1000_chains_seconds=step['step_seconds']*1000*5,
+-                caveat='one prior-state sweep only; trace overhead present; cost changes with Xt/CN density; IO extra')
+-            atomic_json(out/'costs.json',dict(environment=env,initialization_seconds=init,updates=records,
+-                sweep=step,validation=val,estimates=estimate,**c.memory(args.device)))
+-            status='completed'
+-    finally:
+-        atomic_json(out/'summary.json',dict(status=status,wall_seconds=time.monotonic()-started,
+-            scientific_samples=0,formal_training_updates=0,**c.memory(args.device)))
+-    return 0
+-
+-def parser():
+-    p=argparse.ArgumentParser(description='Joint CN IMDB/PubMed fresh 12000-update rounds; raw outputs only')
+-    p.add_argument('command',choices=['inventory','train','resume','pipeline','gate','short-test','_short-worker',
+-            'progress','stop','sample-checkpoint','evaluate'])
+-    p.add_argument('--dataset',choices=['IMDB','PubMed'],required=True)
+-    p.add_argument('--output',type=Path);p.add_argument('--run',type=Path)
+-    p.add_argument('--device',choices=['cuda','cpu'],default='cuda')
+-    p.add_argument('--device-index',type=int,default=0)
+-    p.add_argument('--fresh-start',action='store_true');p.add_argument('--resume',action='store_true')
+-    p.add_argument('--accept-config-provenance-gap',action='store_true')
+-    p.add_argument('--update',type=int);p.add_argument('--graph',type=Path)
+-    p.add_argument('--max-seconds',type=int,default=570)
+-    return p
++_START=time.monotonic()
++import sys
+ 
+ def main(argv=None):
+-    args=parser().parse_args(argv);verify_release();case,cfg=load(args.dataset)
+-    if args.command=='inventory':
+-        print(json.dumps(dict(resolved_config=cfg,inventory=inventory(case),risk=risk(case)),indent=2));return 0
+-    if args.output is None:raise ValueError('--output required')
+-    args.output=protect(args.output)
+-    if args.command in ('progress','stop'):
+-        if not args.output.is_dir():raise ValueError('run does not exist')
+-        if args.command=='stop':(args.output/'STOP').touch();print('Safe stop requested after committed update/time step.');return 0
+-        for name in ('progress.json','latest.json','training_summary.json','summary.json'):
+-            if (args.output/name).is_file():print(name,(args.output/name).read_text())
+-        return 0
+-    if args.command=='evaluate':
+-        if args.output.exists():raise ValueError('evaluation output exists')
+-        if args.graph is None:raise ValueError('--graph required')
+-        with np.load(args.graph,allow_pickle=False) as z:
+-            if not np.array_equal(z['types'],case['space'].types) or not np.array_equal(z['schema'],case['space'].pairs):raise ValueError('graph inventory/schema mismatch')
+-            edges=z['edges'].T
+-            if not np.array_equal(z['relations']-1,case['space'].encode(edges)[0]):raise ValueError('graph labels mismatch')
+-        result=graph(case,edges,cfg['data']['type_names']);ref=graph(case,case['clean'],cfg['data']['type_names'])
+-        args.output.mkdir(parents=True);atomic_json(args.output/'evaluation.json',dict(graph=result,reference=ref,comparison=compare(result,ref),graph_sha256=c.sha(args.graph)))
+-        return 0
+-    if args.device=='cpu':raise ValueError('public real-data execution requires allocated accelerator; CPU is only used by explicit small tests')
+-    torch.cuda.set_device(args.device_index)
+-    print(json.dumps(dict(device_index=args.device_index,device=torch.cuda.get_device_name(args.device_index),
+-         visible_devices=torch.cuda.device_count(),visibility={k:os.environ.get(k) for k in ('CUDA_VISIBLE_DEVICES','HIP_VISIBLE_DEVICES','ROCR_VISIBLE_DEVICES')})),flush=True)
+-    if args.command=='short-test':
+-        if not 30<=args.max_seconds<=570:raise ValueError('short test cap must be 30..570 seconds including startup')
+-        command=[sys.executable,'-m','dual.cli','_short-worker','--dataset',args.dataset,'--output',str(args.output),
+-            '--device-index',str(args.device_index),'--max-seconds',str(args.max_seconds)]
+-        with device_lock(args.output.parent):
+-            return bounded_child(command,args.max_seconds,args.output)
+-    if args.command=='_short-worker':return short_test(case,cfg,args)
+-    if args.command=='gate':preflight(case,cfg,args.output,args.device);return 0
+-    if args.command=='sample-checkpoint':
+-        if args.run is None or args.update is None:raise ValueError('--run and --update required')
+-        with device_lock(args.run.parent):
+-            return 0 if sample(case,cfg,args.run,args.output,args.update,args.device,args.resume) else 2
+-    # One process per allocated device for the entire train-then-sample pipeline.
+-    with device_lock(args.output.parent):
+-        resume=args.resume or args.command=='resume'
+-        if not resume:
+-            if not args.fresh_start:raise ValueError('fresh launch requires --fresh-start')
+-            if args.output.exists():raise ValueError('fresh run exists; refused before gate')
+-            gate=args.output.with_name(args.output.name+'.gate')
+-            rc=bounded_child(gate_command(args,gate),570,gate)
+-            if rc:return rc
+-            receipt=json.loads((gate/'gate.json').read_text())
+-            if (receipt['status']!='passed' or receipt['engine_updates']!=2 or receipt['parameter_error']!=0
+-                or receipt['optimizer_error']!=0 or not receipt['binding']['runtime']['deterministic_algorithms']
+-                or c.sha(gate/'gate.pt')!=receipt['checkpoint_sha256']):raise ValueError('strict gate evidence invalid')
+-        done=run_train(case,cfg,args.output,args.device,fresh=args.fresh_start,resume=resume,
+-                       accept_gap=args.accept_config_provenance_gap)
+-        if not done:return 2
+-        if args.command=='pipeline':
+-            for update in cfg['evaluation_updates']:
+-                target=args.output/'samples'/('u%06d'%update)
+-                if target.exists() and (target/'summary.json').exists():
+-                    receipt=json.loads((target/'summary.json').read_text())
+-                    if receipt['status']=='completed':
+-                        verify_completed_sample(case,cfg,args.output,target,update)
+-                        continue
+-                if not sample(case,cfg,args.output,target,update,args.device,resume=target.exists()):return 2
+-        return 0
++    argv=sys.argv[1:] if argv is None else argv
++    if argv and argv[0]=='short-test':
++        from .supervisor import short_main
++        return short_main(argv[1:],_START)
++    from .worker_cli import main as worker
++    return worker(argv)
+ 
+ if __name__=='__main__':
+     try:sys.exit(main())
+diff --git a/package/dual/engine.py b/package/dual/engine.py
+index a99299a..5c41ccc 100644
+--- a/package/dual/engine.py
++++ b/package/dual/engine.py
+@@ -6,7 +6,8 @@ import uuid
+ import numpy as np
+ import torch
+ from hsgd.bw_preflight import common as c
+-from hsgd.runtime import reverse_step
++from .rng import reverse_step,seed_all,rng_save,rng_restore
++from . import migration
+ from hsgd.kernel import MarginalKernel
+ from . import validation
+ from .data import degrees,digest
+@@ -31,7 +32,7 @@ def panel_binding(panel,cfg):
+         rows.append(dict(t=inp['t'],noise_sha256=h.hexdigest(),plan_seed=[cfg['validation_seed'],j,21]))
+     return rows
+ 
+-def run_train(case,cfg,out,device,fresh=False,resume=False,accept_gap=False):
++def run_train(case,cfg,out,device,fresh=False,resume=False,accept_gap=False,allow_device_migration=False):
+     invocation_start=time.monotonic();cpu_start=time.process_time()
+     if not accept_gap and not cfg['provenance']['formal_6000_entry_verified']:
+         raise ValueError('old formal configuration receipt missing; explicitly acknowledge documented provenance gap')
+@@ -40,24 +41,30 @@ def run_train(case,cfg,out,device,fresh=False,resume=False,accept_gap=False):
+         out=protect(out)
+         if not out.is_dir():raise ValueError('resume output missing')
+         bind=json.loads((out/'binding.json').read_text())
+-        if {k:v for k,v in bind.items() if k!='run_id'}!=base or not bind.get('run_id'):
+-            raise ValueError('resume belongs to another code/config/data/runtime')
++        if not bind.get('run_id'):raise ValueError('run identity missing')
++        migration.check(bind,dict(base,run_id=bind['run_id']),allow=True) # actual device checked against selected checkpoint below
+         if (out/'STOP').exists():raise ValueError('remove this run STOP explicitly before resume')
+     else:
++        if allow_device_migration:raise ValueError('device migration is only for resume, never fresh training')
+         bind=dict(base,run_id=str(uuid.uuid4()))
+         out=validate_fresh(out,fresh)
+         atomic_json(out/'resolved_config.json',cfg);atomic_json(out/'binding.json',bind)
+         atomic_json(out/'environment.json',env)
+-    c.seed_all(cfg['train_seed']);rng=np.random.default_rng(cfg['train_seed'])
++    execution=dict(base,run_id=bind['run_id'])
++    seed_all(cfg['train_seed'],device);rng=np.random.default_rng(cfg['train_seed'])
+     model=c.make_model(case,cfg,device);opt=optimizer(model,cfg)
+     u=0
+-    if resume:u=load_checkpoint(out,model,opt,rng,device,bind)[0]['completed_updates']
++    if resume:u=load_checkpoint(out,model,opt,rng,device,bind,execution_binding=execution,
++                               allow_device_migration=allow_device_migration)[0]['completed_updates']
+     else:
+         atomic_json(out/'dimensions.json',c.dimensions(model))
+         save_checkpoint(out,model,opt,rng,device,0,bind)
+-    saved=c.rng_save(rng,device);panel=validation.panel(case,cfg);c.rng_restore(saved,rng,device)
++    saved=rng_save(rng,device);panel=validation.panel(case,cfg);rng_restore(saved,rng,device)
+     pb=panel_binding(panel,cfg)
+-    if resume and json.loads((out/'validation_panel.json').read_text())!=pb:raise ValueError('panel binding mismatch')
++    if resume:
++        if (out/'validation_panel.json').exists():
++            if json.loads((out/'validation_panel.json').read_text())!=pb:raise ValueError('panel binding mismatch')
++        elif u!=0:raise ValueError('validation panel missing after nonzero training')
+     atomic_json(out/'validation_panel.json',pb)
+     started=time.monotonic();state='incomplete';reason=None;durations=[]
+     sums=np.zeros((case['n_families'],2),np.int64);coverage=np.zeros(case['n_families'],np.int64)
+@@ -85,7 +92,7 @@ def run_train(case,cfg,out,device,fresh=False,resume=False,accept_gap=False):
+                     log(out/'coverage.jsonl',dict(update=u,cumulative_queried_slots_by_family=coverage.tolist(),
+                         cumulative_labels_by_family=sums.tolist(),scope='this invocation; visits, not unique coverage across updates'))
+                 if u%cfg['checkpoint_every_updates']==0:
+-                    save_checkpoint(out,model,opt,rng,device,u,bind)
++                    save_checkpoint(out,model,opt,rng,device,u,bind,execution_binding=execution)
+                 if u%cfg['validation_every_updates']==0 or u==cfg['max_updates']:
+                     val=validation.run(model,case,cfg,device,panel,ctl.check)
+                     log(out/'validation.jsonl',dict(update=u,**val))
+@@ -93,7 +100,7 @@ def run_train(case,cfg,out,device,fresh=False,resume=False,accept_gap=False):
+     except (Stopped,KeyboardInterrupt) as exc:
+         reason=str(exc);state='stopped'
+         # A full successful update is the only committed training unit.
+-        save_checkpoint(out,model,opt,rng,device,u,bind,kind='stop')
++        save_checkpoint(out,model,opt,rng,device,u,bind,kind='stop',execution_binding=execution)
+     except BaseException as exc:
+         state='failed';reason=repr(exc)
+         # Do not save a potentially partially updated model. Latest remains last durable valid checkpoint.
+@@ -111,32 +118,36 @@ def run_train(case,cfg,out,device,fresh=False,resume=False,accept_gap=False):
+         log(out/'invocations.jsonl',summary)
+     return state=='completed'
+ 
+-def sample(case,cfg,run,out,update,device,resume=False,engineering=False,max_steps=None):
++def sample(case,cfg,run,out,update,device,resume=False,engineering=False,max_steps=None,allow_device_migration=False):
+     if update not in cfg['evaluation_updates']:raise ValueError('not a frozen evaluation checkpoint')
+     env=configure(device,False);base=binding(case,cfg,env);run=Path(run)
+     bind=json.loads((run/'binding.json').read_text())
+-    if {k:v for k,v in bind.items() if k!='run_id'}!=base or not bind.get('run_id'):raise ValueError('source training binding mismatch')
++    if not bind.get('run_id'):raise ValueError('source run ID missing')
++    execution=dict(base,run_id=bind['run_id']);migration.check(bind,execution,allow=True)
+     out=protect(out)
+     if resume:
+         if (out/'STOP').exists():raise ValueError('remove sampling STOP before resume')
+     elif out.exists():raise ValueError('sampling output must be new')
+     else:out.mkdir(parents=True)
+-    c.seed_all(cfg['sample_seed']);rng=np.random.default_rng(cfg['sample_seed'])
++    seed_all(cfg['sample_seed'],device);rng=np.random.default_rng(cfg['sample_seed'])
+     model=c.make_model(case,cfg,device);model.eval()
+-    ck,receipt=load_checkpoint(run,model,None,None,device,bind,update)
++    ck,receipt=load_checkpoint(run,model,None,None,device,bind,update,execution_binding=execution,
++                             allow_device_migration=allow_device_migration)
+     sb=dict(binding=bind,checkpoint_sha256=receipt['sha256'],update=update,seed=cfg['sample_seed'],
+             role_guidance=False,postprocessing=False)
+     if resume:
+         last=c.trusted_load(out/'state.pt')
+         if last['binding']!=sb:raise ValueError('sample restore binding mismatch')
+-        state=last['state'];t=last['remaining'];c.rng_restore(last['rng'],rng,device)
++        previous=last['execution_binding'];changed=migration.check(previous,execution,allow_device_migration)
++        state=last['state'];t=last['remaining'];rng_restore(last['rng'],rng,device)
++        if changed:migration.record(out,previous,execution,c.sha(out/'state.pt'),'sampling state resume',atomic_json)
+     else:
+         pi=np.repeat(case['prior'],case['space'].counts)
+         state=(rng.random(case['space'].total)<pi).astype(np.uint8);t=cfg['T']
+         atomic_json(out/'binding.json',sb)
+     kernel=MarginalKernel(case['prior'],c.schedule(cfg['T'],cfg['schedule_offset']))
+     def commit():
+-        c.torch_save(out/'state.pt',dict(binding=sb,state=state,remaining=t,rng=c.rng_save(rng,device)))
++        c.torch_save(out/'state.pt',dict(binding=sb,state=state,remaining=t,rng=rng_save(rng,device),execution_binding=execution))
+     commit();started=time.monotonic();status='incomplete';reason=None;steps=0
+     try:
+         with Control(out) as ctl:
+@@ -178,16 +189,16 @@ def preflight(case,cfg,out,device):
+     """
+     out=protect(out)
+     if out.exists():raise ValueError('gate output exists')
+-    out.mkdir(parents=True);env=configure(device,True);c.seed_all(cfg['train_seed'])
++    out.mkdir(parents=True);env=configure(device,True);seed_all(cfg['train_seed'],device)
+     rng=np.random.default_rng(cfg['train_seed']);model=c.make_model(case,cfg,device);opt=optimizer(model,cfg)
+     inp=c.train_input(case,cfg['T'],cfg['rounds'],cfg['train_seed'],0,rng,force_t=min(20,cfg['T']))
+     first=c.update(model,opt,case,inp,cfg['T'],device,backend=cfg['backend'])
+-    snap=dict(model=c.cpu_tree(model.state_dict()),optimizer=c.cpu_tree(opt.state_dict()),rng=c.rng_save(rng,device))
++    snap=dict(model=c.cpu_tree(model.state_dict()),optimizer=c.cpu_tree(opt.state_dict()),rng=rng_save(rng,device))
+     c.torch_save(out/'gate.pt',snap);snap=c.trusted_load(out/'gate.pt')
+     inp2=c.train_input(case,cfg['T'],cfg['rounds'],cfg['train_seed'],1,rng,force_t=max(1,cfg['T']//2))
+     c.update(model,opt,case,inp2,cfg['T'],device,backend=cfg['backend'])
+-    target=c.cpu_tree(model.state_dict());target_opt=c.cpu_tree(opt.state_dict());target_rng=c.rng_save(rng,device)
+-    model.load_state_dict(snap['model']);opt.load_state_dict(snap['optimizer']);c.rng_restore(snap['rng'],rng,device)
++    target=c.cpu_tree(model.state_dict());target_opt=c.cpu_tree(opt.state_dict());target_rng=rng_save(rng,device)
++    model.load_state_dict(snap['model']);opt.load_state_dict(snap['optimizer']);rng_restore(snap['rng'],rng,device)
+     inp3=c.train_input(case,cfg['T'],cfg['rounds'],cfg['train_seed'],1,rng,force_t=max(1,cfg['T']//2))
+     c.update(model,opt,case,inp3,cfg['T'],device,backend=cfg['backend'])
+     err=c.tree_error(target,c.cpu_tree(model.state_dict()));oe=c.tree_error(target_opt,c.cpu_tree(opt.state_dict()))
+diff --git a/package/dual/io.py b/package/dual/io.py
+index dd767a8..6b9f774 100644
+--- a/package/dual/io.py
++++ b/package/dual/io.py
+@@ -6,6 +6,8 @@ import time
+ import torch
+ from hsgd.bw_preflight import common as c
+ from .data import ROOT, digest
++from . import transactions, migration
++from .rng import rng_save,rng_restore
+ 
+ class Stopped(Exception): pass
+ 
+@@ -25,6 +27,10 @@ def verify_release():
+ 
+ def atomic_json(path,obj):
+     c.json_save(path,obj)
++    with Path(path).open('rb') as f:os.fsync(f.fileno())
++    fd=os.open(str(Path(path).parent),os.O_RDONLY)
++    try:os.fsync(fd)
++    finally:os.close(fd)
+ 
+ def log(path,obj):
+     with Path(path).open('a') as f:
+@@ -52,10 +58,12 @@ def configure(device,strict=False):
+     torch.backends.cudnn.allow_tf32=False
+     torch.use_deterministic_algorithms(strict,warn_only=False)
+     if device=='cuda' and not torch.cuda.is_available():raise ValueError('accelerator unavailable, no CPU fallback')
+-    env=c.environment(device)
++    # common.environment('cuda') inspects visible index 0; keep this entry selected-only.
++    env=c.environment('cpu');env['requested_device']=device
+     if device=='cuda':
+         index=torch.cuda.current_device();p=torch.cuda.get_device_properties(index)
+-        env.update(device_index=index,device_name=torch.cuda.get_device_name(index),
++        env.update(device_index=index,device_name=torch.cuda.get_device_name(index),device_type='HIP' if torch.version.hip else 'CUDA',
++                   visible_devices=torch.cuda.device_count(),
+                    device_memory_bytes=p.total_memory,device_uuid=str(getattr(p,'uuid',getattr(p,'pci_bus_id','unavailable'))),
+                    visibility={k:os.environ.get(k) for k in ('CUDA_VISIBLE_DEVICES','HIP_VISIBLE_DEVICES','ROCR_VISIBLE_DEVICES')})
+     return env
+@@ -84,26 +92,19 @@ def device_lock(parent):
+     except BaseException:f.close();raise
+     return f
+ 
+-def save_checkpoint(out,model,opt,rng,device,u,bind,kind='milestone',extra=None):
+-    out=Path(out);folder=out/'checkpoints';folder.mkdir(exist_ok=True)
+-    name=('u%06d.pt'%u) if kind=='milestone' else ('stop_u%06d_%d.pt'%(u,time.time_ns()))
+-    path=folder/name
+-    if path.exists(): raise ValueError('immutable checkpoint already exists')
+-    start=time.monotonic()
++def save_checkpoint(out,model,opt,rng,device,u,bind,kind='milestone',extra=None,execution_binding=None):
++    if kind not in ('milestone','stop'):raise ValueError('invalid checkpoint kind')
++    migration.check(bind,execution_binding or bind,allow=True)
++    extra=dict(extra or {},execution_binding=execution_binding or bind)
+     ck=dict(purpose='engineering fixture' if bind.get('engineering_fixture') else 'fresh formal joint CN training',binding=bind,completed_updates=u,
+             model=c.cpu_tree(model.state_dict()),optimizer=c.cpu_tree(opt.state_dict()),
+-            rng=c.cpu_tree(c.rng_save(rng,device)),extra=extra or {})
+-    c.torch_save(path,ck)
+-    receipt=dict(path=str(path.relative_to(out)),sha256=c.sha(path),completed_updates=u,
+-                 save_seconds=time.monotonic()-start)
+-    atomic_json(out/'latest.json',receipt)
+-    if kind=='milestone':
+-        ledger=json.loads((out/'milestones.json').read_text()) if (out/'milestones.json').exists() else {}
+-        ledger[str(u)]=receipt;atomic_json(out/'milestones.json',ledger)
+-    return receipt
++            rng=c.cpu_tree(rng_save(rng,device)),extra=extra)
++    return transactions.save(out,ck,u,bind,kind,atomic_json)
+ 
+-def load_checkpoint(out,model,opt,rng,device,bind,update=None):
++def load_checkpoint(out,model,opt,rng,device,bind,update=None,execution_binding=None,allow_device_migration=False):
+     out=Path(out)
++    migration.check(bind,execution_binding or bind,allow=True)
++    transactions.reconcile(out,bind,atomic_json)
+     receipt=(json.loads((out/'latest.json').read_text()) if update is None else
+              json.loads((out/'milestones.json').read_text())[str(update)])
+     path=out/receipt['path']
+@@ -113,7 +114,12 @@ def load_checkpoint(out,model,opt,rng,device,bind,update=None):
+     if ck['purpose']!=purpose or ck['binding']!=bind:
+         raise ValueError('checkpoint source/config/runtime binding mismatch')
+     if ck['completed_updates']!=receipt['completed_updates']:raise ValueError('update count mismatch')
++    saved_execution=ck['extra']['execution_binding'];requested=execution_binding or bind
++    changed=migration.check(saved_execution,requested,allow_device_migration)
+     model.load_state_dict(ck['model'],strict=True)
+     if opt is not None:opt.load_state_dict(ck['optimizer'])
+-    if rng is not None:c.rng_restore(ck['rng'],rng,device)
++    if rng is not None:rng_restore(ck['rng'],rng,device)
++    if changed:migration.record(out,saved_execution,requested,receipt['sha256'],
++        'training resume' if rng is not None else 'checkpoint model import for sampling; training RNG not consumed',atomic_json,
++        rng_restored=rng is not None)
+     return ck,receipt
+diff --git a/new/package/dual/migration.py b/package/dual/migration.py
+new file mode 100644
+index 0000000..8e977c6
+--- /dev/null
++++ b/package/dual/migration.py
+@@ -0,0 +1,31 @@
++"""Device migration is explicit; numerical dependencies/source are NEVER relaxed."""
++import json
++from pathlib import Path
++import time
++from .data import digest
++
++def scientific(binding):
++    result={k:v for k,v in binding.items() if k!='device_identity'}
++    result['runtime']={k:v for k,v in binding['runtime'].items() if k!='device_name'}
++    return result
++
++def check(origin,current,allow=False):
++    if scientific(origin)!=scientific(current):
++        raise ValueError('source/config/data/runtime software mismatch; device migration cannot bypass it')
++    changed=origin!=current
++    if changed and not allow:raise ValueError('device identity mismatch; explicit --allow-device-migration required')
++    return changed
++
++def record(out,source,current,source_sha,scope,write,rng_restored=True):
++    out=Path(out)/'migrations';out.mkdir(exist_ok=True)
++    body=dict(source_execution_binding=source,target_execution_binding=current,
++        source_sha256=source_sha,scope=scope,source_untouched=True,
++        numerical_dependencies_verified=True,rng_restored=rng_restored,
++        rng_restore='saved selected-device state restored to current selected device' if rng_restored else 'model-only import: training RNG not restored',
++        bitwise_cross_device_reproducibility=False)
++    path=out/(digest(body)+'.json')
++    if path.exists():
++        existing=json.loads(path.read_text())
++        if {k:v for k,v in existing.items() if k!='recorded_utc'}!=body:raise ValueError('migration receipt conflict')
++    else:write(path,dict(body,recorded_utc=time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime())))
++    return path
+diff --git a/new/package/dual/rng.py b/package/dual/rng.py
+new file mode 100644
+index 0000000..6de965b
+--- /dev/null
++++ b/package/dual/rng.py
+@@ -0,0 +1,46 @@
++"""Adapter-only RNG ownership: CPU and ONE selected accelerator, never all visible cards."""
++import copy
++import random
++from contextlib import contextmanager
++import numpy as np
++import torch
++from hsgd.bw_preflight import common as c
++
++def seed_all(seed,device='cpu'):
++    random.seed(seed);np.random.seed(seed)
++    # torch.manual_seed seeds ALL accelerators too; use the CPU generator directly.
++    torch.random.default_generator.manual_seed(seed)
++    if device=='cuda':torch.cuda.manual_seed(seed)
++
++def rng_save(rng,device):
++    return dict(generator=copy.deepcopy(rng.bit_generator.state),python=random.getstate(),
++        numpy=np.random.get_state(),torch=torch.get_rng_state(),
++        accelerator=torch.cuda.get_rng_state(torch.cuda.current_device()) if device=='cuda' else None,
++        accelerator_scope='selected_device_v1',
++        selected_device_index=torch.cuda.current_device() if device=='cuda' else None)
++
++def rng_restore(saved,rng,device):
++    if saved.get('accelerator_scope')!='selected_device_v1':
++        raise ValueError('RNG scope not certified as selected-device only')
++    if device=='cuda' and (not torch.is_tensor(saved['accelerator']) or saved['accelerator'].dtype!=torch.uint8):
++        raise ValueError('selected accelerator RNG missing/invalid')
++    if device=='cpu' and saved['accelerator'] is not None:raise ValueError('accelerator RNG cannot be restored on CPU')
++    rng.bit_generator.state=copy.deepcopy(saved['generator']);random.setstate(saved['python'])
++    np.random.set_state(saved['numpy']);torch.set_rng_state(saved['torch'])
++    if device=='cuda':torch.cuda.set_rng_state(saved['accelerator'],device=torch.cuda.current_device())
++
++@contextmanager
++def selected_core_rng():
++    """Narrow synchronous bridge for unmodified reverse_step's transaction rollback.
++
++    Only replaces accounting helpers during this call; no kernel/formula/query change.
++    Production adapter runs a single worker thread; this scope is not a threaded API.
++    """
++    before=c.rng_save,c.rng_restore
++    c.rng_save,c.rng_restore=rng_save,rng_restore
++    try:yield
++    finally:c.rng_save,c.rng_restore=before
++
++def reverse_step(*args,**kwargs):
++    from hsgd.runtime import reverse_step as original
++    with selected_core_rng():return original(*args,**kwargs)
+diff --git a/new/package/dual/supervisor.py b/package/dual/supervisor.py
+new file mode 100644
+index 0000000..c0f6563
+--- /dev/null
++++ b/package/dual/supervisor.py
+@@ -0,0 +1,77 @@
++"""Standard-library-only wall supervisor. No torch/numpy/data/CUDA/lock imports."""
++import argparse
++import json
++import os
++from pathlib import Path
++import signal
++import subprocess
++import sys
++import time
++
++def safe_output(output):
++    out=Path(output).resolve();package=Path(__file__).resolve().parents[1]
++    if out==package or package in out.parents or out in package.parents:raise ValueError('output overlaps package/source')
++    if out.exists():raise ValueError('bounded output exists')
++    return out
++
++def supervise(command,seconds,output,started=None,cleanup_seconds=3,completion_check=None):
++    started=time.monotonic() if started is None else started
++    out=safe_output(output);out.parent.mkdir(parents=True,exist_ok=True)
++    deadline=started+seconds;received=[];handlers={};proc=None;reason=None;rc=1;cleanup_start=None
++    for sig in (signal.SIGINT,signal.SIGTERM,signal.SIGHUP):handlers[sig]=signal.signal(sig,lambda s,f:received.append(s))
++    try:
++        if time.monotonic()>=deadline:reason='timeout';rc=124
++        else:
++            proc=subprocess.Popen(command,start_new_session=True)
++            while True:
++                if received:reason='signal';rc=130;break
++                if (out/'STOP').exists():reason='STOP';rc=130;break
++                if time.monotonic()>=deadline:reason='timeout';rc=124;break
++                if proc.poll() is not None:rc=proc.returncode;break
++                time.sleep(.02)
++        if rc==0 and completion_check:
++            try:completion_check(out)
++            except Exception:reason='missing/invalid complete evidence';rc=1
++        if received:reason='signal';rc=130
++        elif (out/'STOP').exists():reason='STOP';rc=130
++        elif time.monotonic()>=deadline:reason='timeout';rc=124
++        return rc
++    finally:
++        compute_end=time.monotonic();cleanup_start=compute_end
++        if proc is not None:
++            # Reap the group even if the direct worker exited but left children.
++            try:os.killpg(proc.pid,signal.SIGTERM)
++            except ProcessLookupError:pass
++            try:proc.wait(timeout=cleanup_seconds)
++            except subprocess.TimeoutExpired:
++                try:os.killpg(proc.pid,signal.SIGKILL)
++                except ProcessLookupError:pass
++                proc.wait()
++            # Direct worker may exit promptly while descendants ignore TERM.
++            try:os.killpg(proc.pid,signal.SIGKILL)
++            except ProcessLookupError:pass
++        cleanup_end=time.monotonic()
++        for sig,h in handlers.items():signal.signal(sig,h)
++        out.mkdir(exist_ok=True)
++        receipt=dict(exit_code=rc,child_exit_code=proc.returncode if proc else None,reason=reason,
++            completed=rc==0 and reason is None,cap_seconds=seconds,
++            started_monotonic=started,computation_window_seconds=compute_end-started,
++            cleanup_seconds=cleanup_end-cleanup_start,cleanup_budget_seconds=cleanup_seconds,
++            wall_seconds=cleanup_end-started,scope='includes interpreter/module startup, data, CUDA, device lock, compute and save; cleanup recorded separately')
++        tmp=out/'supervisor.json.tmp';tmp.write_text(json.dumps(receipt,indent=2));tmp.replace(out/'supervisor.json')
++
++def short_main(argv,started):
++    p=argparse.ArgumentParser(description='570s TOTAL startup+device short test; no formal training')
++    p.add_argument('--dataset',required=True,choices=['IMDB','PubMed']);p.add_argument('--output',required=True)
++    p.add_argument('--device-index',type=int,default=0);p.add_argument('--max-seconds',type=int,default=570)
++    p.add_argument('--device',choices=['cuda'],default='cuda')
++    args=p.parse_args(argv)
++    if not 30<=args.max_seconds<=570:raise ValueError('cap must be 30..570 seconds')
++    command=[sys.executable,'-u','-m','dual.cli','_short-worker','--dataset',args.dataset,
++        '--output',args.output,'--device-index',str(args.device_index),'--max-seconds',str(args.max_seconds),
++        '--deadline-monotonic',str(started+args.max_seconds)]
++    def completed(out):
++        summary=json.loads((out/'summary.json').read_text());costs=json.loads((out/'costs.json').read_text())
++        if summary['status']!='completed' or len(costs['updates'])!=6 or costs['sweep']['blocks']!=20 or not costs['sweep']['exact_coverage'] or len(costs['validation']['times'])!=5:
++            raise ValueError('short test incomplete')
++    return supervise(command,args.max_seconds,args.output,started,completion_check=completed)
+diff --git a/new/package/dual/transactions.py b/package/dual/transactions.py
+new file mode 100644
+index 0000000..a253938
+--- /dev/null
++++ b/package/dual/transactions.py
+@@ -0,0 +1,152 @@
++"""Immutable payload + durable intent, then idempotent pointer publication."""
++import hashlib
++import json
++import os
++from pathlib import Path
++import struct
++import time
++import numpy as np
++import torch
++from hsgd.bw_preflight import common as c
++
++def content_hash(obj):
++    h=hashlib.sha256()
++    def atom(x):
++        def tag(s):
++            b=s.encode();h.update(struct.pack('!Q',len(b)));h.update(b)
++        if torch.is_tensor(x):
++            tag('tensor:'+str(x.dtype)+':'+str(tuple(x.shape)))
++            y=x.detach().cpu().contiguous()
++            if y.is_floating_point() and not torch.isfinite(y).all():raise ValueError('nonfinite checkpoint tensor')
++            h.update(y.reshape(-1).view(torch.uint8).numpy().tobytes())
++        elif isinstance(x,np.ndarray):
++            tag('ndarray:'+x.dtype.str+':'+str(x.shape));h.update(x.tobytes(order='C'))
++        elif isinstance(x,dict):
++            tag('dict:'+str(len(x)))
++            for k in sorted(x,key=lambda k:(type(k).__name__,repr(k))):atom(k);atom(x[k])
++        elif isinstance(x,(tuple,list)):
++            tag(type(x).__name__+':'+str(len(x)))
++            for v in x:atom(v)
++        elif x is None:tag('None')
++        elif isinstance(x,(bool,int,np.integer,str)):tag(type(x).__name__+':'+str(x))
++        elif isinstance(x,(float,np.floating)):
++            if not np.isfinite(x):raise ValueError('nonfinite checkpoint scalar')
++            tag('float');h.update(struct.pack('!d',float(x)))
++        else:raise TypeError('unsupported checkpoint content: '+str(type(x)))
++    atom(obj);return h.hexdigest()
++
++def payload(path,bind,u,sha,semantic):
++    if c.sha(path)!=sha:raise ValueError('checkpoint byte hash mismatch')
++    ck=c.trusted_load(path)
++    required={'purpose','binding','completed_updates','model','optimizer','rng','extra'}
++    if set(ck)!=required or ck['binding']!=bind or ck['completed_updates']!=u:
++        raise ValueError('checkpoint binding/update/content mismatch')
++    purpose='engineering fixture' if bind.get('engineering_fixture') else 'fresh formal joint CN training'
++    if ck['purpose']!=purpose or not isinstance(ck['model'],dict) or not isinstance(ck['optimizer'],dict):
++        raise ValueError('invalid checkpoint purpose/model/optimizer')
++    if content_hash(ck)!=semantic:raise ValueError('complete checkpoint content hash mismatch')
++    return ck
++
++def local_path(out,relative):
++    path=(out/relative).resolve()
++    if path.parent!= (out/'checkpoints').resolve():raise ValueError('checkpoint path escapes its directory')
++    return path
++
++def publish(out,intent,write=c.json_save):
++    receipt=intent['receipt'];u=receipt['completed_updates'];bind=intent['binding']
++    path=local_path(out,receipt['path'])
++    if not path.exists():
++        staged=out/'transactions'/intent['staged_file']
++        if staged.parent.resolve()!=(out/'transactions').resolve():raise ValueError('unsafe staged path')
++        payload(staged,bind,u,receipt['sha256'],intent['content_sha256'])
++        staged.replace(path)
++        for parent in (path.parent,staged.parent):
++            fd=os.open(str(parent),os.O_RDONLY)
++            try:os.fsync(fd)
++            finally:os.close(fd)
++    ck=payload(path,bind,u,receipt['sha256'],intent['content_sha256'])
++    latest=out/'latest.json';ledger_path=out/'milestones.json'
++    ledger=json.loads(ledger_path.read_text()) if ledger_path.exists() else {}
++    if intent['kind']=='milestone' and str(u) in ledger and ledger[str(u)]!=receipt:
++        raise ValueError('conflicting milestone receipt')
++    old=json.loads(latest.read_text()) if latest.exists() else None
++    if old:
++        old_path=local_path(out,old['path'])
++        if c.sha(old_path)!=old['sha256']:raise ValueError('conflicting latest checkpoint hash')
++        old_ck=c.trusted_load(old_path)
++        if old_ck['binding']!=bind or old_ck['completed_updates']!=old['completed_updates']:
++            raise ValueError('conflicting latest binding/update')
++    if old!=receipt and (old is None or old['completed_updates']<u or (old['completed_updates']==u and receipt['order_ns']>=old['order_ns'])):
++        write(latest,receipt)
++    if intent['kind']=='milestone' and str(u) not in ledger:
++        ledger[str(u)]=receipt;write(ledger_path,ledger)
++    return ck,receipt
++
++def reconcile(out,bind,write=c.json_save):
++    """Validate ALL intents and published pointers before making any repair."""
++    out=Path(out);folder=out/'transactions'
++    intents=[]
++    for path in sorted(folder.glob('*.json')):
++        item=json.loads(path.read_text());r=item['receipt']
++        if item['binding']!=bind or item['kind'] not in ('milestone','stop'):raise ValueError('transaction source mismatch')
++        target=local_path(out,r['path']);staged=folder/item['staged_file']
++        u=r['completed_updates']
++        if type(u) is not int or u<0:raise ValueError('invalid update counter')
++        if ((item['kind']=='milestone' and target.name!='u%06d.pt'%u) or
++            (item['kind']=='stop' and not target.name.startswith('stop_u%06d_'%u)) or path.name!=target.name+'.json'):
++            raise ValueError('checkpoint filename/update/kind mismatch')
++        if staged.parent.resolve()!=folder.resolve():raise ValueError('transaction staged path escape')
++        payload(target if target.exists() else staged,bind,r['completed_updates'],r['sha256'],item['content_sha256'])
++        intents.append(item)
++    known={x['receipt']['path']:x for x in intents}
++    for path in (out/'checkpoints').glob('*.pt'):
++        if str(path.relative_to(out)) not in known:raise ValueError('unattested checkpoint file: '+path.name)
++    for name in ('latest.json','milestones.json'):
++        if not (out/name).exists():continue
++        value=json.loads((out/name).read_text());rows=[value] if name=='latest.json' else list(value.values())
++        for r in rows:
++            item=known.get(r['path'])
++            if item is None or r!=item['receipt']:raise ValueError('pointer/ledger conflicts with transaction')
++        if name=='milestones.json':
++            for k,r in value.items():
++                if k!=str(r['completed_updates']) or known[r['path']]['kind']!='milestone':raise ValueError('milestone index mismatch')
++    for item in sorted(intents,key=lambda x:(x['receipt']['completed_updates'],x['receipt']['order_ns'])):
++        publish(out,item,write)
++    return intents
++
++def save(out,ck,u,bind,kind,write=c.json_save):
++    out=Path(out);folder=out/'checkpoints';folder.mkdir(exist_ok=True)
++    txn=out/'transactions';txn.mkdir(exist_ok=True)
++    name=('u%06d.pt'%u) if kind=='milestone' else ('stop_u%06d_%d.pt'%(u,time.time_ns()))
++    target=folder/name;journal=txn/(name+'.json');semantic=content_hash(ck)
++    # Idempotence compares every saved value, not only model weights or update number.
++    if journal.exists():
++        intent=json.loads(journal.read_text())
++        if intent['binding']!=bind or intent['content_sha256']!=semantic or intent['kind']!=kind:
++            raise ValueError('existing immutable checkpoint content conflicts')
++        reconcile(out,bind,write);return intent['receipt']
++    if target.exists():
++        # No intent: adoption is allowed ONLY against the caller's COMPLETE known snapshot,
++        # never merely by self-hashing an unexplained file during load/recovery.
++        sha=c.sha(target);payload(target,bind,u,sha,semantic)
++        surviving=[]
++        if (out/'latest.json').exists():surviving.append(json.loads((out/'latest.json').read_text()))
++        if (out/'milestones.json').exists():surviving+=list(json.loads((out/'milestones.json').read_text()).values())
++        matching=[r for r in surviving if r['path']==str(target.relative_to(out))]
++        if any(r['sha256']!=sha or r['completed_updates']!=u for r in matching):raise ValueError('existing receipt conflicts')
++        receipt=matching[0] if matching else dict(path=str(target.relative_to(out)),sha256=sha,
++            completed_updates=u,order_ns=time.time_ns(),save_seconds=0.)
++        if 'order_ns' not in receipt:raise ValueError('old receipt format is not a certified source upgrade')
++        intent=dict(binding=bind,kind=kind,receipt=receipt,staged_file=name+'.adopted.prepared',
++                    content_sha256=semantic,adoption='complete known in-memory snapshot matched')
++        write(journal,intent);reconcile(out,bind,write);return receipt
++    reconcile(out,bind,write)
++    start=time.monotonic();staged=txn/(name+'.%d.prepared'%time.time_ns())
++    c.torch_save(staged,ck)
++    with staged.open('rb') as f:os.fsync(f.fileno())
++    receipt=dict(path=str(target.relative_to(out)),sha256=c.sha(staged),completed_updates=u,
++                 order_ns=time.time_ns(),save_seconds=time.monotonic()-start)
++    intent=dict(binding=bind,kind=kind,receipt=receipt,staged_file=staged.name,content_sha256=semantic)
++    write(journal,intent) # Durable expected byte/content hashes BEFORE checkpoint publication.
++    publish(out,intent,write)
++    return receipt
+diff --git a/package/dual/validation.py b/package/dual/validation.py
+index 2636da7..2af46f2 100644
+--- a/package/dual/validation.py
++++ b/package/dual/validation.py
+@@ -6,6 +6,7 @@ from hsgd.bw_preflight import common as c
+ from hsgd.runtime import predict
+ from hsgd.losses import supported_binary_ce
+ from .data import degrees
++from .rng import rng_save,rng_restore
+ 
+ def panel(case,cfg):
+     result=[]
+@@ -16,7 +17,7 @@ def panel(case,cfg):
+     return result
+ 
+ def run(model,case,cfg,device,inputs,check=lambda:None):
+-    saved=c.rng_save(np.random.default_rng(0),device); was_training=model.training
++    saved=rng_save(np.random.default_rng(0),device); was_training=model.training
+     started=time.monotonic();result=[];model.eval()
+     try:
+         with torch.no_grad():
+@@ -76,4 +77,4 @@ def run(model,case,cfg,device,inputs,check=lambda:None):
+                     statistic='clean prediction p0, not Bayes q; same-reference denoising only'))
+         return dict(times=result,seconds=time.monotonic()-started,execution_mode='ordinary' if not torch.are_deterministic_algorithms_enabled() else 'strict')
+     finally:
+-        c.rng_restore(saved,np.random.default_rng(0),device);model.train(was_training)
++        rng_restore(saved,np.random.default_rng(0),device);model.train(was_training)
+diff --git a/new/package/dual/worker_cli.py b/package/dual/worker_cli.py
+new file mode 100644
+index 0000000..cc5bcb7
+--- /dev/null
++++ b/package/dual/worker_cli.py
+@@ -0,0 +1,182 @@
++import argparse
++import json
++import os
++from pathlib import Path
++import subprocess
++import sys
++import time
++import fcntl
++import numpy as np
++import torch
++from hsgd.bw_preflight import common as c
++from hsgd.kernel import MarginalKernel
++from .rng import reverse_step,seed_all
++from .data import ROOT,load,inventory,risk,digest
++from .io import (Control,Stopped,atomic_json,configure,optimizer,protect,verify_release,device_lock)
++from .engine import run_train,sample,preflight,verify_completed_sample
++from . import validation
++from .metrics import graph,compare
++
++def gate_command(args,output):
++    command=[sys.executable,'-m','dual.cli','gate','--dataset',args.dataset,'--output',str(output),
++             '--device',args.device,'--device-index',str(args.device_index)]
++    return command
++
++def bounded_child(command,seconds,output):
++    """Entire disposable device process, with bounded cleanup and explicit receipt."""
++    import signal
++    out=protect(output)
++    if out.exists():raise ValueError('bounded output exists')
++    out.parent.mkdir(parents=True,exist_ok=True)
++    proc=subprocess.Popen(command,start_new_session=True)
++    handlers={};received=[];start=time.monotonic();reason=None
++    for sig in (signal.SIGINT,signal.SIGTERM,signal.SIGHUP):
++        handlers[sig]=signal.signal(sig,lambda s,f:received.append(s))
++    try:
++        while proc.poll() is None:
++            if received or time.monotonic()-start>=seconds or (out/'STOP').exists():
++                reason='signal' if received else 'STOP' if (out/'STOP').exists() else 'timeout'
++                os.killpg(proc.pid,signal.SIGTERM)
++                try:proc.wait(timeout=3)
++                except subprocess.TimeoutExpired:os.killpg(proc.pid,signal.SIGKILL);proc.wait()
++                break
++            time.sleep(.1)
++        rc=proc.wait()
++        if reason:rc=124 if reason=='timeout' else 130
++        return rc
++    finally:
++        if proc.poll() is None:
++            os.killpg(proc.pid,signal.SIGKILL);proc.wait()
++        for sig,h in handlers.items():signal.signal(sig,h)
++        # No writes to protected package tree; out is a dedicated new test directory.
++        out.mkdir(exist_ok=True)
++        atomic_json(out/'supervisor.json',dict(exit_code=proc.returncode,reason=reason,
++                    wall_seconds=time.monotonic()-start,cap_seconds=seconds,completed=proc.returncode==0 and reason is None))
++
++def short_test(case,cfg,args):
++    out=protect(args.output)
++    if out.exists():raise ValueError('short test output exists')
++    out.mkdir(parents=True);env=configure(args.device,False);seed_all(cfg['train_seed'],args.device)
++    rng=np.random.default_rng(cfg['train_seed']);started=time.monotonic()
++    model=c.make_model(case,cfg,args.device);opt=optimizer(model,cfg);init=time.monotonic()-started
++    records=[];status='incomplete'
++    try:
++        remaining=(args.deadline_monotonic-time.monotonic()-3) if args.deadline_monotonic else args.max_seconds-10
++        if remaining<=0:raise Stopped('startup exhausted short-test deadline')
++        with Control(out,remaining) as ctl:
++            for j,t in enumerate([1,500,1000,20,500,1000]):
++                ctl.check();s=time.monotonic()
++                inp=c.train_input(case,cfg['T'],cfg['rounds'],cfg['train_seed'],j,rng,force_t=t)
++                r=c.update(model,opt,case,inp,cfg['T'],args.device,backend=cfg['backend'])
++                r.update(total_seconds=time.monotonic()-s,warmup=j<3);records.append(r)
++                atomic_json(out/'partial.json',dict(phase='training_updates',initialization_seconds=init,updates=records))
++                print(json.dumps(dict(short_update=j+1,seconds=r['total_seconds'],loss=r['loss'])),flush=True)
++            model.eval();pi=np.repeat(case['prior'],case['space'].counts)
++            state=(rng.random(case['space'].total)<pi).astype(np.uint8)
++            with torch.no_grad():
++                _,step=reverse_step(model,case,state,MarginalKernel(case['prior'],c.schedule(cfg['T'])),cfg['T'],
++                    cfg['rounds'],cfg['sample_seed'],rng,args.device,check_time=ctl.check,trace=True)
++            step.pop('trace')
++            atomic_json(out/'partial.json',dict(phase='full_sweep_complete',initialization_seconds=init,updates=records,sweep=step))
++            # Full five-time-panel cost, not a single-block extrapolation.
++            val=validation.run(model,case,cfg,args.device,validation.panel(case,cfg),ctl.check)
++            stable=[r['total_seconds'] for r in records[3:]]
++            estimate=dict(training_12000_seconds=float(np.median(stable)*12000),
++                validation_13_panels_seconds=val['seconds']*13,
++                five_T1000_chains_seconds=step['step_seconds']*1000*5,
++                caveat='one prior-state sweep only; trace overhead present; cost changes with Xt/CN density; IO extra')
++            atomic_json(out/'costs.json',dict(environment=env,initialization_seconds=init,updates=records,
++                sweep=step,validation=val,estimates=estimate,**c.memory(args.device)))
++            status='completed'
++    finally:
++        atomic_json(out/'summary.json',dict(status=status,wall_seconds=time.monotonic()-started,
++            scientific_samples=0,formal_training_updates=0,**c.memory(args.device)))
++    return 0
++
++def parser():
++    p=argparse.ArgumentParser(description='Joint CN IMDB/PubMed fresh 12000-update rounds; raw outputs only')
++    p.add_argument('command',choices=['inventory','train','resume','pipeline','gate','short-test','_short-worker',
++            'progress','stop','sample-checkpoint','evaluate'])
++    p.add_argument('--dataset',choices=['IMDB','PubMed'],required=True)
++    p.add_argument('--output',type=Path);p.add_argument('--run',type=Path)
++    p.add_argument('--device',choices=['cuda','cpu'],default='cuda')
++    p.add_argument('--device-index',type=int,default=0)
++    p.add_argument('--fresh-start',action='store_true');p.add_argument('--resume',action='store_true')
++    p.add_argument('--accept-config-provenance-gap',action='store_true')
++    p.add_argument('--update',type=int);p.add_argument('--graph',type=Path)
++    p.add_argument('--max-seconds',type=int,default=570)
++    p.add_argument('--deadline-monotonic',type=float)
++    p.add_argument('--allow-device-migration',action='store_true')
++    return p
++
++def main(argv=None):
++    args=parser().parse_args(argv);verify_release();case,cfg=load(args.dataset)
++    if args.command=='inventory':
++        print(json.dumps(dict(resolved_config=cfg,inventory=inventory(case),risk=risk(case)),indent=2));return 0
++    if args.output is None:raise ValueError('--output required')
++    args.output=protect(args.output)
++    if args.command in ('progress','stop'):
++        if not args.output.is_dir():raise ValueError('run does not exist')
++        if args.command=='stop':(args.output/'STOP').touch();print('Safe stop requested after committed update/time step.');return 0
++        for name in ('progress.json','latest.json','training_summary.json','summary.json'):
++            if (args.output/name).is_file():print(name,(args.output/name).read_text())
++        return 0
++    if args.command=='evaluate':
++        if args.output.exists():raise ValueError('evaluation output exists')
++        if args.graph is None:raise ValueError('--graph required')
++        with np.load(args.graph,allow_pickle=False) as z:
++            if not np.array_equal(z['types'],case['space'].types) or not np.array_equal(z['schema'],case['space'].pairs):raise ValueError('graph inventory/schema mismatch')
++            edges=z['edges'].T
++            if not np.array_equal(z['relations']-1,case['space'].encode(edges)[0]):raise ValueError('graph labels mismatch')
++        result=graph(case,edges,cfg['data']['type_names']);ref=graph(case,case['clean'],cfg['data']['type_names'])
++        args.output.mkdir(parents=True);atomic_json(args.output/'evaluation.json',dict(graph=result,reference=ref,comparison=compare(result,ref),graph_sha256=c.sha(args.graph)))
++        return 0
++    if args.device=='cpu':raise ValueError('public real-data execution requires allocated accelerator; CPU is only used by explicit small tests')
++    torch.cuda.set_device(args.device_index)
++    print(json.dumps(dict(device_index=args.device_index,device=torch.cuda.get_device_name(args.device_index),
++         visible_devices=torch.cuda.device_count(),visibility={k:os.environ.get(k) for k in ('CUDA_VISIBLE_DEVICES','HIP_VISIBLE_DEVICES','ROCR_VISIBLE_DEVICES')})),flush=True)
++    if args.command=='short-test':
++        raise ValueError('short-test must use lightweight dual.cli entry')
++    if args.command=='_short-worker':
++        if args.deadline_monotonic is None or not 0<args.deadline_monotonic-time.monotonic()<=570:
++            raise ValueError('worker requires active parent deadline')
++        with device_lock(args.output.parent):return short_test(case,cfg,args)
++    if args.command=='gate':preflight(case,cfg,args.output,args.device);return 0
++    if args.command=='sample-checkpoint':
++        if args.run is None or args.update is None:raise ValueError('--run and --update required')
++        with device_lock(args.run.parent):
++            return 0 if sample(case,cfg,args.run,args.output,args.update,args.device,args.resume,
++                allow_device_migration=args.allow_device_migration) else 2
++    # One process per allocated device for the entire train-then-sample pipeline.
++    with device_lock(args.output.parent):
++        resume=args.resume or args.command=='resume'
++        if args.allow_device_migration and not resume:raise ValueError('migration requires resume, not fresh start')
++        if not resume:
++            if not args.fresh_start:raise ValueError('fresh launch requires --fresh-start')
++            if args.output.exists():raise ValueError('fresh run exists; refused before gate')
++            gate=args.output.with_name(args.output.name+'.gate')
++            rc=bounded_child(gate_command(args,gate),570,gate)
++            if rc:return rc
++            receipt=json.loads((gate/'gate.json').read_text())
++            if (receipt['status']!='passed' or receipt['engine_updates']!=2 or receipt['parameter_error']!=0
++                or receipt['optimizer_error']!=0 or not receipt['binding']['runtime']['deterministic_algorithms']
++                or c.sha(gate/'gate.pt')!=receipt['checkpoint_sha256']):raise ValueError('strict gate evidence invalid')
++        done=run_train(case,cfg,args.output,args.device,fresh=args.fresh_start,resume=resume,
++                       accept_gap=args.accept_config_provenance_gap,allow_device_migration=args.allow_device_migration)
++        if not done:return 2
++        if args.command=='pipeline':
++            for update in cfg['evaluation_updates']:
++                target=args.output/'samples'/('u%06d'%update)
++                if target.exists() and (target/'summary.json').exists():
++                    receipt=json.loads((target/'summary.json').read_text())
++                    if receipt['status']=='completed':
++                        verify_completed_sample(case,cfg,args.output,target,update)
++                        continue
++                if not sample(case,cfg,args.output,target,update,args.device,resume=target.exists(),
++                              allow_device_migration=args.allow_device_migration):return 2
++        return 0
++
++if __name__=='__main__':
++    try:sys.exit(main())
++    except Exception as exc:
++        print('FAILED: '+repr(exc),file=sys.stderr,flush=True);raise
+diff --git a/new/package/full_expected_tests_v11.json b/package/full_expected_tests_v11.json
+new file mode 100644
+index 0000000..889d257
+--- /dev/null
++++ b/package/full_expected_tests_v11.json
+@@ -0,0 +1,97 @@
++[
++  "tests/test_contract.py::test_active_family_chunks_concatenate_and_preserve_ce_scaling",
++  "tests/test_contract.py::test_active_sweep_skips_only_exact_fixed_families",
++  "tests/test_contract.py::test_decode_independent_combinations",
++  "tests/test_contract.py::test_empty_inventory_and_fixed_slots_still_in_plan",
++  "tests/test_contract.py::test_explicit_large_recipe_dimensions",
++  "tests/test_contract.py::test_fixed_support_and_clean_endpoint",
++  "tests/test_contract.py::test_full_sweep_frozen_context_and_clock",
++  "tests/test_contract.py::test_global_forward_complement_exhaustive",
++  "tests/test_contract.py::test_global_noising_support_retention_and_relabel",
++  "tests/test_contract.py::test_kernel_independent_joint_enumeration",
++  "tests/test_contract.py::test_network_fixed_support_and_schema_mismatch",
++  "tests/test_contract.py::test_network_gradient_and_query_order",
++  "tests/test_contract.py::test_network_rejects_duplicate_and_illegal_inputs",
++  "tests/test_contract.py::test_network_type_preserving_renumber_and_restore",
++  "tests/test_contract.py::test_random_reproducibility_cap_and_batch_independence",
++  "tests/test_contract.py::test_uniform_full_coverage_and_weight[10]",
++  "tests/test_contract.py::test_uniform_full_coverage_and_weight[1]",
++  "tests/test_contract.py::test_uniform_full_coverage_and_weight[20]",
++  "tests/test_contract.py::test_uniform_full_coverage_and_weight[3]",
++  "tests/test_contract.py::test_without_replacement_exact_subset_law",
++  "tests/test_dual.py::test_checkpoint_atomic_immutable_binding_restore",
++  "tests/test_dual.py::test_checkpoint_requires_exact_requested_milestone",
++  "tests/test_dual.py::test_complete_data_switch[IMDB-1653-4079-types0]",
++  "tests/test_dual.py::test_complete_data_switch[PubMed-1565-12284-types1]",
++  "tests/test_dual.py::test_configs_seeds_and_directories_isolated",
++  "tests/test_dual.py::test_exact_metapaths_independent_dfs[edges0]",
++  "tests/test_dual.py::test_exact_metapaths_independent_dfs[edges1]",
++  "tests/test_dual.py::test_exact_metapaths_independent_dfs[edges2]",
++  "tests/test_dual.py::test_exact_metapaths_independent_dfs[edges3]",
++  "tests/test_dual.py::test_exact_metapaths_independent_dfs[edges4]",
++  "tests/test_dual.py::test_fresh_rejects_existing_and_source",
++  "tests/test_dual.py::test_frozen_test_set_is_nonempty_and_covers_core",
++  "tests/test_dual.py::test_interrupted_training_then_actual_resume_and_sampling_restore",
++  "tests/test_dual.py::test_metrics_relabel_and_imdb_closure",
++  "tests/test_dual.py::test_no_role_import_in_production",
++  "tests/test_dual.py::test_one_step_interruption_rng_and_state",
++  "tests/test_dual.py::test_real_engineering_entry_and_short_chain",
++  "tests/test_dual.py::test_stop_and_resume_preserves_count",
++  "tests/test_dual.py::test_strict_restore_gate",
++  "tests/test_dual.py::test_validation_full_coverage_prior_and_rng",
++  "tests/test_fusion.py::test_cache_time_parameter_and_wedge_limits",
++  "tests/test_fusion.py::test_existing_role_guidance_remains_a_separate_t1_option",
++  "tests/test_fusion.py::test_joint_mechanism",
++  "tests/test_fusion.py::test_mean_content_separate_from_log_count",
++  "tests/test_fusion.py::test_old_checkpoint_rejected_and_empty_query",
++  "tests/test_fusion.py::test_path_memory_chunks_preserve_values_and_gradients",
++  "tests/test_fusion.py::test_sampling_cannot_read_clean_identity_and_hidden_exposure_preserves_backbone",
++  "tests/test_loss_response.py::test_actual_head_has_gap_probability_and_mixed_decision_responses",
++  "tests/test_loss_response.py::test_common_shift_is_not_a_decision_response",
++  "tests/test_loss_response.py::test_decision_probability_uses_exact_supported_p0",
++  "tests/test_loss_response.py::test_exact_support_zero_loss_zero_gradient_and_empty",
++  "tests/test_loss_response.py::test_extreme_wrong_confidence_retains_corrective_gradient",
++  "tests/test_loss_response.py::test_invalid_labels_or_support_rejected[labels0-prior0-support]",
++  "tests/test_loss_response.py::test_invalid_labels_or_support_rejected[labels1-prior1-support]",
++  "tests/test_loss_response.py::test_invalid_labels_or_support_rejected[labels2-prior2-binary]",
++  "tests/test_loss_response.py::test_invalid_labels_or_support_rejected[labels3-prior3-nonfinite]",
++  "tests/test_loss_response.py::test_invalid_labels_or_support_rejected[labels4-prior4-prior]",
++  "tests/test_loss_response.py::test_moderate_logits_match_original_objective_and_R_over_S",
++  "tests/test_loss_response.py::test_training_and_diagnostics_share_stable_CE_without_probability_BCE",
++  "tests/test_recovery_v11.py::test_conflicting_content_not_overwritten[binding]",
++  "tests/test_recovery_v11.py::test_conflicting_content_not_overwritten[model]",
++  "tests/test_recovery_v11.py::test_conflicting_content_not_overwritten[optimizer]",
++  "tests/test_recovery_v11.py::test_conflicting_content_not_overwritten[receipt]",
++  "tests/test_recovery_v11.py::test_conflicting_content_not_overwritten[rng]",
++  "tests/test_recovery_v11.py::test_conflicting_content_not_overwritten[update]",
++  "tests/test_recovery_v11.py::test_core_rollback_uses_selected_helpers_and_restores_globals",
++  "tests/test_recovery_v11.py::test_existing_file_without_intent_needs_complete_known_snapshot",
++  "tests/test_recovery_v11.py::test_final_evidence_verification_is_inside_deadline",
++  "tests/test_recovery_v11.py::test_fresh_start_cannot_use_migration",
++  "tests/test_recovery_v11.py::test_idempotence_rejects_different_in_memory_snapshot",
++  "tests/test_recovery_v11.py::test_interrupted_publications_repair_and_selected_evaluation_load[latest.json]",
++  "tests/test_recovery_v11.py::test_interrupted_publications_repair_and_selected_evaluation_load[milestones.json]",
++  "tests/test_recovery_v11.py::test_interrupted_publications_repair_and_selected_evaluation_load[prepared]",
++  "tests/test_recovery_v11.py::test_light_supervisor_subprocess_status[STOP-130]",
++  "tests/test_recovery_v11.py::test_light_supervisor_subprocess_status[failure-7]",
++  "tests/test_recovery_v11.py::test_light_supervisor_subprocess_status[success-0]",
++  "tests/test_recovery_v11.py::test_migration_is_explicit_and_source_preserved",
++  "tests/test_recovery_v11.py::test_migration_never_relaxes_science_or_software[backend]",
++  "tests/test_recovery_v11.py::test_migration_never_relaxes_science_or_software[config_sha256]",
++  "tests/test_recovery_v11.py::test_migration_never_relaxes_science_or_software[data_sha256]",
++  "tests/test_recovery_v11.py::test_migration_never_relaxes_science_or_software[deterministic_algorithms]",
++  "tests/test_recovery_v11.py::test_migration_never_relaxes_science_or_software[packages]",
++  "tests/test_recovery_v11.py::test_migration_never_relaxes_science_or_software[python_version]",
++  "tests/test_recovery_v11.py::test_migration_never_relaxes_science_or_software[release_sha256]",
++  "tests/test_recovery_v11.py::test_migration_never_relaxes_science_or_software[source_commit]",
++  "tests/test_recovery_v11.py::test_migration_never_relaxes_science_or_software[torch_runtime_version]",
++  "tests/test_recovery_v11.py::test_public_short_help_has_no_numerical_imports",
++  "tests/test_recovery_v11.py::test_real_small_training_entry_resumes_publication_failure[0]",
++  "tests/test_recovery_v11.py::test_real_small_training_entry_resumes_publication_failure[2]",
++  "tests/test_recovery_v11.py::test_selected_card_rng_only_mocked_api",
++  "tests/test_recovery_v11.py::test_selected_reverse_step_rolls_back_partial_step",
++  "tests/test_recovery_v11.py::test_timeout_includes_startup_stages[CUDA_init]",
++  "tests/test_recovery_v11.py::test_timeout_includes_startup_stages[data_load]",
++  "tests/test_recovery_v11.py::test_timeout_includes_startup_stages[device_lock]",
++  "tests/test_recovery_v11.py::test_training_and_sampling_device_migration_logic_end_to_end"
++]
+diff --git a/package/launch_pair.py b/package/launch_pair.py
+index 76de983..c3b176b 100644
+--- a/package/launch_pair.py
++++ b/package/launch_pair.py
+@@ -24,7 +24,9 @@ def main():
+     p=argparse.ArgumentParser();p.add_argument('--imdb-device',type=int,required=True)
+     p.add_argument('--pubmed-device',type=int,required=True);p.add_argument('--root',type=Path,required=True)
+     p.add_argument('--resume',action='store_true');p.add_argument('--accept-config-provenance-gap',action='store_true')
++    p.add_argument('--allow-device-migration',action='store_true')
+     a=p.parse_args()
++    if a.allow_device_migration and not a.resume:raise ValueError('device migration is only for resume')
+     if not a.accept_config_provenance_gap:raise ValueError('read configuration provenance before launch; acknowledgement required')
+     jobs=validate(a.imdb_device,a.pubmed_device,a.root)
+     import torch
+@@ -48,6 +50,7 @@ def main():
+         for name,index,out in jobs:
+             cmd=[sys.executable,'-u','-m','dual.cli','pipeline','--dataset',name,'--output',str(out),'--device-index',str(index),
+                  '--accept-config-provenance-gap','--resume' if a.resume else '--fresh-start']
++            if a.allow_device_migration:cmd.append('--allow-device-migration')
+             log=(a.root/(name+'.log')).open('a')
+             proc=subprocess.Popen(cmd,cwd=Path(__file__).parent,stdout=log,stderr=subprocess.STDOUT)
+             children.append((proc,out,log))
+diff --git a/package/release_manifest.json b/package/release_manifest.json
+index 3c4d53a..029fb80 100644
+--- a/package/release_manifest.json
++++ b/package/release_manifest.json
+@@ -1,21 +1,29 @@
+ {
+-  "README_zh.md": "7bea01bf46ae447c2365da91259f2fe4ed6049e57238bb2c59a5518017e42dd9",
++  "README_zh.md": "1a505e38c81b9a27b99d812c2243929a88c73f0227cb471416ffaa169f7fb858",
++  "RECOVERY_V11.md": "c1be28eedd2ab2238fbaea52647c538fb71b9bdc3bef215f1f76d2b4eac84dee",
+   "configs/IMDB.json": "001ef83c7553c350b9327ac4765db70fc26ddc811b0b3548f9f1fa7a04acae05",
+   "configs/PubMed.json": "475310696a61440bde50a0ffe370da5be63f2d7c2193675f37440497a294cf42",
+   "core_baseline_hashes.json": "db022ffa6b748303eef247c68f91eb7aab6bddc6b3ad636b07da726b3d7242fe",
+   "data/IMDB.npz": "10f1dbbbe55c6a069594b2dcb590d1b8295ca5436320ef4597cd30e6b7f73e42",
+   "data/PubMed.npz": "dacff5a392e23fbcfb695076a14a6db5317f4a4382b69af2a7596a1a217163f8",
++  "data/formal_provenance_update.json": "dd2b9d31ba4203bdba6e3fda1ac2f751cb9bbddb33b6736c52156b07132552ae",
+   "data/historical_inventory.json": "d60ac2ebf00ed328e2e650830ae2ee3e26550f692a98fcca873c3c67eb1cd8f7",
+   "data/verified_inventory.json": "5764aaa24c505e5d0786219d17f53b4e3b22263808336f93e2597a5a41325fef",
+   "dual/__init__.py": "2851fb98009e4b527a5ad776dfda985bdae91f5668ba669a6d45199dc5e8d4fd",
+-  "dual/cli.py": "4d3d96f9a4407cabcd498a9bef20d7d143c537851fd48b4155a626780f73dd83",
++  "dual/cli.py": "f33c89d2d4806f66938cb84c4157e281f6a6acea6f63d669880d436c7aacfa80",
+   "dual/data.py": "ad14f9a110cf8f368898f9d44e5d7d282c3989afdeb6137e0090308b723d05cf",
+-  "dual/engine.py": "b139bc4615d7a19b6973797ffa9487592a2c604c6424a1cd1b758360eade797c",
++  "dual/engine.py": "853c78f7e877f4bd9dc0ae2b083331e8679abc6d321e1cf3dcfa890b5dcc4521",
+   "dual/fixture.py": "b9c4e9476368464a20fa0d3051611b7651e6009a8d4702e4b0336a5d87d7db54",
+-  "dual/io.py": "2a245de9891c8d5942666730d894c55b0f064f7a7443a5aa7e6a2fc1ee410964",
++  "dual/io.py": "ba5f4ab4e1c270e88166f36b8f3eb0b71e9bf49787c6b010ed5f9db2b5e4b9e2",
+   "dual/metrics.py": "6ad88f7fd5fef921a7cd7e19c7c273768e228d0980d6f56cce34a53dc1b17999",
+-  "dual/validation.py": "b039535e19ff55a02adf0ba750002deb4907fc29f86b8d0e64d891279302abc8",
++  "dual/migration.py": "a39b9e156bf3fe4d40fdaf6edccbff17a13e1b2ed095b8136856ed348f269830",
++  "dual/rng.py": "310ffe2d0c979e2059b19dc0e78d770b74f2e4c979eddb2534462209e6c1d058",
++  "dual/supervisor.py": "3126d5eab6222059e25ed0790f6daaf2fd570fb17830d2f200ce9e280669b15f",
++  "dual/transactions.py": "e668e72390a7008eb84ddd650dcdca060e40fd36f88ea3be2410c9b58bced646",
++  "dual/validation.py": "90ebc91a81afa28ffc21f4afaf4e81ea4a609474ea4575a6f4224d586eddb75a",
++  "dual/worker_cli.py": "8110b64565a7fc224600f6e2370c03ff31327970a3357f7ab6230c6224e45cec",
+   "expected_tests.json": "08e6831658f8c1b1bbc7588c2544d8fcbf6e460be6d683c8535fd4b477a213d1",
++  "full_expected_tests_v11.json": "816213b0ea4dac420ba37b9483f03243d7193df563cd0e1aa630f7d7ab0e36a7",
+   "hsgd/__init__.py": "a4737e1651429fcffe97f6d5c2b81c056b7caca1b87e880ae88e8152c34abaa2",
+   "hsgd/bw_preflight/__init__.py": "486d75e373229cd7c8c0f780a7943361a5244e8e1cbd99002cbc04526c362771",
+   "hsgd/bw_preflight/common.py": "c6068da392bd551977c514118ba12d092a54b43361eb2866e9d1deef932a95c9",
+@@ -38,16 +46,17 @@
+   "hsgd/vendor/layers.py": "5a07827103fc201e601a182798ff5fae32520ab7a557a7dfaeb9cdc3bbd6ad78",
+   "hsgd/vendor/sample_edges_utils_typed.py": "7653a2dfb4a88be7a0e4f76cdb04325e69cf927071625b22b544a87df24996dc",
+   "hsgd/vendor/transconv_layer.py": "d8b953639ecd6e971cd1dfb47f74fea1c69db2768978bcfb67403599919c18a2",
+-  "launch_pair.py": "37c36c218a4ba7e3b1e903c370e3ce1c7e73e86d459862a805a42da973c99098",
++  "launch_pair.py": "00174a326c156665163a1de3088ea9eb258d4fafc78d9ba8a1df52e915394558",
+   "role_degree/implementation_contract.json": "3738d28c93e081eae9312ea53787772f72a56f64d1f7eebf52c716a32c0d49f6",
+   "role_degree/role_guidance.py": "c19143afbf6cc445cc1b8ed494849b42db18506e62c6aa0b22ed65fe86c538df",
+   "role_degree/role_sampling.py": "9121dbc579b86b007d7abdd6c9738dd076f9f89a4c080ab5b27b470577d35991",
+   "role_degree/role_statistics.py": "e033e88f641e16ebd1ac6804339963bf47a88395dfd9bb78b8e6fb953afa2a62",
+   "run.sh": "e7905fb38af26481876baf3c23d4bee4f380323f7d4d45a0ece70078d693627f",
+-  "source_revision.json": "34f7b90dc37160002cd49fcb9afd99bc5033b60717fbf5dc60a34c225db23bf7",
+-  "test_release.py": "23658ecc84fe6ecda1292a2a39098a3d48ae265e8d7bf6e16a09c89800f3b792",
++  "source_revision.json": "dbb5436708731c01548cea730926c1346e976d4b6792c24c55a57738cca25662",
++  "test_release.py": "83e5bee58e53c5b4a24930089527986afd1a41d85a5afeeea3606ee8d2296427",
+   "tests/test_contract.py": "e3afa1720e8bb027c2edabbea81ba1abf099efa90db5e1c7fdaf69c9ac2940e4",
+-  "tests/test_dual.py": "b6c25de1677d77ae5e8294d2197dd46ecff5e4a026ff144abe688f10a73089bd",
++  "tests/test_dual.py": "febde7520a29690ecedd637ae7cfc51148d6f6905c5f1ae61c88cdb094369e2b",
+   "tests/test_fusion.py": "c381c990a573d2cfadbd753f28575d683ce52f7835397d825901870b52906178",
+-  "tests/test_loss_response.py": "2ee144d7fcc3957baf138fffd734ed66978e41c76c4e3180c72fd9770a92a176"
++  "tests/test_loss_response.py": "2ee144d7fcc3957baf138fffd734ed66978e41c76c4e3180c72fd9770a92a176",
++  "tests/test_recovery_v11.py": "c2d23a1d1cb3e82d23a665f616a3f7476fd8aecc6dad16ab59368ac4523aa830"
+ }
+diff --git a/package/source_revision.json b/package/source_revision.json
+index b2a9888..347d65b 100644
+--- a/package/source_revision.json
++++ b/package/source_revision.json
+@@ -1,5 +1,5 @@
+ {
+-  "source_commit": "26f07d7029cf4d997fa30bab497ee4d89b7c1125",
+-  "base_commit": "dd53b6431303263e740abedf67e01d7dfc13d15b",
++  "source_commit": "78a973c3428c9d1e0f44c565b7d5aebfde23cdd2",
++  "base_commit": "0cdd8274d7359c4cc189685735fbe77c60c712c7",
+   "scope": "source commit; release manifest/ZIP are generated afterwards and committed separately"
+ }
+diff --git a/package/test_release.py b/package/test_release.py
+index efec90a..0ae238f 100644
+--- a/package/test_release.py
++++ b/package/test_release.py
+@@ -25,7 +25,7 @@ def main():
+     collect=subprocess.run(args+['--collect-only','-q','tests'],cwd=ROOT,env=env,capture_output=True,text=True)
+     (out/'collection.txt').write_text(collect.stdout+collect.stderr)
+     ids=sorted(x.strip() for x in collect.stdout.splitlines() if '::' in x and x.startswith('tests/'))
+-    expected=json.loads((ROOT/'expected_tests.json').read_text())
++    expected=json.loads((ROOT/'full_expected_tests_v11.json').read_text())
+     if collect.returncode or not ids or ids!=expected:raise ValueError('complete test collection differs from frozen nonempty IDs')
+     test=subprocess.run(args+['-q','tests','--junitxml='+str(out/'tests.xml')],cwd=ROOT,env=env,capture_output=True,text=True)
+     (out/'pytest.txt').write_text(test.stdout+test.stderr)
+diff --git a/package/tests/test_dual.py b/package/tests/test_dual.py
+index 10df9d7..3346833 100644
+--- a/package/tests/test_dual.py
++++ b/package/tests/test_dual.py
+@@ -53,7 +53,9 @@ def test_checkpoint_atomic_immutable_binding_restore(tmp_path):
+     model=c.make_model(case,cfg,'cpu');opt=optimizer(model,cfg);rng=np.random.default_rng(7);b=binding(case,cfg,env)
+     r=save_checkpoint(tmp_path,model,opt,rng,'cpu',0,b)
+     assert r['completed_updates']==0 and (tmp_path/'milestones.json').exists()
+-    with pytest.raises(ValueError):save_checkpoint(tmp_path,model,opt,rng,'cpu',0,b)
++    before=(tmp_path/r['path']).read_bytes()
++    assert save_checkpoint(tmp_path,model,opt,rng,'cpu',0,b)==r
++    assert (tmp_path/r['path']).read_bytes()==before
+     wrong=dict(b,backend='wrong')
+     with pytest.raises(ValueError):load_checkpoint(tmp_path,model,opt,rng,'cpu',wrong)
+     load_checkpoint(tmp_path,model,opt,rng,'cpu',b,0)
+diff --git a/new/package/tests/test_recovery_v11.py b/package/tests/test_recovery_v11.py
+new file mode 100644
+index 0000000..5b48128
+--- /dev/null
++++ b/package/tests/test_recovery_v11.py
+@@ -0,0 +1,211 @@
++"""Synthetic CPU fixtures only. Device identities below are logic mocks, NOT BW tests."""
++import copy
++import json
++from pathlib import Path
++import subprocess
++import sys
++import time
++import os
++import numpy as np
++import pytest
++import torch
++from hsgd.bw_preflight import common as c
++from dual import io,transactions,migration,rng as owned
++from dual.fixture import fixture
++from dual.engine import run_train,sample
++from dual.supervisor import supervise
++
++def setup():
++    case,cfg=fixture();env=io.configure('cpu',False);owned.seed_all(74)
++    model=c.make_model(case,cfg,'cpu');opt=io.optimizer(model,cfg);r=np.random.default_rng(74)
++    bind=io.binding(case,cfg,env)
++    return case,cfg,model,opt,r,bind
++
++@pytest.mark.parametrize('stage',['prepared','latest.json','milestones.json'])
++def test_interrupted_publications_repair_and_selected_evaluation_load(tmp_path,monkeypatch,stage):
++    case,cfg,model,opt,r,bind=setup();original=io.atomic_json;publish=transactions.publish
++    def fail(path,obj):
++        if Path(path).name==stage:raise InterruptedError('synthetic publication fault')
++        original(path,obj)
++    if stage=='prepared':
++        monkeypatch.setattr(transactions,'publish',lambda *a,**kw:(_ for _ in ()).throw(InterruptedError('after durable intent')))
++    else:monkeypatch.setattr(io,'atomic_json',fail)
++    with pytest.raises(InterruptedError):io.save_checkpoint(tmp_path,model,opt,r,'cpu',3000,bind)
++    # 3000 is synthetic metadata here, not 3000 real optimizer updates.
++    assert (tmp_path/'checkpoints/u003000.pt').exists()==(stage!='prepared')
++    assert (tmp_path/'latest.json').exists()==(stage=='milestones.json')
++    monkeypatch.setattr(io,'atomic_json',original);monkeypatch.setattr(transactions,'publish',publish)
++    ck,receipt=io.load_checkpoint(tmp_path,model,opt,r,'cpu',bind,update=3000)
++    assert ck['completed_updates']==3000 and c.sha(tmp_path/receipt['path'])==receipt['sha256']
++    assert json.loads((tmp_path/'milestones.json').read_text())['3000']==receipt
++    before=(tmp_path/receipt['path']).read_bytes()
++    assert io.save_checkpoint(tmp_path,model,opt,r,'cpu',3000,bind)==receipt
++    assert before==(tmp_path/receipt['path']).read_bytes()
++
++@pytest.mark.parametrize('alter',['model','optimizer','rng','binding','update','receipt'])
++def test_conflicting_content_not_overwritten(tmp_path,alter):
++    case,cfg,model,opt,r,bind=setup();receipt=io.save_checkpoint(tmp_path,model,opt,r,'cpu',0,bind)
++    path=tmp_path/receipt['path'];ck=c.trusted_load(path)
++    if alter=='model':ck['model'][next(iter(ck['model']))].reshape(-1)[0]+=1
++    elif alter=='optimizer':ck['optimizer']['param_groups'][0]['eps']=1e-4
++    elif alter=='rng':ck['rng']['torch'][0]^=1
++    elif alter=='binding':ck['binding']=dict(bind,backend='tampered')
++    elif alter=='update':ck['completed_updates']=3
++    if alter=='receipt':
++        x=json.loads((tmp_path/'latest.json').read_text());x['sha256']='0'*64
++        (tmp_path/'latest.json').write_text(json.dumps(x))
++    else:
++        c.torch_save(path,ck)
++        # Even if a byte receipt were changed, full original semantic hash still detects it.
++        j=tmp_path/'transactions/u000000.pt.json';intent=json.loads(j.read_text());intent['receipt']['sha256']=c.sha(path)
++        j.write_text(json.dumps(intent))
++    before=path.read_bytes()
++    with pytest.raises(ValueError):io.load_checkpoint(tmp_path,model,opt,r,'cpu',bind)
++    assert before==path.read_bytes()
++
++def test_idempotence_rejects_different_in_memory_snapshot(tmp_path):
++    _,_,model,opt,r,b=setup();receipt=io.save_checkpoint(tmp_path,model,opt,r,'cpu',0,b)
++    with torch.no_grad():next(model.parameters()).add_(.1)
++    before=(tmp_path/receipt['path']).read_bytes()
++    with pytest.raises(ValueError):io.save_checkpoint(tmp_path,model,opt,r,'cpu',0,b)
++    assert (tmp_path/receipt['path']).read_bytes()==before
++
++def test_existing_file_without_intent_needs_complete_known_snapshot(tmp_path):
++    _,_,model,opt,r,b=setup();receipt=io.save_checkpoint(tmp_path,model,opt,r,'cpu',0,b)
++    (tmp_path/'transactions/u000000.pt.json').unlink()
++    (tmp_path/'latest.json').unlink();(tmp_path/'milestones.json').unlink()
++    before=(tmp_path/receipt['path']).read_bytes()
++    with pytest.raises(ValueError):io.load_checkpoint(tmp_path,model,opt,r,'cpu',b)
++    recovered=io.save_checkpoint(tmp_path,model,opt,r,'cpu',0,b)
++    assert recovered['sha256']==receipt['sha256'] and before==(tmp_path/receipt['path']).read_bytes()
++    io.load_checkpoint(tmp_path,model,opt,r,'cpu',b,update=0)
++
++@pytest.mark.parametrize('u',[0,2])
++def test_real_small_training_entry_resumes_publication_failure(tmp_path,monkeypatch,u):
++    case,cfg=fixture();out=tmp_path/'run';original=io.atomic_json
++    def fault(path,obj):
++        if Path(path).name=='milestones.json' and str(u) in obj:raise InterruptedError('after latest')
++        original(path,obj)
++    monkeypatch.setattr(io,'atomic_json',fault)
++    with pytest.raises(InterruptedError):run_train(case,cfg,out,'cpu',fresh=True,accept_gap=True)
++    monkeypatch.setattr(io,'atomic_json',original)
++    assert run_train(case,cfg,out,'cpu',resume=True,accept_gap=True)
++    assert set(json.loads((out/'milestones.json').read_text()))=={'0','1','2','3','4'}
++    assert sample(case,cfg,out,tmp_path/'graph',2,'cpu')
++
++def identities(bind):
++    a=copy.deepcopy(bind);a['device_identity']=dict(device_index=0,device_uuid='synthetic-A',visibility={'CUDA_VISIBLE_DEVICES':'4'})
++    a['runtime']['device_name']='synthetic-A';b=copy.deepcopy(a)
++    b['device_identity']=dict(device_index=1,device_uuid='synthetic-B',visibility={'CUDA_VISIBLE_DEVICES':'1,7'})
++    b['runtime']['device_name']='synthetic-B'
++    return a,b
++
++def test_migration_is_explicit_and_source_preserved(tmp_path):
++    _,_,model,opt,r,b=setup();a,d=identities(b)
++    io.atomic_json(tmp_path/'binding.json',a);original=(tmp_path/'binding.json').read_bytes()
++    receipt=io.save_checkpoint(tmp_path,model,opt,r,'cpu',1,a)
++    with pytest.raises(ValueError):io.load_checkpoint(tmp_path,model,opt,r,'cpu',a,execution_binding=d)
++    io.load_checkpoint(tmp_path,model,opt,r,'cpu',a,execution_binding=d,allow_device_migration=True)
++    assert (tmp_path/'binding.json').read_bytes()==original
++    assert c.sha(tmp_path/receipt['path'])==receipt['sha256']
++    records=list((tmp_path/'migrations').glob('*.json'));assert len(records)==1
++    rec=json.loads(records[0].read_text());assert not rec['bitwise_cross_device_reproducibility'] and rec['rng_restored']
++    io.save_checkpoint(tmp_path,model,opt,r,'cpu',2,a,execution_binding=d)
++    io.load_checkpoint(tmp_path,model,opt,r,'cpu',a,execution_binding=d) # same migrated device now strict
++
++@pytest.mark.parametrize('field',['source_commit','release_sha256','config_sha256','data_sha256','backend','python_version','torch_runtime_version','packages','deterministic_algorithms'])
++def test_migration_never_relaxes_science_or_software(tmp_path,field):
++    _,_,model,opt,r,b=setup();a,d=identities(b);io.save_checkpoint(tmp_path,model,opt,r,'cpu',0,a)
++    if field in ('python_version','torch_runtime_version','packages','deterministic_algorithms'):d['runtime'][field]='tampered'
++    else:d[field]='tampered'
++    with pytest.raises(ValueError):io.load_checkpoint(tmp_path,model,opt,r,'cpu',a,execution_binding=d,allow_device_migration=True)
++    assert not (tmp_path/'migrations').exists()
++
++def test_fresh_start_cannot_use_migration(tmp_path):
++    case,cfg=fixture()
++    with pytest.raises(ValueError):run_train(case,cfg,tmp_path/'run','cpu',fresh=True,accept_gap=True,allow_device_migration=True)
++    assert not (tmp_path/'run').exists()
++
++def test_selected_card_rng_only_mocked_api(monkeypatch):
++    calls=[];state=torch.tensor([1,2,3],dtype=torch.uint8)
++    monkeypatch.setattr(torch.cuda,'current_device',lambda:3)
++    monkeypatch.setattr(torch.cuda,'manual_seed',lambda seed:calls.append(('seed',seed)))
++    monkeypatch.setattr(torch.cuda,'get_rng_state',lambda device:(calls.append(('get',device)) or state.clone()))
++    monkeypatch.setattr(torch.cuda,'set_rng_state',lambda value,device:calls.append(('set',device,value.tolist())))
++    def forbidden(*a,**kw):raise AssertionError('all-visible RNG API forbidden')
++    for name in ('get_rng_state_all','set_rng_state_all','manual_seed_all'):monkeypatch.setattr(torch.cuda,name,forbidden)
++    owned.seed_all(77,'cuda');rng=np.random.default_rng(77);saved=owned.rng_save(rng,'cuda')
++    # Stored index can differ: restore targets the CURRENT selected device explicitly.
++    saved['selected_device_index']=0;owned.rng_restore(saved,rng,'cuda')
++    assert calls==[('seed',77),('get',3),('set',3,[1,2,3])]
++
++def test_core_rollback_uses_selected_helpers_and_restores_globals():
++    old=c.rng_save,c.rng_restore
++    with owned.selected_core_rng():assert c.rng_save is owned.rng_save and c.rng_restore is owned.rng_restore
++    assert (c.rng_save,c.rng_restore)==old
++
++def test_selected_reverse_step_rolls_back_partial_step():
++    from hsgd.kernel import MarginalKernel
++    case,cfg,model,opt,r,bind=setup();model.eval();state=np.zeros(case['space'].total,np.uint8)
++    before=owned.rng_save(r,'cpu');old=c.rng_save,c.rng_restore
++    with pytest.raises(InterruptedError):owned.reverse_step(model,case,state,MarginalKernel(case['prior'],c.schedule(4)),4,3,2,r,'cpu',interrupt_block=1)
++    after=owned.rng_save(r,'cpu')
++    assert before['generator']==after['generator'] and torch.equal(before['torch'],after['torch'])
++    assert (c.rng_save,c.rng_restore)==old and not state.any()
++
++def test_training_and_sampling_device_migration_logic_end_to_end(tmp_path,monkeypatch):
++    import dual.engine as engine
++    case,cfg=fixture();out=tmp_path/'run';current=['A'];configure=engine.configure;update=c.update;calls=[]
++    def logical_env(device,strict=False):
++        env=configure(device,strict);env.update(device_name='logical-'+current[0],device_uuid=current[0],device_index=0,visibility={'fixture':current[0]})
++        return env
++    def stop_after_two(*a,**kw):
++        result=update(*a,**kw);calls.append(1)
++        if len(calls)==2:(out/'STOP').touch()
++        return result
++    monkeypatch.setattr(engine,'configure',logical_env);monkeypatch.setattr(c,'update',stop_after_two)
++    assert not run_train(case,cfg,out,'cpu',fresh=True,accept_gap=True)
++    original=(out/'binding.json').read_bytes();(out/'STOP').unlink();current[0]='B';monkeypatch.setattr(c,'update',update)
++    with pytest.raises(ValueError):run_train(case,cfg,out,'cpu',resume=True,accept_gap=True)
++    assert run_train(case,cfg,out,'cpu',resume=True,accept_gap=True,allow_device_migration=True)
++    assert run_train(case,cfg,out,'cpu',resume=True,accept_gap=True) # new checkpoint records device B
++    assert (out/'binding.json').read_bytes()==original
++    target=tmp_path/'sample';assert not sample(case,cfg,out,target,4,'cpu',engineering=True,max_steps=2)
++    current[0]='C'
++    with pytest.raises(ValueError):sample(case,cfg,out,target,4,'cpu',resume=True)
++    assert sample(case,cfg,out,target,4,'cpu',resume=True,allow_device_migration=True)
++    assert list((target/'migrations').glob('*.json'))
++
++@pytest.mark.parametrize('phase',['data_load','CUDA_init','device_lock'])
++def test_timeout_includes_startup_stages(tmp_path,phase):
++    out=tmp_path/phase
++    code="import pathlib,time; p=pathlib.Path(%r);p.mkdir();(p/'phase').write_text(%r);time.sleep(10)"%(str(out),phase)
++    start=time.monotonic();rc=supervise([sys.executable,'-c',code],.25,out,started=start,cleanup_seconds=.1)
++    receipt=json.loads((out/'supervisor.json').read_text())
++    assert rc==124 and not receipt['completed'] and (out/'phase').read_text()==phase
++    assert .25<=receipt['computation_window_seconds']<1 and receipt['cleanup_seconds']<1
++
++@pytest.mark.parametrize('mode,expected',[('success',0),('failure',7),('STOP',130)])
++def test_light_supervisor_subprocess_status(tmp_path,mode,expected):
++    out=tmp_path/mode
++    code="import pathlib,time,sys;p=pathlib.Path(%r);p.mkdir();"%str(out)
++    code+="(p/'STOP').touch();time.sleep(10)" if mode=='STOP' else "sys.exit(%d)"%(7 if mode=='failure' else 0)
++    assert supervise([sys.executable,'-c',code],2,out)==expected
++    receipt=json.loads((out/'supervisor.json').read_text());assert receipt['completed']==(expected==0)
++
++def test_public_short_help_has_no_numerical_imports():
++    code="""import sys,runpy,importlib.abc
++class Guard(importlib.abc.MetaPathFinder):
++ def find_spec(self,fullname,path=None,target=None):
++  if fullname.split('.')[0] in ('torch','numpy','scipy'):raise RuntimeError('heavy import in parent: '+fullname)
++sys.meta_path.insert(0,Guard());sys.argv=['dual.cli','short-test','--help'];runpy.run_module('dual.cli',run_name='__main__')
++"""
++    p=subprocess.run([sys.executable,'-c',code],capture_output=True,text=True,timeout=10)
++    assert p.returncode==0,p.stderr
++    assert '570s TOTAL' in p.stdout
++
++def test_final_evidence_verification_is_inside_deadline(tmp_path):
++    out=tmp_path/'late'
++    def slow(out):time.sleep(.3)
++    assert supervise([sys.executable,'-c','pass'],.2,out,completion_check=slow)==124
++    assert not json.loads((out/'supervisor.json').read_text())['completed']
