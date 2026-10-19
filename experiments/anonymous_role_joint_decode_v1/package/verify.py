@@ -20,7 +20,9 @@ def main():
     release_hash();expected=json.loads((ROOT/'test_suite.json').read_text())['nodeids']
     env={k:v for k,v in os.environ.items() if not k.startswith('PYTEST_')}
     env.update(PYTEST_DISABLE_PLUGIN_AUTOLOAD='1',PYTHONDONTWRITEBYTECODE='1',OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1',CUDA_VISIBLE_DEVICES='',PYTHONPATH=str(ROOT))
-    cmd=[sys.executable,'-m','pytest','tests','-q']
+    # Package-local node IDs in BOTH repository and stand-alone ZIP. Do not
+    # inherit a parent repository's rootdir/config or silently weaken identity checks.
+    cmd=[sys.executable,'-m','pytest','--rootdir',str(ROOT),'-c',os.devnull,'tests','-q']
     collected=subprocess.run(cmd+['--collect-only'],cwd=ROOT,env=env,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=60,check=True)
     ids=[s for s in collected.stdout.splitlines() if '::' in s and not s.startswith(' ')]
     if ids!=expected:raise ValueError('complete frozen test collection differs')
