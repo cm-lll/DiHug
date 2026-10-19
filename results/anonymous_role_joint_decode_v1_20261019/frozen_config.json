@@ -1,0 +1,33 @@
+{
+  "version": "anonymous_role_joint_decode_v1",
+  "baseline_definition_commit": "124d227752fbce651ca20a11e730b19e5de270f7",
+  "enumeration_nodes": 6,
+  "draws_per_method": 4096,
+  "sampling_seed": 2026101907,
+  "temperatures": [1.0, 2.0],
+  "homo_probability_cases": ["all_0.5", "cycle_0.8_other_0.2", "two_triangles_0.8_other_0.2"],
+  "hetero_probabilities_canonical_family_slots": [0.75,0.25,0.6,0.4,0.8,0.2,0.55,0.45,0.65,0.35,0.7,0.3,0.4,0.6,0.5],
+  "normalization_atol": 1e-12,
+  "enumeration_MAP_tie_atol": 1e-12,
+  "decoder": {
+    "bipartite": "scipy.linprog highs-ds TU degree matching LP",
+    "same_type": "scipy.milp binary simple-graph f-factor",
+    "lp_primal_feasibility_tolerance": 1e-7,
+    "lp_dual_feasibility_tolerance": 1e-7,
+    "external_integrality_atol": 1e-6,
+    "objective_atol": 2e-7,
+    "objective_rtol": 1e-9,
+    "mip_rel_gap": 0.0,
+    "mip_node_limit": 100000,
+    "threads": 1,
+    "per_small_solve_seconds": 10.0
+  },
+  "imdb_engineering": {
+    "reference_sha256": "10f1dbbbe55c6a069594b2dcb590d1b8295ca5436320ef4597cd30e6b7f73e42",
+    "score": "PCG64 Normal(0,1) on all canonical schema slots, no reference edge lookup",
+    "score_seed": 2026101909,
+    "role_assignment": "lexicographic full joint vectors with integer counts, current type storage order; fixed-match engineering only",
+    "inclusive_wall_cap_seconds": 300,
+    "work_reserve_seconds": 8
+  }
+}

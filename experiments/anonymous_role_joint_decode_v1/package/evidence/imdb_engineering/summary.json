@@ -1,0 +1,305 @@
+{
+  "status": "complete",
+  "scope": "IMDB-size ENGINEERING fixed-matching decoder ONLY; NO model probabilities",
+  "config_sha256": "260a9370086094207861b695f2f89b59143a974c33ca55a093c1d9cdd878c4bd",
+  "reference_sha256": "10f1dbbbe55c6a069594b2dcb590d1b8295ca5436320ef4597cd30e6b7f73e42",
+  "target_sha256": "f2ba984345336d9b6a10ff66b960a5259f2bdd05866afe82b5b1074185835ae3",
+  "nodes": 1653,
+  "slots": 1365378,
+  "type_counts": {
+    "0": 410,
+    "1": 494,
+    "2": 726,
+    "3": 23
+  },
+  "roles": {
+    "0": {
+      "nodes": 410,
+      "distinct_vectors": 19
+    },
+    "1": {
+      "nodes": 494,
+      "distinct_vectors": 27
+    },
+    "2": {
+      "nodes": 726,
+      "distinct_vectors": 20
+    },
+    "3": {
+      "nodes": 23,
+      "distinct_vectors": 19
+    }
+  },
+  "engineering_score_seed": 2026101909,
+  "score_generation_seconds": 0.1328990301117301,
+  "score_independent_of_reference_edge_identity": true,
+  "decoder": {
+    "scope": "MAP under ONE FIXED COMPLETE role matching",
+    "status": "optimal_fixed_matching",
+    "blocks": [
+      {
+        "family": 0,
+        "pair": [
+          0,
+          0
+        ],
+        "original_slots": 83845,
+        "free_variables": 0,
+        "residual_edges": 0,
+        "algorithm": "binary same-type f-factor MILP",
+        "status": "optimal",
+        "objective": 0.0,
+        "lower_bound": 0.0,
+        "gap": 0.0,
+        "seconds": 0.0036972928792238235
+      },
+      {
+        "family": 1,
+        "pair": [
+          0,
+          1
+        ],
+        "original_slots": 202540,
+        "free_variables": 174624,
+        "residual_edges": 604,
+        "algorithm": "bipartite TU LP",
+        "solver_status": 0,
+        "solver_message": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
+        "warnings": [
+          "Unrecognized options detected: {'threads': 1}. These will be passed to HiGHS verbatim."
+        ],
+        "seconds": 1.286887239664793,
+        "status": "optimal",
+        "objective": -1602.0708840674506,
+        "lower_bound": -1602.0708840674508,
+        "gap": 2.2737367544323206e-13,
+        "objective_tolerance": 1.8020708840674506e-06,
+        "integrality_error": 0.0,
+        "independent_degree_error": 0,
+        "certificate": "TU vertex integrality + independently recomputed Lagrangian lower bound (FP arithmetic)",
+        "node_count": 0
+      },
+      {
+        "family": 2,
+        "pair": [
+          0,
+          2
+        ],
+        "original_slots": 297660,
+        "free_variables": 263220,
+        "residual_edges": 642,
+        "algorithm": "bipartite TU LP",
+        "solver_status": 0,
+        "solver_message": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
+        "warnings": [
+          "Unrecognized options detected: {'threads': 1}. These will be passed to HiGHS verbatim."
+        ],
+        "seconds": 2.4229409666731954,
+        "status": "optimal",
+        "objective": -1800.8832461970055,
+        "lower_bound": -1800.8832461970055,
+        "gap": 0.0,
+        "objective_tolerance": 2.0008832461970057e-06,
+        "integrality_error": 0.0,
+        "independent_degree_error": 0,
+        "certificate": "TU vertex integrality + independently recomputed Lagrangian lower bound (FP arithmetic)",
+        "node_count": 0
+      },
+      {
+        "family": 3,
+        "pair": [
+          0,
+          3
+        ],
+        "original_slots": 9430,
+        "free_variables": 0,
+        "residual_edges": 0,
+        "algorithm": "bipartite TU LP",
+        "status": "optimal",
+        "objective": 0.0,
+        "lower_bound": 0.0,
+        "gap": 0.0,
+        "seconds": 0.005670529790222645
+      },
+      {
+        "family": 4,
+        "pair": [
+          1,
+          1
+        ],
+        "original_slots": 121771,
+        "free_variables": 210,
+        "residual_edges": 15,
+        "algorithm": "binary same-type f-factor MILP",
+        "solver_status": 0,
+        "solver_message": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
+        "warnings": [
+          "Unrecognized options detected: {'threads'}. These will be passed to HiGHS verbatim."
+        ],
+        "seconds": 0.0097492141649127,
+        "status": "optimal",
+        "objective": -15.80164728843689,
+        "lower_bound": -15.801647288436888,
+        "gap": -1.7763568394002505e-15,
+        "objective_tolerance": 2.1580164728843688e-07,
+        "integrality_error": 0.0,
+        "independent_degree_error": 0,
+        "certificate": "HiGHS branch-and-bound bound; independent exact binary degree feasibility; not interval arithmetic",
+        "node_count": 1
+      },
+      {
+        "family": 5,
+        "pair": [
+          1,
+          2
+        ],
+        "original_slots": 358644,
+        "free_variables": 357656,
+        "residual_edges": 739,
+        "algorithm": "bipartite TU LP",
+        "solver_status": 0,
+        "solver_message": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
+        "warnings": [
+          "Unrecognized options detected: {'threads': 1}. These will be passed to HiGHS verbatim."
+        ],
+        "seconds": 3.381520156748593,
+        "status": "optimal",
+        "objective": -2096.507830972639,
+        "lower_bound": -2096.507830972639,
+        "gap": 0.0,
+        "objective_tolerance": 2.2965078309726392e-06,
+        "integrality_error": 0.0,
+        "independent_degree_error": 0,
+        "certificate": "TU vertex integrality + independently recomputed Lagrangian lower bound (FP arithmetic)",
+        "node_count": 0
+      },
+      {
+        "family": 6,
+        "pair": [
+          1,
+          3
+        ],
+        "original_slots": 11362,
+        "free_variables": 0,
+        "residual_edges": 0,
+        "algorithm": "bipartite TU LP",
+        "status": "optimal",
+        "objective": 0.0,
+        "lower_bound": 0.0,
+        "gap": 0.0,
+        "seconds": 0.001905457116663456
+      },
+      {
+        "family": 7,
+        "pair": [
+          2,
+          2
+        ],
+        "original_slots": 263175,
+        "free_variables": 0,
+        "residual_edges": 0,
+        "algorithm": "binary same-type f-factor MILP",
+        "status": "optimal",
+        "objective": 0.0,
+        "lower_bound": 0.0,
+        "gap": 0.0,
+        "seconds": 0.012204145081341267
+      },
+      {
+        "family": 8,
+        "pair": [
+          2,
+          3
+        ],
+        "original_slots": 16698,
+        "free_variables": 16698,
+        "residual_edges": 2079,
+        "algorithm": "bipartite TU LP",
+        "solver_status": 0,
+        "solver_message": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
+        "warnings": [
+          "Unrecognized options detected: {'threads': 1}. These will be passed to HiGHS verbatim."
+        ],
+        "seconds": 4.14249365683645,
+        "status": "optimal",
+        "objective": -2558.44578890254,
+        "lower_bound": -2558.44578890254,
+        "gap": 0.0,
+        "objective_tolerance": 2.75844578890254e-06,
+        "integrality_error": 0.0,
+        "independent_degree_error": 0,
+        "certificate": "TU vertex integrality + independently recomputed Lagrangian lower bound (FP arithmetic)",
+        "node_count": 0
+      },
+      {
+        "family": 9,
+        "pair": [
+          3,
+          3
+        ],
+        "original_slots": 253,
+        "free_variables": 0,
+        "residual_edges": 0,
+        "algorithm": "binary same-type f-factor MILP",
+        "status": "optimal",
+        "objective": 0.0,
+        "lower_bound": 0.0,
+        "gap": 0.0,
+        "seconds": 0.0014713173732161522
+      }
+    ],
+    "solver_options": {
+      "bipartite": "scipy.linprog highs-ds TU degree matching LP",
+      "same_type": "scipy.milp binary simple-graph f-factor",
+      "lp_primal_feasibility_tolerance": 1e-07,
+      "lp_dual_feasibility_tolerance": 1e-07,
+      "external_integrality_atol": 1e-06,
+      "objective_atol": 2e-07,
+      "objective_rtol": 1e-09,
+      "mip_rel_gap": 0.0,
+      "mip_node_limit": 100000,
+      "threads": 1,
+      "per_small_solve_seconds": 10.0
+    },
+    "optimal": true,
+    "tie_rule": "solver representative; no tied-output equivariance claim",
+    "hard_zero_slots": 0,
+    "hard_one_slots": 0,
+    "finite_logit_free_slots": 1365378,
+    "exact_joint_role_multiset": true,
+    "exact_assigned_degrees": true,
+    "exact_support": true,
+    "log_q": -1092864.7912526021,
+    "log_q_upper_bound": -1092864.7912526024,
+    "log_q_gap": -2.3283064365386963e-10,
+    "physical_edges": 4079,
+    "seconds": 11.525726217776537,
+    "no_anonymous_global_optimality_claim": true,
+    "no_sampling_claim": true
+  },
+  "model_probabilities_available": false,
+  "model_calls": 0,
+  "training_updates": 0,
+  "GPU_use": 0,
+  "scientific_chains": 0,
+  "no_anonymous_global_MAP_claim": true,
+  "no_conditional_sampling_claim": true,
+  "graph_sha256": "df3a8403de331ae5994599b53753519ef71a815c038a3bbc6a7aaac5f4756559",
+  "engineering_graphs": 1,
+  "physical_edges": 4079,
+  "relation_edges": [
+    0,
+    604,
+    642,
+    0,
+    15,
+    739,
+    0,
+    0,
+    2079,
+    0
+  ],
+  "wall_seconds": 12.474586275406182,
+  "cpu_seconds": 12.449885191,
+  "peak_rss_mib": 481.23046875
+}

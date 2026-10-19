@@ -1,0 +1,1218 @@
+{
+  "scope": "ENGINEERING probabilities, not model outputs",
+  "status": "complete",
+  "config_sha256": "260a9370086094207861b695f2f89b59143a974c33ca55a093c1d9cdd878c4bd",
+  "independent_census": {
+    "candidates": 5005,
+    "feasible": 70,
+    "six_cycles": 60,
+    "two_triangles": 10,
+    "independent_combinatorial_counts": {
+      "six_cycles": 60,
+      "two_triangles": 10
+    }
+  },
+  "enumerated_homo_graphs": 32768,
+  "enumerated_hetero_graphs": 32768,
+  "homo_type_preserving_topology_classes": 156,
+  "model_calls": 0,
+  "GPU_use": 0,
+  "training_updates": 0,
+  "scientific_chains": 0,
+  "draws_per_method": 4096,
+  "engineering_graph_draws": 81920,
+  "exact_metrics": "all graph states summed in FP64; only distinct draw counts/observed pass counts are sampling statistics",
+  "wall_seconds": 0.9318243451416492,
+  "cpu_seconds": 0.9284581909999999,
+  "peak_rss_mib": 101.421875,
+  "cases": [
+    {
+      "name": "all_0.5",
+      "target": {
+        "format": "anonymous-joint-relation-degree-v1",
+        "family_pairs": [
+          [
+            0,
+            0
+          ]
+        ],
+        "groups": {
+          "0": {
+            "nodes": 6,
+            "rows": [
+              [
+                2
+              ]
+            ],
+            "counts": [
+              6
+            ]
+          }
+        }
+      },
+      "probabilities": [
+        0.5,
+        0.5,
+        0.5,
+        0.5,
+        0.5,
+        0.5,
+        0.5,
+        0.5,
+        0.5,
+        0.5,
+        0.5,
+        0.5,
+        0.5,
+        0.5,
+        0.5
+      ],
+      "truth": {
+        "C_size": 70,
+        "admissible_C_size": 70,
+        "q_C": 0.0021362304687500017,
+        "log_q_C": -6.14871246634982,
+        "MAP": {
+          "scope": "anonymous GLOBAL optimum by complete enumeration ONLY",
+          "representative_code": 1880,
+          "exact_FP64_tied_maximizers": 70,
+          "within_tie_tolerance_count": 70,
+          "tie_rule": "smallest graph code among exact FP64 maximizers; not an equivariant tie rule"
+        },
+        "distributions": {
+          "independent": {
+            "log_partition": 0.0,
+            "normalization_error": 2.220446049250313e-16,
+            "mathematical_support_size": 32768,
+            "numerical_positive_count": 32768,
+            "numerical_underflow_count": 0
+          },
+          "uniform_feasible": {
+            "log_partition": 4.248495242049359,
+            "normalization_error": 3.3306690738754696e-16,
+            "mathematical_support_size": 70,
+            "numerical_positive_count": 70,
+            "numerical_underflow_count": 0
+          },
+          "conditional_T1": {
+            "log_partition": -6.14871246634982,
+            "normalization_error": 3.3306690738754696e-16,
+            "mathematical_support_size": 70,
+            "numerical_positive_count": 70,
+            "numerical_underflow_count": 0
+          },
+          "conditional_T2": {
+            "log_partition": -0.9501086121502302,
+            "normalization_error": 3.3306690738754696e-16,
+            "mathematical_support_size": 70,
+            "numerical_positive_count": 70,
+            "numerical_underflow_count": 0
+          }
+        }
+      },
+      "fixed_assignment_MAP": {
+        "scope": "MAP under ONE FIXED COMPLETE role matching",
+        "status": "optimal_fixed_matching",
+        "blocks": [
+          {
+            "family": 0,
+            "pair": [
+              0,
+              0
+            ],
+            "original_slots": 15,
+            "free_variables": 15,
+            "residual_edges": 6,
+            "algorithm": "binary same-type f-factor MILP",
+            "solver_status": 0,
+            "solver_message": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
+            "warnings": [
+              "Unrecognized options detected: {'threads'}. These will be passed to HiGHS verbatim."
+            ],
+            "seconds": 0.00233308132737875,
+            "status": "optimal",
+            "objective": 0.0,
+            "lower_bound": 0.0,
+            "gap": 0.0,
+            "objective_tolerance": 2.0099999999999999e-07,
+            "integrality_error": 0.0,
+            "independent_degree_error": 0,
+            "certificate": "HiGHS branch-and-bound bound; independent exact binary degree feasibility; not interval arithmetic",
+            "node_count": 1
+          }
+        ],
+        "solver_options": {
+          "bipartite": "scipy.linprog highs-ds TU degree matching LP",
+          "same_type": "scipy.milp binary simple-graph f-factor",
+          "lp_primal_feasibility_tolerance": 1e-07,
+          "lp_dual_feasibility_tolerance": 1e-07,
+          "external_integrality_atol": 1e-06,
+          "objective_atol": 2e-07,
+          "objective_rtol": 1e-09,
+          "mip_rel_gap": 0.0,
+          "mip_node_limit": 100000,
+          "threads": 1,
+          "per_small_solve_seconds": 10.0
+        },
+        "optimal": true,
+        "tie_rule": "solver representative; no tied-output equivariance claim",
+        "hard_zero_slots": 0,
+        "hard_one_slots": 0,
+        "finite_logit_free_slots": 15,
+        "exact_joint_role_multiset": true,
+        "exact_assigned_degrees": true,
+        "exact_support": true,
+        "log_q": -10.39720770839918,
+        "log_q_upper_bound": -10.39720770839918,
+        "log_q_gap": 0.0,
+        "physical_edges": 6,
+        "seconds": 0.0041403332725167274,
+        "no_anonymous_global_optimality_claim": true,
+        "no_sampling_claim": true
+      },
+      "exact_fixed_assignment_log_q": -10.39720770839918,
+      "fixed_assignment_graph_code": 21041,
+      "exact_anonymous_MAP_log_q": -10.39720770839918,
+      "role_mixture_counterexample": {
+        "distinct_complete_role_assignments": 1,
+        "min_log_assignment_partition": -6.14871246634982,
+        "max_log_assignment_partition": -6.14871246634982,
+        "TV_uniform_assignment_mixture_vs_true_conditional": 0.0,
+        "meaning": "uniform role assignment is not q conditional unless all assignment partition functions are equal"
+      },
+      "methods": {
+        "independent": {
+          "schema_simple_undirected_rate": 1.0,
+          "exact_joint_role_rate": 0.002136230468750001,
+          "mathematical_support_size": 32768,
+          "numerically_positive_support": 32768,
+          "entropy_nats": 10.397207708399183,
+          "effective_graph_count_exp_entropy": 32768.0000000001,
+          "inverse_simpson_graph_count": 32767.999999999993,
+          "maximum_single_graph_probability": 3.0517578125000014e-05,
+          "sampled_distinct_labelled_graphs": 3868,
+          "expected_distinct_labelled_graphs": 3850.3966532339673,
+          "expected_two_graph_edge_symmetric_difference": 7.5,
+          "connected_rate": 0.8149414062500001,
+          "mean_triangles": 2.500000000000001,
+          "mean_original_log_q_nats": -10.397207708399282,
+          "mean_original_log_q_per_slot": -0.6931471805599522,
+          "exact_type_preserving_topology_classes": 156,
+          "topology_entropy_nats": 4.718849758951879,
+          "effective_topology_classes": 112.03930631320661,
+          "maximum_topology_mass": 0.021972656250000003,
+          "sampled_distinct_topologies": 151,
+          "observed_joint_role_passes": 9
+        },
+        "MAP": {
+          "schema_simple_undirected_rate": 1.0,
+          "exact_joint_role_rate": 1.0,
+          "mathematical_support_size": 1,
+          "numerically_positive_support": 1,
+          "entropy_nats": -0.0,
+          "effective_graph_count_exp_entropy": 1.0,
+          "inverse_simpson_graph_count": 1.0,
+          "maximum_single_graph_probability": 1.0,
+          "sampled_distinct_labelled_graphs": 1,
+          "expected_distinct_labelled_graphs": 1.0,
+          "expected_two_graph_edge_symmetric_difference": 0.0,
+          "connected_rate": 1.0,
+          "mean_triangles": 0.0,
+          "mean_original_log_q_nats": -10.39720770839918,
+          "mean_original_log_q_per_slot": -0.6931471805599453,
+          "exact_type_preserving_topology_classes": 1,
+          "topology_entropy_nats": -0.0,
+          "effective_topology_classes": 1.0,
+          "maximum_topology_mass": 1.0,
+          "sampled_distinct_topologies": 1,
+          "observed_joint_role_passes": 4096
+        },
+        "uniform_feasible": {
+          "schema_simple_undirected_rate": 1.0,
+          "exact_joint_role_rate": 0.9999999999999994,
+          "mathematical_support_size": 70,
+          "numerically_positive_support": 70,
+          "entropy_nats": 4.248495242049356,
+          "effective_graph_count_exp_entropy": 69.99999999999977,
+          "inverse_simpson_graph_count": 70.00000000000006,
+          "maximum_single_graph_probability": 0.01428571428571428,
+          "sampled_distinct_labelled_graphs": 70,
+          "expected_distinct_labelled_graphs": 70.0,
+          "expected_two_graph_edge_symmetric_difference": 7.200000000000003,
+          "connected_rate": 0.8571428571428568,
+          "mean_triangles": 0.2857142857142856,
+          "mean_original_log_q_nats": -10.397207708399176,
+          "mean_original_log_q_per_slot": -0.6931471805599451,
+          "exact_type_preserving_topology_classes": 2,
+          "topology_entropy_nats": 0.41011631828841,
+          "effective_topology_classes": 1.5069930657725392,
+          "maximum_topology_mass": 0.8571428571428559,
+          "sampled_distinct_topologies": 2,
+          "observed_joint_role_passes": 4096
+        },
+        "conditional_T1": {
+          "schema_simple_undirected_rate": 1.0,
+          "exact_joint_role_rate": 0.9999999999999994,
+          "mathematical_support_size": 70,
+          "numerically_positive_support": 70,
+          "entropy_nats": 4.248495242049356,
+          "effective_graph_count_exp_entropy": 69.99999999999977,
+          "inverse_simpson_graph_count": 70.00000000000006,
+          "maximum_single_graph_probability": 0.01428571428571428,
+          "sampled_distinct_labelled_graphs": 70,
+          "expected_distinct_labelled_graphs": 70.0,
+          "expected_two_graph_edge_symmetric_difference": 7.200000000000003,
+          "connected_rate": 0.8571428571428568,
+          "mean_triangles": 0.2857142857142856,
+          "mean_original_log_q_nats": -10.397207708399176,
+          "mean_original_log_q_per_slot": -0.6931471805599451,
+          "exact_type_preserving_topology_classes": 2,
+          "topology_entropy_nats": 0.41011631828841,
+          "effective_topology_classes": 1.5069930657725392,
+          "maximum_topology_mass": 0.8571428571428559,
+          "sampled_distinct_topologies": 2,
+          "observed_joint_role_passes": 4096
+        },
+        "conditional_T2": {
+          "schema_simple_undirected_rate": 1.0,
+          "exact_joint_role_rate": 0.9999999999999994,
+          "mathematical_support_size": 70,
+          "numerically_positive_support": 70,
+          "entropy_nats": 4.248495242049356,
+          "effective_graph_count_exp_entropy": 69.99999999999977,
+          "inverse_simpson_graph_count": 70.00000000000006,
+          "maximum_single_graph_probability": 0.01428571428571428,
+          "sampled_distinct_labelled_graphs": 70,
+          "expected_distinct_labelled_graphs": 70.0,
+          "expected_two_graph_edge_symmetric_difference": 7.200000000000003,
+          "connected_rate": 0.8571428571428568,
+          "mean_triangles": 0.2857142857142856,
+          "mean_original_log_q_nats": -10.397207708399176,
+          "mean_original_log_q_per_slot": -0.6931471805599451,
+          "exact_type_preserving_topology_classes": 2,
+          "topology_entropy_nats": 0.41011631828841,
+          "effective_topology_classes": 1.5069930657725392,
+          "maximum_topology_mass": 0.8571428571428559,
+          "sampled_distinct_topologies": 2,
+          "observed_joint_role_passes": 4096
+        }
+      }
+    },
+    {
+      "name": "cycle_0.8_other_0.2",
+      "target": {
+        "format": "anonymous-joint-relation-degree-v1",
+        "family_pairs": [
+          [
+            0,
+            0
+          ]
+        ],
+        "groups": {
+          "0": {
+            "nodes": 6,
+            "rows": [
+              [
+                2
+              ]
+            ],
+            "counts": [
+              6
+            ]
+          }
+        }
+      },
+      "probabilities": [
+        0.8,
+        0.2,
+        0.2,
+        0.2,
+        0.8,
+        0.8,
+        0.2,
+        0.2,
+        0.2,
+        0.8,
+        0.2,
+        0.2,
+        0.8,
+        0.2,
+        0.8
+      ],
+      "truth": {
+        "C_size": 70,
+        "admissible_C_size": 70,
+        "q_C": 0.03701712355328001,
+        "log_q_C": -3.296374674658921,
+        "MAP": {
+          "scope": "anonymous GLOBAL optimum by complete enumeration ONLY",
+          "representative_code": 21041,
+          "exact_FP64_tied_maximizers": 1,
+          "within_tie_tolerance_count": 1,
+          "tie_rule": "smallest graph code among exact FP64 maximizers; not an equivariant tie rule"
+        },
+        "distributions": {
+          "independent": {
+            "log_partition": 0.0,
+            "normalization_error": 2.220446049250313e-16,
+            "mathematical_support_size": 32768,
+            "numerical_positive_count": 32768,
+            "numerical_underflow_count": 0
+          },
+          "uniform_feasible": {
+            "log_partition": 4.248495242049359,
+            "normalization_error": 3.3306690738754696e-16,
+            "mathematical_support_size": 70,
+            "numerical_positive_count": 70,
+            "numerical_underflow_count": 0
+          },
+          "conditional_T1": {
+            "log_partition": -3.296374674658921,
+            "normalization_error": 2.220446049250313e-16,
+            "mathematical_support_size": 70,
+            "numerical_positive_count": 70,
+            "numerical_underflow_count": 0
+          },
+          "conditional_T2": {
+            "log_partition": -0.9047532370359089,
+            "normalization_error": 2.220446049250313e-16,
+            "mathematical_support_size": 70,
+            "numerical_positive_count": 70,
+            "numerical_underflow_count": 0
+          }
+        }
+      },
+      "fixed_assignment_MAP": {
+        "scope": "MAP under ONE FIXED COMPLETE role matching",
+        "status": "optimal_fixed_matching",
+        "blocks": [
+          {
+            "family": 0,
+            "pair": [
+              0,
+              0
+            ],
+            "original_slots": 15,
+            "free_variables": 15,
+            "residual_edges": 6,
+            "algorithm": "binary same-type f-factor MILP",
+            "solver_status": 0,
+            "solver_message": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
+            "warnings": [
+              "Unrecognized options detected: {'threads'}. These will be passed to HiGHS verbatim."
+            ],
+            "seconds": 0.0014472948387265205,
+            "status": "optimal",
+            "objective": -8.317766166719345,
+            "lower_bound": -8.317766166719345,
+            "gap": 0.0,
+            "objective_tolerance": 2.0831776616671932e-07,
+            "integrality_error": 0.0,
+            "independent_degree_error": 0,
+            "certificate": "HiGHS branch-and-bound bound; independent exact binary degree feasibility; not interval arithmetic",
+            "node_count": 1
+          }
+        ],
+        "solver_options": {
+          "bipartite": "scipy.linprog highs-ds TU degree matching LP",
+          "same_type": "scipy.milp binary simple-graph f-factor",
+          "lp_primal_feasibility_tolerance": 1e-07,
+          "lp_dual_feasibility_tolerance": 1e-07,
+          "external_integrality_atol": 1e-06,
+          "objective_atol": 2e-07,
+          "objective_rtol": 1e-09,
+          "mip_rel_gap": 0.0,
+          "mip_node_limit": 100000,
+          "threads": 1,
+          "per_small_solve_seconds": 10.0
+        },
+        "optimal": true,
+        "tie_rule": "solver representative; no tied-output equivariance claim",
+        "hard_zero_slots": 0,
+        "hard_one_slots": 0,
+        "finite_logit_free_slots": 15,
+        "exact_joint_role_multiset": true,
+        "exact_assigned_degrees": true,
+        "exact_support": true,
+        "log_q": -3.347153269713146,
+        "log_q_upper_bound": -3.3471532697131465,
+        "log_q_gap": -4.440892098500626e-16,
+        "physical_edges": 6,
+        "seconds": 0.002930738963186741,
+        "no_anonymous_global_optimality_claim": true,
+        "no_sampling_claim": true
+      },
+      "exact_fixed_assignment_log_q": -3.347153269713146,
+      "fixed_assignment_graph_code": 21041,
+      "exact_anonymous_MAP_log_q": -3.347153269713146,
+      "role_mixture_counterexample": {
+        "distinct_complete_role_assignments": 1,
+        "min_log_assignment_partition": -3.296374674658921,
+        "max_log_assignment_partition": -3.296374674658921,
+        "TV_uniform_assignment_mixture_vs_true_conditional": 0.0,
+        "meaning": "uniform role assignment is not q conditional unless all assignment partition functions are equal"
+      },
+      "methods": {
+        "independent": {
+          "schema_simple_undirected_rate": 1.0,
+          "exact_joint_role_rate": 0.037017123553280004,
+          "mathematical_support_size": 32768,
+          "numerically_positive_support": 32768,
+          "entropy_nats": 7.506036353072817,
+          "effective_graph_count_exp_entropy": 1818.9894035458547,
+          "inverse_simpson_graph_count": 325.3616107249587,
+          "maximum_single_graph_probability": 0.03518437208883201,
+          "sampled_distinct_labelled_graphs": 1766,
+          "expected_distinct_labelled_graphs": 1756.7620166160632,
+          "expected_two_graph_edge_symmetric_difference": 4.800000000000441,
+          "connected_rate": 0.8439132653158324,
+          "mean_triangles": 1.1679999999999993,
+          "mean_original_log_q_nats": -7.506036353072796,
+          "mean_original_log_q_per_slot": -0.5004024235381864,
+          "exact_type_preserving_topology_classes": 156,
+          "topology_entropy_nats": 4.18140434380322,
+          "effective_topology_classes": 65.45771383176071,
+          "maximum_topology_mass": 0.06624072695808002,
+          "sampled_distinct_topologies": 133,
+          "observed_joint_role_passes": 153
+        },
+        "MAP": {
+          "schema_simple_undirected_rate": 1.0,
+          "exact_joint_role_rate": 1.0,
+          "mathematical_support_size": 1,
+          "numerically_positive_support": 1,
+          "entropy_nats": -0.0,
+          "effective_graph_count_exp_entropy": 1.0,
+          "inverse_simpson_graph_count": 1.0,
+          "maximum_single_graph_probability": 1.0,
+          "sampled_distinct_labelled_graphs": 1,
+          "expected_distinct_labelled_graphs": 1.0,
+          "expected_two_graph_edge_symmetric_difference": 0.0,
+          "connected_rate": 1.0,
+          "mean_triangles": 0.0,
+          "mean_original_log_q_nats": -3.347153269713146,
+          "mean_original_log_q_per_slot": -0.22314355131420974,
+          "exact_type_preserving_topology_classes": 1,
+          "topology_entropy_nats": -0.0,
+          "effective_topology_classes": 1.0,
+          "maximum_topology_mass": 1.0,
+          "sampled_distinct_topologies": 1,
+          "observed_joint_role_passes": 4096
+        },
+        "uniform_feasible": {
+          "schema_simple_undirected_rate": 1.0,
+          "exact_joint_role_rate": 0.9999999999999994,
+          "mathematical_support_size": 70,
+          "numerically_positive_support": 70,
+          "entropy_nats": 4.248495242049356,
+          "effective_graph_count_exp_entropy": 69.99999999999977,
+          "inverse_simpson_graph_count": 70.00000000000006,
+          "maximum_single_graph_probability": 0.01428571428571428,
+          "sampled_distinct_labelled_graphs": 70,
+          "expected_distinct_labelled_graphs": 70.0,
+          "expected_two_graph_edge_symmetric_difference": 7.200000000000003,
+          "connected_rate": 0.8571428571428568,
+          "mean_triangles": 0.2857142857142856,
+          "mean_original_log_q_nats": -13.328472669776353,
+          "mean_original_log_q_per_slot": -0.8885648446517569,
+          "exact_type_preserving_topology_classes": 2,
+          "topology_entropy_nats": 0.41011631828841,
+          "effective_topology_classes": 1.5069930657725392,
+          "maximum_topology_mass": 0.8571428571428559,
+          "sampled_distinct_topologies": 2,
+          "observed_joint_role_passes": 4096
+        },
+        "conditional_T1": {
+          "schema_simple_undirected_rate": 1.0,
+          "exact_joint_role_rate": 0.9999999999999998,
+          "mathematical_support_size": 70,
+          "numerically_positive_support": 70,
+          "entropy_nats": 0.33997500772673944,
+          "effective_graph_count_exp_entropy": 1.4049124781682647,
+          "inverse_simpson_graph_count": 1.10668925437083,
+          "maximum_single_graph_probability": 0.9504890902230676,
+          "sampled_distinct_labelled_graphs": 29,
+          "expected_distinct_labelled_graphs": 26.526404815373898,
+          "expected_two_graph_edge_symmetric_difference": 0.41113505226446223,
+          "connected_rate": 0.9887743794451801,
+          "mean_triangles": 0.02245124110963935,
+          "mean_original_log_q_nats": -3.636349682385659,
+          "mean_original_log_q_per_slot": -0.24242331215904395,
+          "exact_type_preserving_topology_classes": 2,
+          "topology_entropy_nats": 0.061560434621240015,
+          "effective_topology_classes": 1.0634947664901182,
+          "maximum_topology_mass": 0.9887743794451803,
+          "sampled_distinct_topologies": 2,
+          "observed_joint_role_passes": 4096
+        },
+        "conditional_T2": {
+          "schema_simple_undirected_rate": 1.0,
+          "exact_joint_role_rate": 0.9999999999999996,
+          "mathematical_support_size": 70,
+          "numerically_positive_support": 70,
+          "entropy_nats": 2.587511065781479,
+          "effective_graph_count_exp_entropy": 13.296635931886318,
+          "inverse_simpson_graph_count": 4.423221163052357,
+          "maximum_single_graph_probability": 0.463558171118153,
+          "sampled_distinct_labelled_graphs": 67,
+          "expected_distinct_labelled_graphs": 65.59327626494161,
+          "expected_two_graph_edge_symmetric_difference": 4.290259086608324,
+          "connected_rate": 0.9021050248981439,
+          "mean_triangles": 0.19578995020371198,
+          "mean_original_log_q_nats": -6.984528605634775,
+          "mean_original_log_q_per_slot": -0.4656352403756517,
+          "exact_type_preserving_topology_classes": 2,
+          "topology_entropy_nats": 0.32043298836062223,
+          "effective_topology_classes": 1.3777241737388513,
+          "maximum_topology_mass": 0.9021050248981438,
+          "sampled_distinct_topologies": 2,
+          "observed_joint_role_passes": 4096
+        }
+      }
+    },
+    {
+      "name": "two_triangles_0.8_other_0.2",
+      "target": {
+        "format": "anonymous-joint-relation-degree-v1",
+        "family_pairs": [
+          [
+            0,
+            0
+          ]
+        ],
+        "groups": {
+          "0": {
+            "nodes": 6,
+            "rows": [
+              [
+                2
+              ]
+            ],
+            "counts": [
+              6
+            ]
+          }
+        }
+      },
+      "probabilities": [
+        0.8,
+        0.8,
+        0.2,
+        0.2,
+        0.2,
+        0.8,
+        0.2,
+        0.2,
+        0.2,
+        0.2,
+        0.2,
+        0.2,
+        0.8,
+        0.8,
+        0.8
+      ],
+      "truth": {
+        "C_size": 70,
+        "admissible_C_size": 70,
+        "q_C": 0.03768244502528001,
+        "log_q_C": -3.278560942173243,
+        "MAP": {
+          "scope": "anonymous GLOBAL optimum by complete enumeration ONLY",
+          "representative_code": 28707,
+          "exact_FP64_tied_maximizers": 1,
+          "within_tie_tolerance_count": 1,
+          "tie_rule": "smallest graph code among exact FP64 maximizers; not an equivariant tie rule"
+        },
+        "distributions": {
+          "independent": {
+            "log_partition": 4.440892098500626e-16,
+            "normalization_error": 0.0,
+            "mathematical_support_size": 32768,
+            "numerical_positive_count": 32768,
+            "numerical_underflow_count": 0
+          },
+          "uniform_feasible": {
+            "log_partition": 4.248495242049359,
+            "normalization_error": 3.3306690738754696e-16,
+            "mathematical_support_size": 70,
+            "numerical_positive_count": 70,
+            "numerical_underflow_count": 0
+          },
+          "conditional_T1": {
+            "log_partition": -3.278560942173243,
+            "normalization_error": 0.0,
+            "mathematical_support_size": 70,
+            "numerical_positive_count": 70,
+            "numerical_underflow_count": 0
+          },
+          "conditional_T2": {
+            "log_partition": -0.8396914259484136,
+            "normalization_error": 0.0,
+            "mathematical_support_size": 70,
+            "numerical_positive_count": 70,
+            "numerical_underflow_count": 0
+          }
+        }
+      },
+      "fixed_assignment_MAP": {
+        "scope": "MAP under ONE FIXED COMPLETE role matching",
+        "status": "optimal_fixed_matching",
+        "blocks": [
+          {
+            "family": 0,
+            "pair": [
+              0,
+              0
+            ],
+            "original_slots": 15,
+            "free_variables": 15,
+            "residual_edges": 6,
+            "algorithm": "binary same-type f-factor MILP",
+            "solver_status": 0,
+            "solver_message": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
+            "warnings": [
+              "Unrecognized options detected: {'threads'}. These will be passed to HiGHS verbatim."
+            ],
+            "seconds": 0.0013658972457051277,
+            "status": "optimal",
+            "objective": -8.317766166719345,
+            "lower_bound": -8.317766166719345,
+            "gap": 0.0,
+            "objective_tolerance": 2.0831776616671932e-07,
+            "integrality_error": 0.0,
+            "independent_degree_error": 0,
+            "certificate": "HiGHS branch-and-bound bound; independent exact binary degree feasibility; not interval arithmetic",
+            "node_count": 1
+          }
+        ],
+        "solver_options": {
+          "bipartite": "scipy.linprog highs-ds TU degree matching LP",
+          "same_type": "scipy.milp binary simple-graph f-factor",
+          "lp_primal_feasibility_tolerance": 1e-07,
+          "lp_dual_feasibility_tolerance": 1e-07,
+          "external_integrality_atol": 1e-06,
+          "objective_atol": 2e-07,
+          "objective_rtol": 1e-09,
+          "mip_rel_gap": 0.0,
+          "mip_node_limit": 100000,
+          "threads": 1,
+          "per_small_solve_seconds": 10.0
+        },
+        "optimal": true,
+        "tie_rule": "solver representative; no tied-output equivariance claim",
+        "hard_zero_slots": 0,
+        "hard_one_slots": 0,
+        "finite_logit_free_slots": 15,
+        "exact_joint_role_multiset": true,
+        "exact_assigned_degrees": true,
+        "exact_support": true,
+        "log_q": -3.347153269713146,
+        "log_q_upper_bound": -3.347153269713143,
+        "log_q_gap": 3.1086244689504383e-15,
+        "physical_edges": 6,
+        "seconds": 0.0027407407760620117,
+        "no_anonymous_global_optimality_claim": true,
+        "no_sampling_claim": true
+      },
+      "exact_fixed_assignment_log_q": -3.347153269713146,
+      "fixed_assignment_graph_code": 28707,
+      "exact_anonymous_MAP_log_q": -3.347153269713146,
+      "role_mixture_counterexample": {
+        "distinct_complete_role_assignments": 1,
+        "min_log_assignment_partition": -3.278560942173243,
+        "max_log_assignment_partition": -3.278560942173243,
+        "TV_uniform_assignment_mixture_vs_true_conditional": 0.0,
+        "meaning": "uniform role assignment is not q conditional unless all assignment partition functions are equal"
+      },
+      "methods": {
+        "independent": {
+          "schema_simple_undirected_rate": 1.0,
+          "exact_joint_role_rate": 0.03768244502528,
+          "mathematical_support_size": 32768,
+          "numerically_positive_support": 32768,
+          "entropy_nats": 7.50603635307282,
+          "effective_graph_count_exp_entropy": 1818.9894035458594,
+          "inverse_simpson_graph_count": 325.3616107249573,
+          "maximum_single_graph_probability": 0.035184372088831996,
+          "sampled_distinct_labelled_graphs": 1762,
+          "expected_distinct_labelled_graphs": 1756.762016616065,
+          "expected_two_graph_edge_symmetric_difference": 4.8000000000002165,
+          "connected_rate": 0.7600473704038379,
+          "mean_triangles": 1.6000000000000003,
+          "mean_original_log_q_nats": -7.5060363530728065,
+          "mean_original_log_q_per_slot": -0.5004024235381871,
+          "exact_type_preserving_topology_classes": 156,
+          "topology_entropy_nats": 4.012688979085546,
+          "effective_topology_classes": 55.29535889658163,
+          "maximum_topology_mass": 0.08017227546623995,
+          "sampled_distinct_topologies": 134,
+          "observed_joint_role_passes": 145
+        },
+        "MAP": {
+          "schema_simple_undirected_rate": 1.0,
+          "exact_joint_role_rate": 1.0,
+          "mathematical_support_size": 1,
+          "numerically_positive_support": 1,
+          "entropy_nats": -0.0,
+          "effective_graph_count_exp_entropy": 1.0,
+          "inverse_simpson_graph_count": 1.0,
+          "maximum_single_graph_probability": 1.0,
+          "sampled_distinct_labelled_graphs": 1,
+          "expected_distinct_labelled_graphs": 1.0,
+          "expected_two_graph_edge_symmetric_difference": 0.0,
+          "connected_rate": 0.0,
+          "mean_triangles": 2.0,
+          "mean_original_log_q_nats": -3.347153269713146,
+          "mean_original_log_q_per_slot": -0.22314355131420974,
+          "exact_type_preserving_topology_classes": 1,
+          "topology_entropy_nats": -0.0,
+          "effective_topology_classes": 1.0,
+          "maximum_topology_mass": 1.0,
+          "sampled_distinct_topologies": 1,
+          "observed_joint_role_passes": 4096
+        },
+        "uniform_feasible": {
+          "schema_simple_undirected_rate": 1.0,
+          "exact_joint_role_rate": 0.9999999999999994,
+          "mathematical_support_size": 70,
+          "numerically_positive_support": 70,
+          "entropy_nats": 4.248495242049356,
+          "effective_graph_count_exp_entropy": 69.99999999999977,
+          "inverse_simpson_graph_count": 70.00000000000006,
+          "maximum_single_graph_probability": 0.01428571428571428,
+          "sampled_distinct_labelled_graphs": 70,
+          "expected_distinct_labelled_graphs": 70.0,
+          "expected_two_graph_edge_symmetric_difference": 7.200000000000003,
+          "connected_rate": 0.8571428571428568,
+          "mean_triangles": 0.2857142857142856,
+          "mean_original_log_q_nats": -13.328472669776353,
+          "mean_original_log_q_per_slot": -0.8885648446517569,
+          "exact_type_preserving_topology_classes": 2,
+          "topology_entropy_nats": 0.41011631828841,
+          "effective_topology_classes": 1.5069930657725392,
+          "maximum_topology_mass": 0.8571428571428559,
+          "sampled_distinct_topologies": 2,
+          "observed_joint_role_passes": 4096
+        },
+        "conditional_T1": {
+          "schema_simple_undirected_rate": 1.0,
+          "exact_joint_role_rate": 1.0,
+          "mathematical_support_size": 70,
+          "numerically_positive_support": 70,
+          "entropy_nats": 0.43975625394289375,
+          "effective_graph_count_exp_entropy": 1.5523287983700658,
+          "inverse_simpson_graph_count": 1.1467249662834613,
+          "maximum_single_graph_probability": 0.9337072492304541,
+          "sampled_distinct_labelled_graphs": 24,
+          "expected_distinct_labelled_graphs": 21.552276324947147,
+          "expected_two_graph_edge_symmetric_difference": 0.5255202820961111,
+          "connected_rate": 0.06616452559188664,
+          "mean_triangles": 1.8676709488162266,
+          "mean_original_log_q_nats": -3.718317196116137,
+          "mean_original_log_q_per_slot": -0.24788781307440913,
+          "exact_type_preserving_topology_classes": 2,
+          "topology_entropy_nats": 0.2436028167985419,
+          "effective_topology_classes": 1.2758374886233086,
+          "maximum_topology_mass": 0.9338354744081133,
+          "sampled_distinct_topologies": 2,
+          "observed_joint_role_passes": 4096
+        },
+        "conditional_T2": {
+          "schema_simple_undirected_rate": 1.0,
+          "exact_joint_role_rate": 1.0,
+          "mathematical_support_size": 70,
+          "numerically_positive_support": 70,
+          "entropy_nats": 2.6173977422174395,
+          "effective_graph_count_exp_entropy": 13.700026158577009,
+          "inverse_simpson_graph_count": 4.948963151400876,
+          "maximum_single_graph_probability": 0.4343584305408272,
+          "sampled_distinct_labelled_graphs": 67,
+          "expected_distinct_labelled_graphs": 66.0711130350632,
+          "expected_two_graph_edge_symmetric_difference": 4.226593001510263,
+          "connected_rate": 0.550371155885472,
+          "mean_triangles": 0.8992576882290563,
+          "mean_original_log_q_nats": -6.914178336331707,
+          "mean_original_log_q_per_slot": -0.46094522242211383,
+          "exact_type_preserving_topology_classes": 2,
+          "topology_entropy_nats": 0.6880640552936418,
+          "effective_topology_classes": 1.9898595439059048,
+          "maximum_topology_mass": 0.5503711558854717,
+          "sampled_distinct_topologies": 2,
+          "observed_joint_role_passes": 4096
+        }
+      }
+    },
+    {
+      "name": "hetero_joint",
+      "target": {
+        "format": "anonymous-joint-relation-degree-v1",
+        "family_pairs": [
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "groups": {
+          "0": {
+            "nodes": 3,
+            "rows": [
+              [
+                0,
+                1,
+                0
+              ],
+              [
+                1,
+                0,
+                0
+              ],
+              [
+                1,
+                2,
+                0
+              ]
+            ],
+            "counts": [
+              1,
+              1,
+              1
+            ]
+          },
+          "1": {
+            "nodes": 3,
+            "rows": [
+              [
+                0,
+                1,
+                0
+              ],
+              [
+                0,
+                1,
+                1
+              ]
+            ],
+            "counts": [
+              1,
+              2
+            ]
+          }
+        }
+      },
+      "probabilities": [
+        0.75,
+        0.25,
+        0.6,
+        0.4,
+        0.8,
+        0.2,
+        0.55,
+        0.45,
+        0.65,
+        0.35,
+        0.7,
+        0.3,
+        0.4,
+        0.6,
+        0.5
+      ],
+      "truth": {
+        "C_size": 54,
+        "admissible_C_size": 54,
+        "q_C": 0.0015386561190000006,
+        "log_q_C": -6.476845893537268,
+        "MAP": {
+          "scope": "anonymous GLOBAL optimum by complete enumeration ONLY",
+          "representative_code": 9537,
+          "exact_FP64_tied_maximizers": 1,
+          "within_tie_tolerance_count": 1,
+          "tie_rule": "smallest graph code among exact FP64 maximizers; not an equivariant tie rule"
+        },
+        "distributions": {
+          "independent": {
+            "log_partition": 8.881784197001252e-16,
+            "normalization_error": 4.440892098500626e-16,
+            "mathematical_support_size": 32768,
+            "numerical_positive_count": 32768,
+            "numerical_underflow_count": 0
+          },
+          "uniform_feasible": {
+            "log_partition": 3.9889840465642745,
+            "normalization_error": 0.0,
+            "mathematical_support_size": 54,
+            "numerical_positive_count": 54,
+            "numerical_underflow_count": 0
+          },
+          "conditional_T1": {
+            "log_partition": -6.476845893537268,
+            "normalization_error": 6.661338147750939e-16,
+            "mathematical_support_size": 54,
+            "numerical_positive_count": 54,
+            "numerical_underflow_count": 0
+          },
+          "conditional_T2": {
+            "log_partition": -1.4895495758682844,
+            "normalization_error": 2.220446049250313e-16,
+            "mathematical_support_size": 54,
+            "numerical_positive_count": 54,
+            "numerical_underflow_count": 0
+          }
+        }
+      },
+      "fixed_assignment_MAP": {
+        "scope": "MAP under ONE FIXED COMPLETE role matching",
+        "status": "optimal_fixed_matching",
+        "blocks": [
+          {
+            "family": 0,
+            "pair": [
+              0,
+              0
+            ],
+            "original_slots": 3,
+            "free_variables": 1,
+            "residual_edges": 1,
+            "algorithm": "binary same-type f-factor MILP",
+            "solver_status": 0,
+            "solver_message": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
+            "warnings": [
+              "Unrecognized options detected: {'threads'}. These will be passed to HiGHS verbatim."
+            ],
+            "seconds": 0.0012721996754407883,
+            "status": "optimal",
+            "objective": -0.4054651081081643,
+            "lower_bound": -0.4054651081081643,
+            "gap": 0.0,
+            "objective_tolerance": 2.0099999999999999e-07,
+            "integrality_error": 0.0,
+            "independent_degree_error": 0,
+            "certificate": "HiGHS branch-and-bound bound; independent exact binary degree feasibility; not interval arithmetic",
+            "node_count": 0
+          },
+          {
+            "family": 1,
+            "pair": [
+              0,
+              1
+            ],
+            "original_slots": 9,
+            "free_variables": 6,
+            "residual_edges": 3,
+            "algorithm": "bipartite TU LP",
+            "solver_status": 0,
+            "solver_message": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
+            "warnings": [
+              "Unrecognized options detected: {'threads': 1}. These will be passed to HiGHS verbatim."
+            ],
+            "seconds": 0.0020504090934991837,
+            "status": "optimal",
+            "objective": 0.0800427076735366,
+            "lower_bound": 0.0800427076735366,
+            "gap": 0.0,
+            "objective_tolerance": 2.0099999999999999e-07,
+            "integrality_error": 0.0,
+            "independent_degree_error": 0,
+            "certificate": "TU vertex integrality + independently recomputed Lagrangian lower bound (FP arithmetic)",
+            "node_count": 0
+          },
+          {
+            "family": 2,
+            "pair": [
+              1,
+              1
+            ],
+            "original_slots": 3,
+            "free_variables": 1,
+            "residual_edges": 1,
+            "algorithm": "binary same-type f-factor MILP",
+            "solver_status": 0,
+            "solver_message": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
+            "warnings": [
+              "Unrecognized options detected: {'threads'}. These will be passed to HiGHS verbatim."
+            ],
+            "seconds": 0.0009561255574226379,
+            "status": "optimal",
+            "objective": 0.0,
+            "lower_bound": 0.0,
+            "gap": 0.0,
+            "objective_tolerance": 2.0099999999999999e-07,
+            "integrality_error": 0.0,
+            "independent_degree_error": 0,
+            "certificate": "HiGHS branch-and-bound bound; independent exact binary degree feasibility; not interval arithmetic",
+            "node_count": 0
+          }
+        ],
+        "solver_options": {
+          "bipartite": "scipy.linprog highs-ds TU degree matching LP",
+          "same_type": "scipy.milp binary simple-graph f-factor",
+          "lp_primal_feasibility_tolerance": 1e-07,
+          "lp_dual_feasibility_tolerance": 1e-07,
+          "external_integrality_atol": 1e-06,
+          "objective_atol": 2e-07,
+          "objective_rtol": 1e-09,
+          "mip_rel_gap": 0.0,
+          "mip_node_limit": 100000,
+          "threads": 1,
+          "per_small_solve_seconds": 10.0
+        },
+        "optimal": true,
+        "tie_rule": "solver representative; no tied-output equivariance claim",
+        "hard_zero_slots": 0,
+        "hard_one_slots": 0,
+        "finite_logit_free_slots": 15,
+        "exact_joint_role_multiset": true,
+        "exact_assigned_degrees": true,
+        "exact_support": true,
+        "log_q": -11.166112874554782,
+        "log_q_upper_bound": -11.16611287455478,
+        "log_q_gap": 1.7763568394002505e-15,
+        "physical_edges": 5,
+        "seconds": 0.0070460494607687,
+        "no_anonymous_global_optimality_claim": true,
+        "no_sampling_claim": true
+      },
+      "exact_fixed_assignment_log_q": -11.166112874554782,
+      "fixed_assignment_graph_code": 18964,
+      "exact_anonymous_MAP_log_q": -8.320450113957557,
+      "role_mixture_counterexample": {
+        "distinct_complete_role_assignments": 18,
+        "min_log_assignment_partition": -11.675360162721477,
+        "max_log_assignment_partition": -8.109054530437719,
+        "TV_uniform_assignment_mixture_vs_true_conditional": 0.4118653751150486,
+        "meaning": "uniform role assignment is not q conditional unless all assignment partition functions are equal"
+      },
+      "joint_vs_marginals": {
+        "joint_feasible_graphs": 54,
+        "marginal_only_graphs": 162,
+        "concrete_wrong_graph_code": 5665,
+        "wrong_graph_joint_pass": false,
+        "wrong_graph_marginals_pass": true
+      },
+      "methods": {
+        "independent": {
+          "schema_simple_undirected_rate": 1.0,
+          "exact_joint_role_rate": 0.001538656119,
+          "mathematical_support_size": 32768,
+          "numerically_positive_support": 32768,
+          "entropy_nats": 9.40356849451719,
+          "effective_graph_count_exp_entropy": 12131.595109854667,
+          "inverse_simpson_graph_count": 5943.017554875734,
+          "maximum_single_graph_probability": 0.0014609174579999985,
+          "sampled_distinct_labelled_graphs": 3199,
+          "expected_distinct_labelled_graphs": 3176.298653010439,
+          "expected_two_graph_edge_symmetric_difference": 6.550000000000034,
+          "connected_rate": 0.8380369151869989,
+          "mean_triangles": 2.35825,
+          "mean_original_log_q_nats": -9.403568494517188,
+          "mean_original_log_q_per_slot": -0.6269045663011459,
+          "exact_type_preserving_topology_classes": 1408,
+          "topology_entropy_nats": 7.011990877772059,
+          "effective_topology_classes": 1109.861906237656,
+          "maximum_topology_mass": 0.0031450836239999974,
+          "sampled_distinct_topologies": 1147,
+          "observed_joint_role_passes": 1
+        },
+        "MAP": {
+          "schema_simple_undirected_rate": 1.0,
+          "exact_joint_role_rate": 1.0,
+          "mathematical_support_size": 1,
+          "numerically_positive_support": 1,
+          "entropy_nats": -0.0,
+          "effective_graph_count_exp_entropy": 1.0,
+          "inverse_simpson_graph_count": 1.0,
+          "maximum_single_graph_probability": 1.0,
+          "sampled_distinct_labelled_graphs": 1,
+          "expected_distinct_labelled_graphs": 1.0,
+          "expected_two_graph_edge_symmetric_difference": 0.0,
+          "connected_rate": 0.0,
+          "mean_triangles": 1.0,
+          "mean_original_log_q_nats": -8.320450113957557,
+          "mean_original_log_q_per_slot": -0.5546966742638372,
+          "exact_type_preserving_topology_classes": 1,
+          "topology_entropy_nats": -0.0,
+          "effective_topology_classes": 1.0,
+          "maximum_topology_mass": 1.0,
+          "sampled_distinct_topologies": 1,
+          "observed_joint_role_passes": 4096
+        },
+        "uniform_feasible": {
+          "schema_simple_undirected_rate": 1.0,
+          "exact_joint_role_rate": 1.0,
+          "mathematical_support_size": 54,
+          "numerically_positive_support": 54,
+          "entropy_nats": 3.988984046564275,
+          "effective_graph_count_exp_entropy": 54.00000000000003,
+          "inverse_simpson_graph_count": 54.0,
+          "maximum_single_graph_probability": 0.018518518518518517,
+          "sampled_distinct_labelled_graphs": 54,
+          "expected_distinct_labelled_graphs": 54.0,
+          "expected_two_graph_edge_symmetric_difference": 6.666666666666668,
+          "connected_rate": 0.6666666666666666,
+          "mean_triangles": 0.3333333333333333,
+          "mean_original_log_q_nats": -11.49153527498941,
+          "mean_original_log_q_per_slot": -0.7661023516659606,
+          "exact_type_preserving_topology_classes": 2,
+          "topology_entropy_nats": 0.6365141682948132,
+          "effective_topology_classes": 1.8898815748423106,
+          "maximum_topology_mass": 0.6666666666666661,
+          "sampled_distinct_topologies": 2,
+          "observed_joint_role_passes": 4096
+        },
+        "conditional_T1": {
+          "schema_simple_undirected_rate": 1.0,
+          "exact_joint_role_rate": 1.0000000000000004,
+          "mathematical_support_size": 54,
+          "numerically_positive_support": 54,
+          "entropy_nats": 3.0752992881107435,
+          "effective_graph_count_exp_entropy": 21.656362433490386,
+          "inverse_simpson_graph_count": 13.046890443036741,
+          "maximum_single_graph_probability": 0.15824604340978168,
+          "sampled_distinct_labelled_graphs": 52,
+          "expected_distinct_labelled_graphs": 52.53529356524594,
+          "expected_two_graph_edge_symmetric_difference": 5.340632173938838,
+          "connected_rate": 0.5951005099145227,
+          "mean_triangles": 0.40489949008547793,
+          "mean_original_log_q_nats": -9.552145181648015,
+          "mean_original_log_q_per_slot": -0.6368096787765344,
+          "exact_type_preserving_topology_classes": 2,
+          "topology_entropy_nats": 0.6749482959577249,
+          "effective_topology_classes": 1.9639314301510151,
+          "maximum_topology_mass": 0.5951005099145226,
+          "sampled_distinct_topologies": 2,
+          "observed_joint_role_passes": 4096
+        },
+        "conditional_T2": {
+          "schema_simple_undirected_rate": 1.0,
+          "exact_joint_role_rate": 0.9999999999999998,
+          "mathematical_support_size": 54,
+          "numerically_positive_support": 54,
+          "entropy_nats": 3.7307282873749545,
+          "effective_graph_count_exp_entropy": 41.70947358833994,
+          "inverse_simpson_graph_count": 33.04091829836847,
+          "maximum_single_graph_probability": 0.06920546253475335,
+          "sampled_distinct_labelled_graphs": 54,
+          "expected_distinct_labelled_graphs": 53.99994816738081,
+          "expected_two_graph_edge_symmetric_difference": 6.319868338031561,
+          "connected_rate": 0.6548426804081621,
+          "mean_triangles": 0.34515731959183776,
+          "mean_original_log_q_nats": -10.440555726486476,
+          "mean_original_log_q_per_slot": -0.6960370484324317,
+          "exact_type_preserving_topology_classes": 2,
+          "topology_entropy_nats": 0.644397177153593,
+          "effective_topology_classes": 1.9048384029895884,
+          "maximum_topology_mass": 0.6548426804081621,
+          "sampled_distinct_topologies": 2,
+          "observed_joint_role_passes": 4096
+        }
+      }
+    }
+  ]
+}

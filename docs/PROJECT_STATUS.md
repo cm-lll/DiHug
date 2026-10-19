@@ -1,4 +1,15 @@
-# Current scoped review: dynamic matching v1.1 CLI repair
+# Current scoped review: anonymous joint-role discrete decoding CPU prototype
+
+2026-10-19，独立experiments/anonymous_role_joint_decode_v1；定义基线124d227，冻结设置a52f4f4。
+27 CPU通过、零跳过；6节点度2精确70解=60六环+10双三角形，异质联合54解而边际162解。
+条件T1可高度集中或不连通；固定匹配MAP不是匿名全局MAP，均匀角色混合不是q条件分布。
+四组全部概率/主要指标/抽样/固定最优值独立重算通过；输出IMDB联合角色与schema另行验收。
+一次IMDB随机工程评分固定匹配检查：1653节点/1365378槽/4079边，12.935秒含清理，峰RSS481.23MiB。
+没有真实模型概率，不声称模型生成质量或IMDB匿名条件采样有效。旧源码、权重、结果保留。
+主面板81920工程抽样，同seed证据重放一次共163840次执行；无BW/GPU/模型/训练/科学完整链。
+证据results/anonymous_role_joint_decode_v1_20261019；等待审查，不自动后继。
+
+# Previous scoped review: dynamic matching v1.1 CLI repair
 
 2026-10-19，基于50c6ab1独立目录experiments/bw_role_dynamic_matching_v1_1，旧版保留。
 确认v1监督器返回整数，入口误用字典接口；v1.1原样返回退出码，状态另读controller.json。

@@ -1,4 +1,11 @@
-# Current scoped handoff: dynamic matching v1.1
+# Current scoped handoff: anonymous joint-role discrete CPU prototype
+
+2026-10-19独立目录experiments/anonymous_role_joint_decode_v1，27 CPU和完整概率/主要指标重算通过。
+IMDB仅一次随机工程评分固定匹配可行性/成本验证，不是真实模型质量或匿名条件采样实验。
+下一决策：独立审查固定匹配MAP与匿名条件分布边界；不自动连接BW、训练、完整科学链或追加规模检查。
+旧版本/权重/结果保持。机器证据results/anonymous_role_joint_decode_v1_20261019。
+
+# Previous scoped handoff: dynamic matching v1.1
 
 2026-10-19仅修整数退出码、公开CLI工程端到端检查及B1→六状态完整发行清单SHA绑定。
 186项CPU通过；数学/科学设置不变，旧版保留。独立ZIP解包复验、上传后停止等待复审。

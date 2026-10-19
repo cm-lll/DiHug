@@ -1,0 +1,224 @@
+{
+  "version": "IMDB_movie_complete_binary_undirected_bm_real_20261014_v1",
+  "reference_sha256": "10f1dbbbe55c6a069594b2dcb590d1b8295ca5436320ef4597cd30e6b7f73e42",
+  "source_reference": "results/bm_real_validation/bm_real_20261014_v1/IMDB_movie_reference.npz",
+  "source_meta_sha256": "31b5b37804bd1d18f68699cce233878dac37b9fcb5e4450a5867915951f365b0",
+  "source_meta": {
+    "node_types": [
+      "Director",
+      "Actor",
+      "Movie",
+      "Genre"
+    ],
+    "schema_by_type": {
+      "Director": [
+        "default"
+      ],
+      "Actor": [
+        "default"
+      ],
+      "Movie": [
+        "default"
+      ],
+      "Genre": [
+        "default"
+      ]
+    },
+    "fam_endpoints": {
+      "link_Director_Director": {
+        "src_type": "Director",
+        "dst_type": "Director"
+      },
+      "link_Director_Actor": {
+        "src_type": "Director",
+        "dst_type": "Actor"
+      },
+      "link_Director_Movie": {
+        "src_type": "Director",
+        "dst_type": "Movie"
+      },
+      "link_Director_Genre": {
+        "src_type": "Director",
+        "dst_type": "Genre"
+      },
+      "link_Actor_Director": {
+        "src_type": "Actor",
+        "dst_type": "Director"
+      },
+      "link_Actor_Actor": {
+        "src_type": "Actor",
+        "dst_type": "Actor"
+      },
+      "link_Actor_Movie": {
+        "src_type": "Actor",
+        "dst_type": "Movie"
+      },
+      "link_Actor_Genre": {
+        "src_type": "Actor",
+        "dst_type": "Genre"
+      },
+      "link_Movie_Director": {
+        "src_type": "Movie",
+        "dst_type": "Director"
+      },
+      "link_Movie_Actor": {
+        "src_type": "Movie",
+        "dst_type": "Actor"
+      },
+      "link_Movie_Movie": {
+        "src_type": "Movie",
+        "dst_type": "Movie"
+      },
+      "link_Movie_Genre": {
+        "src_type": "Movie",
+        "dst_type": "Genre"
+      },
+      "link_Genre_Director": {
+        "src_type": "Genre",
+        "dst_type": "Director"
+      },
+      "link_Genre_Actor": {
+        "src_type": "Genre",
+        "dst_type": "Actor"
+      },
+      "link_Genre_Movie": {
+        "src_type": "Genre",
+        "dst_type": "Movie"
+      },
+      "link_Genre_Genre": {
+        "src_type": "Genre",
+        "dst_type": "Genre"
+      }
+    },
+    "fam_label2id": {
+      "link_Director_Director": {
+        "link_Director_Director:__none__": 1
+      },
+      "link_Director_Actor": {
+        "link_Director_Actor:__none__": 1
+      },
+      "link_Director_Movie": {
+        "link_Director_Movie:__none__": 1
+      },
+      "link_Director_Genre": {
+        "link_Director_Genre:__none__": 1
+      },
+      "link_Actor_Director": {
+        "link_Actor_Director:__none__": 1
+      },
+      "link_Actor_Actor": {
+        "link_Actor_Actor:__none__": 1
+      },
+      "link_Actor_Movie": {
+        "link_Actor_Movie:__none__": 1
+      },
+      "link_Actor_Genre": {
+        "link_Actor_Genre:__none__": 1
+      },
+      "link_Movie_Director": {
+        "link_Movie_Director:__none__": 1
+      },
+      "link_Movie_Actor": {
+        "link_Movie_Actor:__none__": 1
+      },
+      "link_Movie_Movie": {
+        "link_Movie_Movie:__none__": 1
+      },
+      "link_Movie_Genre": {
+        "link_Movie_Genre:__none__": 1
+      },
+      "link_Genre_Director": {
+        "link_Genre_Director:__none__": 1
+      },
+      "link_Genre_Actor": {
+        "link_Genre_Actor:__none__": 1
+      },
+      "link_Genre_Movie": {
+        "link_Genre_Movie:__none__": 1
+      },
+      "link_Genre_Genre": {
+        "link_Genre_Genre:__none__": 1
+      }
+    },
+    "fam_id2label": {
+      "link_Director_Director": {
+        "1": "link_Director_Director:__none__"
+      },
+      "link_Director_Actor": {
+        "1": "link_Director_Actor:__none__"
+      },
+      "link_Director_Movie": {
+        "1": "link_Director_Movie:__none__"
+      },
+      "link_Director_Genre": {
+        "1": "link_Director_Genre:__none__"
+      },
+      "link_Actor_Director": {
+        "1": "link_Actor_Director:__none__"
+      },
+      "link_Actor_Actor": {
+        "1": "link_Actor_Actor:__none__"
+      },
+      "link_Actor_Movie": {
+        "1": "link_Actor_Movie:__none__"
+      },
+      "link_Actor_Genre": {
+        "1": "link_Actor_Genre:__none__"
+      },
+      "link_Movie_Director": {
+        "1": "link_Movie_Director:__none__"
+      },
+      "link_Movie_Actor": {
+        "1": "link_Movie_Actor:__none__"
+      },
+      "link_Movie_Movie": {
+        "1": "link_Movie_Movie:__none__"
+      },
+      "link_Movie_Genre": {
+        "1": "link_Movie_Genre:__none__"
+      },
+      "link_Genre_Director": {
+        "1": "link_Genre_Director:__none__"
+      },
+      "link_Genre_Actor": {
+        "1": "link_Genre_Actor:__none__"
+      },
+      "link_Genre_Movie": {
+        "1": "link_Genre_Movie:__none__"
+      },
+      "link_Genre_Genre": {
+        "1": "link_Genre_Genre:__none__"
+      }
+    },
+    "unknown_edges_dropped": 0,
+    "num_nodes_by_type": {
+      "Director": 410,
+      "Actor": 494,
+      "Movie": 726,
+      "Genre": 23
+    },
+    "num_edges_by_family": {
+      "link_Director_Director": 0,
+      "link_Director_Actor": 604,
+      "link_Director_Movie": 642,
+      "link_Director_Genre": 0,
+      "link_Actor_Director": 0,
+      "link_Actor_Actor": 15,
+      "link_Actor_Movie": 739,
+      "link_Actor_Genre": 0,
+      "link_Movie_Director": 0,
+      "link_Movie_Actor": 0,
+      "link_Movie_Movie": 0,
+      "link_Movie_Genre": 2079,
+      "link_Genre_Director": 0,
+      "link_Genre_Actor": 0,
+      "link_Genre_Movie": 0,
+      "link_Genre_Genre": 0
+    },
+    "num_undirected_edges": 4079,
+    "undirected_ground_truth": true,
+    "bidirectional_mode": "canonical_single",
+    "source": "HGEN IMDB_movie (full graph, undirected GT + canonical single directed edge)"
+  },
+  "interpretation": "Reuse frozen complete binary undirected physical-edge version; original weighted graph is a distinct representation; no new binarization/cropping/types/relations removed by this package."
+}
