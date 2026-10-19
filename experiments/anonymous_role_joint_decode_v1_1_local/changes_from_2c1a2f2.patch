@@ -1,0 +1,1203 @@
+--- /dev/null
++++ b/experiments/anonymous_role_joint_decode_v1_1_local/package/LOCAL_INPUT_CONTRACT.md
+@@ -0,0 +1,161 @@
++# Local frozen A1/B1 interface v1.1
++
++This is a STANDARD local-file contract, tested with explicitly SYNTHETIC fixtures.
++It is not a claim that the old real export has been connected or authenticated.
++No network, SSH, download, notebook path search, denoiser or chain exists here.
++Definition/source baseline: 2c1a2f2c0c2a4d82402979a03f41be0ad6b02586.
++
++## Caller trust root and files
++
++Pass --input MANIFEST (or its explicit parent root), --manifest-sha256 EXPECTED,
++--arm A|B, --output NEW_DISJOINT_DIR. EXPECTED must come from an independently
++sealed receipt, not from hashing the current untrusted manifest at invocation.
++Manifest has files.payload, files.target, files.source_receipt; each is a relative
++local path and EXPECTED sha256. No path may escape this explicit input root.
++All actual input bytes are checked against these pins and rehashed before success.
++No old ledger/manifest is written or repaired. Missing fields are errors.
++
++Manifest keys:
++
++* format: local_frozen_role_decode_v1
++* arm: A or B, t: integer1, unguided: true, seed: nonnegative integer
++* T:1000, query_rounds:20
++* p0_semantics: clean_edge_present_probability
++* q_semantics: next_state_edge_present_probability (required if q is present)
++* endpoint_convention: unordered_u_lt_v
++* relation_ids: zero_based_family_pairs_order
++* score_semantics: recorded_probability OR finite_clean_logits
++* query_sha256: original complete query digest described below
++* semantic_types: explicit distinct director, actor, movie type IDs
++* files: the three path/hash descriptors above
++
++source_receipt repeats arm, seed, t, unguided, query_sha256; includes
++source_kind=historical_frozen_output (synthetic_fixture only for engineering),
++weight_authentication=historical_receipt_only, and weight_sha256,
++source_manifest_sha256, config_sha256, reference_sha256, alpha_sha256.
++The reader checks actual payload/reference-target receipts, not unavailable
++weight bytes: “沿用历史来源记录，未重新认证权重字节”. These fields are not proof
++of authenticity if the caller does not possess an independently trusted pin.
++
++target.json: {profile: ANONYMOUS_PROFILE, reference_sha256: PIN}. Profile is the
++baseline anonymous-joint-relation-degree-v1 object with family_pairs and groups
++of integer type IDs -> nodes, unique COMPLETE R-dimensional rows and integer
++counts. No node-role assignment or reference edge IDs is included.
++
++## NPZ payload
++
++allow_pickle=False. All probabilities, prior, alpha and optional logits are FP64.
++Arrays are:
++
++* types[N] integer; pairs[R,2] integer, one unordered coarse-type pair per relation
++* slots[2,S] integer, each pair u<v; families[S] zero-based integer labels
++* state[S] binary X1, p0[S] clean present probability, support[S] integer -1/0/1
++* prior[R] reference relation density; alpha[1001] cumulative schedule, alpha[0]=1
++* query_block[S] int64, -1 only for inactive structural-zero families
++* query_ids[Q], query_families[Q], query_slots[2,Q], query_offsets[21], all int64
++* optional q[S]; optional clean_logits[S]
++
++All legal schema slots MUST be present, including fixed-zero relations.
++Slots may be stored in any order: the reader explicitly maps endpoints to
++schema.slots and checks family labels. It rejects duplicates, missing slots,
++self edges, reversed/illegal endpoints and wrong relation IDs. state/p0/q/
++support/query_block follow the INPUT slot order. types/pairs are not silently
++remapped to another schema or node inventory.
++
++Query IDs, unlike per-slot arrays, are original canonical TypedSlots IDs.
++The full20-block recipe is locally checked against the old source implementation:
++SeedSequence([seed,1,61]).spawn(R), per-active-family permutation and balanced
++quotas (including old RNG consumption), then concatenation in family order.
++Active means reference family edge count>0, NOT an independent schema prohibition.
++For each block digest.update(ids.tobytes()), then families.tobytes(), then
++query[2,Q].tobytes(), exactly old worker ordering, native little-endian int64.
++No new framing. Inactive slots stay in the full payload with exact support.
++Complete bytes, per-slot blocks, coverage, labels AND digest must agree; merely
++20 blocks or the correct length is insufficient. Legitimately reordered payload
++slots do not change original query IDs or the query byte stream.
++
++prior must equal the reference density implied by the anonymous target. Exact
++prior0/1 fixes its family to0/1; support/state/p0 must agree. Free p0 must be
++strictly between0 and1 in recorded_probability mode. A free numerical0/1 is NOT
++automatically a hard constraint. It is rejected unless finite_clean_logits is
++explicitly selected, the finite clean_logits array is supplied, and the source
++receipt states logits_semantics=finite_clean_present_minus_absent. The reader
++then retains finite-logit support and verifies sigmoid/p0 within5e-14. This mode
++scores the finite-logit Bernoulli law, not a newly declared structural zero/one;
++the number of rounded boundary slots and scoring semantics are reported.
++No epsilon or support relaxation is used. Saved q, if supplied, must agree with
++p0 at t=1 within the OLD absolute5e-14 tolerance; no relative tolerance added.
++At t=1 the next state is s=0, so this is the original posterior identity, not
++a new posterior implementation. Other time steps are rejected.
++
++## Optional original unguided output
++
++Supply all four: --original-graph, --original-sha256, --original-receipt,
++--original-receipt-sha256. Both expected pins must be externally provided.
++NPZ contains types[N], edges[2,m] with u<v and no duplicates, families[m].
++Receipt binds arm, seed, t=0, unguided=true, graph_stage=raw_final_t0,
++input_manifest_sha256, source_receipt_sha256, graph_sha256 and weight_sha256.
++Types, schema, labels and model support are checked. Historical receipt binding
++is NOT replay verification of the sampling RNG or reauthentication of weights.
++Missing original output means no paired edit/quality/score comparison; the
++reader does not draw a substitute. C/D, wrong arms/seeds or repaired graphs
++without the declared raw-final provenance are rejected.
++
++## Matching and exact discrete diagnostics
++
++mu_ir=sum of ALL clean p0 slots incident to i in family r, both endpoints once.
++For type c, expand complete target vectors by integer counts; scale_cr=
++1+sqrt(sum_k count_k*d_kr^2/n_c). Effective dimensions are positive target-mass
++relations; excluded zero dimensions are exactly structurally0, still retained
++in complete vectors. Minimize sum_i,r ((mu_ir-d_assignment(i),r)/scale_cr)^2,
++mean over effective dimensions and nodes, then equal mean over types. Hungarian
++joint cost for multidimensional roles; sorting only for one effective dimension.
++One allocation is shared by ALL relation decoders; no per-coordinate role mixing.
++No alternating optimization, new weight or result-driven parameter choice.
++
++Duplicate identical roles are harmless. Stable sorting/SciPy may choose an
++index-dependent representative in a different-role tie. Small<=7-node types
++enumerate distinct role allocations within1e-12; large multidimensional ties are
++explicitly unresolved, NEVER certified equivariant just from equal objective.
++This remains fixed-matching MAP, not anonymous-global MAP or random sampling.
++
++All decoder settings remain frozen_config.json. Report exact assigned integer
++degrees, whole joint frequencies, schema/support, primal/dual bounds and solver
++status. Timeout/infeasible/uncertified-optimal is nonzero, no successful report.
++Exact diagnostics: relation edges; all-node, per-type and per-family-endpoint
++degree histograms, maxima, zero/<=1 counts, P90 and descriptive P(D>153); complete
++joint counts; typed triangles (unordered type triples); components/LCC/isolates.
++D-M-A closure denominator=sum_M deg_D(M)*deg_A(M), numerator counts those paths
++with their D-A edge present; zero denominator yields NA, never0. Edge edits by
++family and both logq scores use the SAME frozen law. None is a new quality gate.
++
++## Known old-format status, static review only
++
++Local source reviewed: legacy.py convert_arrays/original_query, portable.py
++Portable.record, INPUT_CONTRACT/DYNAMIC_INPUT_CONTRACT, hsgd/slots.py and
++verify_original_q. Their file hashes are in format_reference/source_review.json.
++Old RAW baseline.npz has state,p0,q0,types,pairs,prior,alpha; collected.npz adds
++coverage and collection.json supplies time/query/source receipts. Old CONVERTED
++six_states NPZ has state,p0,q,slots,families,types,prior,alpha,query_block,t.
++Both need their actual externally sealed manifests/receipts; filenames are not
++authentication. Neither is auto-detected or silently treated as this standard.
++
++Not present as standard fields in those old arrays: explicit support semantics,
++free-boundary finite-logit evidence if needed, flat ordered query arrays/offsets,
++the explicit unguided present-probability declaration, semantic type map and
++optional final graph provenance. Some may be deterministically reconstructed
++from original pinned code and collection by the other side, with origins and
++old hashes recorded; reconstruction is not evidence they existed originally.
++No real A1/B1 arrays or original output were read here. This release provides a
++strict standard consumer, NOT a claimed verified raw/converted legacy adapter.
++
++## Runtime and stopping
++
++One explicit arm per invocation, CPU/one thread, <=300 seconds INCLUDING startup,
++hashes, matching, solver, exact evaluation, save and cleanup. Work reserves up to
++5s for cleanup. Fresh output is rejected before any writes if overlapping source
++or input roots. SIGINT/SIGTERM/SIGHUP and OUTPUT/STOP terminate only owned process
++groups; SIGKILL/machine loss cannot be caught. Partial graph files may remain as
++incomplete evidence, never successful output. No automatic retry, resampling or
++budget extension. Success requires a nonempty check set, graph/hash evidence,
++exit0 and complete controller receipt. Ordinary MAP says nothing about diversity.
+--- /dev/null
++++ b/experiments/anonymous_role_joint_decode_v1_1_local/package/LOCAL_INPUT_POLICY.json
+@@ -0,0 +1,15 @@
++{
++  "base_commit": "2c1a2f2c0c2a4d82402979a03f41be0ad6b02586",
++  "scope": "explicit local unguided A/B t=1 fixed-matching MAP; fixtures only executed here",
++  "posterior_absolute_tolerance": 5e-14,
++  "matching": "joint squared distance of complete p0 expected degrees; scales per type=1+target RMS; one-to-one Hungarian, sorting only one effective dimension",
++  "effective_dimensions": "target has positive degree mass in that relation; zero-mass dimensions have p0 structurally fixed0 and remain in full vectors",
++  "loss_reduction": "mean over effective dimensions and nodes within type, then types",
++  "tie_rule": "stable sort or SciPy index representative; repeated identical roles harmless; general distinct-role ties not exhaustively certified at large N; no strict tie equivariance claim",
++  "decoder": "unchanged original frozen_config decoder tolerances and algorithms",
++  "maximum_inclusive_seconds_per_arm": 300,
++  "maximum_CPU_threads": 1,
++  "no_model_calls": true,
++  "no_IMDB_engineering_scale_rerun": true,
++  "no_automatic_followup": true
++}
+--- a/experiments/anonymous_role_joint_decode_v1/package/README_CN.md
++++ b/experiments/anonymous_role_joint_decode_v1_1_local/package/README_CN.md
+@@ -1,72 +1,87 @@
+-# 匿名联合角色约束解码／采样：独立CPU工程原型
++# 匿名联合角色度固定匹配MAP：本地文件接口小修版
+ 
+-源码为本轮独立实现。旧版本、权重和结果不改；不连接BW，不训练，不调用模型，
+-不跑完整扩散链。所有概率都明确是工程输入，没有真实模型输出。
++独立目录anonymous_role_joint_decode_v1_1_local，固定基线2c1a2f2。
++原v1源码、ZIP、权重和结果保留。无网络、SSH、BW、模型调用、训练、完整链、
++自动下载或安装；本轮不重跑IMDB随机评分规模检查。
+ 
+-已装依赖：Python、NumPy、SciPy；测试还需pytest。入口不会pip安装或启用GPU。
+-具体实测版本见evidence/dependencies.json。所有运行输出必须是新目录且与包分离。
++改动：正支持CDF采样；图位向量/编号独立交叉验收；严格本地冻结A1/B1标准读取器；
++完整p0期望联合关系度到匿名角色的类型内一对一匹配；固定匹配MAP与离散诊断。
++不是匿名全局MAP，不是IMDB条件随机采样器。度满足是约束保证，不是学习成果。
++
++重要边界：标准接口通过明确标记的合成夹具，不等于旧真实导出格式已经接通。
++本地只静态读取过旧导出器/合同/测试；真正A1/B1数组、原图和私有权重均未读取。
++需要的字段、来源限制、旧格式缺口、匹配公式见LOCAL_INPUT_CONTRACT.md。
++所有设置固定在LOCAL_INPUT_POLICY.json和原frozen_config.json。
++
++## 本地CPU回归
++
++使用已有NumPy/SciPy/pytest，不改变环境；具体实际版本见evidence/dependencies.json。
+ 
+ ```bash
+-env OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 CUDA_VISIBLE_DEVICES='' \
+-  python verify.py --output /tmp/anonymous_decode_tests_01
+-env OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 CUDA_VISIBLE_DEVICES='' \
+-  python run.py small --output /tmp/anonymous_decode_small_01 --max-seconds 120
++export OMP_NUM_THREADS=1
++export OPENBLAS_NUM_THREADS=1
++export CUDA_VISIBLE_DEVICES=''
++python verify.py --output /tmp/role_decode_local_tests_review01
++python decode_frozen.py --help
+ ```
+ 
+-small完整枚举6节点32768张图（另有异质6节点枚举），并计算五种分布的精确有限和；
+-之后每方法4096次工程抽样。保留原独立分布的全部失败，不筛选补抽。
+-分布熵/有效图数是带编号图指标；另报类型保持同构类别，不能混称拓扑数量。
++verify隔离外部pytest筛选与父目录配置，核对本版完整node IDs且零跳过。
++旧27项原样保留。合成CLI端到端测试确实经过父进程、子进程、读取器、匹配、求解、
++评价和保存，不把内部函数或mock替代完整成功路径。
++
++## 合成标准输入示例（不是实际模型概率）
+ 
+ ```bash
+-env OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 CUDA_VISIBLE_DEVICES='' \
+-  python run.py imdb --output /tmp/anonymous_decode_imdb_engineering_01 --max-seconds 300
++python tests/fixture_export.py --output /tmp/role_decode_ENGINEERING_input01
+ ```
+ 
+-imdb仅是一次固定完整角色匹配下的工程MAP／成本测试；随机工程评分与参考边身份无关。
+-不代表真实模型生成质量，不代表匿名全局MAP，更不是IMDB条件随机采样器。
+-300秒包括启动、核验、预处理、求解、保存和清理；超时不自动续跑或改配置。
+-此命令用于复现已经授权的单次规模检查，不自动在small后串行追加。
++该命令在创建夹具时写fixture_pins.json，记录新建合成文件的预期哈希，仅用于工程
++复现；不能把这种自生成pin当作真实模型来源证据。正式输入应由另一侧按封存记录
++准备标准工件，提供独立可信的预期SHA256。本机没有真实数据，不会自动寻找。
++
++## 留给另一侧的显式真实入口，本轮未执行
++
++下列变量均由调用者填写自己的本地工件和封存pin，不提供猜测路径，不自行计算当前
++manifest哈希来充当可信预期值。每次只运行一个arm，不自动串联A/B。
+ 
+ ```bash
+-touch /tmp/anonymous_decode_imdb_engineering_01/STOP
++: "${INPUT_MANIFEST:?填写本地标准manifest文件或根目录}"
++: "${EXPECTED_MANIFEST_SHA256:?填写独立封存的manifest SHA256}"
++: "${ARM:?A或B}"
++: "${OUTPUT_DIR:?填写与输入和源码分离的新目录}"
++
++python decode_frozen.py \
++  --input "$INPUT_MANIFEST" --manifest-sha256 "$EXPECTED_MANIFEST_SHA256" \
++  --arm "$ARM" --output "$OUTPUT_DIR" --max-seconds 300
+ ```
+ 
+-安全停止由父入口清理自己的子进程组，退出码与controller.json一致。SIGKILL或
+-机器故障无法捕获。部分输出/超时可行解不能标为最优。工程图文件明确命名
+-engineering_graph.npz，不能冒充科学生成图。
+-
+-公式、证明、反例和尺度边界见DESIGN.md；参数/seed/温度/容差在frozen_config.json，
+-冻结提交在发行manifest中。固定匹配解码与匿名精确条件采样是两个不同API。
+-
+-## 本轮实际结果与验收边界
+-
+-27项CPU测试完整通过、零跳过。6节点70个度2解中，60个六环、10个双三角形，
+-匿名拓扑仅2类。异质例完整联合角色约束54解，各维边际约束却有162解。
+-六环偏好下T1最大单图质量0.950489；双三角形偏好下T1连通率0.0661645。
+-T2提高熵但降低原logq评分；不能把满足角色或带编号图数增加当作免费拓扑收益。
+-异质例均匀角色分配混合与真正条件分布TV=0.411865；固定匹配MAP评分
+--11.166113，匿名全局枚举MAP为-8.320450，不能混称。
+-
+-完整IMDB工程检查仅执行一次，1653节点/1365378槽/10关系族，固定匹配输出4079边；
+-逐节点关系度、各类型完整联合频数与支持精确验收。包含启动/清理墙钟12.935秒，
+-worker CPU12.450秒，峰RSS481.23MiB。求解器浮点最优性界仅针对该固定匹配；
+-最大块目标间隙2.28e-13，全图logq界累加出现-2.33e-10舍入差，未隐藏。
+-与参考相同的边数由角色约束构造保证，不是模型学习结果。
+-
+-独立audit_results.py不导入生产模块，另以整数权重/直接概率乘积和Python邻接集合
+-重算全部四组概率、主要精确指标、抽样重放、固定匹配穷举最优值，以及IMDB输出度数。
+-该独立复核未重做完整拓扑分类和优化器内部对偶证明；这些由生产穷举/专项测试及
+-已记录的浮点上下界支持。耗时约6.41秒CPU、峰RSS99.52MiB。可只读复核已封存证据：
++若有相同arm/seed/来源的原无引导图，另用下面命令（不是自动后续命令），并指定
++另一个新输出目录。原图缺失时报告比较缺失，不补抽。
+ 
+ ```bash
+-env OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 CUDA_VISIBLE_DEVICES='' \
+-  python audit_results.py --small evidence/small --imdb evidence/imdb_engineering \
+-  --reference data/IMDB_movie_reference.npz --output /tmp/anonymous_decode_audit_01.json
++: "${ORIGINAL_GRAPH:?填写对应原图NPZ}"
++: "${EXPECTED_ORIGINAL_SHA256:?填写封存原图哈希}"
++: "${ORIGINAL_RECEIPT:?填写原图来源回执}"
++: "${EXPECTED_ORIGINAL_RECEIPT_SHA256:?填写封存回执哈希}"
++
++python decode_frozen.py \
++  --input "$INPUT_MANIFEST" --manifest-sha256 "$EXPECTED_MANIFEST_SHA256" \
++  --arm "$ARM" --output "$OUTPUT_DIR" --max-seconds 300 \
++  --original-graph "$ORIGINAL_GRAPH" --original-sha256 "$EXPECTED_ORIGINAL_SHA256" \
++  --original-receipt "$ORIGINAL_RECEIPT" \
++  --original-receipt-sha256 "$EXPECTED_ORIGINAL_RECEIPT_SHA256"
+ ```
+ 
+-所有主要指标来自枚举有限和（FP64），只有4096次观测不同图数及观测通过数来自抽样。
+-主面板81920次小图工程抽样；为补充固定匹配图证据，用同一配置、seed做过一次完全相同
+-小图重放，合计执行163840次抽样但只有同一个81920输出面板，原有全部数值数组逐位
+-一致，见evidence/trace_replay.json。不是新增科学样本。
+-没有真实模型logits、BW设备或完整科学链结果，没有训练、模型调用或GPU使用。
+-后续应先审查离散条件分布与固定匹配边界；本包不自动启动后继实验。
++300秒包括启动、核验、匹配、求解、精确评价、保存及清理；CPU单线程。不再找一个
++匹配、不调参、不换输入、不延时重试。不可行、超时或未认证最优均非零退出。
++
++```bash
++touch "$OUTPUT_DIR/STOP"
++cat "$OUTPUT_DIR/controller.json"
++cat "$OUTPUT_DIR/summary.json"
++```
++
++SIGINT/SIGTERM/SIGHUP/STOP清理本次自己的子进程组；不能捕获SIGKILL或机器故障。
++成功图为decoded_graph.npz，所有比较/来源/数值界/时间/内存在summary.json。
++不能只看summary.status；还需controller.exit_code=0、非空checks和图哈希。
++partial状态不算完成，不可由一次MAP宣称大图多样性。本票交付后等待审查。
+--- a/experiments/anonymous_role_joint_decode_v1/package/audit_results.py
++++ b/experiments/anonymous_role_joint_decode_v1_1_local/package/audit_results.py
+@@ -17,6 +17,30 @@
+ 
+ def sha(path):
+     return hashlib.sha256(path.read_bytes()).hexdigest()
++
++
++def audit_fixed_graph(case,a):
++    """Check BOTH representations first, then independently validate that graph."""
++    bits=np.asarray(a['fixed_assignment_bits']);slots=a['slots'];families=a['families'];types=a['types']
++    code=case['fixed_assignment_graph_code'];s=slots.shape[1];r=len(case['target']['family_pairs'])
++    if not isinstance(code,int) or code<0 or code>=2**s:raise AssertionError('fixed graph code range')
++    decoded=np.array([(code>>e)&1 for e in range(s)],dtype=np.uint8)
++    if bits.shape!=(s,) or not np.isin(bits,[0,1]).all() or not np.array_equal(bits,decoded):
++        raise AssertionError('fixed graph representations disagree')
++    degree=np.zeros((len(types),r),dtype=np.int64);seen=set()
++    for present,(u,v),family in zip(bits,slots.T,families):
++        if not present:continue
++        if not 0<=u<v<len(types) or (int(u),int(v)) in seen:raise AssertionError('fixed graph schema/simple')
++        seen.add((int(u),int(v)))
++        if sorted([int(types[u]),int(types[v])])!=case['target']['family_pairs'][family]:raise AssertionError('fixed graph family')
++        degree[u,family]+=1;degree[v,family]+=1
++    if not np.array_equal(degree,a['assigned_joint_degrees']):raise AssertionError('fixed assigned joint degrees')
++    for t,g in case['target']['groups'].items():
++        if Counter(map(tuple,degree[types==int(t)]))!=Counter({tuple(row):n for row,n in zip(g['rows'],g['counts'])}):
++            raise AssertionError('fixed joint multiset')
++    p=np.asarray(case['probabilities']);score=float(np.log(np.where(bits,p,1-p)).sum())
++    if not np.isfinite(score) or not np.isfinite(case['fixed_assignment_MAP']['log_q']) or abs(score-case['fixed_assignment_MAP']['log_q'])>1e-12:raise AssertionError('fixed graph score')
++    return degree
+ 
+ 
+ def topology_statistics(bits, slots, families, types, r):
+@@ -78,8 +102,9 @@
+         for method,w in expected.items():
+             saved=a[method+'_probabilities'];row=case['methods'][method]
+             near(case['name']+'/'+method+'/weights',saved,w,1e-12)
+-            cdf=np.cumsum(saved).tolist();cdf[-1]=1.
+-            draws=[bisect.bisect_right(cdf,float(u)) for u in a['shared_uniforms']]
++            support=[i for i,p in enumerate(saved) if p>0]
++            cdf=np.cumsum([saved[i] for i in support]).tolist();cdf[-1]=1.
++            draws=[support[bisect.bisect_right(cdf,float(u))] for u in a['shared_uniforms']]
+             if draws!=a[method+'_draw_codes'].tolist():raise AssertionError('draw replay')
+             if len(set(draws))!=row['sampled_distinct_labelled_graphs']:raise AssertionError('distinct draws')
+             positive=w>0;h=-float(np.dot(w[positive],np.log(w[positive])))
+@@ -91,8 +116,7 @@
+                 connected_rate=float(w@conn),mean_triangles=float(w@tri),mean_original_log_q_nats=float(w@logq))
+             for name,value in metrics.items():
+                 near(case['name']+'/'+method+'/'+name,value,row[name],1e-8 if 'graph_count' in name else 1e-10)
+-        fixed=a['fixed_assignment_bits'];d=degrees[case['fixed_assignment_graph_code']]
+-        if not np.array_equal(d,a['assigned_joint_degrees']):raise AssertionError('fixed matching degrees')
++        d=audit_fixed_graph(case,a)
+         fixedmask=np.all(degrees==d[None,:,:],axis=(1,2))
+         near(case['name']+'/fixed MAP',float(logq[fixedmask].max()),case['fixed_assignment_MAP']['log_q'],1e-12)
+     # No optimizer, reference identity scoring or additional graph is used below.
+--- /dev/null
++++ b/experiments/anonymous_role_joint_decode_v1_1_local/package/decode_frozen.py
+@@ -0,0 +1,172 @@
++#!/usr/bin/env python3
++"""One explicit local unguided A1/B1 fixed-matching MAP. CPU <=300s, no model."""
++import argparse
++import hashlib
++import json
++import os
++from pathlib import Path
++import signal
++import subprocess
++import sys
++import time
++
++ROOT=Path(__file__).resolve().parent
++
++
++def atomic(path,value):
++    tmp=path.with_name(path.name+'.tmp')
++    with tmp.open('w') as f:json.dump(value,f,indent=2,allow_nan=False);f.flush();os.fsync(f.fileno())
++    os.replace(tmp,path)
++
++
++def paths(args):
++    # ALL checks precede mkdir, logs and activation. Resolve symlinks as well.
++    manifest=Path(args.input).resolve()
++    if manifest.is_dir():manifest=manifest/'manifest.json'
++    out=Path(args.output).resolve();protected=[manifest.parent,ROOT]
++    # Recognized repository layout only; an unrelated /tmp/.git must not make
++    # every /tmp output forbidden after stand-alone extraction.
++    if ROOT.parent.parent.name=='experiments' and (ROOT.parents[2]/'.git').exists():protected.append(ROOT.parents[2])
++    for name in ('original_graph','original_receipt'):
++        if getattr(args,name):protected.append(Path(getattr(args,name)).resolve())
++    if out.exists() or any(out==p or p in out.parents or out in p.parents for p in protected):
++        raise ValueError('fresh output must be disjoint from input and source roots')
++    return manifest,out
++
++
++def worker(args,out,deadline):
++    import resource
++    import platform
++    import numpy as np
++    import scipy
++    from joint_decode.frozen_input import Frozen,array_sha,POSTERIOR_ATOL
++    from joint_decode.role_assignment import match
++    from joint_decode.decoder import decode
++    from joint_decode.structure import evaluate,differences
++    stopped=[]
++    for sig in (signal.SIGINT,signal.SIGTERM,signal.SIGHUP):signal.signal(sig,lambda s,f:stopped.append(s))
++    start=time.monotonic();cpu=time.process_time();times={}
++    def check():
++        if stopped or (out/'STOP').exists():raise InterruptedError('STOP/signal')
++        if time.monotonic()>=deadline:raise TimeoutError('inclusive local CPU work deadline')
++    def timed(name,fn):
++        check();tick=time.monotonic();value=fn();times[name]=time.monotonic()-tick;check();return value
++    try:
++        frozen=timed('input_verification',lambda:Frozen(args.input,args.manifest_sha256,args.arm,check))
++        original=None
++        if args.original_graph:
++            original=timed('original_verification',lambda:frozen.original(args.original_graph,args.original_sha256,args.original_receipt,args.original_receipt_sha256))
++        assigned,matching=timed('matching',lambda:match(frozen.schema,frozen.target,frozen.p0,check))
++        bits,solver=timed('decoding',lambda:decode(frozen.schema,frozen.target,assigned,frozen.law,seconds=max(.001,deadline-time.monotonic()),check=check,
++              event=lambda row:print(json.dumps(dict(phase='relation',family=row['family'],status=row['status'])),flush=True)))
++        if bits is None or solver['status']!='optimal_fixed_matching':
++            atomic(out/'summary.json',dict(status='failed' if bits is None else 'incomplete',reason='fixed matching decoder not certified optimal',solver=solver))
++            return 1
++        decoded=timed('decoded_evaluation',lambda:evaluate(frozen.schema,bits,frozen.semantic_types,frozen.law,check))
++        baseline=timed('original_evaluation',lambda:evaluate(frozen.schema,original,frozen.semantic_types,frozen.law,check)) if original is not None else None
++        comparison=differences(frozen.schema,original,bits) if original is not None else None
++        check();tick=time.monotonic();graph=out/'decoded_graph.npz'
++        with graph.with_suffix('.npz.tmp').open('xb') as f:
++            np.savez_compressed(f,types=frozen.schema.types,edges=frozen.schema.slots[:,bits.astype(bool)],
++                families=frozen.schema.families[bits.astype(bool)],assigned_joint_degrees=assigned,
++                actual_joint_degrees=frozen.schema.degree(bits));f.flush();os.fsync(f.fileno())
++        check();os.replace(graph.with_suffix('.npz.tmp'),graph);times['graph_save']=time.monotonic()-tick
++        timed('final_input_rehash',frozen.rehash);check()
++        from run import release_hash
++        release=release_hash();check()
++        report=dict(status='complete',arm=args.arm,t=1,seed=frozen.meta['seed'],source_kind=frozen.receipt['source_kind'],
++            source_limit=frozen.source_limit,scope='ONE fixed JOINT role matching MAP, not anonymous global MAP, not a sampler',
++            matching=matching,solver=solver,checks=dict(schema=True,support=solver['exact_support'],
++                assigned_degrees=solver['exact_assigned_degrees'],anonymous_joint_frequencies=solver['exact_joint_role_multiset']),
++            schema=dict(nodes=frozen.schema.n,type_counts=frozen.schema.sizes,pairs=frozen.schema.pairs.tolist(),
++                slots=frozen.schema.s,canonical_slots_sha256=array_sha(frozen.schema.slots),families_sha256=array_sha(frozen.schema.families),
++                input_to_canonical_sha256=array_sha(frozen.mapping)),semantic_types=frozen.semantic_types,
++            source_receipt={k:frozen.receipt[k] for k in ('weight_sha256','source_manifest_sha256','config_sha256','reference_sha256','alpha_sha256')},
++            posterior_absolute_tolerance=POSTERIOR_ATOL,
++            structural_fixed0=int((frozen.support==0).sum()),structural_fixed1=int((frozen.support==1).sum()),
++            query_sha256=frozen.meta['query_sha256'],q_p0_max_error=frozen.q_error,numerical_saturated_free_slots=frozen.saturated,
++            score_semantics=frozen.meta['score_semantics'],decoded=decoded,original=baseline,changes_by_family=comparison,
++            missing_comparisons=[] if original is not None else ['no original graph: original quality, edge edits and paired scores unavailable'],
++            input_hashes={str(p):h for p,h in frozen.hashes.items()},output_sha256=hashlib.sha256(graph.read_bytes()).hexdigest(),
++            release_checklist_sha256=release,times=times,worker_wall_seconds=time.monotonic()-start,worker_cpu_seconds=time.process_time()-cpu,
++            peak_rss_mib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024,
++            environment=dict(python=platform.python_version(),numpy=np.__version__,scipy=scipy.__version__,CPU_threads=1),
++            model_calls=0,training_updates=0,GPU_use=0,scientific_chains=0,no_automatic_followup=True)
++        check();atomic(out/'summary.json',report);check();return 0
++    except BaseException as exc:
++        status='incomplete' if isinstance(exc,TimeoutError) else 'stopped' if isinstance(exc,(InterruptedError,KeyboardInterrupt)) else 'failed'
++        atomic(out/'summary.json',dict(status=status,reason=type(exc).__name__+': '+str(exc),times=times,real_input_executed=False if 'frozen' not in locals() else frozen.receipt['source_kind']!='synthetic_fixture'))
++        print(status,type(exc).__name__,str(exc),flush=True);return 124 if status=='incomplete' else 75 if status=='stopped' else 1
++
++
++def main():
++    start=time.monotonic();p=argparse.ArgumentParser(description=__doc__)
++    p.add_argument('--input',required=True,help='explicit local standard manifest or its root; never searches elsewhere')
++    p.add_argument('--manifest-sha256',required=True);p.add_argument('--arm',required=True,choices=['A','B'])
++    p.add_argument('--output',required=True);p.add_argument('--max-seconds',type=float,default=300.)
++    for name in ('original-graph','original-sha256','original-receipt','original-receipt-sha256'):p.add_argument('--'+name)
++    p.add_argument('--worker',action='store_true',help=argparse.SUPPRESS);p.add_argument('--deadline',type=float,help=argparse.SUPPRESS)
++    a=p.parse_args()
++    if not 1<=a.max_seconds<=300:raise ValueError('inclusive bound must be1..300 seconds')
++    original=[a.original_graph,a.original_sha256,a.original_receipt,a.original_receipt_sha256]
++    if any(original) and not all(original):raise ValueError('all four original graph/receipt arguments are required together')
++    if a.worker:
++        out=Path(a.output).resolve()
++        for _ in range(20):
++            if (out/'child.json').exists():break
++            time.sleep(.025)
++        owner=json.loads((out/'child.json').read_text())
++        if owner['pid']!=os.getpid() or a.deadline is None:raise ValueError('worker requires owned parent')
++        return worker(a,out,a.deadline)
++    manifest,out=paths(a);a.input=str(manifest)
++    from run import release_hash
++    release=release_hash();out.mkdir(parents=True);atomic(out/'activation.json',dict(max_seconds=a.max_seconds,
++         input=str(manifest),expected_manifest_sha256=a.manifest_sha256,arm=a.arm,release_checklist_sha256=release))
++    old={};caught=[];child=None;status='failed';reason='parent failure';code=1
++    reserve=min(5.,a.max_seconds*.2);deadline=start+a.max_seconds-reserve
++    for sig in (signal.SIGINT,signal.SIGTERM,signal.SIGHUP):old[sig]=signal.signal(sig,lambda s,f:caught.append(s))
++    try:
++        env=os.environ.copy();env.update(OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1',CUDA_VISIBLE_DEVICES='',PYTHONDONTWRITEBYTECODE='1')
++        command=[sys.executable,str(Path(__file__).resolve()),*sys.argv[1:],'--input',str(manifest),'--worker','--deadline',str(deadline)]
++        with (out/'worker.log').open('w') as log:
++            child=subprocess.Popen(command,env=env,start_new_session=True,stdout=log,stderr=subprocess.STDOUT)
++            atomic(out/'child.json',dict(pid=child.pid,pgid=child.pid))
++            while True:
++                if caught or (out/'STOP').exists():status='stopped';reason='STOP' if not caught else signal.Signals(caught[0]).name;code=75;break
++                if time.monotonic()>=deadline:status='incomplete';reason='wall_timeout';code=124;break
++                ret=child.poll()
++                if ret is not None:
++                    summary=json.loads((out/'summary.json').read_text()) if (out/'summary.json').exists() else {}
++                    status=summary.get('status','failed');reason=summary.get('reason','worker returned')
++                    evidence=summary.get('checks',{})
++                    graph=out/'decoded_graph.npz'
++                    valid=bool(evidence) and all(evidence.values()) and graph.is_file()
++                    valid=valid and hashlib.sha256(graph.read_bytes()).hexdigest()==summary.get('output_sha256')
++                    code=0 if ret==0 and status=='complete' and valid and release_hash()==release else (ret or 1)
++                    if code and status=='complete':status='failed';reason='missing/changed completion evidence'
++                    break
++                time.sleep(.025)
++    except BaseException as exc:status='failed';reason=type(exc).__name__+': '+str(exc);code=1
++    finally:
++        gone=child is None
++        if child is not None:
++            try:os.killpg(child.pid,signal.SIGTERM)
++            except ProcessLookupError:pass
++            try:child.wait(timeout=max(.02,min(1.,start+a.max_seconds-time.monotonic()-.1)))
++            except subprocess.TimeoutExpired:
++                try:os.killpg(child.pid,signal.SIGKILL)
++                except ProcessLookupError:pass
++                child.wait(timeout=.1)
++            try:os.killpg(child.pid,0)
++            except ProcessLookupError:gone=True
++        if not gone or time.monotonic()>start+a.max_seconds:code=124;status='incomplete';reason='cleanup/deadline'
++        if code and (out/'summary.json').exists():
++            summary=json.loads((out/'summary.json').read_text());summary.update(status=status,controller_reason=reason);atomic(out/'summary.json',summary)
++        receipt=dict(status=status,reason=reason,exit_code=int(code),owned_group_gone=gone,wall_seconds=time.monotonic()-start,
++             cap_seconds=a.max_seconds,SIGKILL_catchable=False)
++        atomic(out/'controller.json',receipt)
++        for sig,handler in old.items():signal.signal(sig,handler)
++    print(json.dumps(receipt));return int(code)
++
++
++if __name__=='__main__':sys.exit(main())
+--- a/experiments/anonymous_role_joint_decode_v1/package/joint_decode/exact.py
++++ b/experiments/anonymous_role_joint_decode_v1_1_local/package/joint_decode/exact.py
+@@ -99,10 +99,17 @@
+ 
+ 
+ def draw(probability,uniforms):
+-    cdf=np.cumsum(probability);error=abs(float(cdf[-1])-1)
++    probability=np.asarray(probability,dtype=np.float64);uniforms=np.asarray(uniforms,dtype=np.float64)
++    if probability.ndim!=1 or not probability.size or not np.isfinite(probability).all() or (probability<0).any():
++        raise ValueError('nonempty finite nonnegative probability vector required')
++    if not np.isfinite(uniforms).all() or ((uniforms<0)|(uniforms>=1)).any():
++        raise ValueError('uniforms must be finite in [0,1)')
++    support=np.flatnonzero(probability>0)
++    if not support.size:raise ValueError('positive probability support required')
++    cdf=np.cumsum(probability[support]);error=abs(float(cdf[-1])-1)
+     if error>CONFIG['normalization_atol']:raise FloatingPointError('cannot sample unnormalized distribution')
+-    cdf[-1]=1. # terminal cumulative roundoff only, no epsilon edge support
+-    return np.searchsorted(cdf,uniforms,side='right')
++    cdf[-1]=1. # roundoff belongs to the last POSITIVE atom, never zero support
++    return support[np.searchsorted(cdf,uniforms,side='right')]
+ 
+ 
+ def metrics(universe,p,logq,role_mask,draws,mathematical_support):
+--- /dev/null
++++ b/experiments/anonymous_role_joint_decode_v1_1_local/package/joint_decode/frozen_input.py
+@@ -0,0 +1,181 @@
++"""Explicit LOCAL standard input only. No discovery, network, model or legacy auto-detection."""
++import hashlib
++import io
++import json
++from pathlib import Path
++import numpy as np
++from .contracts import Schema,EdgeLaw,validate_target
++
++POSTERIOR_ATOL=5e-14  # unchanged old saved-q verification absolute tolerance
++FORMAT='local_frozen_role_decode_v1'
++
++
++def valid_sha(value):
++    if not isinstance(value,str) or len(value)!=64 or any(c not in '0123456789abcdef' for c in value):
++        raise ValueError('explicit expected SHA256 required')
++    return value
++
++
++def checked(path,expected,check=lambda:None):
++    valid_sha(expected);h=hashlib.sha256();chunks=[]
++    with Path(path).open('rb') as f:
++        while True:
++            check();b=f.read(1024*1024)
++            if not b:break
++            h.update(b);chunks.append(b)
++    check()
++    if h.hexdigest()!=expected:raise ValueError('expected SHA256 mismatch: '+str(path))
++    return b''.join(chunks)
++
++
++def array_sha(a):return hashlib.sha256(np.ascontiguousarray(a).tobytes()).hexdigest()
++
++
++def query_plan(schema,active,seed,check=lambda:None):
++    """Exact local old UniformQueryPlan recipe: spawned families + balanced20 rounds.
++
++    Complete query digest is raw int64 ids/families/2xQ endpoints in worker order.
++    No importing Torch/common.py or evaluating old producer code.
++    """
++    permutations=[];cuts=[];offsets=np.r_[0,np.bincount(schema.families,minlength=schema.r).cumsum()]
++    seeds=np.random.SeedSequence([seed,1,61]).spawn(schema.r)
++    for r,child in enumerate(seeds):
++        check();n=int(offsets[r+1]-offsets[r]) if active[r] else 0
++        rng=np.random.default_rng(child);perm=rng.permutation(n);quota=np.full(20,n//20,dtype=np.int64)
++        quota[rng.permutation(20)[:n%20]]+=1;permutations.append(perm);cuts.append(np.r_[0,quota.cumsum()])
++    ids=[];families=[];queries=[];boundaries=[0];block=np.full(schema.s,-1,np.int64);digest=hashlib.sha256()
++    for b in range(20):
++        check();ii=np.concatenate([offsets[r]+p[cuts[r][b]:cuts[r][b+1]] for r,p in enumerate(permutations)]).astype(np.int64)
++        ff=schema.families[ii].astype(np.int64);qq=np.ascontiguousarray(schema.slots[:,ii],dtype=np.int64)
++        for a in (ii,ff,qq):digest.update(a.tobytes())
++        if (block[ii]>=0).any():raise ValueError('duplicate reconstructed query')
++        block[ii]=b;ids.append(ii);families.append(ff);queries.append(qq);boundaries.append(boundaries[-1]+len(ii))
++    return dict(query_ids=np.concatenate(ids),query_families=np.concatenate(families),
++                query_slots=np.concatenate(queries,axis=1),query_offsets=np.array(boundaries,np.int64),
++                query_block=block,query_sha256=digest.hexdigest())
++
++
++def canonical_map(schema,slots,families):
++    slots=np.asarray(slots);families=np.asarray(families)
++    if slots.shape!=(2,schema.s) or families.shape!=(schema.s,) or not np.issubdtype(slots.dtype,np.integer) or not np.issubdtype(families.dtype,np.integer):
++        raise ValueError('complete slot/family dimensions and integer labels required')
++    if ((slots<0)|(slots>=schema.n)).any() or (slots[0]>=slots[1]).any():raise ValueError('canonical unordered u<v endpoints required')
++    keys=slots[0]*schema.n+slots[1];base=schema.slots[0]*schema.n+schema.slots[1]
++    if len(np.unique(keys))!=schema.s:raise ValueError('duplicate input slots')
++    order=np.argsort(base);locations=np.searchsorted(base[order],keys)
++    if (locations>=schema.s).any() or not np.array_equal(base[order[locations]],keys):raise ValueError('missing/illegal schema slots')
++    mapping=order[locations]
++    if not np.array_equal(families,schema.families[mapping]):raise ValueError('wrong slot family')
++    return mapping
++
++
++class Frozen:
++    def __init__(self,path,expected,arm,check=lambda:None):
++        self.check=check;self.path=Path(path).resolve();self.root=self.path.parent;self.hashes={}
++        self.meta=json.loads(self.file(self.path,expected));m=self.meta
++        if m.get('format')!=FORMAT or arm not in ('A','B') or m.get('arm')!=arm or type(m.get('t')) is not int or m['t']!=1 or m.get('unguided') is not True:
++            raise ValueError('only unguided A/B at t=1 is supported')
++        if type(m.get('seed')) is not int or m['seed']<0 or type(m.get('T')) is not int or m['T']!=1000 or type(m.get('query_rounds')) is not int or m['query_rounds']!=20:
++            raise ValueError('seed/T/query configuration required')
++        if m.get('p0_semantics')!='clean_edge_present_probability' or m.get('endpoint_convention')!='unordered_u_lt_v' or m.get('relation_ids')!='zero_based_family_pairs_order':
++            raise ValueError('probability/endpoint/relation semantics differs')
++        for key in ('payload','target','source_receipt'):
++            entry=m['files'][key];rel=Path(entry['path'])
++            if rel.is_absolute():raise ValueError('relative local payload path required')
++            p=(self.root/rel).resolve()
++            if self.root not in p.parents:raise ValueError('payload escapes explicit local input root')
++            self.file(p,entry['sha256'])
++        def path(key):return (self.root/m['files'][key]['path']).resolve()
++        self.receipt=json.loads(self.file(path('source_receipt'),m['files']['source_receipt']['sha256']))
++        receipt=self.receipt
++        for k in ('arm','seed','t','unguided','query_sha256'):
++            if receipt.get(k)!=m.get(k):raise ValueError('source receipt binding differs: '+k)
++        if receipt.get('source_kind') not in ('synthetic_fixture','historical_frozen_output'):
++            raise ValueError('explicit source kind required')
++        for k in ('weight_sha256','source_manifest_sha256','config_sha256','reference_sha256'):
++            valid_sha(receipt.get(k))
++        if receipt.get('weight_authentication')!='historical_receipt_only':raise ValueError('this offline reader does not authenticate private weight bytes')
++        self.source_limit='沿用历史来源记录，未重新认证权重字节'
++        if receipt['source_kind']=='synthetic_fixture':self.source_limit='合成工程夹具；不是实际模型输出或真实来源认证'
++        artifact=json.loads(self.file(path('target'),m['files']['target']['sha256']));self.target=artifact['profile']
++        if artifact.get('reference_sha256')!=receipt['reference_sha256']:raise ValueError('target/reference receipt differs')
++        payload=self.file(path('payload'),m['files']['payload']['sha256'])
++        with np.load(io.BytesIO(payload),allow_pickle=False) as z:
++            required=('types','pairs','slots','families','state','p0','support','prior','alpha','query_block',
++                      'query_ids','query_families','query_slots','query_offsets')
++            if not set(required).issubset(z.files):raise ValueError('missing required standard arrays: '+str(set(required)-set(z.files)))
++            a={k:z[k].copy() for k in z.files}
++        for name in ('p0','prior','alpha',*(['q'] if 'q' in a else []),*(['clean_logits'] if 'clean_logits' in a else [])):
++            if a[name].dtype!=np.dtype('float64'):raise ValueError('FP64 probability/schedule array required: '+name)
++        if not np.issubdtype(a['support'].dtype,np.integer) or a['query_block'].dtype!=np.dtype('int64'):
++            raise ValueError('integer support and int64 query blocks required')
++        self.schema=s=Schema(a['types'],a['pairs']);validate_target(s,self.target)
++        mapping=canonical_map(s,a['slots'],a['families']);self.mapping=mapping
++        def canon(name):
++            if a[name].shape!=(s.s,):raise ValueError('wrong complete slot dimension: '+name)
++            out=np.empty_like(a[name]);out[mapping]=a[name];return out
++        self.p0=np.asarray(canon('p0'),dtype=np.float64);self.state=canon('state');self.support=canon('support')
++        self.prior=np.asarray(a['prior']);alpha=np.asarray(a['alpha'])
++        if self.prior.shape!=(s.r,) or not np.isfinite(self.prior).all() or ((self.prior<0)|(self.prior>1)).any():raise ValueError('prior dimensions/range')
++        if alpha.shape!=(1001,) or not np.isfinite(alpha).all() or alpha[0]!=1 or ((alpha<0)|(alpha>1)).any() or (np.diff(alpha)>0).any():raise ValueError('T1000 cumulative schedule contract')
++        if receipt.get('alpha_sha256')!=array_sha(alpha):raise ValueError('schedule array binding')
++        counts=np.bincount(s.families,minlength=s.r);edge_counts=np.zeros(s.r)
++        for c,g in self.target['groups'].items():edge_counts+=(np.asarray(g['rows'])*np.asarray(g['counts'])[:,None]).sum(0)/2
++        expected_prior=np.divide(edge_counts,counts,out=np.zeros(s.r),where=counts>0)
++        if not np.array_equal(self.prior,expected_prior):raise ValueError('prior not target reference family density')
++        structural=np.where(self.prior[s.families]==0,0,np.where(self.prior[s.families]==1,1,-1))
++        if not np.array_equal(self.support,structural):raise ValueError('structural support not explained by exact prior')
++        if not np.isfinite(self.p0).all() or ((self.p0<0)|(self.p0>1)).any() or not np.isin(self.state,[0,1]).all():raise ValueError('p0/state range')
++        fixed=structural!=-1
++        if not np.array_equal(self.p0[fixed],structural[fixed]) or not np.array_equal(self.state[fixed],structural[fixed]):raise ValueError('fixed support conflicts with p0/X1')
++        free=~fixed;self.saturated=int(np.sum(free&((self.p0==0)|(self.p0==1))))
++        score_kind=m.get('score_semantics')
++        if score_kind=='recorded_probability':
++            if self.saturated:raise ValueError('unexplained numerical saturation: finite clean logits are required')
++            logits=np.zeros(s.s);logits[free]=np.log(self.p0[free])-np.log1p(-self.p0[free])
++        elif score_kind=='finite_clean_logits':
++            logits=np.asarray(canon('clean_logits'),dtype=np.float64)
++            if not np.isfinite(logits).all() or receipt.get('logits_semantics')!='finite_clean_present_minus_absent':raise ValueError('finite clean-logit evidence missing')
++            prob=np.exp(-np.logaddexp(0.,-logits[free]))
++            if np.max(abs(prob-self.p0[free]),initial=0)>POSTERIOR_ATOL:raise ValueError('logits/p0 mismatch')
++        else:raise ValueError('explicit scoring semantics required')
++        self.law=EdgeLaw(logits,structural)
++        self.q_error=None
++        if 'q' in a:
++            q=np.asarray(canon('q'),dtype=np.float64)
++            if m.get('q_semantics')!='next_state_edge_present_probability' or not np.isfinite(q).all() or ((q<0)|(q>1)).any():raise ValueError('q semantics/range')
++            self.q_error=float(np.max(abs(q-self.p0),initial=0))
++            if self.q_error>POSTERIOR_ATOL:raise ValueError('t=1 saved q differs from clean p0')
++        plan=query_plan(s,edge_counts>0,m['seed'],check)
++        for name in ('query_ids','query_families','query_slots','query_offsets'):
++            if a[name].dtype!=np.dtype('int64') or not np.array_equal(a[name],plan[name]):raise ValueError('full query order/coverage differs: '+name)
++        if not np.array_equal(canon('query_block'),plan['query_block']) or m.get('query_sha256')!=plan['query_sha256']:
++            raise ValueError('query full byte digest/block differs')
++        self.semantic_types=m['semantic_types']
++        semantic=[self.semantic_types[k] for k in ('director','actor','movie')]
++        if len(set(semantic))!=3 or any(not isinstance(t,int) or t not in s.sizes for t in semantic):raise ValueError('explicit director/actor/movie type mapping required')
++        self.rehash()
++
++    def file(self,path,expected):
++        path=Path(path).resolve();raw=checked(path,expected,self.check)
++        if path in self.hashes and self.hashes[path]!=expected:raise ValueError('conflicting file pins')
++        self.hashes[path]=expected;return raw
++
++    def rehash(self):
++        for path,h in self.hashes.items():checked(path,h,self.check)
++
++    def original(self,path,sha,receipt_path,receipt_sha):
++        receipt=json.loads(self.file(receipt_path,receipt_sha))
++        expected=dict(arm=self.meta['arm'],seed=self.meta['seed'],t=0,unguided=True,
++                      graph_stage='raw_final_t0',input_manifest_sha256=self.hashes[self.path],
++                      source_receipt_sha256=self.meta['files']['source_receipt']['sha256'],graph_sha256=sha,
++                      weight_sha256=self.receipt['weight_sha256'])
++        if any(receipt.get(k)!=v for k,v in expected.items()):raise ValueError('original graph arm/seed/source binding differs')
++        raw=self.file(path,sha)
++        with np.load(io.BytesIO(raw),allow_pickle=False) as z:
++            if not np.array_equal(z['types'],self.schema.types):raise ValueError('original graph type inventory differs')
++            ids=self.schema.encode_edges(z['edges'])
++            if not np.array_equal(z['families'],self.schema.families[ids]):raise ValueError('original graph families differ')
++        bits=np.zeros(self.schema.s,np.uint8);bits[ids]=1
++        if not self.law.allowed(bits):raise ValueError('original raw graph violates frozen model support')
++        return bits
+--- /dev/null
++++ b/experiments/anonymous_role_joint_decode_v1_1_local/package/joint_decode/role_assignment.py
+@@ -0,0 +1,47 @@
++"""One exact type-wise JOINT role matching from complete clean p0; no alternating search."""
++import itertools
++import time
++import numpy as np
++from scipy.optimize import linear_sum_assignment
++from .contracts import validate_target,validate_assignment
++
++
++def match(schema,target,p0,check=lambda:None):
++    start=time.monotonic();validate_target(schema,target);p0=np.asarray(p0,dtype=np.float64)
++    if p0.shape!=(schema.s,) or not np.isfinite(p0).all() or ((p0<0)|(p0>1)).any():raise ValueError('complete clean probabilities required')
++    mu=np.zeros((schema.n,schema.r));d=np.zeros((schema.n,schema.r),np.int64);rows=[];total=0.
++    for endpoint in schema.slots:np.add.at(mu,(endpoint,schema.families),p0)
++    for c,n in schema.sizes.items():
++        check();nodes=np.flatnonzero(schema.types==c);g=target['groups'][str(c)]
++        roles=np.repeat(np.asarray(g['rows'],np.int64),np.asarray(g['counts']),axis=0)
++        scale=1+np.sqrt(np.mean(roles.astype(float)**2,axis=0));valid=np.flatnonzero(np.any(roles>0,axis=0));k=len(valid)
++        x=mu[nodes];ties='all roles identical' if len(g['rows'])==1 else 'not exhaustively certified; index-based solver representative'
++        if k==0:order=np.arange(n);algorithm='all zero roles'
++        elif k==1:
++            r=valid[0];source=np.argsort(x[:,r],kind='stable');role=np.argsort(roles[:,r],kind='stable')
++            order=np.empty(n,int);order[source]=role;algorithm='exact single-effective-relation sorting'
++            ties='different-role tie present' if any(x[a,r]==x[b,r] and roles[order[a],r]!=roles[order[b],r] for a,b in zip(source[:-1],source[1:])) else 'no different-role sorting tie'
++        else:
++            # Only n*n matrix; never n*n*k broadcast. Whole graph networks are not retained.
++            cost=np.zeros((n,n))
++            for r in valid:
++                check();cost+=((x[:,r,None]-roles[None,:,r])/scale[r])**2/k
++            a,order=linear_sum_assignment(cost)
++            if not np.array_equal(a,np.arange(n)):raise AssertionError('assignment rows')
++            algorithm='scipy linear_sum_assignment exact joint square cost'
++            if n<=7:
++                optimum=float(cost[np.arange(n),order].sum());solutions=set()
++                for perm in itertools.permutations(range(n)):
++                    if abs(float(cost[np.arange(n),perm].sum())-optimum)<=1e-12:
++                        solutions.add(tuple(map(tuple,roles[list(perm)])))
++                ties='different-role tie present' if len(solutions)>1 else 'unique role-vector allocation within1e-12'
++        check();d[nodes]=roles[order]
++        value=float(np.mean(np.sum(((x[:,valid]-d[nodes][:,valid])/scale[valid])**2,axis=1)/k)) if k else 0.
++        total+=value/len(schema.sizes)
++        rows.append(dict(type=int(c),nodes=n,effective_relations=valid.tolist(),scales=scale.tolist(),
++                         duplicate_role_copies=n-len(g['rows']),cost=value,algorithm=algorithm,
++                         different_role_ties=ties,tie_rule='stable sorting/SciPy index representative; no strict tied-gradient or assignment equivariance claim'))
++    validate_assignment(schema,target,d)
++    return d,dict(status='complete',cost=total,types=rows,seconds=time.monotonic()-start,
++        normalization='mean over effective relation dimensions, nodes within type, then node types; scales=1+reference type RMS',
++        expected_joint_degrees=mu.tolist(),scope='one complete matching fixed for all relation decoders; not anonymous global MAP')
+--- /dev/null
++++ b/experiments/anonymous_role_joint_decode_v1_1_local/package/joint_decode/structure.py
+@@ -0,0 +1,70 @@
++"""Exact sparse discrete diagnostics, not constraints. No degree repair or graph draws."""
++from collections import Counter
++import time
++import numpy as np
++
++
++def evaluate(schema,bits,semantic_types,law=None,check=lambda:None):
++    start=time.monotonic();bits=schema.bits(bits);s=schema;degree=s.degree(bits);adj=[set() for _ in range(s.n)]
++    selected=np.flatnonzero(bits)
++    for j,e in enumerate(selected):
++        if j%1024==0:check()
++        u,v=s.slots[:,e];adj[u].add(int(v));adj[v].add(int(u))
++    triangles=Counter();triangle_total=0
++    for u in range(s.n):
++        check()
++        for v in adj[u]:
++            if v<=u:continue
++            for w in adj[u].intersection(adj[v]):
++                if w>v:
++                    pattern=tuple(sorted([int(s.types[u]),int(s.types[v]),int(s.types[w])]))
++                    triangles[pattern]+=1;triangle_total+=1
++    seen=set();components=[]
++    for u in range(s.n):
++        check()
++        if u in seen:continue
++        stack=[u];seen.add(u);n=0
++        while stack:
++            v=stack.pop();n+=1
++            for w in adj[v]:
++                if w not in seen:seen.add(w);stack.append(w)
++        components.append(n)
++    director,actor,movie=(semantic_types[k] for k in ('director','actor','movie'))
++    numerator=0;denominator=0
++    for m in np.flatnonzero(s.types==movie):
++        check();directors={v for v in adj[m] if s.types[v]==director};actors={v for v in adj[m] if s.types[v]==actor}
++        denominator+=len(directors)*len(actors)
++        numerator+=sum(len(adj[d].intersection(actors)) for d in directors)
++    def distribution(values):
++        count=Counter(map(int,values));n=len(values)
++        return dict(counts={str(k):count[k] for k in sorted(count)},nodes=n,maximum=int(max(values,default=0)),
++                    mean=float(np.mean(values)) if n else None,zero=int(count[0]),degree_le1=int(sum(v<=1 for v in values)),
++                    P_gt153=float(sum(v>153 for v in values)/n) if n else None,
++                    P90=float(np.quantile(values,.9,method='linear')) if n else None)
++    total=degree.sum(1)
++    joint={str(c):dict(rows=rows.tolist(),counts=counts.tolist()) for c in s.sizes
++           for rows,counts in [np.unique(degree[s.types==c],axis=0,return_counts=True)]}
++    result=dict(schema_simple_undirected=True,nodes=s.n,edges=int(bits.sum()),
++        relation_edges=np.bincount(s.families,weights=bits,minlength=s.r).astype(int).tolist(),
++        relation_endpoint_degree={str(r):distribution(degree[np.isin(s.types,[a,b]),r]) for r,(a,b) in enumerate(s.pairs)},
++        total_degree=distribution(total),type_total_degree={str(c):distribution(total[s.types==c]) for c in s.sizes},
++        type_relation_degree={str(c):{str(r):distribution(degree[s.types==c,r]) for r in range(s.r)} for c in s.sizes},
++        joint_degree_frequencies=joint,triangles=triangle_total,
++        typed_triangles={','.join(map(str,k)):v for k,v in sorted(triangles.items())},
++        director_movie_actor_closure=dict(numerator=numerator,denominator=denominator,
++            ratio=numerator/denominator if denominator else None,NA_reason=None if denominator else 'no D-M-A paths',
++            definition='each D-M-A path once; closed iff its D-A edge exists; all edges from this discrete graph'),
++        component_sizes=sorted(components,reverse=True),components=len(components),connected=len(components)==1,
++        LCC=max(components,default=0),LCC_fraction=max(components,default=0)/s.n,
++        isolates=int((total==0).sum()),diagnostic_seconds=time.monotonic()-start)
++    if law is not None:
++        supported=bool(law.allowed(bits));result['model_support']=supported
++        result['log_probability']=float(law.log_prob(bits)) if supported else None
++        result['log_probability_status']='finite' if supported else 'negative_infinity_support_violation'
++    return result
++
++
++def differences(schema,original,decoded):
++    original=schema.bits(original).astype(bool);decoded=schema.bits(decoded).astype(bool)
++    return {name:np.bincount(schema.families[mask],minlength=schema.r).tolist()
++            for name,mask in dict(added=decoded&~original,deleted=original&~decoded,retained=original&decoded).items()}
+--- /dev/null
++++ b/experiments/anonymous_role_joint_decode_v1_1_local/package/tests/fixture_export.py
+@@ -0,0 +1,61 @@
++"""SYNTHETIC standard-format fixture writer; NOT an old real-output converter."""
++import argparse
++import hashlib
++import itertools
++import json
++from pathlib import Path
++import sys
++import numpy as np
++sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
++from joint_decode.contracts import Schema
++from joint_decode.frozen_input import array_sha,query_plan,FORMAT
++
++
++def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
++
++
++def write_json(p,value):p.write_text(json.dumps(value,indent=2)+'\n')
++
++
++def fixture(root,arm='A',reorder=False,original=True):
++    root=Path(root);root.mkdir(parents=True,exist_ok=False)
++    s=Schema(np.array([0,0,1,1,2,2]),np.array(list(itertools.combinations_with_replacement(range(3),2))))
++    bits=np.zeros(s.s,np.uint8);bits[s.encode_edges(np.array([[0,1,2,3,0,1],[4,5,4,5,2,3]]))]=1
++    profile=s.profile(bits);counts=np.bincount(s.families,minlength=s.r);edge=np.bincount(s.families,weights=bits,minlength=s.r)
++    prior=np.divide(edge,counts,out=np.zeros(s.r),where=counts>0);support=np.where(prior[s.families]==0,0,np.where(prior[s.families]==1,1,-1)).astype(np.int8)
++    p0=np.linspace(.19,.81,s.s);p0[support!=-1]=support[support!=-1]
++    seed=2026101907;plan=query_plan(s,edge>0,seed);alpha=np.linspace(1,0,1001,dtype=np.float64)
++    # Deliberately SYNTHETIC schedule, bound by receipt; never called the actual model schedule.
++    state=np.zeros(s.s,np.uint8);state[support==1]=1
++    arrays=dict(types=s.types,pairs=s.pairs,slots=s.slots,families=s.families,state=state,p0=p0,q=p0.copy(),
++                support=support,prior=prior,alpha=alpha,**{k:v for k,v in plan.items() if k!='query_sha256'})
++    if reorder:
++        order=np.arange(s.s)[::-1]
++        for k in ('families','state','p0','q','support','query_block'):arrays[k]=arrays[k][order]
++        arrays['slots']=arrays['slots'][:,order]
++    np.savez_compressed(root/'payload.npz',**arrays)
++    receipt=dict(arm=arm,seed=seed,t=1,unguided=True,query_sha256=plan['query_sha256'],source_kind='synthetic_fixture',
++        weight_authentication='historical_receipt_only',weight_sha256='1'*64,source_manifest_sha256='2'*64,
++        config_sha256='3'*64,reference_sha256='4'*64,alpha_sha256=array_sha(alpha),
++        note='ALL DATA SYNTHETIC; dummy hashes are NOT authenticated model/source evidence')
++    write_json(root/'receipt.json',receipt);write_json(root/'target.json',dict(profile=profile,reference_sha256='4'*64))
++    manifest=dict(format=FORMAT,arm=arm,t=1,unguided=True,seed=seed,T=1000,query_rounds=20,
++        p0_semantics='clean_edge_present_probability',score_semantics='recorded_probability',
++        q_semantics='next_state_edge_present_probability',endpoint_convention='unordered_u_lt_v',
++        relation_ids='zero_based_family_pairs_order',query_sha256=plan['query_sha256'],semantic_types=dict(director=0,actor=1,movie=2),
++        files={k:dict(path=n,sha256=sha(root/n)) for k,n in dict(payload='payload.npz',target='target.json',source_receipt='receipt.json').items()})
++    write_json(root/'manifest.json',manifest);pins=dict(manifest_sha256=sha(root/'manifest.json'))
++    if original:
++        np.savez_compressed(root/'original.npz',types=s.types,edges=s.slots[:,bits.astype(bool)],families=s.families[bits.astype(bool)])
++        orig_receipt=dict(arm=arm,seed=seed,t=0,unguided=True,graph_stage='raw_final_t0',
++             input_manifest_sha256=pins['manifest_sha256'],source_receipt_sha256=manifest['files']['source_receipt']['sha256'],
++             graph_sha256=sha(root/'original.npz'),weight_sha256=receipt['weight_sha256'])
++        write_json(root/'original_receipt.json',orig_receipt)
++        pins.update(original_sha256=sha(root/'original.npz'),original_receipt_sha256=sha(root/'original_receipt.json'))
++    write_json(root/'fixture_pins.json',pins)
++    return pins
++
++
++if __name__=='__main__':
++    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--output',required=True);a=p.parse_args()
++    print(json.dumps(fixture(a.output)))
+--- /dev/null
++++ b/experiments/anonymous_role_joint_decode_v1_1_local/package/tests/test_local_repairs.py
+@@ -0,0 +1,250 @@
++import copy
++import hashlib
++import itertools
++import json
++import os
++from pathlib import Path
++import subprocess
++import sys
++import numpy as np
++import pytest
++from joint_decode.exact import draw
++from joint_decode.frozen_input import Frozen,canonical_map
++from joint_decode.contracts import Schema,EdgeLaw
++from joint_decode.role_assignment import match
++from joint_decode.structure import evaluate,differences
++from audit_results import audit_fixed_graph
++sys.path.insert(0,str(Path(__file__).parent))
++from fixture_export import fixture,sha,write_json
++ROOT=Path(__file__).resolve().parents[1]
++
++
++def test_release_preserves_authenticated_nested_fixture_manifest():
++    # Packaging regression: excluding every basename manifest.json removed the
++    # fixture's trust-root file, even though ordinary source tests still passed.
++    manifest=json.loads((ROOT/'manifest.json').read_text())
++    path='evidence/SYNTHETIC_input/manifest.json'
++    assert (ROOT/path).is_file() and path in manifest['files']
++    pins=json.loads((ROOT/'evidence/SYNTHETIC_input/fixture_pins.json').read_text())
++    assert manifest['files'][path]['sha256']==pins['manifest_sha256']==sha(ROOT/path)
++
++
++def mutate(root,key,fn):
++    m=json.loads((root/'manifest.json').read_text())
++    if key=='manifest':fn(m)
++    elif key=='payload':
++        with np.load(root/'payload.npz') as z:a={k:z[k].copy() for k in z.files}
++        fn(a);np.savez_compressed(root/'payload.npz',**a)
++        m['files']['payload']['sha256']=sha(root/'payload.npz')
++    else:
++        p=root/m['files'][key]['path'];v=json.loads(p.read_text());fn(v);write_json(p,v);m['files'][key]['sha256']=sha(p)
++    write_json(root/'manifest.json',m);return sha(root/'manifest.json')
++
++
++def test_tail_zero_nextafter_regression():
++    p=np.array([1/6]*6+[0,0]);x=draw(p,[np.nextafter(1.,0.)]);assert x.tolist()==[5]
++
++
++@pytest.mark.parametrize('p',[[0,.25,0,.75,0],[0,0,1,0],[.5,0,.5],[1.]])
++def test_draw_positive_support_and_boundaries(p):
++    u=np.array([0.,.25,.5,.75,np.nextafter(1.,0.)]);x=draw(p,u)
++    assert (np.asarray(p)[x]>0).all()
++    if p==[.5,0,.5]:assert draw(p,[.5]).tolist()==[2]
++
++
++@pytest.mark.parametrize('p',[[],[0,0],[-.1,1.1],[np.nan,1],[np.inf],[.2,.7],[[1.]]])
++def test_draw_bad_probabilities(p):
++    with pytest.raises((ValueError,FloatingPointError)):draw(p,[0.])
++
++
++@pytest.mark.parametrize('u',[[-.1],[1.],[np.inf],[np.nan]])
++def test_draw_bad_uniforms(u):
++    with pytest.raises(ValueError):draw([1.],u)
++
++
++@pytest.mark.parametrize('kind',['bits','code','score','assigned'])
++def test_fixed_graph_two_representations_tamper_rejected(kind):
++    a=dict(slots=np.array([[0,0,1],[1,2,2]]),families=np.zeros(3,int),types=np.zeros(3,int),
++           fixed_assignment_bits=np.array([1,1,0]),assigned_joint_degrees=np.array([[2],[1],[1]]))
++    target=Schema(a['types'],[(0,0)]).profile(a['fixed_assignment_bits']);p=np.array([.2,.3,.4])
++    case=dict(fixed_assignment_graph_code=3,target=target,probabilities=p.tolist(),fixed_assignment_MAP=dict(log_q=float(np.log([.2,.3,.6]).sum())))
++    audit_fixed_graph(case,a)
++    if kind=='bits':a['fixed_assignment_bits'][0]^=1
++    elif kind=='code':case['fixed_assignment_graph_code']^=1
++    elif kind=='score':case['fixed_assignment_MAP']['log_q']+=1
++    else:a['assigned_joint_degrees'][0,0]=0
++    with pytest.raises(AssertionError):audit_fixed_graph(case,a)
++
++
++def test_reader_correct_reorder_and_complete_joint_matching(tmp_path):
++    p=fixture(tmp_path/'in');q=fixture(tmp_path/'reordered',reorder=True)
++    a=Frozen(tmp_path/'in/manifest.json',p['manifest_sha256'],'A');b=Frozen(tmp_path/'reordered/manifest.json',q['manifest_sha256'],'A')
++    assert np.array_equal(a.p0,b.p0) and np.array_equal(a.state,b.state)
++    assigned,report=match(a.schema,a.target,a.p0)
++    assert a.schema.profile(np.array([0]*a.schema.s))!=a.target
++    assert report['cost']>=0 and assigned.shape==(6,6) and '合成' in a.source_limit
++    from joint_decode.contracts import validate_assignment
++    validate_assignment(a.schema,a.target,assigned)
++
++
++@pytest.mark.parametrize('bad',['missing','duplicate','family','out_of_range','arm','time','guidance','semantic','support','saturation','q','query','seed','prior','target'])
++def test_reader_rejects_bad_contract(tmp_path,bad):
++    r=tmp_path/'in';pins=fixture(r);expected=pins['manifest_sha256']
++    def array_bad(a):
++        if bad=='missing':a['slots']=a['slots'][:,:-1]
++        if bad=='duplicate':a['slots'][:,1]=a['slots'][:,0]
++        if bad=='family':a['families'][0]+=1
++        if bad=='out_of_range':a['slots'][1,0]=999
++        if bad=='support':a['support'][0]=-1
++        if bad=='saturation':a['p0'][np.flatnonzero(a['support']==-1)[0]]=1.
++        if bad=='q':a['q'][np.flatnonzero(a['support']==-1)[0]]+=1e-10
++        if bad=='query':a['query_ids'][0],a['query_ids'][1]=a['query_ids'][1],a['query_ids'][0]
++        if bad=='prior':a['prior'][1]=.4
++    if bad in ('arm','time','guidance','semantic','seed'):
++        k,v=dict(arm=('arm','C'),time=('t',20),guidance=('unguided',False),semantic=('p0_semantics','absent_probability'),seed=('seed',99))[bad]
++        expected=mutate(r,'manifest',lambda m:m.update({k:v}))
++    elif bad=='target':expected=mutate(r,'target',lambda t:t.update(reference_sha256='9'*64))
++    else:expected=mutate(r,'payload',array_bad)
++    with pytest.raises((ValueError,KeyError)):Frozen(r/'manifest.json',expected,'A')
++
++
++@pytest.mark.parametrize('file',['manifest','payload','receipt'])
++def test_reader_expected_hash_chain_not_current_self_hash(tmp_path,file):
++    r=tmp_path/'in';pins=fixture(r);p=r/(file+'.json' if file!='payload' else 'payload.npz')
++    with p.open('ab') as f:f.write(b' ')
++    with pytest.raises(ValueError,match='SHA256'):Frozen(r/'manifest.json',pins['manifest_sha256'],'A')
++
++
++def test_explained_finite_saturation_remains_free_and_unexplained_is_rejected(tmp_path):
++    r=tmp_path/'in';fixture(r)
++    def change(a):
++        p=a['p0'];free=a['support']==-1;logits=np.zeros_like(p);logits[free]=np.log(p[free])-np.log1p(-p[free]);logits[np.flatnonzero(free)[0]]=1000.
++        a['clean_logits']=logits;p[free]=np.exp(-np.logaddexp(0.,-logits[free]));a['q']=p.copy()
++    mutate(r,'payload',change);mutate(r,'source_receipt',lambda m:m.update(logits_semantics='finite_clean_present_minus_absent'))
++    h=mutate(r,'manifest',lambda m:m.update(score_semantics='finite_clean_logits'))
++    f=Frozen(r/'manifest.json',h,'A');i=np.flatnonzero(f.support==-1)[0]
++    assert f.p0[i]==1 and f.law.support[i]==-1 and f.law.logits[i]==1000
++
++
++def test_full_joint_matching_exact_bruteforce_and_not_lexicographic():
++    s=Schema(np.array([0,0,1,1,2,2]),[(0,1),(0,2),(1,2)])
++    reference=np.zeros(s.s,np.uint8);reference[[0,4,5,8]]=1;target=s.profile(reference)
++    p=np.linspace(.1,.8,s.s);d,report=match(s,target,p)
++    mu=np.zeros_like(d,dtype=float)
++    for endpoint in s.slots:np.add.at(mu,(endpoint,s.families),p)
++    for row in report['types']:
++        c=row['type'];g=target['groups'][str(c)];roles=np.repeat(g['rows'],g['counts'],axis=0);nodes=np.flatnonzero(s.types==c)
++        scale=np.array(row['scales']);valid=row['effective_relations'];k=len(valid)
++        costs=[np.mean(np.sum(((mu[nodes][:,valid]-roles[list(perm)][:,valid])/scale[valid])**2,axis=1)/k) if k else 0 for perm in itertools.permutations(range(len(nodes)))]
++        assert abs(row['cost']-min(costs))<1e-12
++
++
++def test_single_dimension_matching_scales_duplicates_and_ties():
++    s=Schema(np.array([0,0,1,1]),[(0,1)]);target=s.profile(np.array([1,1,0,0]))
++    d,r=match(s,target,np.full(4,.5))
++    assert any('sorting' in x['algorithm'] for x in r['types'])
++    assert any('different-role tie present'==x['different_role_ties'] for x in r['types'])
++    assert r['types'][0]['scales']==[1+np.sqrt(2)]
++
++
++def test_structure_independent_small_graph_checks(tmp_path):
++    r=tmp_path/'in';pins=fixture(r);f=Frozen(r/'manifest.json',pins['manifest_sha256'],'A');s=f.schema
++    rng=np.random.default_rng(7)
++    for bits in [np.zeros(s.s,np.uint8),np.ones(s.s,np.uint8),*rng.integers(0,2,size=(12,s.s),dtype=np.uint8)]:
++        v=evaluate(s,bits,f.semantic_types);adj=np.zeros((6,6),int)
++        for present,(u,w) in zip(bits,s.slots.T):adj[u,w]=adj[w,u]=present
++        tri=sum(adj[a,b]*adj[a,c]*adj[b,c] for a,b,c in itertools.combinations(range(6),3))
++        denom=num=0
++        for d,a,m in itertools.product([0,1],[2,3],[4,5]):
++            denom+=adj[d,m]*adj[m,a];num+=adj[d,m]*adj[m,a]*adj[d,a]
++        assert v['triangles']==tri and v['director_movie_actor_closure']['numerator']==num and v['director_movie_actor_closure']['denominator']==denom
++        assert sum(v['component_sizes'])==6 and v['total_degree']['mean']==adj.sum()/6
++        assert differences(s,bits,bits)['added']==[0]*s.r
++
++
++def cli(root,pins,out,**extra):
++    args=[sys.executable,str(ROOT/'decode_frozen.py'),'--input',str(root if extra.get('root_input') else root/'manifest.json'),'--manifest-sha256',pins['manifest_sha256'],
++          '--arm',extra.get('arm','A'),'--output',str(out),'--max-seconds',str(extra.get('seconds',30))]
++    if extra.get('original'):
++        args+=['--original-graph',str(root/'original.npz'),'--original-sha256',pins['original_sha256'],
++               '--original-receipt',str(root/'original_receipt.json'),'--original-receipt-sha256',pins['original_receipt_sha256']]
++    env=os.environ.copy();env.update(OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1',CUDA_VISIBLE_DEVICES='',PYTHONDONTWRITEBYTECODE='1')
++    return subprocess.run(args,cwd=ROOT,env=env,text=True,capture_output=True,timeout=40)
++
++
++@pytest.mark.parametrize('arm',['A','B'])
++def test_public_local_cli_real_parent_child_solver_end_to_end(tmp_path,arm):
++    root=tmp_path/'input';pins=fixture(root,arm=arm);out=tmp_path/'output';res=cli(root,pins,out,original=True,arm=arm,root_input=arm=='B')
++    assert res.returncode==0,(res.stdout,res.stderr,(out/'worker.log').read_text())
++    summary=json.loads((out/'summary.json').read_text());receipt=json.loads((out/'controller.json').read_text())
++    assert summary['status']=='complete' and summary['source_kind']=='synthetic_fixture'
++    assert summary['original'] and all(summary['checks'].values()) and receipt['owned_group_gone']
++    assert (out/'decoded_graph.npz').exists() and summary['solver']['no_anonymous_global_optimality_claim']
++
++
++def test_no_original_graph_is_explicitly_missing_not_replaced(tmp_path):
++    root=tmp_path/'input';pins=fixture(root,original=False);out=tmp_path/'output';res=cli(root,pins,out)
++    assert res.returncode==0,(res.stdout,res.stderr)
++    summary=json.loads((out/'summary.json').read_text())
++    assert summary['original'] is None and summary['changes_by_family'] is None and summary['missing_comparisons']
++
++
++def test_matching_assignment_is_not_engineering_lexicographic():
++    from joint_decode.contracts import canonical_assignment
++    s=Schema(np.array([0,0,1,1]),[(0,1)]);target=s.profile(np.array([1,1,0,0]))
++    p=np.array([.9,.8,.2,.1]);d,r=match(s,target,p)
++    assert not np.array_equal(d,canonical_assignment(s,target))
++    assert np.array_equal(d[:,0],[2,0,1,1])
++
++
++def test_output_protection_before_mkdir_and_input_hash_failure(tmp_path):
++    root=tmp_path/'input';pins=fixture(root);before={p.relative_to(root):sha(p) for p in root.iterdir()}
++    res=cli(root,pins,root/'BAD')
++    assert res.returncode!=0 and not (root/'BAD').exists() and before=={p.relative_to(root):sha(p) for p in root.iterdir()}
++    bad=pins.copy();bad['manifest_sha256']='0'*64;out=tmp_path/'failed';res=cli(root,bad,out)
++    assert res.returncode!=0 and json.loads((out/'summary.json').read_text())['status']=='failed' and not (out/'decoded_graph.npz').exists()
++
++
++@pytest.mark.parametrize('field,value',[('seed',7),('arm','B'),('weight_sha256','f'*64)])
++def test_original_receipt_wrong_arm_seed_rejected(tmp_path,field,value):
++    root=tmp_path/'in';pins=fixture(root);f=Frozen(root/'manifest.json',pins['manifest_sha256'],'A')
++    r=json.loads((root/'original_receipt.json').read_text());r[field]=value;write_json(root/'original_receipt.json',r)
++    with pytest.raises(ValueError,match='binding'):f.original(root/'original.npz',pins['original_sha256'],root/'original_receipt.json',sha(root/'original_receipt.json'))
++
++
++def test_query_recipe_matches_local_old_implementation_without_importing_torch():
++    # Trusted local baseline source is exercised directly only for this static
++    # recipe equivalence test. It imports numpy/math, never a model/common.py.
++    from joint_decode.frozen_input import query_plan
++    import importlib.util
++    old=ROOT/'format_reference/old_slots.py'
++    spec=importlib.util.spec_from_file_location('old_local_slots_reference',old);mod=importlib.util.module_from_spec(spec);spec.loader.exec_module(mod)
++    s=Schema(np.array([0,0,1,1,2,2]),[(0,0),(0,1),(0,2),(1,1),(1,2),(2,2)])
++    active=np.array([False,True,True,False,True,False]);seed=2026101907
++    p=query_plan(s,active,seed);oldplan=mod.UniformQueryPlan(mod.TypedSlots(s.types,s.pairs),[seed,1,61],rounds=20,active_families=active)
++    h=hashlib.sha256()
++    for b in range(20):
++        ids,f,q=oldplan.block(b);left,right=p['query_offsets'][b:b+2]
++        assert np.array_equal(ids,p['query_ids'][left:right]) and np.array_equal(f,p['query_families'][left:right])
++        assert np.array_equal(q,p['query_slots'][:,left:right])
++        for a in (ids,f,q):h.update(a.tobytes())
++    assert h.hexdigest()==p['query_sha256']
++
++
++def test_reader_true_fixed_one_and_empty_families(tmp_path):
++    from joint_decode.frozen_input import query_plan
++    r=tmp_path/'input';fixture(r);s=Schema(np.array([0,1,2]),list(itertools.combinations_with_replacement(range(3),2)))
++    bits=np.ones(s.s,np.uint8);target=s.profile(bits);counts=np.bincount(s.families,minlength=s.r)
++    prior=(counts>0).astype(float);plan=query_plan(s,counts>0,2026101907)
++    def replace(a):
++        alpha=a['alpha'];a.clear();a.update(types=s.types,pairs=s.pairs,slots=s.slots,families=s.families,
++            state=bits,p0=bits.astype(float),q=bits.astype(float),support=np.ones(s.s,np.int8),prior=prior,alpha=alpha,
++            **{k:v for k,v in plan.items() if k!='query_sha256'})
++    mutate(r,'payload',replace);mutate(r,'target',lambda a:a.update(profile=target))
++    mutate(r,'source_receipt',lambda a:a.update(query_sha256=plan['query_sha256']))
++    h=mutate(r,'manifest',lambda a:a.update(query_sha256=plan['query_sha256']))
++    f=Frozen(r/'manifest.json',h,'A');assigned,report=match(s,target,f.p0)
++    from joint_decode.decoder import decode
++    decoded,solver=decode(s,target,assigned,f.law)
++    assert solver['optimal'] and np.array_equal(decoded,bits) and np.all(f.support==1)
++    assert f.law.log_prob(decoded)==0
