@@ -1,0 +1,303 @@
+{
+  "PubMed_baseline": {
+    "dataset": "PubMed_baseline",
+    "version": "/data2/lyh/gnn_project/DiHug/data/PubMed_baseline_subgraphs/subgraph_000",
+    "source": "HGEN PubMed_baseline (full graph, undirected GT + canonical single directed edge)",
+    "nodes": 1565,
+    "edges": 12284,
+    "node_types": [
+      "Gene",
+      "Disease",
+      "Chemical",
+      "Species"
+    ],
+    "type_counts": {
+      "Gene": 313,
+      "Disease": 643,
+      "Chemical": 564,
+      "Species": 45
+    },
+    "schema": [
+      {
+        "relation": 1,
+        "types": [
+          "Gene",
+          "Gene"
+        ],
+        "edges": 542
+      },
+      {
+        "relation": 2,
+        "types": [
+          "Gene",
+          "Disease"
+        ],
+        "edges": 1813
+      },
+      {
+        "relation": 3,
+        "types": [
+          "Gene",
+          "Chemical"
+        ],
+        "edges": 2230
+      },
+      {
+        "relation": 4,
+        "types": [
+          "Gene",
+          "Species"
+        ],
+        "edges": 187
+      },
+      {
+        "relation": 5,
+        "types": [
+          "Disease",
+          "Disease"
+        ],
+        "edges": 1095
+      },
+      {
+        "relation": 6,
+        "types": [
+          "Disease",
+          "Chemical"
+        ],
+        "edges": 3595
+      },
+      {
+        "relation": 7,
+        "types": [
+          "Disease",
+          "Species"
+        ],
+        "edges": 314
+      },
+      {
+        "relation": 8,
+        "types": [
+          "Chemical",
+          "Chemical"
+        ],
+        "edges": 2139
+      },
+      {
+        "relation": 9,
+        "types": [
+          "Chemical",
+          "Species"
+        ],
+        "edges": 353
+      },
+      {
+        "relation": 10,
+        "types": [
+          "Species",
+          "Species"
+        ],
+        "edges": 16
+      }
+    ],
+    "original_family_mapping": {
+      "link_Gene_Gene": 1,
+      "link_Gene_Disease": 2,
+      "link_Gene_Chemical": 3,
+      "link_Gene_Species": 4,
+      "link_Disease_Disease": 5,
+      "link_Disease_Chemical": 6,
+      "link_Disease_Species": 7,
+      "link_Chemical_Chemical": 8,
+      "link_Chemical_Species": 9,
+      "link_Species_Species": 10
+    },
+    "edge_label_semantics": "one binary physical link for each unordered endpoint-type family; supplied y=1",
+    "simultaneous_multirelation_slots": 0,
+    "self_loops": 0,
+    "directed": false,
+    "isolates": 0,
+    "component_sizes": [
+      1565
+    ],
+    "splits": {
+      "train": [
+        0
+      ],
+      "val": [
+        0
+      ],
+      "test": [
+        0
+      ]
+    },
+    "split_caveat": "train/val/test all index 0; same-reference validation, not held-out graph generalization",
+    "provenance": {
+      "original_shape": [
+        1565,
+        1565
+      ],
+      "original_nonzero": 25816,
+      "original_self_loops": 0,
+      "original_symmetric": true,
+      "physical_edges_match": true,
+      "node_types_match": true,
+      "note": "Stored canonical-single undirected version. No new cropping, symmetrization or edge deletion performed."
+    },
+    "input_hashes": {
+      "/data2/lyh/gnn_project/DiHug/data/PubMed_baseline_subgraphs/subgraph_000/meta.json": "d9b2c1952a711c30326979fb3f5bededf056db9e97e18c485f79ea00288ddb68",
+      "/data2/lyh/gnn_project/DiHug/data/PubMed_baseline_subgraphs/subgraph_000/nodes.pt": "9d39e366e88d8d1b05ec5f2c5a8e0486be4e2a4866f9b8ff9012b15ecf2c0f30",
+      "/data2/lyh/gnn_project/DiHug/data/PubMed_baseline_subgraphs/subgraph_000/edges.pt": "0255bfc987601975f2b52f7cd7808bea16bee0db90c20dde595447e5f7201b27",
+      "/data2/lyh/gnn_project/DiHug/data/PubMed_baseline_subgraphs/processed/splits.pt": "a9f5d6443072b3d692e5ac82343651db7e930cb6d47f8d483e97abfc30eaf6f0",
+      "/data2/lyh/gnn_project/HGEN/PubMed_baseline/adj_matrix.p": "0ff8373ada01ec185d19b59b06cb41a90719db71d9ec94f861a8b0dbc2bfcc27",
+      "/data2/lyh/gnn_project/HGEN/PubMed_baseline/new_node_dict.p": "ddd94d9673cd8b2850d3544e6d85a2b0397be42ac1f19e3e8aba43fea679a797"
+    }
+  },
+  "IMDB_movie": {
+    "dataset": "IMDB_movie",
+    "version": "/data2/lyh/gnn_project/DiHug/data/IMDB_movie_subgraphs/subgraph_000",
+    "source": "HGEN IMDB_movie (full graph, undirected GT + canonical single directed edge)",
+    "nodes": 1653,
+    "edges": 4079,
+    "node_types": [
+      "Director",
+      "Actor",
+      "Movie",
+      "Genre"
+    ],
+    "type_counts": {
+      "Director": 410,
+      "Actor": 494,
+      "Movie": 726,
+      "Genre": 23
+    },
+    "schema": [
+      {
+        "relation": 1,
+        "types": [
+          "Director",
+          "Director"
+        ],
+        "edges": 0
+      },
+      {
+        "relation": 2,
+        "types": [
+          "Director",
+          "Actor"
+        ],
+        "edges": 604
+      },
+      {
+        "relation": 3,
+        "types": [
+          "Director",
+          "Movie"
+        ],
+        "edges": 642
+      },
+      {
+        "relation": 4,
+        "types": [
+          "Director",
+          "Genre"
+        ],
+        "edges": 0
+      },
+      {
+        "relation": 5,
+        "types": [
+          "Actor",
+          "Actor"
+        ],
+        "edges": 15
+      },
+      {
+        "relation": 6,
+        "types": [
+          "Actor",
+          "Movie"
+        ],
+        "edges": 739
+      },
+      {
+        "relation": 7,
+        "types": [
+          "Actor",
+          "Genre"
+        ],
+        "edges": 0
+      },
+      {
+        "relation": 8,
+        "types": [
+          "Movie",
+          "Movie"
+        ],
+        "edges": 0
+      },
+      {
+        "relation": 9,
+        "types": [
+          "Movie",
+          "Genre"
+        ],
+        "edges": 2079
+      },
+      {
+        "relation": 10,
+        "types": [
+          "Genre",
+          "Genre"
+        ],
+        "edges": 0
+      }
+    ],
+    "original_family_mapping": {
+      "link_Actor_Actor": 5,
+      "link_Actor_Movie": 6,
+      "link_Director_Actor": 2,
+      "link_Director_Movie": 3,
+      "link_Movie_Genre": 9
+    },
+    "edge_label_semantics": "one binary physical link for each unordered endpoint-type family; supplied y=1",
+    "simultaneous_multirelation_slots": 0,
+    "self_loops": 0,
+    "directed": false,
+    "isolates": 0,
+    "component_sizes": [
+      1653
+    ],
+    "splits": {
+      "train": [
+        0
+      ],
+      "val": [
+        0
+      ],
+      "test": [
+        0
+      ]
+    },
+    "split_caveat": "train/val/test all index 0; same-reference validation, not held-out graph generalization",
+    "provenance": {
+      "original_shape": [
+        1653,
+        1653
+      ],
+      "original_nonzero": 4090,
+      "original_self_loops": 11,
+      "original_symmetric": false,
+      "physical_edges_match": true,
+      "node_types_match": true,
+      "note": "Stored canonical-single undirected version. No new cropping, symmetrization or edge deletion performed."
+    },
+    "input_hashes": {
+      "/data2/lyh/gnn_project/DiHug/data/IMDB_movie_subgraphs/subgraph_000/meta.json": "31b5b37804bd1d18f68699cce233878dac37b9fcb5e4450a5867915951f365b0",
+      "/data2/lyh/gnn_project/DiHug/data/IMDB_movie_subgraphs/subgraph_000/nodes.pt": "c5204a8aab7255e6d5b6cfa9dc7096dae4773645c562f8cdf45c9afe6a66b03e",
+      "/data2/lyh/gnn_project/DiHug/data/IMDB_movie_subgraphs/subgraph_000/edges.pt": "7d372b11d6bea2ba6f1d68b2d6ab936e8ebb8fe9ded57c8ea70f9314e1bfd2ec",
+      "/data2/lyh/gnn_project/DiHug/data/IMDB_movie_subgraphs/processed/splits.pt": "14bff00127b0950e17fac0769d8fb3d57beccda792198d165014ae6fb7879d39",
+      "/data2/lyh/gnn_project/HGEN/IMDB_movie/adj_matrix.p": "bb26dfcbd079f59a163c058893b31294994fd6fdea9daa6cbf9bdcbe68f38010",
+      "/data2/lyh/gnn_project/HGEN/IMDB_movie/new_node_dict.p": "51a7a4b5312f5f84403cbc6a1c2b43f7655a6b0731470549b1fa10d8a9250729"
+    }
+  }
+}
