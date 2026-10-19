@@ -1,6 +1,6 @@
 # Current scoped handoff: local frozen-input decode v1.1
 
-2026-10-19基线2c1a2f2，独立小修及标准本地接口80项CPU通过，原27保留、零跳过。
+2026-10-19基线2c1a2f2，原80项实际通过；补嵌套manifest打包回归后81项CPU通过，原27保留、零跳过。
 标准夹具接口与旧真实导出接通明确区分；没有真实A1/B1、notebook、SSH、BW、网络模型调用或规模重跑。
 仅完成独立ZIP解包验收和GitHub发布后停止；真实数据转换/运行交另一侧，不自动签发。
 证据results/anonymous_role_decode_local_v11_20261019。

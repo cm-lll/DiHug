@@ -19,6 +19,16 @@ from fixture_export import fixture,sha,write_json
 ROOT=Path(__file__).resolve().parents[1]
 
 
+def test_release_preserves_authenticated_nested_fixture_manifest():
+    # Packaging regression: excluding every basename manifest.json removed the
+    # fixture's trust-root file, even though ordinary source tests still passed.
+    manifest=json.loads((ROOT/'manifest.json').read_text())
+    path='evidence/SYNTHETIC_input/manifest.json'
+    assert (ROOT/path).is_file() and path in manifest['files']
+    pins=json.loads((ROOT/'evidence/SYNTHETIC_input/fixture_pins.json').read_text())
+    assert manifest['files'][path]['sha256']==pins['manifest_sha256']==sha(ROOT/path)
+
+
 def mutate(root,key,fn):
     m=json.loads((root/'manifest.json').read_text())
     if key=='manifest':fn(m)

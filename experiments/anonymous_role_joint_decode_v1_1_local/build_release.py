@@ -26,7 +26,7 @@ def main():
     old=subprocess.check_output(['git','show',BASE+':experiments/anonymous_role_joint_decode_v1/package/tests/test_prototype.py'],cwd=REPO)
     if (ROOT/'tests/test_prototype.py').read_bytes()!=old:raise ValueError('original27 regressions changed')
     files={str(p.relative_to(ROOT)):p.read_bytes() for p in sorted(ROOT.rglob('*')) if p.is_file() and
-           '__pycache__' not in p.parts and '.pytest_cache' not in p.parts and p.name not in ('manifest.json','SHA256SUMS')}
+           '__pycache__' not in p.parts and '.pytest_cache' not in p.parts and str(p.relative_to(ROOT)) not in ('manifest.json','SHA256SUMS')}
     if any(n.endswith(('.pt','.pth','.ckpt','.pkl','.zip')) for n in files):raise ValueError('private/unplanned binary')
     manifest=dict(version='anonymous_role_joint_decode_v1_1_local',base_commit=BASE,
         source_commit=subprocess.check_output(['git','rev-parse','HEAD'],cwd=REPO,text=True).strip(),
