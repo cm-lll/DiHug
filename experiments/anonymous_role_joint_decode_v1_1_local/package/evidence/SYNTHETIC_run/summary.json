@@ -1,0 +1,1279 @@
+{
+  "status": "complete",
+  "arm": "A",
+  "t": 1,
+  "seed": 2026101907,
+  "source_kind": "synthetic_fixture",
+  "source_limit": "\u5408\u6210\u5de5\u7a0b\u5939\u5177\uff1b\u4e0d\u662f\u5b9e\u9645\u6a21\u578b\u8f93\u51fa\u6216\u771f\u5b9e\u6765\u6e90\u8ba4\u8bc1",
+  "scope": "ONE fixed JOINT role matching MAP, not anonymous global MAP, not a sampler",
+  "matching": {
+    "status": "complete",
+    "cost": 0.02786573129251702,
+    "types": [
+      {
+        "type": 0,
+        "nodes": 2,
+        "effective_relations": [
+          1,
+          2
+        ],
+        "scales": [
+          1.0,
+          2.0,
+          2.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "duplicate_role_copies": 1,
+        "cost": 0.02206377551020407,
+        "algorithm": "scipy linear_sum_assignment exact joint square cost",
+        "different_role_ties": "unique role-vector allocation within1e-12",
+        "tie_rule": "stable sorting/SciPy index representative; no strict tied-gradient or assignment equivariance claim"
+      },
+      {
+        "type": 1,
+        "nodes": 2,
+        "effective_relations": [
+          1,
+          4
+        ],
+        "scales": [
+          1.0,
+          2.0,
+          1.0,
+          1.0,
+          2.0,
+          1.0
+        ],
+        "duplicate_role_copies": 1,
+        "cost": 0.040940561224489816,
+        "algorithm": "scipy linear_sum_assignment exact joint square cost",
+        "different_role_ties": "unique role-vector allocation within1e-12",
+        "tie_rule": "stable sorting/SciPy index representative; no strict tied-gradient or assignment equivariance claim"
+      },
+      {
+        "type": 2,
+        "nodes": 2,
+        "effective_relations": [
+          2,
+          4
+        ],
+        "scales": [
+          1.0,
+          1.0,
+          2.0,
+          1.0,
+          2.0,
+          1.0
+        ],
+        "duplicate_role_copies": 1,
+        "cost": 0.020592857142857163,
+        "algorithm": "scipy linear_sum_assignment exact joint square cost",
+        "different_role_ties": "unique role-vector allocation within1e-12",
+        "tie_rule": "stable sorting/SciPy index representative; no strict tied-gradient or assignment equivariance claim"
+      }
+    ],
+    "seconds": 0.003570052795112133,
+    "normalization": "mean over effective relation dimensions, nodes within type, then node types; scales=1+reference type RMS",
+    "expected_joint_degrees": [
+      [
+        0.0,
+        0.5128571428571429,
+        0.8671428571428572,
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.6900000000000002,
+        1.0442857142857145,
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.5571428571428572,
+        0.0,
+        0.0,
+        1.3100000000000003,
+        0.0
+      ],
+      [
+        0.0,
+        0.6457142857142858,
+        0.0,
+        0.0,
+        1.4871428571428573,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.9114285714285715,
+        0.0,
+        1.3542857142857145,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        1.0000000000000002,
+        0.0,
+        1.442857142857143,
+        0.0
+      ]
+    ],
+    "scope": "one complete matching fixed for all relation decoders; not anonymous global MAP"
+  },
+  "solver": {
+    "scope": "MAP under ONE FIXED COMPLETE role matching",
+    "status": "optimal_fixed_matching",
+    "blocks": [
+      {
+        "family": 0,
+        "pair": [
+          0,
+          0
+        ],
+        "original_slots": 1,
+        "free_variables": 0,
+        "residual_edges": 0,
+        "algorithm": "binary same-type f-factor MILP",
+        "status": "optimal",
+        "objective": 0.0,
+        "lower_bound": 0.0,
+        "gap": 0.0,
+        "seconds": 0.00022213999181985855
+      },
+      {
+        "family": 1,
+        "pair": [
+          0,
+          1
+        ],
+        "original_slots": 4,
+        "free_variables": 4,
+        "residual_edges": 2,
+        "algorithm": "bipartite TU LP",
+        "solver_status": 0,
+        "solver_message": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
+        "warnings": [
+          "Unrecognized options detected: {'threads': 1}. These will be passed to HiGHS verbatim."
+        ],
+        "seconds": 0.005633920431137085,
+        "status": "optimal",
+        "objective": 1.6922311931344032,
+        "lower_bound": 1.6922311931344032,
+        "gap": 0.0,
+        "objective_tolerance": 2.0169223119313439e-07,
+        "integrality_error": 0.0,
+        "independent_degree_error": 0,
+        "certificate": "TU vertex integrality + independently recomputed Lagrangian lower bound (FP arithmetic)",
+        "node_count": 0
+      },
+      {
+        "family": 2,
+        "pair": [
+          0,
+          2
+        ],
+        "original_slots": 4,
+        "free_variables": 4,
+        "residual_edges": 2,
+        "algorithm": "bipartite TU LP",
+        "solver_status": 0,
+        "solver_message": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
+        "warnings": [
+          "Unrecognized options detected: {'threads': 1}. These will be passed to HiGHS verbatim."
+        ],
+        "seconds": 0.0027029793709516525,
+        "status": "optimal",
+        "objective": 0.17760827234185605,
+        "lower_bound": 0.17760827234185605,
+        "gap": 0.0,
+        "objective_tolerance": 2.0099999999999999e-07,
+        "integrality_error": 0.0,
+        "independent_degree_error": 0,
+        "certificate": "TU vertex integrality + independently recomputed Lagrangian lower bound (FP arithmetic)",
+        "node_count": 0
+      },
+      {
+        "family": 3,
+        "pair": [
+          1,
+          1
+        ],
+        "original_slots": 1,
+        "free_variables": 0,
+        "residual_edges": 0,
+        "algorithm": "binary same-type f-factor MILP",
+        "status": "optimal",
+        "objective": 0.0,
+        "lower_bound": 0.0,
+        "gap": 0.0,
+        "seconds": 0.00011246092617511749
+      },
+      {
+        "family": 4,
+        "pair": [
+          1,
+          2
+        ],
+        "original_slots": 4,
+        "free_variables": 4,
+        "residual_edges": 2,
+        "algorithm": "bipartite TU LP",
+        "solver_status": 0,
+        "solver_message": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
+        "warnings": [
+          "Unrecognized options detected: {'threads': 1}. These will be passed to HiGHS verbatim."
+        ],
+        "seconds": 0.002272781915962696,
+        "status": "optimal",
+        "objective": -1.7287614183965205,
+        "lower_bound": -1.7287614183965205,
+        "gap": 0.0,
+        "objective_tolerance": 2.017287614183965e-07,
+        "integrality_error": 0.0,
+        "independent_degree_error": 0,
+        "certificate": "TU vertex integrality + independently recomputed Lagrangian lower bound (FP arithmetic)",
+        "node_count": 0
+      },
+      {
+        "family": 5,
+        "pair": [
+          2,
+          2
+        ],
+        "original_slots": 1,
+        "free_variables": 0,
+        "residual_edges": 0,
+        "algorithm": "binary same-type f-factor MILP",
+        "status": "optimal",
+        "objective": 0.0,
+        "lower_bound": 0.0,
+        "gap": 0.0,
+        "seconds": 0.00011345185339450836
+      }
+    ],
+    "solver_options": {
+      "bipartite": "scipy.linprog highs-ds TU degree matching LP",
+      "same_type": "scipy.milp binary simple-graph f-factor",
+      "lp_primal_feasibility_tolerance": 1e-07,
+      "lp_dual_feasibility_tolerance": 1e-07,
+      "external_integrality_atol": 1e-06,
+      "objective_atol": 2e-07,
+      "objective_rtol": 1e-09,
+      "mip_rel_gap": 0.0,
+      "mip_node_limit": 100000,
+      "threads": 1,
+      "per_small_solve_seconds": 10.0
+    },
+    "optimal": true,
+    "tie_rule": "solver representative; no tied-output equivariance claim",
+    "hard_zero_slots": 3,
+    "hard_one_slots": 0,
+    "finite_logit_free_slots": 12,
+    "exact_joint_role_multiset": true,
+    "exact_assigned_degrees": true,
+    "exact_support": true,
+    "log_q": -9.06114833321424,
+    "log_q_upper_bound": -9.061148333214241,
+    "log_q_gap": -1.7763568394002505e-15,
+    "physical_edges": 6,
+    "seconds": 0.01768046524375677,
+    "no_anonymous_global_optimality_claim": true,
+    "no_sampling_claim": true
+  },
+  "checks": {
+    "schema": true,
+    "support": true,
+    "assigned_degrees": true,
+    "anonymous_joint_frequencies": true
+  },
+  "schema": {
+    "nodes": 6,
+    "type_counts": {
+      "0": 2,
+      "1": 2,
+      "2": 2
+    },
+    "pairs": [
+      [
+        0,
+        0
+      ],
+      [
+        0,
+        1
+      ],
+      [
+        0,
+        2
+      ],
+      [
+        1,
+        1
+      ],
+      [
+        1,
+        2
+      ],
+      [
+        2,
+        2
+      ]
+    ],
+    "slots": 15,
+    "canonical_slots_sha256": "45aa581f9bb536a1d01c3f51d07cf3081b7a50ff9c874fc8b6c3af06bee40544",
+    "families_sha256": "f9cd3f941f092aa42d007af01f0743f3667148ff28b38c6ee91cdc50f3ee9ccc",
+    "input_to_canonical_sha256": "4107167d6f03f7cb8e829358a6fb9c09ff16b19adc550b79d4874e76e96849bb"
+  },
+  "semantic_types": {
+    "director": 0,
+    "actor": 1,
+    "movie": 2
+  },
+  "source_receipt": {
+    "weight_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+    "source_manifest_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+    "config_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+    "reference_sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+    "alpha_sha256": "b11c02e1278a0b33c744ed0f6a2fd7afc5720c0ab6c91bd46fabead318280fb5"
+  },
+  "posterior_absolute_tolerance": 5e-14,
+  "structural_fixed0": 3,
+  "structural_fixed1": 0,
+  "query_sha256": "c880fd08ef7b2c97370cabf087a81feee051f1970edf616a4fc7b42a408b8aa9",
+  "q_p0_max_error": 0.0,
+  "numerical_saturated_free_slots": 0,
+  "score_semantics": "recorded_probability",
+  "decoded": {
+    "schema_simple_undirected": true,
+    "nodes": 6,
+    "edges": 6,
+    "relation_edges": [
+      0,
+      2,
+      2,
+      0,
+      2,
+      0
+    ],
+    "relation_endpoint_degree": {
+      "0": {
+        "counts": {
+          "0": 2
+        },
+        "nodes": 2,
+        "maximum": 0,
+        "mean": 0.0,
+        "zero": 2,
+        "degree_le1": 2,
+        "P_gt153": 0.0,
+        "P90": 0.0
+      },
+      "1": {
+        "counts": {
+          "1": 4
+        },
+        "nodes": 4,
+        "maximum": 1,
+        "mean": 1.0,
+        "zero": 0,
+        "degree_le1": 4,
+        "P_gt153": 0.0,
+        "P90": 1.0
+      },
+      "2": {
+        "counts": {
+          "1": 4
+        },
+        "nodes": 4,
+        "maximum": 1,
+        "mean": 1.0,
+        "zero": 0,
+        "degree_le1": 4,
+        "P_gt153": 0.0,
+        "P90": 1.0
+      },
+      "3": {
+        "counts": {
+          "0": 2
+        },
+        "nodes": 2,
+        "maximum": 0,
+        "mean": 0.0,
+        "zero": 2,
+        "degree_le1": 2,
+        "P_gt153": 0.0,
+        "P90": 0.0
+      },
+      "4": {
+        "counts": {
+          "1": 4
+        },
+        "nodes": 4,
+        "maximum": 1,
+        "mean": 1.0,
+        "zero": 0,
+        "degree_le1": 4,
+        "P_gt153": 0.0,
+        "P90": 1.0
+      },
+      "5": {
+        "counts": {
+          "0": 2
+        },
+        "nodes": 2,
+        "maximum": 0,
+        "mean": 0.0,
+        "zero": 2,
+        "degree_le1": 2,
+        "P_gt153": 0.0,
+        "P90": 0.0
+      }
+    },
+    "total_degree": {
+      "counts": {
+        "2": 6
+      },
+      "nodes": 6,
+      "maximum": 2,
+      "mean": 2.0,
+      "zero": 0,
+      "degree_le1": 0,
+      "P_gt153": 0.0,
+      "P90": 2.0
+    },
+    "type_total_degree": {
+      "0": {
+        "counts": {
+          "2": 2
+        },
+        "nodes": 2,
+        "maximum": 2,
+        "mean": 2.0,
+        "zero": 0,
+        "degree_le1": 0,
+        "P_gt153": 0.0,
+        "P90": 2.0
+      },
+      "1": {
+        "counts": {
+          "2": 2
+        },
+        "nodes": 2,
+        "maximum": 2,
+        "mean": 2.0,
+        "zero": 0,
+        "degree_le1": 0,
+        "P_gt153": 0.0,
+        "P90": 2.0
+      },
+      "2": {
+        "counts": {
+          "2": 2
+        },
+        "nodes": 2,
+        "maximum": 2,
+        "mean": 2.0,
+        "zero": 0,
+        "degree_le1": 0,
+        "P_gt153": 0.0,
+        "P90": 2.0
+      }
+    },
+    "type_relation_degree": {
+      "0": {
+        "0": {
+          "counts": {
+            "0": 2
+          },
+          "nodes": 2,
+          "maximum": 0,
+          "mean": 0.0,
+          "zero": 2,
+          "degree_le1": 2,
+          "P_gt153": 0.0,
+          "P90": 0.0
+        },
+        "1": {
+          "counts": {
+            "1": 2
+          },
+          "nodes": 2,
+          "maximum": 1,
+          "mean": 1.0,
+          "zero": 0,
+          "degree_le1": 2,
+          "P_gt153": 0.0,
+          "P90": 1.0
+        },
+        "2": {
+          "counts": {
+            "1": 2
+          },
+          "nodes": 2,
+          "maximum": 1,
+          "mean": 1.0,
+          "zero": 0,
+          "degree_le1": 2,
+          "P_gt153": 0.0,
+          "P90": 1.0
+        },
+        "3": {
+          "counts": {
+            "0": 2
+          },
+          "nodes": 2,
+          "maximum": 0,
+          "mean": 0.0,
+          "zero": 2,
+          "degree_le1": 2,
+          "P_gt153": 0.0,
+          "P90": 0.0
+        },
+        "4": {
+          "counts": {
+            "0": 2
+          },
+          "nodes": 2,
+          "maximum": 0,
+          "mean": 0.0,
+          "zero": 2,
+          "degree_le1": 2,
+          "P_gt153": 0.0,
+          "P90": 0.0
+        },
+        "5": {
+          "counts": {
+            "0": 2
+          },
+          "nodes": 2,
+          "maximum": 0,
+          "mean": 0.0,
+          "zero": 2,
+          "degree_le1": 2,
+          "P_gt153": 0.0,
+          "P90": 0.0
+        }
+      },
+      "1": {
+        "0": {
+          "counts": {
+            "0": 2
+          },
+          "nodes": 2,
+          "maximum": 0,
+          "mean": 0.0,
+          "zero": 2,
+          "degree_le1": 2,
+          "P_gt153": 0.0,
+          "P90": 0.0
+        },
+        "1": {
+          "counts": {
+            "1": 2
+          },
+          "nodes": 2,
+          "maximum": 1,
+          "mean": 1.0,
+          "zero": 0,
+          "degree_le1": 2,
+          "P_gt153": 0.0,
+          "P90": 1.0
+        },
+        "2": {
+          "counts": {
+            "0": 2
+          },
+          "nodes": 2,
+          "maximum": 0,
+          "mean": 0.0,
+          "zero": 2,
+          "degree_le1": 2,
+          "P_gt153": 0.0,
+          "P90": 0.0
+        },
+        "3": {
+          "counts": {
+            "0": 2
+          },
+          "nodes": 2,
+          "maximum": 0,
+          "mean": 0.0,
+          "zero": 2,
+          "degree_le1": 2,
+          "P_gt153": 0.0,
+          "P90": 0.0
+        },
+        "4": {
+          "counts": {
+            "1": 2
+          },
+          "nodes": 2,
+          "maximum": 1,
+          "mean": 1.0,
+          "zero": 0,
+          "degree_le1": 2,
+          "P_gt153": 0.0,
+          "P90": 1.0
+        },
+        "5": {
+          "counts": {
+            "0": 2
+          },
+          "nodes": 2,
+          "maximum": 0,
+          "mean": 0.0,
+          "zero": 2,
+          "degree_le1": 2,
+          "P_gt153": 0.0,
+          "P90": 0.0
+        }
+      },
+      "2": {
+        "0": {
+          "counts": {
+            "0": 2
+          },
+          "nodes": 2,
+          "maximum": 0,
+          "mean": 0.0,
+          "zero": 2,
+          "degree_le1": 2,
+          "P_gt153": 0.0,
+          "P90": 0.0
+        },
+        "1": {
+          "counts": {
+            "0": 2
+          },
+          "nodes": 2,
+          "maximum": 0,
+          "mean": 0.0,
+          "zero": 2,
+          "degree_le1": 2,
+          "P_gt153": 0.0,
+          "P90": 0.0
+        },
+        "2": {
+          "counts": {
+            "1": 2
+          },
+          "nodes": 2,
+          "maximum": 1,
+          "mean": 1.0,
+          "zero": 0,
+          "degree_le1": 2,
+          "P_gt153": 0.0,
+          "P90": 1.0
+        },
+        "3": {
+          "counts": {
+            "0": 2
+          },
+          "nodes": 2,
+          "maximum": 0,
+          "mean": 0.0,
+          "zero": 2,
+          "degree_le1": 2,
+          "P_gt153": 0.0,
+          "P90": 0.0
+        },
+        "4": {
+          "counts": {
+            "1": 2
+          },
+          "nodes": 2,
+          "maximum": 1,
+          "mean": 1.0,
+          "zero": 0,
+          "degree_le1": 2,
+          "P_gt153": 0.0,
+          "P90": 1.0
+        },
+        "5": {
+          "counts": {
+            "0": 2
+          },
+          "nodes": 2,
+          "maximum": 0,
+          "mean": 0.0,
+          "zero": 2,
+          "degree_le1": 2,
+          "P_gt153": 0.0,
+          "P90": 0.0
+        }
+      }
+    },
+    "joint_degree_frequencies": {
+      "0": {
+        "rows": [
+          [
+            0,
+            1,
+            1,
+            0,
+            0,
+            0
+          ]
+        ],
+        "counts": [
+          2
+        ]
+      },
+      "1": {
+        "rows": [
+          [
+            0,
+            1,
+            0,
+            0,
+            1,
+            0
+          ]
+        ],
+        "counts": [
+          2
+        ]
+      },
+      "2": {
+        "rows": [
+          [
+            0,
+            0,
+            1,
+            0,
+            1,
+            0
+          ]
+        ],
+        "counts": [
+          2
+        ]
+      }
+    },
+    "triangles": 2,
+    "typed_triangles": {
+      "0,1,2": 2
+    },
+    "director_movie_actor_closure": {
+      "numerator": 2,
+      "denominator": 2,
+      "ratio": 1.0,
+      "NA_reason": null,
+      "definition": "each D-M-A path once; closed iff its D-A edge exists; all edges from this discrete graph"
+    },
+    "component_sizes": [
+      3,
+      3
+    ],
+    "components": 2,
+    "connected": false,
+    "LCC": 3,
+    "LCC_fraction": 0.5,
+    "isolates": 0,
+    "diagnostic_seconds": 0.008518461138010025,
+    "model_support": true,
+    "log_probability": -9.06114833321424,
+    "log_probability_status": "finite"
+  },
+  "original": {
+    "schema_simple_undirected": true,
+    "nodes": 6,
+    "edges": 6,
+    "relation_edges": [
+      0,
+      2,
+      2,
+      0,
+      2,
+      0
+    ],
+    "relation_endpoint_degree": {
+      "0": {
+        "counts": {
+          "0": 2
+        },
+        "nodes": 2,
+        "maximum": 0,
+        "mean": 0.0,
+        "zero": 2,
+        "degree_le1": 2,
+        "P_gt153": 0.0,
+        "P90": 0.0
+      },
+      "1": {
+        "counts": {
+          "1": 4
+        },
+        "nodes": 4,
+        "maximum": 1,
+        "mean": 1.0,
+        "zero": 0,
+        "degree_le1": 4,
+        "P_gt153": 0.0,
+        "P90": 1.0
+      },
+      "2": {
+        "counts": {
+          "1": 4
+        },
+        "nodes": 4,
+        "maximum": 1,
+        "mean": 1.0,
+        "zero": 0,
+        "degree_le1": 4,
+        "P_gt153": 0.0,
+        "P90": 1.0
+      },
+      "3": {
+        "counts": {
+          "0": 2
+        },
+        "nodes": 2,
+        "maximum": 0,
+        "mean": 0.0,
+        "zero": 2,
+        "degree_le1": 2,
+        "P_gt153": 0.0,
+        "P90": 0.0
+      },
+      "4": {
+        "counts": {
+          "1": 4
+        },
+        "nodes": 4,
+        "maximum": 1,
+        "mean": 1.0,
+        "zero": 0,
+        "degree_le1": 4,
+        "P_gt153": 0.0,
+        "P90": 1.0
+      },
+      "5": {
+        "counts": {
+          "0": 2
+        },
+        "nodes": 2,
+        "maximum": 0,
+        "mean": 0.0,
+        "zero": 2,
+        "degree_le1": 2,
+        "P_gt153": 0.0,
+        "P90": 0.0
+      }
+    },
+    "total_degree": {
+      "counts": {
+        "2": 6
+      },
+      "nodes": 6,
+      "maximum": 2,
+      "mean": 2.0,
+      "zero": 0,
+      "degree_le1": 0,
+      "P_gt153": 0.0,
+      "P90": 2.0
+    },
+    "type_total_degree": {
+      "0": {
+        "counts": {
+          "2": 2
+        },
+        "nodes": 2,
+        "maximum": 2,
+        "mean": 2.0,
+        "zero": 0,
+        "degree_le1": 0,
+        "P_gt153": 0.0,
+        "P90": 2.0
+      },
+      "1": {
+        "counts": {
+          "2": 2
+        },
+        "nodes": 2,
+        "maximum": 2,
+        "mean": 2.0,
+        "zero": 0,
+        "degree_le1": 0,
+        "P_gt153": 0.0,
+        "P90": 2.0
+      },
+      "2": {
+        "counts": {
+          "2": 2
+        },
+        "nodes": 2,
+        "maximum": 2,
+        "mean": 2.0,
+        "zero": 0,
+        "degree_le1": 0,
+        "P_gt153": 0.0,
+        "P90": 2.0
+      }
+    },
+    "type_relation_degree": {
+      "0": {
+        "0": {
+          "counts": {
+            "0": 2
+          },
+          "nodes": 2,
+          "maximum": 0,
+          "mean": 0.0,
+          "zero": 2,
+          "degree_le1": 2,
+          "P_gt153": 0.0,
+          "P90": 0.0
+        },
+        "1": {
+          "counts": {
+            "1": 2
+          },
+          "nodes": 2,
+          "maximum": 1,
+          "mean": 1.0,
+          "zero": 0,
+          "degree_le1": 2,
+          "P_gt153": 0.0,
+          "P90": 1.0
+        },
+        "2": {
+          "counts": {
+            "1": 2
+          },
+          "nodes": 2,
+          "maximum": 1,
+          "mean": 1.0,
+          "zero": 0,
+          "degree_le1": 2,
+          "P_gt153": 0.0,
+          "P90": 1.0
+        },
+        "3": {
+          "counts": {
+            "0": 2
+          },
+          "nodes": 2,
+          "maximum": 0,
+          "mean": 0.0,
+          "zero": 2,
+          "degree_le1": 2,
+          "P_gt153": 0.0,
+          "P90": 0.0
+        },
+        "4": {
+          "counts": {
+            "0": 2
+          },
+          "nodes": 2,
+          "maximum": 0,
+          "mean": 0.0,
+          "zero": 2,
+          "degree_le1": 2,
+          "P_gt153": 0.0,
+          "P90": 0.0
+        },
+        "5": {
+          "counts": {
+            "0": 2
+          },
+          "nodes": 2,
+          "maximum": 0,
+          "mean": 0.0,
+          "zero": 2,
+          "degree_le1": 2,
+          "P_gt153": 0.0,
+          "P90": 0.0
+        }
+      },
+      "1": {
+        "0": {
+          "counts": {
+            "0": 2
+          },
+          "nodes": 2,
+          "maximum": 0,
+          "mean": 0.0,
+          "zero": 2,
+          "degree_le1": 2,
+          "P_gt153": 0.0,
+          "P90": 0.0
+        },
+        "1": {
+          "counts": {
+            "1": 2
+          },
+          "nodes": 2,
+          "maximum": 1,
+          "mean": 1.0,
+          "zero": 0,
+          "degree_le1": 2,
+          "P_gt153": 0.0,
+          "P90": 1.0
+        },
+        "2": {
+          "counts": {
+            "0": 2
+          },
+          "nodes": 2,
+          "maximum": 0,
+          "mean": 0.0,
+          "zero": 2,
+          "degree_le1": 2,
+          "P_gt153": 0.0,
+          "P90": 0.0
+        },
+        "3": {
+          "counts": {
+            "0": 2
+          },
+          "nodes": 2,
+          "maximum": 0,
+          "mean": 0.0,
+          "zero": 2,
+          "degree_le1": 2,
+          "P_gt153": 0.0,
+          "P90": 0.0
+        },
+        "4": {
+          "counts": {
+            "1": 2
+          },
+          "nodes": 2,
+          "maximum": 1,
+          "mean": 1.0,
+          "zero": 0,
+          "degree_le1": 2,
+          "P_gt153": 0.0,
+          "P90": 1.0
+        },
+        "5": {
+          "counts": {
+            "0": 2
+          },
+          "nodes": 2,
+          "maximum": 0,
+          "mean": 0.0,
+          "zero": 2,
+          "degree_le1": 2,
+          "P_gt153": 0.0,
+          "P90": 0.0
+        }
+      },
+      "2": {
+        "0": {
+          "counts": {
+            "0": 2
+          },
+          "nodes": 2,
+          "maximum": 0,
+          "mean": 0.0,
+          "zero": 2,
+          "degree_le1": 2,
+          "P_gt153": 0.0,
+          "P90": 0.0
+        },
+        "1": {
+          "counts": {
+            "0": 2
+          },
+          "nodes": 2,
+          "maximum": 0,
+          "mean": 0.0,
+          "zero": 2,
+          "degree_le1": 2,
+          "P_gt153": 0.0,
+          "P90": 0.0
+        },
+        "2": {
+          "counts": {
+            "1": 2
+          },
+          "nodes": 2,
+          "maximum": 1,
+          "mean": 1.0,
+          "zero": 0,
+          "degree_le1": 2,
+          "P_gt153": 0.0,
+          "P90": 1.0
+        },
+        "3": {
+          "counts": {
+            "0": 2
+          },
+          "nodes": 2,
+          "maximum": 0,
+          "mean": 0.0,
+          "zero": 2,
+          "degree_le1": 2,
+          "P_gt153": 0.0,
+          "P90": 0.0
+        },
+        "4": {
+          "counts": {
+            "1": 2
+          },
+          "nodes": 2,
+          "maximum": 1,
+          "mean": 1.0,
+          "zero": 0,
+          "degree_le1": 2,
+          "P_gt153": 0.0,
+          "P90": 1.0
+        },
+        "5": {
+          "counts": {
+            "0": 2
+          },
+          "nodes": 2,
+          "maximum": 0,
+          "mean": 0.0,
+          "zero": 2,
+          "degree_le1": 2,
+          "P_gt153": 0.0,
+          "P90": 0.0
+        }
+      }
+    },
+    "joint_degree_frequencies": {
+      "0": {
+        "rows": [
+          [
+            0,
+            1,
+            1,
+            0,
+            0,
+            0
+          ]
+        ],
+        "counts": [
+          2
+        ]
+      },
+      "1": {
+        "rows": [
+          [
+            0,
+            1,
+            0,
+            0,
+            1,
+            0
+          ]
+        ],
+        "counts": [
+          2
+        ]
+      },
+      "2": {
+        "rows": [
+          [
+            0,
+            0,
+            1,
+            0,
+            1,
+            0
+          ]
+        ],
+        "counts": [
+          2
+        ]
+      }
+    },
+    "triangles": 2,
+    "typed_triangles": {
+      "0,1,2": 2
+    },
+    "director_movie_actor_closure": {
+      "numerator": 2,
+      "denominator": 2,
+      "ratio": 1.0,
+      "NA_reason": null,
+      "definition": "each D-M-A path once; closed iff its D-A edge exists; all edges from this discrete graph"
+    },
+    "component_sizes": [
+      3,
+      3
+    ],
+    "components": 2,
+    "connected": false,
+    "LCC": 3,
+    "LCC_fraction": 0.5,
+    "isolates": 0,
+    "diagnostic_seconds": 0.008300506509840488,
+    "model_support": true,
+    "log_probability": -9.100524883006223,
+    "log_probability_status": "finite"
+  },
+  "changes_by_family": {
+    "added": [
+      0,
+      2,
+      2,
+      0,
+      0,
+      0
+    ],
+    "deleted": [
+      0,
+      2,
+      2,
+      0,
+      0,
+      0
+    ],
+    "retained": [
+      0,
+      0,
+      0,
+      0,
+      2,
+      0
+    ]
+  },
+  "missing_comparisons": [],
+  "input_hashes": {
+    "/tmp/anon_decode_local_delivery_fixture_01/manifest.json": "54b79ee1b73408de71e6cac043037dc1453cd75f8296764cdd9dd76dbdad7af0",
+    "/tmp/anon_decode_local_delivery_fixture_01/payload.npz": "21eac1e57a5d36ececfc771a2f314fdecaefb800b170c3242d341750f964ca7e",
+    "/tmp/anon_decode_local_delivery_fixture_01/target.json": "45310353d39c43097e874a3859ed94c2fef6e582060a14e12e9c4c3f377f57b2",
+    "/tmp/anon_decode_local_delivery_fixture_01/receipt.json": "c28ef129f5697324d58060f9741258f54785ee27bf0c2c8be843b63969a36efa",
+    "/tmp/anon_decode_local_delivery_fixture_01/original_receipt.json": "59858928312b9f55efb64c9463ffe350e0d48e5ac1d246beb0805218ed1efdcd",
+    "/tmp/anon_decode_local_delivery_fixture_01/original.npz": "5b6d9e9fb0ed7165f2125b7769a35265c3266f8b5604fbb61a6034611bd88a91"
+  },
+  "output_sha256": "9a139620230c0528f468793bc1124bc76a93d5d5ab7ea911c9ddcacd42fd9d03",
+  "release_checklist_sha256": "9a9ed729682f9b16ee65a6d6919f18e39b190534ac2e636ba1de50f02b9d8af6",
+  "times": {
+    "input_verification": 0.011085801757872105,
+    "original_verification": 0.0011088596656918526,
+    "matching": 0.003602849319577217,
+    "decoding": 0.01770914439111948,
+    "decoded_evaluation": 0.008718300610780716,
+    "original_evaluation": 0.008498920127749443,
+    "graph_save": 0.007698324508965015,
+    "final_input_rehash": 0.0007915161550045013
+  },
+  "worker_wall_seconds": 0.06803566403687,
+  "worker_cpu_seconds": 0.061662914999999985,
+  "peak_rss_mib": 80.17578125,
+  "environment": {
+    "python": "3.9.23",
+    "numpy": "1.26.4",
+    "scipy": "1.11.0",
+    "CPU_threads": 1
+  },
+  "model_calls": 0,
+  "training_updates": 0,
+  "GPU_use": 0,
+  "scientific_chains": 0,
+  "no_automatic_followup": true
+}

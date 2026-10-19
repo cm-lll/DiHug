@@ -1,4 +1,11 @@
-# Current scoped handoff: anonymous joint-role discrete CPU prototype
+# Current scoped handoff: local frozen-input decode v1.1
+
+2026-10-19基线2c1a2f2，独立小修及标准本地接口80项CPU通过，原27保留、零跳过。
+标准夹具接口与旧真实导出接通明确区分；没有真实A1/B1、notebook、SSH、BW、网络模型调用或规模重跑。
+仅完成独立ZIP解包验收和GitHub发布后停止；真实数据转换/运行交另一侧，不自动签发。
+证据results/anonymous_role_decode_local_v11_20261019。
+
+# Previous scoped handoff: anonymous joint-role discrete CPU prototype
 
 2026-10-19独立目录experiments/anonymous_role_joint_decode_v1，27 CPU和完整概率/主要指标重算通过。
 IMDB仅一次随机工程评分固定匹配可行性/成本验证，不是真实模型质量或匿名条件采样实验。

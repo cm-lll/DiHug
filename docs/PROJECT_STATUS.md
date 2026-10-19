@@ -1,4 +1,15 @@
-# Current scoped review: anonymous joint-role discrete decoding CPU prototype
+# Current scoped review: local frozen-input decoding v1.1 repair
+
+2026-10-19独立experiments/anonymous_role_joint_decode_v1_1_local，基线2c1a2f2，旧v1保持。
+正支持CDF修复、图编号/位向量独立交叉验收、显式本地A/B t1标准读取器及联合角色匹配已实现。
+原27+新增53=80 CPU完整通过，零失败/错误/跳过，正式验收4.971秒墙钟、4.838子进程CPU、109.80MiB峰RSS。
+标准格式合成夹具公开CLI父/子/匹配/求解/评价/保存通过，0.518秒含启动清理；不是真实A1/B1。
+旧导出格式仅静态核对并记录缺口；真实格式兼容、真实来源/概率/设备成本未验证。
+来源仅历史权重收据，不重新认证私有权重字节。没有notebook/SSH/BW/模型/训练/完整链或IMDB规模重跑。
+80项不以旧77项替代。下一步仅独立解包复验与GitHub交付，完成后停止等待审查，不自动真实运行。
+机器证据results/anonymous_role_decode_local_v11_20261019。
+
+# Previous scoped review: anonymous joint-role discrete decoding CPU prototype
 
 2026-10-19，独立experiments/anonymous_role_joint_decode_v1；定义基线124d227，冻结设置a52f4f4。
 27 CPU通过、零跳过；6节点度2精确70解=60六环+10双三角形，异质联合54解而边际162解。
