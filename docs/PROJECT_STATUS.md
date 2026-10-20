@@ -1,5 +1,17 @@
 # DiHug current research status
 
+2026-10-20 Paired original-C/late-C panel completed at source b4b2f82916eeb94b41f7132d797897c98882eb79.
+All 6000 effective updates / 96 full small-graph chains retained, 3 paired training seeds, no scientific retries.
+81 preflight and 81 independently unpacked checks passed with zero skips. Common initial tensors, actual training
+input/RNG and per-step sampling uniforms/query/RNG independently verified. Twelve actual initial/final weights saved;
+public hash receipts accompany all generated graphs and curves. Original single 3600s ledger never reset.
+Core execution/audit2602.47s; archive/unpacked acceptance2827.87s cumulative; CPU worker peakRSS749.75MiB.
+Late fusion strengthens probability response, but target switches change only1/24 final graphs (original0/24).
+All96 Genre maximum degrees<=9, none reaches>=12. Extreme W1 4.07639→4.06250 (seed directions mixed);
+balanced1.46528→1.49306. Closure/connectivity partly improve, without effective extreme-role control.
+Evidence results/role_late_paired_20261020_run01 and experiments/role_late_paired_v1_results.
+Stop after independent GitHub publication; no further experiment/big-graph/BW action authorized.
+
 2026-10-20 角色条件诊断独立审查版：experiments/role_condition_diagnosis_v1。
 三已有C最终权重/36固定输入的目标切换表明角色信息非全丢失，MG p0响应仅2.50e-6–1.59e-5，重复误差0。
 独立后移联合融合候选保留CN/CE/核/查询，参数减256；60旧+15新CPU回归通过。

@@ -1,0 +1,713 @@
+diff --git a/experiments/role_late_paired_v1/PROTOCOL.md b/experiments/role_late_paired_v1/PROTOCOL.md
+new file mode 100644
+index 0000000..54b0de4
+--- /dev/null
++++ b/experiments/role_late_paired_v1/PROTOCOL.md
+@@ -0,0 +1,53 @@
++# Frozen local paired C experiment
++
++Base1613be145b095f238a805b6a9513561191ef3bd1. Original C versus late-fusion C,
++both from fresh initialization; never load an old trained model. Model modules
++are imported unchanged from the prior independent package. Original34node panel,
++full8layer FP32, AdamW and stable CE unchanged,T64/R4. No clipping, EMA, scheduler,
++guidance, repair or extra scientific model. CPU one thread.
++
++3original training seeds2026102011/12/13;1000effective updates per arm.
++Validation0/250/500/1000 on original fixed validation panel. Final weights only.
++Sampling seeds2026102031..38,8per condition per arm per training seed:96chains.
++Both groups are conditional models, so all96outputs are actually generated.
++Shared parameters copied tensor-by-tensor; old role_out/new role_fusion differ
++and start at zero. Every actual initial state saved, each optimizer independent
++and empty. Every paired update uses one shared fully constructed input, with
++full input digest before/after and matching Torch RNG. Initial prior states,
++each complete-step uniform bytes, query bytes and RNG checked across arms and
++conditions. CompleteXt frozen until all4blocks complete, unchanged sampler.
++
++First activation creates an exclusive persistent budget ledger.3600seconds
++cumulative includes frozen-source binding,81CPU tests, cost probe, scientific
++updates, validation,96chains, evaluation, initial/final weights and audit.
++No resume/new directory budget reset. Worker saves partial weights on catchable
++stop/failure with per-arm counts; partial pairs/chains are not completed results.
++Parent deadline includes all children; own process-group cleanup at end.
++No notebook/BW/GPU. Source/config frozen before tests and scientific run.
++Cost gate uses disposable models,5updates/arm,3dense complete steps/arm, full
++validation.1.15forecast margin plus90seconds audit/IO; reject whole scope if it
++does not fit, never drop seeds/conditions or change settings after seeing quality.
++
++Actual graphs: GenreW1 and joint-role TV, maximum degree, G>=12 count and >1hub,
++Gzero/degree<=1, relation counts, LCC/isolates, typed triangles and DMAclosure.
++Topology diversity measured within each seed/arm/condition via true-type/
++relation-preserving isomorphism;1second per pair, undecided counts reported.
++Class positive identifications retain mapping evidence; WL/hash not a proof.
++Undefined closure remains NA. No composite success score or new quality cutoff.
++Report paired differences by training seed, balanced/extreme separately.
++Responses after training use same fixedXt and full4blocks at t1/32/64,
++balanced/extreme/balanced; record logit gap and p0, MG separately.
++
++Primary interpretation: improved extreme actual-tail/role distribution with
++ordinary-condition and edge/closure/connectivity/diversity tradeoffs exposed.
++Response alone, loss alone, hand-weight capacity witness or one best seed cannot
++establish success. Failure, no improvement, regression and incomplete scope kept.
++No additional experiments after this panel.
++
++Run exactly once after freezing commit:
++```
++env OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 CUDA_VISIBLE_DEVICES= \
++ /data2/lyh/miniconda3/envs/dihug/bin/python -u run.py --output /absolute/new/output
++```
++Progress: tail output/progress.jsonl and launcher_progress.json. Safe stop:
++touch output/STOP. This run is not resumable for extra learning/time.
+diff --git a/experiments/role_late_paired_v1/audit.py b/experiments/role_late_paired_v1/audit.py
+new file mode 100644
+index 0000000..c8ccff6
+--- /dev/null
++++ b/experiments/role_late_paired_v1/audit.py
+@@ -0,0 +1,165 @@
++"""Independent raw-graph / paired-input audit, summaries and descriptive curves."""
++import collections
++import itertools
++import json
++from pathlib import Path
++import resource
++import signal
++import sys
++import time
++import numpy as np
++import networkx as nx
++import torch
++from pairing import c,config,source_manifest
++from role_condition.experiment import save
++
++
++def lines(p):return [json.loads(x) for x in p.read_text().splitlines()]
++
++
++def main(out,deadline):
++    out=Path(out);started=time.perf_counter();cpu=time.process_time()
++    def check():
++        if (out/"STOP").exists() or time.monotonic()>deadline-10:raise TimeoutError("audit cumulative deadline/STOP")
++    check();cfg=config();assert source_manifest()==json.loads((out/"source_manifest.json").read_text())
++    updates=lines(out/"updates.jsonl");rows=json.loads((out/"generation.json").read_text())
++    assert len(updates)==6000 and len(rows)==96
++    weights=json.loads((out/"weight_hashes.json").read_text());assert len(weights)==12
++    for name,h in weights.items():check();assert c.sha(out/name)==h
++    for seed in cfg["train_seeds"]:
++        sd=out/f"seed{seed}";init=json.loads((sd/"initialization.json").read_text())
++        a=torch.load(sd/"original_C_initial.pt",map_location="cpu",weights_only=True)
++        b=torch.load(sd/"late_C_initial.pt",map_location="cpu",weights_only=True)
++        assert all(torch.equal(a[k],b[k]) for k in init["shared_tensors"]);del a,b
++        for u in range(1,1001):
++            paired=[x for x in updates if x["seed"]==seed and x["update"]==u]
++            assert len(paired)==2 and {x["arm"] for x in paired}==set(cfg["arms"])
++            for k in ["input_sha256","torch_rng_before","torch_rng_after","t","query_block","query_count"]:
++                assert paired[0][k]==paired[1][k],k
++            assert all(x["optimizer_step"]==u for x in paired)
++    refs=json.loads((out/"reference_metrics.json").read_text());graphs={};checks=[]
++    for row in rows:
++        check();path=out/row["graph_file"];assert c.sha(path)==row["graph_file_sha256"]
++        with np.load(path,allow_pickle=False) as z:
++            types=z["types"];edges=z["edges"];fam=z["relations"]-1;pairs=z["schema"]
++        assert len(types)==34 and len(edges)==len({tuple(e) for e in edges})
++        assert (edges[:,0]<edges[:,1]).all()
++        assert np.array_equal(pairs[fam],np.sort(types[edges],axis=1))
++        g=nx.Graph();g.add_nodes_from((i,{"type":int(t)}) for i,t in enumerate(types))
++        g.add_edges_from((int(u),int(v),{"relation":int(r)}) for (u,v),r in zip(edges,fam))
++        m=row["metrics"];assert g.number_of_edges()==m["edges"]
++        assert sum(nx.triangles(g).values())//3==m["triangles"]
++        assert sorted(map(len,nx.connected_components(g)),reverse=True)==m["component_sizes"]
++        degree=np.zeros((34,len(pairs)),dtype=int)
++        for (u,v),r in zip(edges,fam):degree[u,r]+=1;degree[v,r]+=1
++        assert int(np.max(degree.sum(1)))==m["maximum_degree"]
++        for typ,name in enumerate(["Director","Actor","Movie","Genre"]):
++            joint={",".join(map(str,k)):v for k,v in collections.Counter(map(tuple,degree[types==typ])).items()}
++            assert joint==m["joint_relation_degree"][name]
++        genre=degree[types==3,8];target=refs[row["condition"]]["typed_degree"]["Genre"]["by_relation"][8]["histogram"]
++        target_degrees=np.repeat(np.arange(len(target)),target)
++        w1=float(np.abs(np.sort(genre)-np.sort(target_degrees)).mean())
++        assert abs(w1-row["G_W1"])<1e-12
++        assert int((genre>=12).sum())==row["G_high_ge12"]
++        assert int((genre<=1).sum())==row["G_low_le1"]
++        closure_num=closure_den=0
++        for movie in np.flatnonzero(types==2):
++            ds=[v for v in g[movie] if types[v]==0];acts=[v for v in g[movie] if types[v]==1]
++            for d in ds:
++                for actor in acts:closure_den+=1;closure_num+=g.has_edge(d,actor)
++        assert (closure_num,closure_den)==(m["imdb_closure"]["path_numerator"],m["imdb_closure"]["path_denominator"])
++        steps=json.loads(path.with_name(path.stem+"_steps.json").read_text())
++        assert [s["t"] for s in steps]==list(range(64,0,-1))
++        assert all(s["blocks"]==4 and s["exact_coverage"] for s in steps)
++        key=(row["seed"],row["arm"],row["condition"],row["sampling_seed"])
++        graphs[key]=g;checks.append(dict(graph_file=row["graph_file"],passed=True))
++    for seed in cfg["train_seeds"]:
++        for sample in cfg["sampling_seeds"]:
++            records=[]
++            for arm,cond in itertools.product(cfg["arms"],["balanced","extreme"]):
++                path=out/f"seed{seed}"/f"{arm}_{cond}_{sample}_steps.json"
++                records.append(json.loads(path.read_text()))
++            for i in range(64):
++                for field in ["uniform_sha256","query_sha256","rng_after"]:
++                    assert len({r[i][field] for r in records})==1
++            initials={r["initial_state_sha256"] for r in rows if r["seed"]==seed and r["sampling_seed"]==sample}
++            assert len(initials)==1
++    def iso(a,b):
++        check()
++        if a.number_of_edges()!=b.number_of_edges():return False,None
++        def timeout(sig,frame):raise TimeoutError("isomorphism one-second cap")
++        previous=signal.signal(signal.SIGALRM,timeout);signal.setitimer(signal.ITIMER_REAL,1)
++        try:
++            gm=nx.algorithms.isomorphism.GraphMatcher(a,b,node_match=lambda x,y:x["type"]==y["type"],
++                                                    edge_match=lambda x,y:x["relation"]==y["relation"])
++            result=gm.is_isomorphic();return result,gm.mapping if result else None
++        except TimeoutError:return None,None
++        finally:signal.setitimer(signal.ITIMER_REAL,0);signal.signal(signal.SIGALRM,previous)
++    summary=[];mappings=[];uncertain=[]
++    metrics=["G_W1","G_joint_TV","G_max","G_high_ge12","G_multiple_hubs","G_zero","G_low_le1"]
++    for seed,arm,cond in itertools.product(cfg["train_seeds"],cfg["arms"],["balanced","extreme"]):
++        check();rr=[r for r in rows if (r["seed"],r["arm"],r["condition"])==(seed,arm,cond)]
++        assert len(rr)==8
++        entry=dict(seed=seed,arm=arm,condition=cond,n=8)
++        for k in metrics:entry[k]=float(np.mean([r[k] for r in rr]))
++        for k in ["edges","lcc","isolates","maximum_degree","triangles"]:
++            entry[k]=float(np.mean([r["metrics"][k] for r in rr]))
++        cv=[r["metrics"]["imdb_closure"]["path_ratio"] for r in rr]
++        entry["closure_NA"]=sum(x is None for x in cv)
++        entry["closure_mean"]=float(np.mean([x for x in cv if x is not None])) if any(x is not None for x in cv) else None
++        reps=[];freq=[];unknown=0
++        for r in rr:
++            g=graphs[seed,arm,cond,r["sampling_seed"]];assigned=False
++            for j,other in enumerate(reps):
++                match,mapping=iso(g,other)
++                if match is None:unknown+=1;uncertain.append(dict(seed=seed,arm=arm,condition=cond,sample=r["sampling_seed"]));continue
++                if match:
++                    freq[j]+=1;assigned=True;mappings.append(dict(seed=seed,arm=arm,condition=cond,
++                        sample=r["sampling_seed"],representative_index=j,mapping=mapping));break
++            if not assigned:reps.append(g);freq.append(1)
++        entry.update(topology_classes=len(reps) if not unknown else None,frequency=freq if not unknown else None,
++                     isomorphism_unresolved=unknown,
++                     effective_classes=64/sum(n*n for n in freq) if not unknown else None)
++        summary.append(entry)
++    effects=[]
++    for seed,cond in itertools.product(cfg["train_seeds"],["balanced","extreme"]):
++        a=next(r for r in summary if (r["seed"],r["arm"],r["condition"])==(seed,"original_C",cond))
++        b=next(r for r in summary if (r["seed"],r["arm"],r["condition"])==(seed,"late_C",cond))
++        effects.append(dict(seed=seed,condition=cond,late_minus_original={
++            k:b[k]-a[k] if a[k] is not None and b[k] is not None else None
++            for k in metrics+["edges","lcc","isolates","maximum_degree","triangles","closure_mean","topology_classes"]}))
++    condition_changes=[]
++    for seed,arm in itertools.product(cfg["train_seeds"],cfg["arms"]):
++        changes=0;iso_changes=0;unresolved=0
++        for sample in cfg["sampling_seeds"]:
++            a=graphs[seed,arm,"balanced",sample];b=graphs[seed,arm,"extreme",sample]
++            changes+=set(a.edges)!=set(b.edges)
++            match,_=iso(a,b);unresolved+=match is None;iso_changes+=match is False
++        condition_changes.append(dict(seed=seed,arm=arm,paired_samples=8,
++            labeled_graph_changes=changes,proven_nonisomorphic_changes=iso_changes,unresolved=unresolved))
++    save(out/"seed_summary.json",summary);save(out/"paired_effects.json",effects)
++    save(out/"topology_mappings.json",mappings);save(out/"condition_generation_response.json",condition_changes)
++    # Descriptive plots only; no metric-based checkpoint selection.
++    check();import matplotlib
++    matplotlib.use("Agg")
++    import matplotlib.pyplot as plt
++    fig,axes=plt.subplots(3,2,figsize=(10,9))
++    for i,seed in enumerate(cfg["train_seeds"]):
++        for arm in cfg["arms"]:
++            rr=[r for r in updates if r["seed"]==seed and r["arm"]==arm]
++            xx=np.array([r["loss"] for r in rr])
++            axes[i,0].plot(np.arange(25,1001),np.convolve(xx,np.ones(25)/25,"valid"),label=arm)
++            vs=[json.loads((out/f"seed{seed}"/f"{arm}_validation_{u:04d}.json").read_text())["mean_ce"] for u in [0,250,500,1000]]
++            axes[i,1].plot([0,250,500,1000],vs,"o-",label=arm)
++        axes[i,0].set_title(f"seed {seed}: train CE (25-update mean)")
++        axes[i,1].set_title("Fixed same-reference denoising CE")
++        for ax in axes[i]:ax.legend();ax.set_xlabel("effective updates")
++    fig.tight_layout();fig.savefig(out/"learning_curves.png");plt.close(fig)
++    check()
++    save(out/"audit.json",dict(status="completed",updates=6000,chains=96,weight_files=12,
++         per_graph_checks=checks,initial_common_tensors_exact=True,training_input_RNG_pairs_exact=True,
++         sampling_uniform_query_RNG_pairs_exact=True,unresolved=uncertain,
++         wall_seconds=time.perf_counter()-started,CPU_seconds=time.process_time()-cpu,
++         peak_rss_mib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024))
++    return 0
++if __name__=="__main__":sys.exit(main(sys.argv[1],float(sys.argv[2])))
+diff --git a/experiments/role_late_paired_v1/pairing.py b/experiments/role_late_paired_v1/pairing.py
+new file mode 100644
+index 0000000..036ee7b
+--- /dev/null
++++ b/experiments/role_late_paired_v1/pairing.py
+@@ -0,0 +1,71 @@
++"""Paired construction/input/RNG contracts; no experiment starts on import."""
++import hashlib
++import json
++from pathlib import Path
++import sys
++import numpy as np
++import torch
++ROOT=Path(__file__).resolve().parent
++PREVIOUS=ROOT.parent/"role_condition_diagnosis_v1"
++BASE=PREVIOUS/"baseline"
++sys.path[:0]=[str(BASE),str(PREVIOUS)]
++from hsgd.bw_preflight import common as c
++from role_condition.model import paired_models,sha
++from late_fusion import LateConditionalDenoiser
++
++
++def config():
++    cfg=json.loads((BASE/"role_condition/config.json").read_text())
++    cfg.update(version="role_late_paired_v1",base_commit="1613be145b095f238a805b6a9513561191ef3bd1",
++               arms=["original_C","late_C"],budget_seconds=3600,exit_reserve_seconds=30,
++               updates=1000,expected_updates=6000,expected_chains=96,
++               cost_forecast_safety_factor=1.15)
++    return cfg
++
++
++def source_manifest():
++    files=list(ROOT.glob("*.py"))+list(ROOT.glob("*.md"))
++    files+=[p for p in BASE.rglob("*") if p.is_file() and p.suffix in (".py",".json")]
++    files+=[PREVIOUS/"late_fusion.py",PREVIOUS/"test_late_fusion.py"]
++    return {str(p.relative_to(ROOT.parent)):c.sha(p) for p in sorted(files)}
++
++
++def construct(case,cfg,seed):
++    old=paired_models(case,cfg,seed)["C"]  # reproduce original C initialization exactly
++    new=LateConditionalDenoiser(case["n_types"],case["n_families"],family_pairs=case["space"].pairs,
++                               prior=case["prior"],**cfg["model"])
++    left=old.state_dict();right=new.state_dict();shared=sorted(set(left)&set(right))
++    assert set(left)-set(right)=={"branch.role_out.weight","branch.role_out.bias"}
++    assert set(right)-set(left)=={"role_fusion.weight"}
++    for name in shared:
++        assert left[name].shape==right[name].shape
++        right[name]=left[name].detach().clone()
++    new.load_state_dict(right,strict=True)
++    for name in shared:assert torch.equal(old.state_dict()[name],new.state_dict()[name])
++    assert torch.count_nonzero(old.branch.role_out.weight)==0
++    assert torch.count_nonzero(new.role_fusion.weight)==0
++    receipt=dict(seed=seed,shared_tensors=shared,shared_exact=True,
++        original_only=sorted(set(left)-set(right)),late_only=sorted(set(right)-set(left)),
++        parameter_counts={a:sum(p.numel() for p in m.parameters()) for a,m in [("original_C",old),("late_C",new)]})
++    return {"original_C":old,"late_C":new},receipt
++
++
++def input_digest(case,inp):
++    h=hashlib.sha256()
++    for name,x in [("types",case["space"].types),("clean",case["clean"])]+[
++            (k,inp[k]) for k in ["ids","f","query","labels","edges","edge_families"]]:
++        x=np.ascontiguousarray(x);h.update(name.encode());h.update(str(x.dtype).encode())
++        h.update(str(x.shape).encode());h.update(x.tobytes())
++    h.update(json.dumps({k:inp[k] for k in ["t","round_id","ce_weight"]},sort_keys=True).encode())
++    return h.hexdigest()
++
++
++def uniform_contract(rng,size):
++    clone=np.random.default_rng();clone.bit_generator.state=rng.bit_generator.state
++    u=clone.random(size)
++    return hashlib.sha256(u.tobytes()).hexdigest(),sha(clone.bit_generator.state)
++
++
++def atomic_weights(path,value):
++    tmp=path.with_name(path.name+".tmp");torch.save(value,tmp);tmp.replace(path)
++    return c.sha(path)
+diff --git a/experiments/role_late_paired_v1/run.py b/experiments/role_late_paired_v1/run.py
+new file mode 100644
+index 0000000..1509753
+--- /dev/null
++++ b/experiments/role_late_paired_v1/run.py
+@@ -0,0 +1,94 @@
++"""One nonrenewable 60-minute CPU window, including checks and final audit."""
++import argparse
++import json
++import os
++from pathlib import Path
++import signal
++import subprocess
++import sys
++import time
++import hashlib
++
++ROOT=Path(__file__).resolve().parent
++
++
++def save(p,x):
++    tmp=p.with_suffix(".tmp");tmp.write_text(json.dumps(x,indent=2)+"\n");tmp.replace(p)
++
++
++def activate(out,seconds=3600):
++    # Exclusive sibling ledger prevents using the same output with a new clock.
++    ledger=out.with_name(out.name+".budget.json")
++    if out.exists():raise FileExistsError(out)
++    epoch=time.time()
++    with ledger.open("x") as f:
++        json.dump(dict(activation_epoch=epoch,hard_cutoff_epoch=epoch+seconds,budget_seconds=seconds,
++                       no_reset=True,output=str(out.resolve()),scope="checks,training,sampling,evaluation,saving,audit"),f,indent=2)
++    out.mkdir();return ledger,epoch
++
++
++def main():
++    ap=argparse.ArgumentParser();ap.add_argument("--output",type=Path,required=True)
++    ap.add_argument("--continue-preflight-fix",action="store_true",
++                    help="only failed pre-science checks, same immutable deadline; never resume learning")
++    a=ap.parse_args();a.output=a.output.resolve();a.output.parent.mkdir(parents=True,exist_ok=True)
++    if a.continue_preflight_fix:
++        ledger=a.output.with_name(a.output.name+".budget.json")
++        old=json.loads((a.output/"budget_receipt.json").read_text());budget=json.loads(ledger.read_text())
++        assert old["status"]=="failed" and all(j["job"] in ("freeze","tests") for j in old["jobs"])
++        assert not (a.output/"updates.jsonl").exists() and not (a.output/"cost_gate.json").exists()
++        assert old["ledger_sha256"]==hashlib.sha256(ledger.read_bytes()).hexdigest()
++        assert budget["hard_cutoff_epoch"]>time.time(),"original budget expired"
++        archive=a.output/"preflight_attempt_01";archive.mkdir(exist_ok=False)
++        for p in list(a.output.iterdir()):
++            if p.is_file() and p.name!="STOP":p.rename(archive/p.name)
++        epoch=budget["activation_epoch"]
++        start=time.monotonic()-(time.time()-epoch);deadline=start+3600
++        save(a.output/"preflight_fix.json",dict(reason="test import resolved baseline/run.py instead of this launcher",
++             prior_failed_tests_preserved=True,original_activation_epoch=epoch,
++             original_hard_cutoff_epoch=budget["hard_cutoff_epoch"],budget_reset=False))
++    else:
++        ledger,epoch=activate(a.output);start=time.monotonic();deadline=start+3600
++    env=dict(os.environ,CUDA_VISIBLE_DEVICES="",OMP_NUM_THREADS="1",OPENBLAS_NUM_THREADS="1",
++             PYTEST_ADDOPTS="",PYTHONPATH=str(ROOT.parent/"role_condition_diagnosis_v1/baseline"))
++    jobs=[];child=None;status="failed";reason=None
++    def stop(sig,frame):raise InterruptedError(f"signal {sig}")
++    for sig in (signal.SIGTERM,signal.SIGINT,signal.SIGHUP):signal.signal(sig,stop)
++    def job(name,command):
++        nonlocal child
++        with (a.output/(name+".log")).open("w") as log:
++            begin=time.monotonic();child=subprocess.Popen(command,env=env,cwd=ROOT,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
++            while child.poll() is None:
++                if (a.output/"STOP").exists():raise InterruptedError("STOP")
++                if time.monotonic()>deadline-5:raise TimeoutError("single cumulative budget exhausted")
++                time.sleep(.5)
++            row=dict(job=name,exit_code=child.returncode,seconds=time.monotonic()-begin)
++            jobs.append(row);save(a.output/"launcher_progress.json",row);print(json.dumps(row),flush=True)
++            if child.returncode:raise RuntimeError(f"{name} exited {child.returncode}")
++    try:
++        # Binding is frozen before all executable tests and scientific work.
++        job("freeze",[sys.executable,str(ROOT/"worker.py"),"freeze",str(a.output),str(deadline)])
++        previous=ROOT.parent/"role_condition_diagnosis_v1"
++        job("tests",[sys.executable,"-m","pytest","-q",str(previous/"baseline/tests"),
++            str(previous/"test_late_fusion.py"),str(ROOT/"test_pairing.py"),
++            "--junitxml="+str(a.output/"tests.xml")])
++        import xml.etree.ElementTree as ET
++        suites=ET.parse(a.output/"tests.xml").getroot().findall("testsuite")
++        assert sum(int(s.attrib["tests"]) for s in suites)==81
++        assert all(int(s.attrib[k])==0 for s in suites for k in ["errors","failures","skipped"])
++        job("panel",[sys.executable,str(ROOT/"worker.py"),"panel",str(a.output),str(deadline)])
++        job("audit",[sys.executable,str(ROOT/"audit.py"),str(a.output),str(deadline)])
++        status="completed"
++    except BaseException as exc:
++        reason=repr(exc);status="stopped" if isinstance(exc,(InterruptedError,TimeoutError)) else "failed"
++    finally:
++        if child is not None and child.poll() is None:
++            os.killpg(child.pid,signal.SIGTERM)
++            try:child.wait(timeout=3)
++            except subprocess.TimeoutExpired:os.killpg(child.pid,signal.SIGKILL);child.wait(timeout=2)
++        save(a.output/"budget_receipt.json",dict(status=status,reason=reason,jobs=jobs,
++             activation_epoch=epoch,end_epoch=time.time(),wall_seconds=time.monotonic()-start,
++             budget_seconds=3600,no_reset=True,ledger_sha256=hashlib.sha256(ledger.read_bytes()).hexdigest(),
++             formal_large_graph_runs=0,notebook_BW_access=0))
++    return 0 if status=="completed" else 1
++if __name__=="__main__":sys.exit(main())
+diff --git a/experiments/role_late_paired_v1/test_pairing.py b/experiments/role_late_paired_v1/test_pairing.py
+new file mode 100644
+index 0000000..be0db8c
+--- /dev/null
++++ b/experiments/role_late_paired_v1/test_pairing.py
+@@ -0,0 +1,90 @@
++import json
++import random
++import numpy as np
++import pytest
++import torch
++from pairing import config,construct,input_digest,uniform_contract,c,sha
++from role_condition.experiment import opt,validate
++from role_condition.model import extract_target
++import importlib.util
++from pathlib import Path
++_spec=importlib.util.spec_from_file_location("late_panel_launcher",Path(__file__).with_name("run.py"))
++_launcher=importlib.util.module_from_spec(_spec);_spec.loader.exec_module(_launcher)
++activate=_launcher.activate
++
++
++def small():
++    cfg=config();cfg["model"]=dict(layers=1,width=16,edge_width=8,global_width=8,
++        heads=2,ff_node=16,ff_edge=8,ff_global=8,dropout=.1,cn_hidden=32,joint_width=8)
++    return c.toy_case(),cfg
++
++
++def test_frozen_scope():
++    cfg=config()
++    assert cfg["train_seeds"]==[2026102011,2026102012,2026102013]
++    assert cfg["updates"]==1000 and cfg["T"]==64 and cfg["rounds"]==4
++    assert cfg["budget_seconds"]==3600 and cfg["expected_chains"]==96
++    assert cfg["model"]["layers"]==8 and cfg["model"]["width"]==256
++    assert cfg["optimizer"]["lr"]==2e-4 and cfg["gradient_clipping"] is None
++
++
++def test_actual_parameter_copy_independent_optimizers_saved_weights(tmp_path):
++    case,cfg=small();models,receipt=construct(case,cfg,122)
++    optimizers={a:opt(m,cfg) for a,m in models.items()}
++    assert not any(o.state for o in optimizers.values())
++    assert len({id(o) for o in optimizers.values()})==2
++    for arm,m in models.items():
++        path=tmp_path/(arm+".pt");torch.save(m.state_dict(),path)
++        loaded=torch.load(path,weights_only=True)
++        assert all(torch.equal(v,loaded[k]) for k,v in m.state_dict().items())
++    left,right=[m.state_dict() for m in models.values()]
++    assert all(torch.equal(left[k],right[k]) for k in receipt["shared_tensors"])
++    assert all(left[k].data_ptr()!=right[k].data_ptr() for k in receipt["shared_tensors"] if left[k].numel())
++
++
++def test_train_same_inputs_and_rng_one_real_update():
++    case,cfg=small();models,_=construct(case,cfg,123)
++    inp=c.train_input(case,64,4,123,0,np.random.default_rng(123),force_t=32)
++    before=input_digest(case,inp);rng=torch.get_rng_state();end=None
++    for arm,m in models.items():
++        m.set_target(extract_target(case));torch.set_rng_state(rng)
++        result=c.update(m,opt(m,cfg),case,inp,64,"cpu")
++        assert result["optimizer_update"] and input_digest(case,inp)==before
++        if end is None:end=torch.get_rng_state()
++        else:assert torch.equal(end,torch.get_rng_state())
++    changed=dict(inp,labels=1-inp["labels"])
++    assert input_digest(case,changed)!=before
++
++
++def test_sampling_uniform_and_plan_pairing():
++    case,cfg=small();rng=np.random.default_rng(77);other=np.random.default_rng(77)
++    for t in range(4,0,-1):
++        h,expected=uniform_contract(rng,case["space"].total)
++        assert (h,expected)==uniform_contract(other,case["space"].total)
++        np.testing.assert_array_equal(rng.random(case["space"].total),other.random(case["space"].total))
++        assert sha(rng.bit_generator.state)==expected
++        a=c.plan_for(case,[77,t,61],4);b=c.plan_for(case,[77,t,61],4)
++        for j in range(4):
++            for x,y in zip(a.block(j),b.block(j)):np.testing.assert_array_equal(x,y)
++
++
++def test_validation_does_not_advance_training_rng():
++    case,cfg=small();models,_=construct(case,cfg,124)
++    inp=c.train_input(case,64,4,124,0,np.random.default_rng(124),force_t=32)
++    values=[("toy","balanced",case,inp,0)]
++    for m in models.values():
++        m.set_target(extract_target(case))
++        before=(random.getstate(),np.random.get_state(),torch.get_rng_state())
++        validate(m,values,cfg,{"balanced":extract_target(case)},lambda:None)
++        assert before[0]==random.getstate()
++        assert before[1][0]==np.random.get_state()[0]
++        np.testing.assert_array_equal(before[1][1],np.random.get_state()[1])
++        assert torch.equal(before[2],torch.get_rng_state())
++
++
++def test_activation_is_exclusive_no_budget_reset(tmp_path):
++    out=tmp_path/"unique";ledger,epoch=activate(out,12)
++    before=ledger.read_bytes()
++    with pytest.raises(FileExistsError):activate(out,3600)
++    assert before==ledger.read_bytes()
++    x=json.loads(before);assert x["hard_cutoff_epoch"]==epoch+12
+diff --git a/experiments/role_late_paired_v1/worker.py b/experiments/role_late_paired_v1/worker.py
+new file mode 100644
+index 0000000..e76232b
+--- /dev/null
++++ b/experiments/role_late_paired_v1/worker.py
+@@ -0,0 +1,204 @@
++"""Frozen two-arm experiment. Never resume/reseed an incomplete panel."""
++import json
++import sys
++from pathlib import Path
++import time
++import resource
++import hashlib
++import gc
++import numpy as np
++import torch
++from pairing import BASE,ROOT,c,config,construct,input_digest,uniform_contract,atomic_weights,source_manifest,sha
++from hsgd.runtime import reverse_step,predict
++from hsgd.kernel import MarginalKernel
++from role_condition.experiment import save,emit,opt,fixed_validation,validate,set_condition
++from role_condition.panel import make_panel,save_panel,augment,NAMES
++from role_condition.metrics import graph,compare
++from hsgd.computational import FrozenTypedContext
++
++
++def append(path,row):
++    with path.open("a") as f:f.write(json.dumps(row,allow_nan=False)+"\n")
++
++
++def response(models,values,targets,cfg,check):
++    rows=[];arrays={}
++    for arm,m in models.items():
++        m.eval()
++        for identifier,cond,case,inp,index in values[:3]:
++            plan=c.plan_for(case,[cfg["validation_seed"],index,21],4);ps=[];ls=[];mg=None
++            for target in ["balanced","extreme","balanced"]:
++                check();m.set_target(targets[target]);ll=[];pp=[];ff=[];ii=[]
++                ctx=FrozenTypedContext(m,case["space"].types,inp["edges"],inp["edge_families"],"response")
++                try:
++                    with torch.no_grad():
++                        for block in range(4):
++                            ids,f,q=plan.block(block);_,l,p=ctx.predict(q,f,inp["t"]/64,"response",details=True)
++                            ii.append(ids);ll.append(l.numpy());pp.append(p.numpy());ff.append(f)
++                    order=np.argsort(np.concatenate(ii));ls.append(np.concatenate(ll)[order]);ps.append(np.concatenate(pp)[order])
++                    mg=np.concatenate(ff)[order]==case["space"].pairs.index((2,3))
++                finally:ctx.close()
++            delta=ps[1]-ps[0];gap=(ls[1][:,1]-ls[1][:,0])-(ls[0][:,1]-ls[0][:,0])
++            row=dict(arm=arm,t=inp["t"],input_id=identifier,
++                p0_max_abs=float(abs(delta).max()),MG_p0_max_abs=float(abs(delta[mg]).max()),
++                MG_p0_mean_abs=float(abs(delta[mg]).mean()),MG_logit_gap_max_abs=float(abs(gap[mg]).max()),
++                repeat_max_abs=float(abs(ps[2]-ps[0]).max()))
++            rows.append(row)
++            for j,p in enumerate(ps):arrays[f"{arm}_t{inp['t']}_target{j}_p0"]=p
++            for j,l in enumerate(ls):arrays[f"{arm}_t{inp['t']}_target{j}_logits"]=l
++    return rows,arrays
++
++
++def main(mode,out,deadline):
++    out=Path(out);cfg=config()
++    torch.set_num_threads(1);torch.set_float32_matmul_precision("highest")
++    torch.use_deterministic_algorithms(False)
++    torch.backends.cuda.matmul.allow_tf32=False;torch.backends.cudnn.allow_tf32=False
++    if mode=="freeze":
++        import subprocess
++        save(out/"source_manifest.json",source_manifest());save(out/"resolved_config.json",cfg)
++        save(out/"environment.json",c.environment("cpu"))
++        save(out/"code_revision.json",dict(commit=subprocess.check_output(
++            ["git","-C",str(ROOT),"rev-parse","HEAD"],text=True).strip(),
++            base_commit=cfg["base_commit"]))
++        return 0
++    def check():
++        if (out/"STOP").exists():raise InterruptedError("STOP")
++        if time.monotonic()>deadline-30:raise TimeoutError("single cumulative budget reserve")
++    assert json.loads((out/"source_manifest.json").read_text())==source_manifest()
++    assert json.loads((out/"resolved_config.json").read_text())==cfg
++    started=time.monotonic();cpu=time.process_time();status="failed";reason=None;stage="preparation"
++    models={};optimizers={};completed={};seed=None
++    try:
++        records,targets=make_panel(cfg["panel_seed"]);save_panel(records,targets,out/"panel.json")
++        case=records[0]["case"];values=fixed_validation(records,cfg);train=[r for r in records if r["split"]=="train"]
++        references={}
++        for cond in targets:
++            ref=next(r["case"] for r in records if r["condition"]==cond)
++            references[cond]=graph(ref,ref["clean"],NAMES,check)
++        save(out/"reference_metrics.json",references)
++        # Cost gate uses disposable weights, never the scientific initial state.
++        stage="cost_gate";probe_models,_=construct(case,cfg,2026102099);costs={}
++        probe_case=next(r["case"] for r in records if r["condition"]=="extreme")
++        inps=[c.train_input(probe_case,64,4,2026102099,i,np.random.default_rng([2026102099,i]),force_t=32) for i in range(5)]
++        for arm,m in probe_models.items():
++            m.set_target(targets["extreme"]);optimizer=opt(m,cfg);dt=[]
++            for inp in inps:
++                check();tick=time.perf_counter();c.update(m,optimizer,probe_case,inp,64,"cpu");dt.append(time.perf_counter()-tick)
++            m.eval();dense=np.repeat(case["active"].astype(np.uint8),case["space"].counts);st=[]
++            for i in range(3):
++                check();tick=time.perf_counter()
++                with torch.no_grad():reverse_step(m,case,dense,MarginalKernel(case["prior"],c.schedule(64)),32,4,12,np.random.default_rng(12),"cpu",check_time=check)
++                st.append(time.perf_counter()-tick)
++            v=validate(m,values,cfg,targets,check)
++            costs[arm]=dict(updates_seconds=dt,stable_p90=float(np.quantile(dt[2:],.9)),dense_steps=st,
++                            step_p90=float(np.quantile(st[1:],.9)),validation_seconds=v["seconds"])
++            del optimizer
++        forecast=1.15*(3000*sum(x["stable_p90"] for x in costs.values())+
++                48*64*sum(x["step_p90"] for x in costs.values())+
++                12*sum(x["validation_seconds"] for x in costs.values()))+90
++        remaining=deadline-time.monotonic()
++        save(out/"cost_gate.json",dict(costs=costs,forecast_seconds=forecast,remaining_seconds=remaining,
++             passed=forecast<remaining-30,scope="full model dense-state step cost; no quality selection"))
++        del probe_models,m;gc.collect()
++        if forecast>=remaining-30:raise RuntimeError("cost gate rejects full frozen scope; no scientific learning")
++        stage="learning_sampling";generations=[];hashes={};all_completed=0
++        for seed in cfg["train_seeds"]:
++            check();models,init=construct(case,cfg,seed);optimizers={a:opt(m,cfg) for a,m in models.items()}
++            assert all(not o.state for o in optimizers.values())
++            assert len({id(o) for o in optimizers.values()})==2
++            completed={a:0 for a in models};sd=out/f"seed{seed}";sd.mkdir()
++            for arm,m in models.items():
++                path=sd/f"{arm}_initial.pt";hashes[str(path.relative_to(out))]=atomic_weights(path,m.state_dict())
++            save(sd/"initialization.json",init);save(out/"weight_hashes.json",hashes)
++            rng=np.random.default_rng(seed)
++            for u in range(1001):
++                if u in [0,250,500,1000]:
++                    for arm,m in models.items():
++                        check();v=validate(m,values,cfg,targets,check)
++                        save(sd/f"{arm}_validation_{u:04d}.json",dict(seed=seed,arm=arm,update=u,**v))
++                        emit(out/"progress.jsonl",dict(phase="validation",seed=seed,arm=arm,update=u,ce=v["mean_ce"]))
++                if u==1000:break
++                check();rec=train[(u%2)*4+int(rng.integers(4))];current=augment(rec["case"],rng)
++                inp=c.train_input(current,64,4,seed,u,rng);digest=input_digest(current,inp)
++                begin_rng=torch.get_rng_state();after_rng=None
++                for arm,m in models.items():
++                    check();m.set_target(targets[rec["condition"]]);torch.set_rng_state(begin_rng)
++                    tick=time.perf_counter();result=c.update(m,optimizers[arm],current,inp,64,"cpu");dt=time.perf_counter()-tick
++                    assert input_digest(current,inp)==digest,"training input mutated"
++                    key=m.backbone.lin_out_E.weight
++                    assert int(optimizers[arm].state[key]["step"])==u+1
++                    now=torch.get_rng_state()
++                    if after_rng is None:after_rng=now
++                    else:assert torch.equal(now,after_rng),"training RNG consumption differs"
++                    completed[arm]=u+1;all_completed+=1
++                    append(out/"updates.jsonl",dict(seed=seed,arm=arm,update=u+1,input_sha256=digest,
++                        torch_rng_before=hashlib.sha256(begin_rng.numpy().tobytes()).hexdigest(),
++                        torch_rng_after=hashlib.sha256(now.numpy().tobytes()).hexdigest(),
++                        graph_id=rec["id"],condition=rec["condition"],t=inp["t"],query_block=inp["round_id"],
++                        query_count=len(inp["ids"]),loss=result["loss"],gradient_norm=result["gradient_norm"],
++                        seconds=dt,optimizer_step=int(optimizers[arm].state[key]["step"])))
++                if (u+1)%100==0:emit(out/"progress.jsonl",dict(phase="training",seed=seed,paired_update=u+1,
++                     effective_total_updates=all_completed,remaining_seconds=deadline-time.monotonic()))
++            for arm,m in models.items():
++                path=sd/f"{arm}_final_1000.pt";hashes[str(path.relative_to(out))]=atomic_weights(path,m.state_dict())
++            save(out/"weight_hashes.json",hashes)
++            rr,aa=response(models,values,targets,cfg,check);save(sd/"condition_response.json",rr)
++            np.savez_compressed(sd/"condition_response.npz",**aa)
++            for arm,m in models.items():
++                m.eval()
++                for sample_seed in cfg["sampling_seeds"]:
++                    for cond in ["balanced","extreme"]:
++                        check();m.set_target(targets[cond]);c.seed_all(sample_seed);sampling=np.random.default_rng(sample_seed)
++                        state=(sampling.random(case["space"].total)<np.repeat(case["prior"],case["space"].counts)).astype(np.uint8)
++                        initial_hash=sha(state.tolist());step_records=[];tick=time.perf_counter()
++                        kernel=MarginalKernel(case["prior"],c.schedule(64))
++                        for t in range(64,0,-1):
++                            check();uniform_sha,expected_rng=uniform_contract(sampling,case["space"].total)
++                            plan=c.plan_for(case,[sample_seed,t,61],4);qh=hashlib.sha256()
++                            for j in range(4):
++                                for arr in plan.block(j):qh.update(np.ascontiguousarray(arr).tobytes())
++                            with torch.no_grad():state,info=reverse_step(m,case,state,kernel,t,4,sample_seed,sampling,"cpu",check_time=check)
++                            assert sha(sampling.bit_generator.state)==expected_rng
++                            step_records.append(dict(t=t,uniform_sha256=uniform_sha,query_sha256=qh.hexdigest(),
++                                rng_after=expected_rng,state_sha256=sha(state.tolist()),edge_count=int(state.sum()),
++                                exact_coverage=info["exact_coverage"],blocks=info["blocks"],seconds=info["step_seconds"]))
++                        edges,fam=c.state_edges(case,state);stem=f"{arm}_{cond}_{sample_seed}"
++                        np.savez_compressed(sd/(stem+".npz"),types=case["space"].types,edges=edges.T,
++                            relations=fam+1,schema=np.asarray(case["space"].pairs))
++                        save(sd/(stem+"_steps.json"),step_records)
++                        metrics=graph(case,edges,NAMES,check);comparison=compare(metrics,references[cond])
++                        mg=case["space"].pairs.index((2,3));g=metrics["typed_degree"]["Genre"]["by_relation"][mg]
++                        hist=np.array(g["histogram"]);high=int(hist[12:].sum())
++                        row=dict(seed=seed,arm=arm,condition=cond,sampling_seed=sample_seed,
++                            graph_file=str((sd/(stem+".npz")).relative_to(out)),graph_file_sha256=c.sha(sd/(stem+".npz")),
++                            initial_state_sha256=initial_hash,metrics=metrics,comparison=comparison,
++                            G_W1=comparison["typed_relation_degree_W1"]["Genre"][mg],
++                            G_joint_TV=comparison["joint_relation_degree_TV"]["Genre"],G_max=g["max"],
++                            G_high_ge12=high,G_multiple_hubs=high>1,G_zero=g["zero"],G_low_le1=g["low_le1"],
++                            seconds=time.perf_counter()-tick)
++                        generations.append(row);append(out/"generation.jsonl",row)
++                        emit(out/"progress.jsonl",dict(phase="sample",seed=seed,arm=arm,condition=cond,
++                             sampling_seed=sample_seed,edges=metrics["edges"],G_max=g["max"],
++                             complete_chains=len(generations),remaining_seconds=deadline-time.monotonic()))
++            del m;models={};optimizers={};gc.collect()
++        assert all_completed==6000 and len(generations)==96
++        save(out/"generation.json",generations)
++        assert source_manifest()==json.loads((out/"source_manifest.json").read_text())
++        status="completed";return 0
++    except BaseException as exc:
++        reason=repr(exc)
++        if isinstance(exc,(TimeoutError,InterruptedError)):status="stopped"
++        if models:
++            # Partial paired update is retained with individual counters, not
++            # promoted to a completed pair. No retry/resume path in this panel.
++            atomic_weights(out/"interrupted_state.pt",dict(seed=seed,completed=completed,
++                models={a:m.state_dict() for a,m in models.items()},
++                optimizers={a:o.state_dict() for a,o in optimizers.items()},torch_rng=torch.get_rng_state()))
++        raise
++    finally:
++        save(out/"worker_receipt.json",dict(status=status,reason=reason,stage=stage,
++            wall_seconds=time.monotonic()-started,CPU_seconds=time.process_time()-cpu,
++            peak_rss_mib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024,
++            device="CPU",no_budget_reset=True,partial_seed=seed,partial_completed=completed))
++if __name__=="__main__":sys.exit(main(sys.argv[1],sys.argv[2],float(sys.argv[3])))
