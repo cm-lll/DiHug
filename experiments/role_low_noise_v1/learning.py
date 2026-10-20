@@ -68,7 +68,7 @@ def worker(source,panel_source,out,deadline_epoch):
         baseline_fixed_commit="b8e97cc42e6e835e0ea228a6666e3a22a200e035",
         method="importance-corrected low-noise proposal; same expected uniform-time CE",
         time_proposal=dict(low_t=[1,8],mixture=0.5,low_probability=9/128,high_probability=1/128,
-            low_weight=2/9,high_weight=2,seed_tag=2026102091)))
+            low_weight=2/9,high_weight=2,seed_tag=2026102091))
     save(out/"resolved_config.json",cfg);save(out/"environment.json",c.environment("cpu"))
     old_environment=json.loads((source/"environment.json").read_text())
     current_environment=c.environment("cpu")
@@ -207,9 +207,12 @@ def worker(source,panel_source,out,deadline_epoch):
 def main():
     ap=argparse.ArgumentParser();ap.add_argument("--source",type=Path,required=True);ap.add_argument("--output",type=Path,required=True)
     ap.add_argument("--panel",type=Path,required=True);ap.add_argument("--worker",action="store_true");ap.add_argument("--deadline",type=float)
+    ap.add_argument("--activation-epoch",type=float,help="earlier prelaunch accounting start; never a future time")
     a=ap.parse_args()
     if a.worker:return worker(a.source,a.panel,a.output,a.deadline)
-    a.output.mkdir(parents=True,exist_ok=False);activated=time.time();deadline=activated+2700
+    activated=time.time() if a.activation_epoch is None else a.activation_epoch
+    if activated>time.time() or activated+2700<=time.time():raise ValueError("invalid or expired accounting window")
+    a.output.mkdir(parents=True,exist_ok=False);deadline=activated+2700
     save(a.output/"activation.json",dict(activation_epoch=activated,deadline_epoch=deadline,
         budget_seconds=2700,no_reset=True,new_task="one importance-corrected time proposal; prior budgets remain closed"))
     child=None;status="failed";exit_code=1;reason=None

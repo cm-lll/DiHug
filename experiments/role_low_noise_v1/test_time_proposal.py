@@ -79,3 +79,14 @@ def test_invalid_proposal_and_unfrozen_weight_rejected():
     for atom in (-1, 128, 1.5):
         with pytest.raises(ValueError): proposal_from_atom(atom)
     with pytest.raises(ValueError): weighted_input({"ce_weight": 1.}, .5)
+
+
+def test_public_runner_help_and_all_source_syntax():
+    import subprocess
+    import ast
+    for p in HERE.glob("*.py"):
+        ast.parse(p.read_text(), filename=str(p))
+    result = subprocess.run([sys.executable, str(HERE/"learning.py"), "--help"],
+                            capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+    assert "--activation-epoch" in result.stdout
