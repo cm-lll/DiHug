@@ -1,5 +1,15 @@
 # Current execution task
 
+2026-10-20 New user delegation: select one minimal correction after prior failed
+late-fusion panel. Frozen-weight diagnosis completed; now capacity-coupled
+forward-degree likelihood soft role readout, see experiments/role_specialization_v1/DESIGN.md.
+CPU only. Before science:89 checks, full-size cost gate forecast with1.2 margin
+and120s reserve must fit one2700s window.3 original seeds×1000updates,48 new full
+T64 chains; archive late-C baseline48 chains and actual initial weights reused
+with exact input/query/uniform checks. No second candidate/window or big graph.
+Preserve failed engineering collection receipt; missing PYTHONPATH fixed only
+in test invocation, no model change. Stop and publish all outcomes after audit.
+
 2026-10-20 Paired original-C/late-C task is complete:6000updates,96chains,81+81checks, no skipped seeds/graphs.
 See experiments/role_late_paired_v1_results and branch codex/role-late-paired-v1-review.
 Response is stronger but anonymous extreme-role control is not recovered. Stop for result review.
