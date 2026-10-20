@@ -1,5 +1,11 @@
 # Anonymous joint-role network conditioning v1.1 — review before execution
 
+2026-10-20 execution authorization: static review found no blocker. The user
+now authorizes ONE complete frozen local panel within the existing cumulative
+5400-second maximum, after all60 tests pass again. This amendment changes
+documentation only. Old cost rejection and authorization requests below are
+explicitly historical; they do not override the reviewed90-minute limit.
+
 2026-10-20 update: user authorizes a single cumulative maximum of5400 seconds
 for the complete LOCAL small-graph learning/sampling/evaluation panel, AFTER
 code review passes. This delivery performs regression checks only; the panel
@@ -61,13 +67,20 @@ Degree statistics cost O(E+NR). Degree MLP costs O(N(2R+K)h+NhH). Role encoders 
 
 Frozen full plan: 3 paired training seeds, 1000 updates each A/B/C, validation0/250/500/1000, T64/four blocks, final8 paired sampling seeds/condition. A/B outputs are reused across target evaluations:96 actual chains,144 evaluation rows, not144 independent graphs. Seeds/config are fully recorded in package/role_condition/config.json. G>=12 is the predeclared high-degree threshold. Evaluation uses actual binary graphs: per-family edges, typed relation W1 and joint TV, tails, components/LCC/isolates, typed triangles, DMA path and unique-pair closure, exact short paths. Different invariant signatures only prove a lower bound on topology counts; equal signatures do not establish isomorphism. Training-seed-level summaries precede paired comparisons. No new quality threshold/composite score is added.
 
-## Cost gate outcome and evidence boundary
+## Historical v1 cost gate outcome and evidence boundary (30-minute version)
+
+HISTORICAL RECORD ONLY: this section describes the earlier1800-second run,
+not a failed5400-second run. Keep its original receipts unchanged.
 
 Full original width/depth was preserved. Disposable engineering probe:8 updates/arm,8 forwards/arm,8 complete four-block dense-support reverse steps/arm, one fixed validation panel/arm. This is24 engineering updates, not the requested scientific learning panel or complete chains. Forecast includes training9000, sampling96*64 complete steps,36 validations, safety1.25 and20s overhead. Gate failed before scientific training. No shrink, seed deletion, quality-driven stopping or extension occurred.
 
 The delivered input branch and engineering invariances are tested. No trained condition-control effectiveness, actual generated tail improvement, convergence, cross-condition generalization or topology-diversity improvement is claimed. Original T1000/20 compatibility is one bounded reverse step per arm, not a complete chain. No GPU/BW, IMDB/PubMed runs, private weights, guidance or repairs were used.
 
-## Recommended next decision (not executed)
+## Historical v1 next-decision request (superseded; not current instructions)
+
+HISTORICAL RECORD ONLY: the following request for approximately80 minutes
+has already been superseded by the user's reviewed90-minute authorization.
+Do not ask for it again or interpret it as a new execution gate.
 
 1. Decide whether to authorize approximately80 minutes of single-thread CPU time for the frozen plan, or a separately approved device cost probe. Main cost is full unchanged backbone, not the~1.55ms role attention.
 2. Run that frozen paired plan before changing design: discriminate actual tail response, role averaging and ordinary-condition/closure tradeoffs from interface capability.
