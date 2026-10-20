@@ -1,5 +1,5 @@
 """Publishable synthetic-panel evidence and per-seed fresh toy weights only."""
-import argparse,hashlib,json,zipfile
+import argparse,hashlib,json,zipfile,shutil
 from pathlib import Path
 
 def digest(p):
@@ -44,12 +44,16 @@ def main(run,preflight,dest):
         assert path.stat().st_size<100000000,'per-seed archive exceeds public GitHub file limit; do not split/change scientific results'
         archives.append(path)
         models.extend(str(p.relative_to(run)) for p in files if p.suffix=='.pt')
+    review_files={}
+    for name in ['learning_curves.png','sampled_Genre_degrees.png','macro_summary.json','seed_summary.json','paired_differences.json','conditional_response.json','cost_receipt.json','failures.json','audit.json','validation_curve.json']:
+        p=run/'analysis'/name
+        if p.exists():shutil.copyfile(p,dest/name);review_files[name]=digest(dest/name)
     manifest=dict(run_summary=json.loads((run/'summary.json').read_text()),controller=json.loads((run/'controller.json').read_text()),
         model_scope='fresh synthetic34-node training only; no private/big-graph/notebook weights',
-        weights=models,archives={p.name:dict(sha256=digest(p),bytes=p.stat().st_size) for p in archives},
+        weights=models,archives={p.name:dict(sha256=digest(p),bytes=p.stat().st_size) for p in archives},review_files=review_files,
         no_new_training_or_sampling=True,all_planned_training_seeds=cfg['train_seeds'])
     (dest/'release.json').write_text(json.dumps(manifest,indent=2))
-    (dest/'SHA256SUMS').write_text(''.join(digest(p)+'  '+p.name+'\n' for p in archives+[dest/'input_output_hashes.json',dest/'release.json']))
+    (dest/'SHA256SUMS').write_text(''.join(digest(p)+'  '+p.name+'\n' for p in archives+[dest/'input_output_hashes.json',dest/'release.json']+[dest/n for n in review_files]))
     print(json.dumps(manifest,indent=2))
 
 if __name__=='__main__':

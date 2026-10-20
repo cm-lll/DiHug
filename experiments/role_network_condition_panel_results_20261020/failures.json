@@ -1,0 +1,25 @@
+{
+  "panel_training_failures": [],
+  "sampling_failures": [],
+  "failed_requests": 0,
+  "scientific_reruns": 0,
+  "changed_output_directory": false,
+  "postprocessing_failures": [
+    {
+      "stage": "independent summary quantiles",
+      "error": "numpy boolean subtract in percentile interpolation",
+      "affected": "summary/plot production only; no training/sampling/raw graph altered",
+      "fix": "cast indicator values to float for unchanged mean/median/linear quantile definitions",
+      "resumed": "same analysis directory, same original budget ledger",
+      "record": "analysis/attempt_01_failure.json"
+    }
+  ],
+  "auxiliary_environment_error": {
+    "stage": "reference-values export/plot-version query",
+    "error": "auxiliary command initially selected system Python with no SciPy; no scientific computation performed by that command",
+    "corrected_executable": "/data2/lyh/miniconda3/envs/dihug/bin/python",
+    "previous_matplotlib_metadata": "3.10.8",
+    "actual_matplotlib": "3.9.4",
+    "fix": "use locked DiHug Python for analysis metadata and read-only reference export"
+  }
+}

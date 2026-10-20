@@ -169,7 +169,7 @@
     "cumulative_wall_to_receipt_seconds": 3461.0344524383545,
     "budget_reset": false,
     "scientific_manifest_unchanged": true,
-    "matplotlib": "3.10.8",
+    "matplotlib": "3.9.4",
     "per_arm": {
       "A": {
         "update_median": 0.22643236350268126,
@@ -189,9 +189,42 @@
         "complete_chains": 48,
         "chain_median": 10.408263939898461
       }
+    },
+    "analysis_python": "3.9.23 | packaged by conda-forge | (main, Jun  4 2025, 17:57:12) \n[GCC 13.3.0]",
+    "analysis_executable": "/data2/lyh/miniconda3/envs/dihug/bin/python",
+    "analysis_packages": {
+      "numpy": "1.26.4",
+      "scipy": "1.11.0",
+      "matplotlib": "3.9.4",
+      "networkx": "2.8.7"
     }
   },
   "full_data_destination": "experiments/role_network_condition_panel_results_20261020",
   "scientific_manifest_sha256": "75f558649557f8eb00a940b725eda8defe4012fb566cd96f6c997efad466bb4b",
-  "no_notebook_BW": true
+  "no_notebook_BW": true,
+  "postprocessing_failures": {
+    "panel_training_failures": [],
+    "sampling_failures": [],
+    "failed_requests": 0,
+    "scientific_reruns": 0,
+    "changed_output_directory": false,
+    "postprocessing_failures": [
+      {
+        "stage": "independent summary quantiles",
+        "error": "numpy boolean subtract in percentile interpolation",
+        "affected": "summary/plot production only; no training/sampling/raw graph altered",
+        "fix": "cast indicator values to float for unchanged mean/median/linear quantile definitions",
+        "resumed": "same analysis directory, same original budget ledger",
+        "record": "analysis/attempt_01_failure.json"
+      }
+    ],
+    "auxiliary_environment_error": {
+      "stage": "reference-values export/plot-version query",
+      "error": "auxiliary command initially selected system Python with no SciPy; no scientific computation performed by that command",
+      "corrected_executable": "/data2/lyh/miniconda3/envs/dihug/bin/python",
+      "previous_matplotlib_metadata": "3.10.8",
+      "actual_matplotlib": "3.9.4",
+      "fix": "use locked DiHug Python for analysis metadata and read-only reference export"
+    }
+  }
 }
