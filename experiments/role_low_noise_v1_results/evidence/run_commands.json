@@ -1,0 +1,25 @@
+{
+  "working_directory": "/tmp/dihug-role-low-noise-v1",
+  "science_commit": "2eadab61e3b043c1b0d5f13263ba85462d5528b8",
+  "python": "/data2/lyh/miniconda3/envs/dihug/bin/python",
+  "environment": {
+    "OMP_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1",
+    "CUDA_VISIBLE_DEVICES": "",
+    "MPLCONFIGDIR": "/tmp/dihug-low-noise-mpl"
+  },
+  "learning_argv": [
+    "experiments/role_low_noise_v1/learning.py",
+    "--source",
+    "/data2/lyh/gnn_project/DiHug/results/role_specialization_20261020_v1/learning_run01",
+    "--panel",
+    "/data2/lyh/gnn_project/DiHug/results/role_late_paired_20261020_run01",
+    "--output",
+    "/data2/lyh/gnn_project/DiHug/results/role_low_noise_20261020_v1/learning_run01",
+    "--activation-epoch",
+    "1792509216"
+  ],
+  "accounting": "Original prelaunch frozen commit time retained; parse failure before model invocation documented separately. No reset.",
+  "publication_branch": "codex/role-low-noise-importance-v1",
+  "scope": "single CPU small panel; no BW/notebook/GPU/large graph"
+}

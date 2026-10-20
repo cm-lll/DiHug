@@ -1,0 +1,82 @@
+[
+  {
+    "stage": "audit",
+    "args": [
+      "experiments/role_low_noise_v1/audit.py",
+      "--run",
+      "/data2/lyh/gnn_project/DiHug/results/role_low_noise_20261020_v1/learning_run01",
+      "--source",
+      "/data2/lyh/gnn_project/DiHug/results/role_specialization_20261020_v1/learning_run01"
+    ],
+    "exit_code": 0,
+    "wall_seconds": 1.2187094688415527
+  },
+  {
+    "stage": "check_joint",
+    "args": [
+      "experiments/role_low_noise_v1/check_joint.py",
+      "--run",
+      "/data2/lyh/gnn_project/DiHug/results/role_low_noise_20261020_v1/learning_run01",
+      "--source",
+      "/data2/lyh/gnn_project/DiHug/results/role_specialization_20261020_v1/learning_run01",
+      "--panel",
+      "/data2/lyh/gnn_project/DiHug/results/role_late_paired_20261020_run01"
+    ],
+    "exit_code": 0,
+    "wall_seconds": 3.0234107971191406
+  },
+  {
+    "stage": "check_inputs",
+    "args": [
+      "experiments/role_low_noise_v1/check_inputs.py",
+      "--run",
+      "/data2/lyh/gnn_project/DiHug/results/role_low_noise_20261020_v1/learning_run01",
+      "--source",
+      "/data2/lyh/gnn_project/DiHug/results/role_specialization_20261020_v1/learning_run01",
+      "--panel",
+      "/data2/lyh/gnn_project/DiHug/results/role_late_paired_20261020_run01"
+    ],
+    "exit_code": 0,
+    "wall_seconds": 28.739254236221313
+  },
+  {
+    "stage": "state_coverage",
+    "args": [
+      "experiments/role_low_noise_v1_results/state_coverage.py",
+      "--baseline",
+      "/data2/lyh/gnn_project/DiHug/results/role_specialization_20261020_v1/learning_run01",
+      "--panel",
+      "/data2/lyh/gnn_project/DiHug/results/role_late_paired_20261020_run01",
+      "--run",
+      "/data2/lyh/gnn_project/DiHug/results/role_low_noise_20261020_v1/learning_run01",
+      "--output",
+      "/data2/lyh/gnn_project/DiHug/results/role_low_noise_20261020_v1/state_coverage"
+    ],
+    "exit_code": 0,
+    "wall_seconds": 38.11314654350281
+  },
+  {
+    "stage": "summary",
+    "args": [
+      "experiments/role_low_noise_v1_results/summarize.py",
+      "--run",
+      "/data2/lyh/gnn_project/DiHug/results/role_low_noise_20261020_v1/learning_run01",
+      "--source",
+      "/data2/lyh/gnn_project/DiHug/results/role_specialization_20261020_v1/learning_run01"
+    ],
+    "exit_code": 0,
+    "wall_seconds": 4.176316022872925
+  },
+  {
+    "stage": "details",
+    "args": [
+      "experiments/role_low_noise_v1_results/details.py",
+      "--run",
+      "/data2/lyh/gnn_project/DiHug/results/role_low_noise_20261020_v1/learning_run01",
+      "--source",
+      "/data2/lyh/gnn_project/DiHug/results/role_specialization_20261020_v1/learning_run01"
+    ],
+    "exit_code": 0,
+    "wall_seconds": 0.4668610095977783
+  }
+]
