@@ -29,8 +29,26 @@ def activate(out,seconds=3600):
 
 def main():
     ap=argparse.ArgumentParser();ap.add_argument("--output",type=Path,required=True)
+    ap.add_argument("--continue-preflight-fix",action="store_true",
+                    help="only failed pre-science checks, same immutable deadline; never resume learning")
     a=ap.parse_args();a.output=a.output.resolve();a.output.parent.mkdir(parents=True,exist_ok=True)
-    ledger,epoch=activate(a.output);start=time.monotonic();deadline=start+3600
+    if a.continue_preflight_fix:
+        ledger=a.output.with_name(a.output.name+".budget.json")
+        old=json.loads((a.output/"budget_receipt.json").read_text());budget=json.loads(ledger.read_text())
+        assert old["status"]=="failed" and all(j["job"] in ("freeze","tests") for j in old["jobs"])
+        assert not (a.output/"updates.jsonl").exists() and not (a.output/"cost_gate.json").exists()
+        assert old["ledger_sha256"]==hashlib.sha256(ledger.read_bytes()).hexdigest()
+        assert budget["hard_cutoff_epoch"]>time.time(),"original budget expired"
+        archive=a.output/"preflight_attempt_01";archive.mkdir(exist_ok=False)
+        for p in list(a.output.iterdir()):
+            if p.is_file() and p.name!="STOP":p.rename(archive/p.name)
+        epoch=budget["activation_epoch"]
+        start=time.monotonic()-(time.time()-epoch);deadline=start+3600
+        save(a.output/"preflight_fix.json",dict(reason="test import resolved baseline/run.py instead of this launcher",
+             prior_failed_tests_preserved=True,original_activation_epoch=epoch,
+             original_hard_cutoff_epoch=budget["hard_cutoff_epoch"],budget_reset=False))
+    else:
+        ledger,epoch=activate(a.output);start=time.monotonic();deadline=start+3600
     env=dict(os.environ,CUDA_VISIBLE_DEVICES="",OMP_NUM_THREADS="1",OPENBLAS_NUM_THREADS="1",
              PYTEST_ADDOPTS="",PYTHONPATH=str(ROOT.parent/"role_condition_diagnosis_v1/baseline"))
     jobs=[];child=None;status="failed";reason=None

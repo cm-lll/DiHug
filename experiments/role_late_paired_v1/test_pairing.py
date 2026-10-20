@@ -6,7 +6,11 @@ import torch
 from pairing import config,construct,input_digest,uniform_contract,c,sha
 from role_condition.experiment import opt,validate
 from role_condition.model import extract_target
-from run import activate
+import importlib.util
+from pathlib import Path
+_spec=importlib.util.spec_from_file_location("late_panel_launcher",Path(__file__).with_name("run.py"))
+_launcher=importlib.util.module_from_spec(_spec);_spec.loader.exec_module(_launcher)
+activate=_launcher.activate
 
 
 def small():
