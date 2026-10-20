@@ -1,5 +1,17 @@
 # DiHug current research status
 
+2026-10-20 role_degree_residual_v1阶段完成，科学源码c828566；本地CPU，未访问BW/notebook。
+原容量读取真实链384步复现，外围软目标低但p0仍高；有限低t训练面板很少覆盖此类状态。
+唯一软目标度/噪声对齐残差输入候选+5120参数，原模型/噪声/CE/优化器保持。
+新3seed×1000更新/48链，对照48封存容量读取图；1446初始共同张量/3000输入/3072步随机合同核验。
+源码94项零跳过通过，独立图指标联合TV/W1误差<=2.22e-16/8.88e-16。
+平衡Genre W1 1.63194→1.49306，极端1.02778→1.20139；极端MG28.9167→30.125（目标24）。
+整体边数MAE及闭合改善，极端外围问题未修复；连通平衡13→19、极端15→14（各24）。
+极端24/24单hub，多hub0；每格8图互不同构，不作总体多样性保证。
+保留容量读取主体，新度输入为取舍版本、不升级默认。结果experiments/role_degree_residual_v1_results。
+主进程1302.19秒/CPU1301.71秒/峰RSS651.64MiB，单次2700秒预算无重置；科学失败/重试0。
+固定状态辅助导入错误模型调用前修复并保留。完成发布后停止，不自动追加训练/大图。
+
 2026-10-20 One capacity-coupled anonymous role-readout candidate completed locally.
 Source0efd5b4, results experiments/role_specialization_v1_results and
 results/role_specialization_20261020_v1.3 original seeds×1000 new updates/48 new

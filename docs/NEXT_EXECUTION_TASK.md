@@ -1,5 +1,10 @@
 # Current execution task
 
+2026-10-20 role_degree_residual_v1完成本地诊断、唯一配对学习与独立验收，停止后继计算。
+新度输入未可靠修复极端外围，保留容量读取主体，不用整体边数/闭合收益掩盖Genre退化。
+下一建议是低t训练覆盖/生成状态偏移的单因素方案；本轮不实现、不训练新轮次、不扩大图。
+独立ZIP/解包验收及GitHub审查交付后等待用户审查。旧代码、权重、结果和main保持。
+
 2026-10-20 Capacity-role candidate panel and independent acceptance COMPLETE.
 3000 new updates/48 chains, full3 seeds, original input/randomness pairing.
 Actual extreme-role control improves, ordinary-condition fidelity has costs.
