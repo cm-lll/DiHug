@@ -1,0 +1,30 @@
+{
+  "historical_same_weights_controls": 48,
+  "historical_chain_median_seconds": 10.893156892154366,
+  "historical_chain_p90_seconds": 11.317190974578262,
+  "historical_generation_sha256": "6dd101414d169868bd14d7154f0c39f4fa71e6ac6b934fe44553f1873a8d6509",
+  "planned_chains": 120,
+  "new_condition_chains": 72,
+  "controls": 48,
+  "exact_DP_increment_estimate_per_chain_seconds": 0.08910670876502991,
+  "estimate_scope": "CPU; historical full chain timing plus synthetic-LL exact DP increment; no new model timings",
+  "simple_serial_CPU_seconds": 1368.755722001195,
+  "three_seed_parallel_simple_wall_seconds": 456.25190733373165,
+  "suggested_budget_seconds": 2700,
+  "budget_formula": "2*simple_three_seed_wall + 300 seconds load/evaluation/audit/IO; cap proposed2700, not activated",
+  "budget_safety_estimate_seconds": 1212.5038146674633,
+  "unknowns": [
+    "unseen-condition reverse-state density/CN and numerical behavior",
+    "cold/warm model/cache effects",
+    "hardware load"
+  ],
+  "optional_model_short_test": {
+    "authorized": false,
+    "cap_seconds": 120,
+    "device": "CPU",
+    "fixed_old_state": "frozen holdout_0_t8.npz",
+    "work": "3 final normal2 weights x5 targets x complete4 query blocks=60 eval/no_grad forwards; no state sampling or update",
+    "starts_no_scientific_chain": true
+  },
+  "big_graph_estimate": "exact DP resource guard rejects; no finite end-to-end runtime or GPU-memory claim"
+}
