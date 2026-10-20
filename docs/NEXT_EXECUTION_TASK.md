@@ -1,5 +1,10 @@
 # Current execution task
 
+2026-10-21 Authorized6000-step paired panel completed:36000 updates/288 graphs,within original8h ledger.
+Publish independent results/ZIP/verification at experiments/role_robust_training_6000_v1_results,then stop for review.
+Keep normal2 as comparator; robustness candidate has mixed seed results and connectivity/closure/ordinary-validation costs.
+No further training,candidate,seed,BW/notebook or large graph is authorized. Do not restart or reset the completed panel.
+
 2026-10-21 纠错训练准备交付完成：167文件解包核验、源码绑定与完整126测试零跳过通过。
 发布独立审查提交后停止，等待用户审查方案与90分钟预算；不自动运行学习面板。
 

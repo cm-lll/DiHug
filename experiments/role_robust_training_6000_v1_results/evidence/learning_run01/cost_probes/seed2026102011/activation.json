@@ -1,0 +1,25 @@
+{
+  "mode": "panel",
+  "activation_epoch": 1792519117.4473498,
+  "deadline_epoch": 1792547917.4473498,
+  "budget_seconds": 28800,
+  "learning_panel_activated": true,
+  "no_reset": true,
+  "command": [
+    "experiments/role_robust_training_v1/run.py",
+    "panel",
+    "--execute-learning-panel",
+    "--source",
+    "/data2/lyh/gnn_project/DiHug/results/role_specialization_20261020_v1/learning_run01",
+    "--panel",
+    "/data2/lyh/gnn_project/DiHug/results/role_late_paired_20261020_run01",
+    "--frozen",
+    "/data2/lyh/gnn_project/DiHug/results/role_robust_training_6000_20261021_v1/frozen",
+    "--output",
+    "/data2/lyh/gnn_project/DiHug/results/role_robust_training_6000_20261021_v1/learning_run01"
+  ],
+  "substage": "probe",
+  "seed": 2026102011,
+  "gpu": "CPU slot0",
+  "inherited_global_deadline": true
+}

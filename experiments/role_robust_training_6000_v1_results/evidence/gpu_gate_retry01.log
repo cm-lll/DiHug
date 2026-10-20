@@ -1,0 +1,16 @@
+/data2/lyh/miniconda3/envs/dihug/lib/python3.9/site-packages/torch/_utils.py:831: UserWarning: TypedStorage is deprecated. It will be removed in the future and UntypedStorage will be the only storage class. This should only matter to you if you are using storages directly.  To access UntypedStorage directly, use tensor.untyped_storage() instead of tensor.storage()
+  return self.fget.__get__(instance, owner)()
+/data2/lyh/miniconda3/envs/dihug/lib/python3.9/site-packages/torch_geometric/utils/scatter.py:93: UserWarning: The usage of `scatter(reduce='max')` can be accelerated via the 'torch-scatter' package, but it was not found
+  warnings.warn(f"The usage of `scatter(reduce='{reduce}')` "
+Traceback (most recent call last):
+  File "/tmp/dihug-role-robust-training-6000-v1/experiments/role_robust_training_v1/gpu_gate.py", line 63, in <module>
+    if __name__=="__main__":main()
+  File "/tmp/dihug-role-robust-training-6000-v1/experiments/role_robust_training_v1/gpu_gate.py", line 43, in main
+    other=gd["gradients"][name].cpu();torch.testing.assert_close(g,other,atol=2e-6,rtol=1e-5)
+  File "/data2/lyh/miniconda3/envs/dihug/lib/python3.9/site-packages/torch/testing/_comparison.py", line 1520, in assert_close
+    raise error_metas[0].to_error(msg)
+AssertionError: Tensor-likes are not close!
+
+Mismatched elements: 5 / 65536 (0.0%)
+Greatest absolute difference: 2.519169356673956e-06 at index (24, 148) (up to 2e-06 allowed)
+Greatest relative difference: 0.004658809397369623 at index (24, 197) (up to 1e-05 allowed)

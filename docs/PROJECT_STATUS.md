@@ -1,5 +1,14 @@
 # DiHug current research status
 
+2026-10-21 6000-step paired robustness panel completed at source3a8d55234ccbd13859aed7f2d76fe17c5d0d4cf2.
+36000 effective updates,288 raw T64/R4 graphs,84 validation panels,18 full paired milestone checkpoints; audit passed.
+Single original28800s ledger: main wall6938.50s; three scientific CPU workers20367.22CPU-s, peak per-workerRSS1124.27MiB.
+GPU gradient gate failed frozen tolerance (5 elements,max2.519e-6>2e-6); no threshold change or GPU scientific training.
+At6000,extreme Genre W1 .55556→.48611 but2/3 seeds improve, jointTV .34028→.38194,
+isolates .8333→1.5417 and DMA path closure .45364→.39293. Ordinaryt1 CE .002994→.005709.
+Normal2 extension alone improves extremeW1 1→.65278→.55556. Candidate is NOT adopted as default;6000 does not certify convergence.
+All old inputs/results preserved, initial weights and frozen data postverified. All science stopped; publish and await review.
+
 2026-10-21 本轮独立解包167载荷、父/子入口、封存源码绑定及同126测试集合均通过，零失败/跳过。
 ZIP SHA256 145f5134c362dc266549e426b82ca7d2471114b232887cef7fcbb022fec4da44。
 只交付方案与工程成本证据，学习窗口尚未激活；发布后停止。
