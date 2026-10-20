@@ -106,9 +106,9 @@ def worker(source,out,deadline_epoch):
             with torch.no_grad():reverse_step(m,case,dense,MarginalKernel(case["prior"],c.schedule(64)),32,4,12,np.random.default_rng(12),"cpu",check_time=check)
             times.append(time.monotonic()-st)
         val=validate(m,values,cfg,targets,check)["seconds"]
-        forecast=1.2*(3000*np.quantile(durations[2:],.9)+48*64*np.quantile(times[1:],.9)+12*val)+120
+        forecast=float(1.2*(3000*np.quantile(durations[2:],.9)+48*64*np.quantile(times[1:],.9)+12*val)+120)
         gate=dict(updates_seconds=durations,dense_step_seconds=times,validation_seconds=val,
-            forecast_seconds=forecast,remaining_seconds=deadline_epoch-time.time(),passed=forecast<deadline_epoch-time.time()-30)
+            forecast_seconds=forecast,remaining_seconds=deadline_epoch-time.time(),passed=bool(forecast<deadline_epoch-time.time()-30))
         save(out/"cost_gate.json",gate)
         if not gate["passed"]:raise RuntimeError("complete candidate panel exceeds bound; no science starts")
         del m,optimizer;gc.collect();m=None;optimizer=None
@@ -199,11 +199,25 @@ def worker(source,out,deadline_epoch):
 def main():
     ap=argparse.ArgumentParser();ap.add_argument("--source",type=Path,required=True);ap.add_argument("--output",type=Path,required=True)
     ap.add_argument("--worker",action="store_true");ap.add_argument("--deadline",type=float)
+    ap.add_argument("--continue-preflight-fix",action="store_true")
     a=ap.parse_args()
     if a.worker:return worker(a.source,a.output,a.deadline)
-    a.output.mkdir(parents=True,exist_ok=False);activated=time.time();deadline=activated+2700
-    save(a.output/"activation.json",dict(activation_epoch=activated,deadline_epoch=deadline,budget_seconds=2700,
-        no_reset=True,new_task="user delegates one bounded minimal correction; previous 60min panel remains closed"))
+    if a.continue_preflight_fix:
+        ledger=json.loads((a.output/"activation.json").read_text())
+        old=json.loads((a.output/"worker_receipt.json").read_text())
+        assert old["status"]=="failed" and old["completed_updates"]==0 and old["chains"]==0
+        assert not (a.output/"updates.jsonl").exists() and not list(a.output.glob("seed*"))
+        activated=ledger["activation_epoch"];deadline=ledger["deadline_epoch"]
+        assert time.time()<deadline and deadline-activated==2700
+        archive=a.output/"preflight_failure_01";archive.mkdir(exist_ok=False)
+        for p in list(a.output.iterdir()):
+            if p.is_file() and p.name!="activation.json":p.rename(archive/p.name)
+        save(a.output/"preflight_fix.json",dict(reason="NumPy bool serialization in cost receipt; zero science updates",
+             original_activation_epoch=activated,original_deadline_epoch=deadline,no_reset=True))
+    else:
+        a.output.mkdir(parents=True,exist_ok=False);activated=time.time();deadline=activated+2700
+        save(a.output/"activation.json",dict(activation_epoch=activated,deadline_epoch=deadline,budget_seconds=2700,
+            no_reset=True,new_task="user delegates one bounded minimal correction; previous 60min panel remains closed"))
     child=None;status="failed";exit_code=1;reason=None
     def interrupt(sig,frame):raise InterruptedError(f"parent signal {sig}")
     for sig in [signal.SIGINT,signal.SIGTERM,signal.SIGHUP]:signal.signal(sig,interrupt)
