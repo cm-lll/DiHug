@@ -1,5 +1,23 @@
 # DiHug current research status
 
+2026-10-20 One capacity-coupled anonymous role-readout candidate completed locally.
+Source0efd5b4, results experiments/role_specialization_v1_results and
+results/role_specialization_20261020_v1.3 original seeds×1000 new updates/48 new
+T64 chains;48 archived late-C chains reused with actual initial tensors/input/
+query/uniform checks. No model/loss/kernel/optimizer expansion or graph repair.
+Extreme Genre W1 4.06250→1.02778, all3 seed directions improve;24/24 extreme
+graphs have exactly1 hub>=12, balanced0/24;24/24 target-switch graph changes.
+Balanced W1 1.49306→1.63194 and edgeMAE11.7083→16.4167 worsen; closure/connectivity
+costs and extreme peripheral overshoot remain. Effective conditional-role
+candidate, NOT complete fidelity success or arbitrary-target/large-graph proof.
+89 source+89 independent unpacked CPU checks pass, zero skipped. All48 graphs
+independently checked; jointTV error<=2.22e-16, relationW1<=8.88e-16;1446 common
+initial tensors equal, initial validationCE error0. WorkerCPU1300.13s/RSS647.86MiB.
+Original new2700s ledger not reset; unpacked acceptance cumulative1738.52s.
+Pre-science JSON receipt error retained/fixed in same deadline; no scientific
+retry/filter. No GPU/notebook/BW/big graph. DP prototype has explicit200000cell
+guard; scalability unresolved. Stop after independent GitHub publication.
+
 2026-10-20 Paired original-C/late-C panel completed at source b4b2f82916eeb94b41f7132d797897c98882eb79.
 All 6000 effective updates / 96 full small-graph chains retained, 3 paired training seeds, no scientific retries.
 81 preflight and 81 independently unpacked checks passed with zero skips. Common initial tensors, actual training

@@ -1,0 +1,846 @@
+diff --git a/experiments/role_specialization_v1/DESIGN.md b/experiments/role_specialization_v1/DESIGN.md
+new file mode 100644
+index 0000000..3e4acc1
+--- /dev/null
++++ b/experiments/role_specialization_v1/DESIGN.md
+@@ -0,0 +1,100 @@
++# One correction: capacity-coupled anonymous role reading
++
++Track CORE, local conditional heterogeneous graph-state diffusion development.
++Based on f2f58a39 / late-fusion candidate at1613be1. User delegated the next
++decision after the failed paired panel. No notebook/BW/big graph work.
++
++## Evidence and selected hypothesis
++
++Six frozen models,96 reference-noised condition evaluations at t1/8/32/64:
++at t1 the late model predicts16.22/17.84/17.66 expected edges for an existing
++degree18 Genre hub; attention deviates from frequency by<.005. Old full chains
++produced no Genre degree>=12. This supports testing role specialization rather
++than another injection location. It does NOT prove exact reverse-chain cause:
++these new states are reference-forward-noised, not saved reverse intermediates.
++
++## Model
++
++Replace only learned query/key role attention in the late model. Keep degree
++branch, nonlinear role encoder/value, late joint head, CN,8layer FP32 model,
++CE, AdamW, T64/R4 and original schedules. No clipping, EMA, new loss, probability
++controller, guidance, edge fixing or new sampling RNG. Query/key parameters are
++removed; all other actual initial tensors copied from archived late-C initialization.
++
++For type k, anonymous joint role vectors v_j have integer counts n_j.
++At current noise time t, retention a_t and prior pi_r, the observation law is
++
++  D_tr | v_jr ~ Bin(v_jr,a_t+(1-a_t)pi_r)
++                   + Bin(N_kr-v_jr,(1-a_t)pi_r).
++
++N_kr is legal schema capacity; same-type capacity excludes self. The readout
++uses log L_ij = sum_r log P(D_itr=d_itr|v_jr). Only full frozen Xt real edges
++provide d; absent query edges are never counted. Target has no IDs/edge identity.
++
++Define a working measure over all assignments z with exact role multiplicities:
++
++  w(z) = exp(sum_i log L_i,z_i) / Z,  count(z=j)=n_j.
++
++Compute A_ij=P_w(z_i=j) exactly by log-space forward/backward capacity dynamic
++programming, not by a hard assignment or independent per-relation matching.
++Feed sum_j A_ij value(encode(v_j,n_j/n_k)) to the SAME late nonlinear joint head.
++Every new Xt recomputes A; no sampled/persistent node-role mapping. Column
++occupancies are constrained in the SOFT READOUT, not generated graph degrees.
++
++The single-node degree law is exact for the marginal forward noise. The product
++across nodes is a composite likelihood because endpoint degrees share edges;
++w is NOT claimed to be the exact latent-role posterior of the graph generator.
++No universal role-control or degree-distribution guarantee follows.
++Identical likelihood rows remain identical, including exact symmetry. At a=0
++the role likelihood does not depend on the role, and A is the role frequency.
++This retained counterexample prevents fabricated deterministic symmetry breaking.
++No temperature or new fitted coefficient is introduced.
++
++## Numerics, complexity and limits
++
++Float64 log probabilities and logsumexp; binomial probabilities0/1 exact,
++no epsilon. Impossible observations fail explicitly. DP eliminates the largest
++capacity dimension and uses O(n K product_{j<K}(n_j+1)) work; enforce maximum
++200000 forward table cells, never silently truncate roles. This is a small-panel
++prototype, NOT yet a scalable arbitrary-IMDB solution. Tables cache only immutable
++forward degree laws keyed by capacity, role degree,time,prior. No hidden-state cache.
++Model context lifecycle/target checks remain inherited.
++Row residual tolerance2e-10, column2e-9, neural comparisons atol2e-6/rtol1e-5,
++fixed before execution. Precision/optimizer unchanged.
++
++## Frozen learning comparison, no search
++
++3 original seeds2026102011/12/13;1000 updates each; validation0/250/500/1000.
++Use actual archived late-C initial weights and identical training input digest
++for every update. Independent empty optimizer. Original forward consumes no Torch
++randomness; check this on every update in both new and archived logs.
++Use8 original sampling seeds2026102031..38 at both conditions,48 new full T64
++chains. Reuse48 archived baseline graphs/trained weights, not rerun baseline.
++Check initial prior bytes and every step's query/uniform/RNG against old receipts.
++Reuse is legitimate paired development comparison; it is not an independent
++confirmation of a hypothesis chosen after seeing the baseline failures.
++
++One new2700-second window for learning, validation,48chains,evaluation,saving
++and audit. Old60-minute panel remains closed. Cost gate: full8layer model,
++5 disposable updates,3 dense complete reverse steps, full fixed validation.
++Forecast1.2*(3000*P90update+48*64*P90step+12*validation)+120 must fit remainder
++minus30seconds. Otherwise no scientific training. No retry with a new window,
++shrunk scope, picked seed or changed coefficient. No automatic second candidate.
++
++Evaluate actual graphs, by training seed and condition: GenreW1 and full joint
++role TV, max degree, degree>=12/hub multiplicity, low<=1, per-family edges,
++closure, triangles, connectivity/LCC/isolation, topology duplicates. All48 graphs
++retained; final1000 only. Improvement needs actual extreme-tail/role evidence
++across seeds, not just a lower loss or stronger probability response. Expose
++balanced-condition and ordinary-structure costs; no posthoc composite score.
++No longer run or large-graph rollout if this does not work.
++
++## Reproduction
++
++Existing weight diagnosis:
++  python diagnose_states.py --run <archived_paired_run> --output <new_diagnosis>
++CPU candidate panel (one exclusive new directory, no resume/reset):
++  OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 CUDA_VISIBLE_DEVICES= python panel.py \
++    --source <archived_paired_run> --output <new_candidate_run>
++Stop: touch <new_candidate_run>/STOP. Interrupted results remain incomplete.
++Do not execute these as an automatic follow-up to the already completed run.
+diff --git a/experiments/role_specialization_v1/audit.py b/experiments/role_specialization_v1/audit.py
+new file mode 100644
+index 0000000..0375810
+--- /dev/null
++++ b/experiments/role_specialization_v1/audit.py
+@@ -0,0 +1,114 @@
++"""CPU independent final-graph/paired-log audit within the original new ledger."""
++import argparse
++import hashlib
++import itertools
++import json
++from pathlib import Path
++import resource
++import statistics
++import time
++import numpy as np
++import networkx as nx
++
++def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
++def graph_npz(p):
++    with np.load(p,allow_pickle=False) as z:
++        types=z["types"];edges=z["edges"];families=z["relations"]-1;schema=z["schema"]
++    assert edges.shape[1]==2
++    G=nx.Graph()
++    G.add_nodes_from((i,{"type":int(t)}) for i,t in enumerate(types))
++    deg=np.zeros((len(types),len(schema)),dtype=int);counts=np.zeros(len(schema),dtype=int)
++    for (u,v),r in zip(edges,families):
++        assert 0<=u<v<len(types) and not G.has_edge(int(u),int(v))
++        assert tuple(sorted((int(types[u]),int(types[v]))))==tuple(schema[r])
++        G.add_edge(int(u),int(v),relation=int(r));deg[u,r]+=1;deg[v,r]+=1;counts[r]+=1
++    return G,deg,counts,types
++def main():
++    ap=argparse.ArgumentParser();ap.add_argument("--run",type=Path,required=True);ap.add_argument("--source",type=Path,required=True)
++    a=ap.parse_args();started=time.monotonic();cpu=time.process_time()
++    ledger=json.loads((a.run/"activation.json").read_text())
++    def check():
++        if time.time()>ledger["deadline_epoch"] or (a.run/"STOP").exists():raise TimeoutError("original panel/audit deadline")
++    check();assert json.loads((a.run/"worker_receipt.json").read_text())["status"]=="completed"
++    updates=[json.loads(x) for x in (a.run/"updates.jsonl").read_text().splitlines()]
++    assert len(updates)==3000
++    old={(r["seed"],r["update"]):r for r in map(json.loads,(a.source/"updates.jsonl").read_text().splitlines()) if r["arm"]=="late_C"}
++    for seed in [2026102011,2026102012,2026102013]:
++        rr=[r for r in updates if r["seed"]==seed]
++        assert [r["update"] for r in rr]==list(range(1,1001))
++        assert all(r["input_sha256"]==old[seed,r["update"]]["input_sha256"] and r["optimizer_step"]==r["update"] for r in rr)
++    weights=json.loads((a.run/"weight_hashes.json").read_text());assert len(weights)==6
++    for p,h in weights.items():check();assert sha(a.run/p)==h
++    new=json.loads((a.run/"generation.json").read_text());assert len(new)==48
++    before=[r for r in json.loads((a.source/"generation.json").read_text()) if r["arm"]=="late_C"]
++    graphs={};independent=[]
++    for r in new:
++        check();path=a.run/r["graph_file"];assert sha(path)==r["graph_file_sha256"]
++        G,d,counts,types=graph_npz(path);met=r["metrics"]
++        assert counts.tolist()==met["family_edges"]
++        assert sorted(map(len,nx.connected_components(G)),reverse=True)==met["component_sizes"]
++        triangles=sum(G.has_edge(i,j) and G.has_edge(i,k) and G.has_edge(j,k) for i,j,k in itertools.combinations(G.nodes,3))
++        assert triangles==met["triangles"]
++        mg=8;gd=d[types==3,mg];assert gd.max()==r["G_max"] and np.sum(gd>=12)==r["G_high_ge12"]
++        target=np.array([4]*6 if r["condition"]=="balanced" else [18,2,1,1,1,1])
++        w1=float(np.abs(np.sort(gd)-np.sort(target)).mean())
++        assert abs(w1-r["G_W1"])<2e-12
++        num=den=0
++        for m in np.flatnonzero(types==2):
++            ds=[v for v in G.neighbors(int(m)) if types[v]==0];actors=[v for v in G.neighbors(int(m)) if types[v]==1]
++            for di,ac in itertools.product(ds,actors):den+=1;num+=int(G.has_edge(di,ac))
++        assert (num,den)==(met["imdb_closure"]["path_numerator"],met["imdb_closure"]["path_denominator"])
++        old_r=next(x for x in before if (x["seed"],x["condition"],x["sampling_seed"])==(r["seed"],r["condition"],r["sampling_seed"]))
++        ns=json.loads(path.with_name(path.stem+"_steps.json").read_text())
++        op=a.source/old_r["graph_file"];bs=json.loads(op.with_name(op.stem+"_steps.json").read_text())
++        assert len(ns)==64
++        for n,b in zip(ns,bs):
++            assert n["t"]==b["t"] and n["blocks"]==4 and n["exact_coverage"]
++            for key in ["uniform_sha256","query_sha256","rng_after"]:assert n[key]==b[key]
++        graphs[r["seed"],r["condition"],r["sampling_seed"]]=G
++        independent.append(dict(file=r["graph_file"],W1_abs_error=abs(w1-r["G_W1"]),triangle_exact=True,degree_edges_components_closure_exact=True))
++    summaries=[]
++    for seed in [2026102011,2026102012,2026102013]:
++        for condition in ["balanced","extreme"]:
++            for label,records in [("late_C",before),("capacity_C",new)]:
++                rr=[r for r in records if r["seed"]==seed and r["condition"]==condition];assert len(rr)==8
++                row=dict(seed=seed,arm=label,condition=condition,n=8)
++                for key in ["G_W1","G_joint_TV","G_max","G_high_ge12","G_multiple_hubs","G_zero","G_low_le1"]:
++                    row[key]=statistics.mean(float(r[key]) for r in rr)
++                for key in ["edges","lcc","isolates","triangles"]:
++                    row[key]=statistics.mean(r["metrics"][key] for r in rr)
++                row["connected"]=sum(r["metrics"]["connected"] for r in rr)
++                closure=[r["metrics"]["imdb_closure"]["path_ratio"] for r in rr]
++                row["closure_NA"]=sum(v is None for v in closure)
++                row["closure"]=None if any(v is None for v in closure) else statistics.mean(closure)
++                row["edge_MAE"]=statistics.mean(abs(r["metrics"]["edges"]-88) for r in rr)
++                summaries.append(row)
++    # Exact isomorphism on these34node graphs; budget check between each pair.
++    topology=[];switch=[]
++    node=nx.algorithms.isomorphism.categorical_node_match("type",-1)
++    edge=nx.algorithms.isomorphism.categorical_edge_match("relation",-1)
++    for seed in [2026102011,2026102012,2026102013]:
++        for condition in ["balanced","extreme"]:
++            reps=[];freq=[]
++            for sample_seed in range(2026102031,2026102039):
++                check();G=graphs[seed,condition,sample_seed];found=False
++                for i,H in enumerate(reps):
++                    check()
++                    if nx.is_isomorphic(G,H,node_match=node,edge_match=edge):freq[i]+=1;found=True;break
++                if not found:reps.append(G);freq.append(1)
++            topology.append(dict(seed=seed,condition=condition,classes=len(reps),frequency=freq,
++                effective_classes=64/sum(n*n for n in freq)))
++        changed=sum(set(graphs[seed,"balanced",ss].edges)!=set(graphs[seed,"extreme",ss].edges) for ss in range(2026102031,2026102039))
++        switch.append(dict(seed=seed,changed_graph_pairs=changed,total=8))
++    check()
++    for p,h in json.loads((a.run/"baseline_sources.json").read_text()).items():assert sha(Path(p))==h
++    (a.run/"seed_summary.json").write_text(json.dumps(summaries,indent=2)+"\n")
++    (a.run/"topology.json").write_text(json.dumps(topology,indent=2)+"\n")
++    (a.run/"condition_switch.json").write_text(json.dumps(switch,indent=2)+"\n")
++    (a.run/"audit.json").write_text(json.dumps(dict(status="completed",updates=3000,chains=48,
++        baseline_chains_reused=48,weights=6,paired_inputs_uniforms_queries_verified=True,
++        graphs=independent,wall_seconds=time.monotonic()-started,CPU_seconds=time.process_time()-cpu,
++        peak_rss_mib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024,
++        cumulative_seconds=time.time()-ledger["activation_epoch"],budget_seconds=2700,no_reset=True),indent=2)+"\n")
++    print(json.dumps(switch));print("audit completed")
++if __name__=="__main__":main()
+diff --git a/experiments/role_specialization_v1/capacity_readout.py b/experiments/role_specialization_v1/capacity_readout.py
+new file mode 100644
+index 0000000..7890096
+--- /dev/null
++++ b/experiments/role_specialization_v1/capacity_readout.py
+@@ -0,0 +1,138 @@
++"""Anonymous capacity-coupled degree-likelihood readout, not an edge controller.
++
++Exact allocation marginals under a PRODUCT-OF-NODE-DEGREE-LIKELIHOODS working
++distribution. This is not the exact graph posterior: incident degrees share
++edges. No sampled or persistent node-to-role assignment and no clean node IDs.
++"""
++import itertools
++import math
++import time
++import numpy as np
++import torch
++from torch import nn
++from scipy.special import logsumexp
++from scipy.stats import binom
++from role_condition.model import capacities, degrees, features
++from late_fusion import LateConditionalDenoiser, LateNodeCondition
++from hsgd.bw_preflight.common import schedule
++
++MAX_DP_CELLS=200000
++
++def allocation_marginals(log_likelihood, counts):
++    """Exact soft occupancy marginals with integer column capacities.
++
++    All distinguishable node assignments with these multiplicities have equal
++    prior mass. Identical roles are already merged by RoleTarget.
++    """
++    ll=np.asarray(log_likelihood,dtype=np.float64)
++    counts=np.asarray(counts)
++    if counts.ndim!=1 or not np.issubdtype(counts.dtype,np.integer) or (counts<=0).any():
++        raise ValueError("positive integer capacities required")
++    n,k=ll.shape
++    if k!=len(counts) or counts.sum()!=n or np.isnan(ll).any() or np.isposinf(ll).any():
++        raise ValueError("invalid likelihood/capacities")
++    if k==1:
++        if not np.isfinite(ll[:,0]).all():raise ValueError("impossible role observation")
++        return np.ones_like(ll),dict(states=1,cells=n+1,log_partition=float(ll.sum()))
++    # Eliminate largest capacity coordinate; this affects cost, not the measure.
++    order=np.argsort(counts,kind="stable");inv=np.argsort(order)
++    cc=counts[order];ll=ll[:,order]
++    size=math.prod(int(x)+1 for x in cc[:-1])
++    cells=(n+1)*size
++    if cells>MAX_DP_CELLS:raise RuntimeError(f"capacity DP resource limit: {cells}>{MAX_DP_CELLS}; no truncation")
++    states=np.array(list(itertools.product(*[range(int(x)+1) for x in cc[:-1]])),dtype=int)
++    totals=states.sum(1)
++    stride=np.array([math.prod(int(x)+1 for x in cc[j+1:-1]) for j in range(k-1)],dtype=int)
++    end=size-1
++    forward=np.full((n+1,size),-np.inf);forward[0,0]=0
++    transitions=[]
++    for i in range(n):
++        remaining=i-totals
++        valid=(remaining>=0)&(remaining<=cc[-1])
++        row=[]
++        for j in range(k):
++            ok=valid & ((states[:,j]<cc[j]) if j<k-1 else (remaining<cc[-1]))
++            src=np.flatnonzero(ok);dst=src+stride[j] if j<k-1 else src
++            row.append((src,dst))
++            forward[i+1,dst]=np.logaddexp(forward[i+1,dst],forward[i,src]+ll[i,j])
++        transitions.append(row)
++    z=forward[n,end]
++    if not np.isfinite(z):raise ValueError("no feasible assignment under observation support")
++    backward=np.full_like(forward,-np.inf);backward[n,end]=0
++    result=np.zeros_like(ll)
++    for i in range(n-1,-1,-1):
++        for j,(src,dst) in enumerate(transitions[i]):
++            terms=ll[i,j]+backward[i+1,dst]
++            backward[i,src]=np.logaddexp(backward[i,src],terms)
++            result[i,j]=np.exp(logsumexp(forward[i,src]+terms)-z)
++    if not np.isfinite(result).all():raise FloatingPointError("nonfinite allocation")
++    np.testing.assert_allclose(result.sum(1),1,atol=2e-10,rtol=0)
++    np.testing.assert_allclose(result.sum(0),cc,atol=2e-9,rtol=0)
++    return result[:,inv],dict(states=size,cells=cells,log_partition=float(z))
++
++def degree_logpmf(N,d,a,pi):
++    """Exact Bin(d,a+(1-a)pi)+Bin(N-d,(1-a)pi) degree law."""
++    if not 0<=d<=N or not 0<=a<=1 or not 0<=pi<=1:raise ValueError("degree support")
++    p=a+(1-a)*pi;q=(1-a)*pi
++    first=binom.logpmf(np.arange(d+1),d,p)
++    second=binom.logpmf(np.arange(N-d+1),N-d,q)
++    values=np.full(N+1,-np.inf)
++    for observed in range(N+1):
++        lo=max(0,observed-(N-d));hi=min(d,observed)
++        js=np.arange(lo,hi+1)
++        values[observed]=logsumexp(first[js]+second[observed-js])
++    if not np.isfinite(logsumexp(values)):raise FloatingPointError("empty degree law")
++    np.testing.assert_allclose(logsumexp(values),0,atol=2e-12,rtol=0)
++    values.setflags(write=False)
++    return values
++
++class CapacityNodeCondition(LateNodeCondition):
++    def __init__(self,R,K,width,T):
++        super().__init__(R,K,width)
++        # The learned query/key attention is REPLACED, not stacked with a loss.
++        del self.query;del self.key
++        self.T=int(T);self.alpha=schedule(T);self.tables={}
++
++    def forward(self,ctx,t,target):
++        started=time.perf_counter();types=ctx.types;K=ctx.model.n_types;R=ctx.model.n_families
++        cap=capacities(types,ctx.model.family_pairs);d=degrees(types,ctx.old,ctx.of,R)
++        if target is None or target.type_counts!=tuple(map(int,np.bincount(types))) or target.schema!=ctx.model.family_pairs:
++            raise ValueError("target/schema mismatch")
++        step=int(round(float(t)*self.T))
++        if not 0<=step<=self.T or abs(step/self.T-float(t))>1e-8:raise ValueError("time not on frozen schedule")
++        xf=features(d,cap[types])
++        x=torch.as_tensor(np.c_[xf,np.eye(K,dtype=np.float32)[types],np.full((len(types),1),t,dtype=np.float32)],device=ctx.device)
++        statistics_seconds=time.perf_counter()-started;started=time.perf_counter()
++        delta=self.degree_out(self.degree_encoder(x));degree_seconds=time.perf_counter()-started
++        started=time.perf_counter();context=x.new_zeros((len(types),32));diagnostics=[]
++        pi=ctx.model.prior.detach().cpu().numpy()
++        for typ,rows in enumerate(target.roles):
++            ix=np.flatnonzero(types==typ);vec=np.array([v for v,n in rows]);counts=np.array([n for v,n in rows])
++            ll=np.zeros((len(ix),len(rows)))
++            for j,v in enumerate(vec):
++                for r,N in enumerate(cap[typ]):
++                    if not N:continue
++                    key=(int(N),int(v[r]),step,float(pi[r]))
++                    if key not in self.tables:self.tables[key]=degree_logpmf(int(N),int(v[r]),self.alpha[step],float(pi[r]))
++                    ll[:,j]+=self.tables[key][d[ix,r]]
++            attention,receipt=allocation_marginals(ll,counts)
++            freq=counts/len(ix)
++            encoded=self.role_encoder(torch.as_tensor(np.c_[features(vec,cap[typ]),freq,
++                np.log1p(counts)/np.log1p(len(ix))].astype(np.float32),device=ctx.device))
++            v=self.value(encoded)
++            index=torch.as_tensor(ix,device=ctx.device)
++            context=context.index_copy(0,index,torch.as_tensor(attention,dtype=x.dtype,device=ctx.device)@v)
++            diagnostics.append(dict(type=typ,attention=attention,**receipt))
++        if not torch.isfinite(context).all():raise FloatingPointError("nonfinite capacity context")
++        return delta,dict(degree=d.copy(),role_context=context,allocation=diagnostics,
++            statistics_seconds=statistics_seconds,degree_network_seconds=degree_seconds,
++            role_attention_seconds=time.perf_counter()-started)
++
++class CapacityDenoiser(LateConditionalDenoiser):
++    architecture_version="anonymous_capacity_degree_likelihood_v1"
++    def __init__(self,*args,T=64,**kwargs):
++        super().__init__(*args,**kwargs)
++        old=self.branch
++        self.branch=CapacityNodeCondition(self.n_families,self.n_types,self.backbone.lin_in_X.out_features,T)
++        state=old.state_dict()
++        self.branch.load_state_dict({k:v for k,v in state.items() if not k.startswith(("query.","key."))},strict=True)
+diff --git a/experiments/role_specialization_v1/diagnose_states.py b/experiments/role_specialization_v1/diagnose_states.py
+new file mode 100644
+index 0000000..669e1f4
+--- /dev/null
++++ b/experiments/role_specialization_v1/diagnose_states.py
+@@ -0,0 +1,100 @@
++"""Read frozen paired weights; no learning or reverse-chain generation."""
++import os
++os.environ.update(OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1", CUDA_VISIBLE_DEVICES="")
++import argparse
++import hashlib
++import json
++import math
++from pathlib import Path
++import resource
++import sys
++import time
++import numpy as np
++import torch
++
++ROOT=Path(__file__).resolve().parent
++PREV=ROOT.parent/"role_condition_diagnosis_v1"
++sys.path[:0]=[str(ROOT.parent/"role_late_paired_v1"),str(PREV),str(PREV/"baseline")]
++from pairing import construct
++from diagnose import load_panel
++from hsgd.bw_preflight import common as c
++from hsgd.computational import FrozenTypedContext
++from role_condition.model import degrees
++
++def digest(p):return hashlib.sha256(Path(p).read_bytes()).hexdigest()
++
++def main():
++    ap=argparse.ArgumentParser();ap.add_argument("--run",type=Path,required=True)
++    ap.add_argument("--output",type=Path,required=True);args=ap.parse_args()
++    args.output.mkdir(parents=True,exist_ok=False)
++    torch.set_num_threads(1);torch.set_float32_matmul_precision("highest")
++    started=time.monotonic();deadline=started+300;cpu=time.process_time()
++    cfg=json.loads((args.run/"resolved_config.json").read_text())
++    records,targets=load_panel(args.run)
++    hashes=json.loads((args.run/"weight_hashes.json").read_text())
++    inputs={str(args.run/n):digest(args.run/n) for n in ["panel.json","resolved_config.json","weight_hashes.json"]}
++    rows=[]
++    for seed in cfg["train_seeds"]:
++        models,_=construct(records[0]["case"],cfg,seed)
++        for arm,model in models.items():
++            path=args.run/f"seed{seed}/{arm}_final_1000.pt"
++            assert digest(path)==hashes[str(path.relative_to(args.run))]
++            inputs[str(path)]=digest(path)
++            model.load_state_dict(torch.load(path,map_location="cpu",weights_only=True),strict=True)
++            model.eval()
++            for condition in ["balanced","extreme"]:
++                rec=next(r for r in records if r["condition"]==condition and r["split"]=="validation")
++                case=rec["case"];mg=case["space"].pairs.index((2,3))
++                for t in [1,8,32,64]:
++                    assert time.monotonic()<deadline
++                    rng=np.random.default_rng([2026102077,seed,t,0 if condition=="balanced" else 1])
++                    inp=c.train_input(case,64,4,2026102077,t,rng,force_t=t)
++                    plan=c.plan_for(case,[2026102077,t,21],4)
++                    for target_name in ["balanced","extreme"]:
++                        model.set_target(targets[target_name]);captured={k:[] for k in ["query","key","value"]}
++                        hooks=[]
++                        for name in captured:
++                            def hook(mod,args,out,name=name):captured[name].append(out.detach().numpy().copy())
++                            hooks.append(getattr(model.branch,name).register_forward_hook(hook))
++                        ctx=FrozenTypedContext(model,case["space"].types,inp["edges"],inp["edge_families"],t)
++                        p0=[];queries=[];families=[]
++                        try:
++                            with torch.no_grad():
++                                for block in range(4):
++                                    ids,f,q=plan.block(block)
++                                    _,ll,pp=ctx.predict(q,f,t/64,t,details=True)
++                                    p0.append(c.check_prob(pp,f,case));queries.append(q);families.append(f)
++                            context=ctx.condition_diagnostic["role_context"].numpy()
++                        finally:
++                            ctx.close()
++                            for h in hooks:h.remove()
++                        p=np.concatenate(p0);q=np.concatenate(queries,axis=1);f=np.concatenate(families)
++                        mu=np.zeros((len(case["space"].types),case["n_families"]))
++                        np.add.at(mu,(q[0],f),p);np.add.at(mu,(q[1],f),p)
++                        current=degrees(case["space"].types,inp["edges"],inp["edge_families"],case["n_families"])
++                        clean=degrees(case["space"].types,case["clean"],case["space"].encode(case["clean"])[0],case["n_families"])
++                        ix=np.flatnonzero(case["space"].types==3)
++                        freq=np.array([n/6 for v,n in targets[target_name].roles[3]])
++                        aq,ak,av=(captured[n][3] for n in ["query","key","value"])
++                        att=torch.softmax(torch.from_numpy(aq)@torch.from_numpy(ak).T/math.sqrt(32)+torch.tensor(np.log(freq),dtype=torch.float32),-1).numpy()
++                        np.testing.assert_allclose(att@av,context[ix],atol=2e-7,rtol=2e-6)
++                        high_role=[v[mg] for v,n in targets[target_name].roles[3]]
++                        row=dict(seed=seed,arm=arm,input_condition=condition,target=target_name,t=t,
++                            Xt_G_degree=current[ix,mg].tolist(),clean_G_degree=clean[ix,mg].tolist(),
++                            predicted_G_degree=mu[ix,mg].tolist(),expected_MG_edges=float(mu[ix,mg].sum()),
++                            expected_degree_of_true_hub=float(mu[ix[np.argmax(clean[ix,mg])],mg]) if condition=="extreme" else None,
++                            attention=att.tolist(),role_degrees=high_role,attention_node_range=float(np.ptp(att,axis=0).max()),
++                            attention_deviation_from_frequency=float(np.abs(att-freq).max()),
++                            role_context_node_range=float(np.ptp(context[ix],axis=0).max()),
++                            attention_entropy=float(-(att*np.log(att)).sum(1).mean()))
++                        rows.append(row)
++            print("completed frozen diagnosis",seed,arm,flush=True)
++    assert all(digest(p)==h for p,h in inputs.items())
++    (args.output/"records.json").write_text(json.dumps(rows,indent=2)+"\n")
++    (args.output/"sources.json").write_text(json.dumps(inputs,indent=2)+"\n")
++    (args.output/"receipt.json").write_text(json.dumps(dict(status="completed",records=len(rows),
++        weights=6,training_updates=0,generated_chains=0,GPU=0,
++        state_scope="reference validation graphs forward-noised at t=1,8,32,64; NOT reverse-chain intermediates",
++        wall_seconds=time.monotonic()-started,CPU_seconds=time.process_time()-cpu,
++        peak_rss_mib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024),indent=2)+"\n")
++if __name__=="__main__":main()
+diff --git a/experiments/role_specialization_v1/panel.py b/experiments/role_specialization_v1/panel.py
+new file mode 100644
+index 0000000..2efcd49
+--- /dev/null
++++ b/experiments/role_specialization_v1/panel.py
+@@ -0,0 +1,242 @@
++"""One frozen candidate, paired with already archived late-C reference.
++
++CPU-only, one nonrenewable 2700s window, no model/seed/checkpoint selection.
++"""
++import os
++os.environ.update(OMP_NUM_THREADS="1",OPENBLAS_NUM_THREADS="1",CUDA_VISIBLE_DEVICES="")
++import argparse
++import gc
++import hashlib
++import json
++from pathlib import Path
++import resource
++import signal
++import subprocess
++import sys
++import time
++import numpy as np
++import torch
++ROOT=Path(__file__).resolve().parent
++PREV=ROOT.parent/"role_condition_diagnosis_v1"
++PAIRED=ROOT.parent/"role_late_paired_v1"
++sys.path[:0]=[str(ROOT),str(PAIRED),str(PREV),str(PREV/"baseline")]
++from capacity_readout import CapacityDenoiser
++from pairing import input_digest,uniform_contract,atomic_weights,sha
++from worker import response
++from diagnose import load_panel
++from hsgd.bw_preflight import common as c
++from hsgd.runtime import reverse_step
++from hsgd.kernel import MarginalKernel
++from role_condition.experiment import save,emit,opt,fixed_validation,validate
++from role_condition.panel import augment,NAMES
++from role_condition.metrics import graph,compare
++
++def fingerprint(p):return hashlib.sha256(Path(p).read_bytes()).hexdigest()
++def files():
++    paths=list(ROOT.glob("*.py"))+list(ROOT.glob("*.md"))
++    paths+=list(PAIRED.glob("*.py"))+[PREV/"late_fusion.py",PREV/"diagnose.py"]
++    paths+=[x for x in (PREV/"baseline").rglob("*") if x.is_file() and x.suffix in [".py",".json"]]
++    return {str(p.relative_to(ROOT.parent)):fingerprint(p) for p in sorted(paths)}
++
++def new_model(case,cfg,source,seed,hashes):
++    m=CapacityDenoiser(case["n_types"],case["n_families"],family_pairs=case["space"].pairs,
++        prior=case["prior"],T=64,**cfg["model"])
++    path=source/f"seed{seed}/late_C_initial.pt"
++    assert fingerprint(path)==hashes[str(path.relative_to(source))]
++    old=torch.load(path,map_location="cpu",weights_only=True)
++    state=m.state_dict()
++    assert set(old)-set(state)=={"branch.query.weight","branch.query.bias","branch.key.weight","branch.key.bias"}
++    assert not set(state)-set(old)
++    for name in state:state[name]=old[name].clone()
++    m.load_state_dict(state,strict=True)
++    assert all(torch.equal(m.state_dict()[k],old[k]) for k in state)
++    return m,dict(source=str(path),sha256=fingerprint(path),all_shared_tensors_exact=True,
++                  shared_tensors=len(state),removed_tensors=sorted(set(old)-set(state)),
++                  parameters=sum(p.numel() for p in m.parameters()))
++
++def worker(source,out,deadline_epoch):
++    torch.set_num_threads(1);torch.set_float32_matmul_precision("highest")
++    torch.use_deterministic_algorithms(False)
++    torch.backends.cuda.matmul.allow_tf32=False;torch.backends.cudnn.allow_tf32=False
++    started=time.monotonic();cpu=time.process_time();status="failed";reason=None
++    completed=0;generated=[];m=None;optimizer=None
++    def check():
++        if (out/"STOP").exists():raise InterruptedError("STOP")
++        if time.time()>deadline_epoch-30:raise TimeoutError("original budget reserve")
++    def stopped(sig,frame):raise InterruptedError(f"signal {sig}")
++    for sig in [signal.SIGTERM,signal.SIGINT,signal.SIGHUP]:signal.signal(sig,stopped)
++    cfg=json.loads((source/"resolved_config.json").read_text())
++    cfg.update(version="role_specialization_v1",arms=["capacity_C"],baseline_arm="late_C",
++        budget_seconds=2700,updates=1000,expected_updates=3000,expected_chains=48,
++        method="capacity-coupled forward-degree likelihood soft role readout")
++    save(out/"resolved_config.json",cfg);save(out/"environment.json",c.environment("cpu"))
++    old_environment=json.loads((source/"environment.json").read_text())
++    current_environment=c.environment("cpu")
++    for key in ["python_version","packages","torch_runtime_version","float32_matmul_precision",
++                "matmul_allow_tf32","deterministic_algorithms","torch_threads"]:
++        assert old_environment[key]==current_environment[key],f"numerical environment mismatch: {key}"
++    binding=files();save(out/"source_manifest.json",binding)
++    save(out/"revision.json",dict(commit=subprocess.check_output(["git","rev-parse","HEAD"],cwd=ROOT,text=True).strip()))
++    prior_hashes=json.loads((source/"weight_hashes.json").read_text())
++    receipt=json.loads((source/"budget_receipt.json").read_text());assert receipt["status"]=="completed"
++    records,targets=load_panel(source);case=records[0]["case"]
++    source_hashes={str(p):fingerprint(p) for p in [source/"panel.json",source/"resolved_config.json",source/"weight_hashes.json",
++            source/"updates.jsonl",source/"generation.json",source/"audit.json"]}
++    old_updates={(r["seed"],r["update"]):r for r in map(json.loads,(source/"updates.jsonl").read_text().splitlines()) if r["arm"]=="late_C"}
++    old_graphs=[r for r in json.loads((source/"generation.json").read_text()) if r["arm"]=="late_C"]
++    for g in old_graphs:
++        p=source/g["graph_file"];assert fingerprint(p)==g["graph_file_sha256"];source_hashes[str(p)]=fingerprint(p)
++    save(out/"baseline_sources.json",source_hashes)
++    references=json.loads((source/"reference_metrics.json").read_text())
++    save(out/"reference_metrics.json",references)
++    values=fixed_validation(records,cfg);train=[r for r in records if r["split"]=="train"]
++    weight_hashes={}
++    try:
++        # Full-size engineering cost gate, no changes based on generated quality.
++        m,_=new_model(case,cfg,source,cfg["train_seeds"][0],prior_hashes)
++        m.set_target(targets["extreme"]);optimizer=opt(m,cfg)
++        current=next(r["case"] for r in train if r["condition"]=="extreme")
++        durations=[]
++        for i in range(5):
++            check();inp=c.train_input(current,64,4,2026102088,i,np.random.default_rng([2026102088,i]),force_t=32)
++            st=time.monotonic();c.update(m,optimizer,current,inp,64,"cpu");durations.append(time.monotonic()-st)
++        m.eval();times=[];dense=np.repeat(case["active"].astype(np.uint8),case["space"].counts)
++        for i in range(3):
++            check();st=time.monotonic()
++            with torch.no_grad():reverse_step(m,case,dense,MarginalKernel(case["prior"],c.schedule(64)),32,4,12,np.random.default_rng(12),"cpu",check_time=check)
++            times.append(time.monotonic()-st)
++        val=validate(m,values,cfg,targets,check)["seconds"]
++        forecast=float(1.2*(3000*np.quantile(durations[2:],.9)+48*64*np.quantile(times[1:],.9)+12*val)+120)
++        gate=dict(updates_seconds=durations,dense_step_seconds=times,validation_seconds=val,
++            forecast_seconds=forecast,remaining_seconds=deadline_epoch-time.time(),passed=bool(forecast<deadline_epoch-time.time()-30))
++        save(out/"cost_gate.json",gate)
++        if not gate["passed"]:raise RuntimeError("complete candidate panel exceeds bound; no science starts")
++        del m,optimizer;gc.collect();m=None;optimizer=None
++        for seed in cfg["train_seeds"]:
++            check();m,init=new_model(case,cfg,source,seed,prior_hashes);optimizer=opt(m,cfg);assert not optimizer.state
++            sd=out/f"seed{seed}";sd.mkdir();save(sd/"initialization.json",init)
++            p=sd/"capacity_C_initial.pt";weight_hashes[str(p.relative_to(out))]=atomic_weights(p,m.state_dict())
++            save(out/"weight_hashes.json",weight_hashes)
++            rng=np.random.default_rng(seed)
++            for u in range(1001):
++                if u in [0,250,500,1000]:
++                    check();v=validate(m,values,cfg,targets,check)
++                    save(sd/f"capacity_C_validation_{u:04d}.json",dict(seed=seed,update=u,**v))
++                    emit(out/"progress.jsonl",dict(phase="validation",seed=seed,update=u,mean_ce=v["mean_ce"]))
++                if u==1000:break
++                check();rec=train[(u%2)*4+int(rng.integers(4))];current=augment(rec["case"],rng)
++                inp=c.train_input(current,64,4,seed,u,rng);digest=input_digest(current,inp)
++                old=old_updates[seed,u+1];assert digest==old["input_sha256"]
++                # Original network has no stochastic forward operators. Explicitly
++                # check both runs' unchanged RNG consumption, rather than just seed.
++                before=torch.get_rng_state().clone();m.set_target(targets[rec["condition"]])
++                st=time.monotonic();r=c.update(m,optimizer,current,inp,64,"cpu");dt=time.monotonic()-st
++                assert torch.equal(before,torch.get_rng_state())
++                assert old["torch_rng_before"]==old["torch_rng_after"]
++                assert input_digest(current,inp)==digest
++                step=int(optimizer.state[m.backbone.lin_out_E.weight]["step"]);assert step==u+1
++                completed+=1
++                with (out/"updates.jsonl").open("a") as f:f.write(json.dumps(dict(seed=seed,arm="capacity_C",update=u+1,
++                    input_sha256=digest,paired_baseline_input_verified=True,t=inp["t"],query_block=inp["round_id"],
++                    query_count=len(inp["ids"]),loss=r["loss"],gradient_norm=r["gradient_norm"],optimizer_step=step,
++                    seconds=dt,no_torch_forward_randomness=True))+"\n")
++                if (u+1)%100==0:emit(out/"progress.jsonl",dict(phase="training",seed=seed,update=u+1,total=completed,remaining=deadline_epoch-time.time()))
++            p=sd/"capacity_C_final_1000.pt";weight_hashes[str(p.relative_to(out))]=atomic_weights(p,m.state_dict())
++            save(out/"weight_hashes.json",weight_hashes)
++            rr,aa=response({"capacity_C":m},values,targets,cfg,check);save(sd/"condition_response.json",rr)
++            np.savez_compressed(sd/"condition_response.npz",**aa)
++            m.eval()
++            for sample_seed in cfg["sampling_seeds"]:
++                for condition in ["balanced","extreme"]:
++                    check();m.set_target(targets[condition]);c.seed_all(sample_seed);rng=np.random.default_rng(sample_seed)
++                    state=(rng.random(case["space"].total)<np.repeat(case["prior"],case["space"].counts)).astype(np.uint8)
++                    original=next(r for r in old_graphs if r["seed"]==seed and r["condition"]==condition and r["sampling_seed"]==sample_seed)
++                    assert sha(state.tolist())==original["initial_state_sha256"]
++                    steps_path=(source/original["graph_file"]).with_name(Path(original["graph_file"]).stem+"_steps.json")
++                    source_hashes[str(steps_path)]=fingerprint(steps_path)
++                    old_steps=json.loads(steps_path.read_text());steps=[];st=time.monotonic()
++                    for t in range(64,0,-1):
++                        check();uh,expected=uniform_contract(rng,case["space"].total)
++                        plan=c.plan_for(case,[sample_seed,t,61],4);qh=hashlib.sha256()
++                        for j in range(4):
++                            for arr in plan.block(j):qh.update(np.ascontiguousarray(arr).tobytes())
++                        prior_step=old_steps[64-t]
++                        assert prior_step["t"]==t and prior_step["uniform_sha256"]==uh and prior_step["query_sha256"]==qh.hexdigest()
++                        with torch.no_grad():state,info=reverse_step(m,case,state,MarginalKernel(case["prior"],c.schedule(64)),t,4,sample_seed,rng,"cpu",check_time=check)
++                        assert sha(rng.bit_generator.state)==expected==prior_step["rng_after"]
++                        steps.append(dict(t=t,uniform_sha256=uh,query_sha256=qh.hexdigest(),rng_after=expected,
++                            state_sha256=sha(state.tolist()),edge_count=int(state.sum()),exact_coverage=info["exact_coverage"],
++                            blocks=info["blocks"],seconds=info["step_seconds"]))
++                    edges,f=c.state_edges(case,state);stem=f"capacity_C_{condition}_{sample_seed}"
++                    np.savez_compressed(sd/(stem+".npz"),types=case["space"].types,edges=edges.T,relations=f+1,schema=np.array(case["space"].pairs))
++                    save(sd/(stem+"_steps.json"),steps);metrics=graph(case,edges,NAMES,check);comparison=compare(metrics,references[condition])
++                    mg=case["space"].pairs.index((2,3));g=metrics["typed_degree"]["Genre"]["by_relation"][mg]
++                    high=int(np.array(g["histogram"])[12:].sum())
++                    row=dict(seed=seed,arm="capacity_C",condition=condition,sampling_seed=sample_seed,
++                        graph_file=str((sd/(stem+".npz")).relative_to(out)),graph_file_sha256=fingerprint(sd/(stem+".npz")),
++                        metrics=metrics,comparison=comparison,G_W1=comparison["typed_relation_degree_W1"]["Genre"][mg],
++                        G_joint_TV=comparison["joint_relation_degree_TV"]["Genre"],G_max=g["max"],G_high_ge12=high,
++                        G_multiple_hubs=high>1,G_zero=g["zero"],G_low_le1=g["low_le1"],seconds=time.monotonic()-st)
++                    generated.append(row)
++                    with (out/"generation.jsonl").open("a") as stream:stream.write(json.dumps(row)+"\n")
++                    emit(out/"progress.jsonl",dict(phase="sample",seed=seed,condition=condition,sampling_seed=sample_seed,
++                        chains=len(generated),edges=metrics["edges"],G_max=g["max"],high=high,remaining=deadline_epoch-time.time()))
++            del m,optimizer;gc.collect();m=None;optimizer=None
++        assert completed==3000 and len(generated)==48
++        save(out/"generation.json",generated);save(out/"baseline_sources.json",source_hashes)
++        assert all(fingerprint(p)==h for p,h in source_hashes.items())
++        assert files()==binding
++        status="completed";return 0
++    except BaseException as exc:
++        reason=repr(exc)
++        if m is not None:atomic_weights(out/"interrupted.pt",dict(model=m.state_dict(),optimizer=optimizer.state_dict() if optimizer else None,completed=completed))
++        raise
++    finally:
++        save(out/"worker_receipt.json",dict(status=status,reason=reason,completed_updates=completed,chains=len(generated),
++            wall_seconds=time.monotonic()-started,CPU_seconds=time.process_time()-cpu,
++            peak_rss_mib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024,GPU=0,baseline_training_reexecuted=False))
++
++def main():
++    ap=argparse.ArgumentParser();ap.add_argument("--source",type=Path,required=True);ap.add_argument("--output",type=Path,required=True)
++    ap.add_argument("--worker",action="store_true");ap.add_argument("--deadline",type=float)
++    ap.add_argument("--continue-preflight-fix",action="store_true")
++    a=ap.parse_args()
++    if a.worker:return worker(a.source,a.output,a.deadline)
++    if a.continue_preflight_fix:
++        ledger=json.loads((a.output/"activation.json").read_text())
++        old=json.loads((a.output/"worker_receipt.json").read_text())
++        assert old["status"]=="failed" and old["completed_updates"]==0 and old["chains"]==0
++        assert not (a.output/"updates.jsonl").exists() and not list(a.output.glob("seed*"))
++        activated=ledger["activation_epoch"];deadline=ledger["deadline_epoch"]
++        assert time.time()<deadline and deadline-activated==2700
++        archive=a.output/"preflight_failure_01";archive.mkdir(exist_ok=False)
++        for p in list(a.output.iterdir()):
++            if p.is_file() and p.name!="activation.json":p.rename(archive/p.name)
++        save(a.output/"preflight_fix.json",dict(reason="NumPy bool serialization in cost receipt; zero science updates",
++             original_activation_epoch=activated,original_deadline_epoch=deadline,no_reset=True))
++    else:
++        a.output.mkdir(parents=True,exist_ok=False);activated=time.time();deadline=activated+2700
++        save(a.output/"activation.json",dict(activation_epoch=activated,deadline_epoch=deadline,budget_seconds=2700,
++            no_reset=True,new_task="user delegates one bounded minimal correction; previous 60min panel remains closed"))
++    child=None;status="failed";exit_code=1;reason=None
++    def interrupt(sig,frame):raise InterruptedError(f"parent signal {sig}")
++    for sig in [signal.SIGINT,signal.SIGTERM,signal.SIGHUP]:signal.signal(sig,interrupt)
++    try:
++        with (a.output/"worker.log").open("w") as log:
++            child=subprocess.Popen([sys.executable,"-u",str(Path(__file__).resolve()),"--worker","--source",str(a.source),
++                "--output",str(a.output),"--deadline",str(deadline)],stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
++            while child.poll() is None:
++                if time.time()>deadline-10:raise TimeoutError("single panel deadline")
++                if (a.output/"STOP").exists():raise InterruptedError("STOP")
++                time.sleep(.5)
++            exit_code=child.returncode;status="completed" if exit_code==0 else "failed"
++    except BaseException as exc:reason=repr(exc)
++    finally:
++        if child is not None and child.poll() is None:
++            os.killpg(child.pid,signal.SIGTERM)
++            try:child.wait(timeout=5)
++            except subprocess.TimeoutExpired:os.killpg(child.pid,signal.SIGKILL);child.wait()
++        save(a.output/"budget_receipt.json",dict(status=status,exit_code=exit_code,reason=reason,
++            activation_epoch=activated,deadline_epoch=deadline,wall_seconds=time.time()-activated,budget_seconds=2700,no_reset=True))
++    return exit_code
++if __name__=="__main__":sys.exit(main())
+diff --git a/experiments/role_specialization_v1/test_capacity.py b/experiments/role_specialization_v1/test_capacity.py
+new file mode 100644
+index 0000000..fcabf94
+--- /dev/null
++++ b/experiments/role_specialization_v1/test_capacity.py
+@@ -0,0 +1,116 @@
++import itertools
++import sys
++from pathlib import Path
++import numpy as np
++import pytest
++import torch
++from scipy.special import logsumexp
++PREV=Path(__file__).resolve().parent.parent/"role_condition_diagnosis_v1"
++sys.path[:0]=[str(PREV/"baseline"),str(PREV),str(Path(__file__).resolve().parent)]
++from capacity_readout import allocation_marginals,degree_logpmf,CapacityDenoiser
++from test_late_fusion import fixture,SMALL,activate,all_queries,context,infer
++from role_condition.model import extract_target
++from late_fusion import LateConditionalDenoiser
++from hsgd.bw_preflight import common as c
++
++def make(case):
++    torch.manual_seed(120)
++    return CapacityDenoiser(case["n_types"],case["n_families"],
++        family_pairs=case["space"].pairs,prior=case["prior"],T=64,**SMALL)
++
++def brute(ll,counts):
++    n,k=ll.shape
++    assignments=[x for x in itertools.product(range(k),repeat=n)
++                 if np.array_equal(np.bincount(x,minlength=k),counts)]
++    scores=np.array([sum(ll[i,j] for i,j in enumerate(x)) for x in assignments])
++    weights=np.exp(scores-logsumexp(scores));out=np.zeros_like(ll)
++    for w,x in zip(weights,assignments):
++        for i,j in enumerate(x):out[i,j]+=w
++    return out
++
++@pytest.mark.parametrize("counts",[[1,1],[2,1,1],[1,2,2]])
++def test_exact_capacity_enumeration(counts):
++    rng=np.random.default_rng(33);ll=rng.normal(size=(sum(counts),len(counts)))
++    actual,_=allocation_marginals(ll,np.array(counts))
++    np.testing.assert_allclose(actual,brute(ll,counts),atol=1e-12,rtol=0)
++
++def test_node_and_token_permutation_including_ties():
++    ll=np.array([[1.,3.,0.],[1.,3.,0.],[2.,0.,4.],[2.,0.,4.]])
++    counts=np.array([2,1,1]);a,_=allocation_marginals(ll,counts)
++    nodes=np.array([3,1,0,2]);cols=np.array([2,0,1])
++    b,_=allocation_marginals(ll[nodes][:,cols],counts[cols])
++    np.testing.assert_allclose(b,a[nodes][:,cols],atol=1e-12,rtol=0)
++    np.testing.assert_allclose(a[0],a[1],atol=1e-12,rtol=0)
++
++def test_fully_symmetric_counterexample_returns_frequency_not_artificial_hub():
++    a,_=allocation_marginals(np.zeros((6,3)),np.array([4,1,1]))
++    np.testing.assert_allclose(a,np.tile([4/6,1/6,1/6],(6,1)),atol=1e-12,rtol=0)
++
++@pytest.mark.parametrize("retention",[0.,.4,1.])
++def test_degree_law_exhaustive_and_exact_support(retention):
++    N,d,pi=4,2,.3;prob=np.r_[np.repeat(retention+(1-retention)*pi,d),np.repeat((1-retention)*pi,N-d)]
++    expected=np.zeros(N+1)
++    for x in itertools.product([0,1],repeat=N):
++        x=np.array(x);expected[x.sum()]+=np.prod(np.where(x,prob,1-prob))
++    actual=np.exp(degree_logpmf(N,d,retention,pi))
++    np.testing.assert_allclose(actual,expected,atol=1e-12,rtol=0)
++
++def test_zero_projection_matches_old_late():
++    a,b,xt=fixture();m=make(a);base=LateConditionalDenoiser(2,1,family_pairs=a["space"].pairs,prior=a["prior"],**SMALL)
++    state=base.state_dict()
++    for k,v in m.state_dict().items():state[k]=v.clone()
++    base.load_state_dict(state);m.eval();base.eval()
++    with torch.no_grad():
++        x=infer(m,a,xt,extract_target(b));y=infer(base,a,xt,extract_target(b))
++    for l,r in zip(x,y):assert torch.equal(l,r)
++
++def test_nonzero_prediction_response_and_query_independent_context():
++    a,b,xt=fixture();m=make(a);activate(m);m.eval();target=extract_target(b)
++    with torch.no_grad():
++        x=infer(m,a,xt,extract_target(a));y=infer(m,a,xt,target)
++    assert (x[1]-y[1]).abs().max()>1e-5
++    m.set_target(target);ctx=context(m,a,xt);q,f=all_queries(a)
++    with torch.no_grad():
++        ctx.predict(q[:,:8],f[:8],.5,"fixed")
++        z=ctx.condition_diagnostic["role_context"].clone()
++        ctx.predict(q[:,8:],f[8:],.5,"fixed")
++        assert torch.equal(z,ctx.condition_diagnostic["role_context"])
++    ctx.close()
++
++def test_renumber_and_training_sampling_same_features():
++    a,b,xt=fixture();m=make(a);activate(m);m.set_target(extract_target(b))
++    q,f=all_queries(a);perm=np.array([2,0,3,1,7,5,4,6])
++    from hsgd.runtime import predict
++    m.train()
++    x=predict(m,a["space"].types,xt,np.zeros(3,dtype=int),q,f,.5,details=True)
++    m.eval()
++    with torch.no_grad():
++        same=infer(m,a,xt,extract_target(b))
++        y=predict(m,a["space"].types,np.sort(perm[xt],axis=0),np.zeros(3,dtype=int),np.sort(perm[q],axis=0),f,.5,details=True)
++    for l,r in zip(x,same):torch.testing.assert_close(l,r,atol=2e-6,rtol=1e-5)
++    for l,r in zip(x,y):torch.testing.assert_close(l,r,atol=2e-6,rtol=1e-5)
++
++def test_encoder_receives_nonzero_gradient_after_zero_projection_updates():
++    a,b,xt=fixture();m=make(a);m.set_target(extract_target(b))
++    optimizer=torch.optim.AdamW(m.parameters(),lr=2e-4,weight_decay=1e-12)
++    inp=c.train_input(b,64,4,121,0,np.random.default_rng(121),force_t=32)
++    seen=False
++    for i in range(4):
++        c.update(m,optimizer,b,inp,64,"cpu")
++        g=m.branch.role_encoder[0].weight.grad
++        seen=seen or (g is not None and torch.isfinite(g).all() and bool(torch.any(g!=0)))
++    assert seen
++
++def test_impossible_support_and_resource_limit_fail_explicitly():
++    with pytest.raises(ValueError):allocation_marginals(np.full((2,2),-np.inf),np.array([1,1]))
++    with pytest.raises(RuntimeError):allocation_marginals(np.zeros((20,20)),np.ones(20,dtype=int))
++
++def test_joint_vectors_not_separate_marginal_assignment():
++    # Two observations: same univariate role histograms, different joint roles.
++    obs=np.array([[1,1],[0,0]])
++    joint=np.array([[1,1],[0,0]]);cross=np.array([[1,0],[0,1]])
++    def score(role):return -((obs[:,None,:]-role[None,:,:])**2).sum(2)*3
++    a,_=allocation_marginals(score(joint),np.ones(2,dtype=int))
++    b,_=allocation_marginals(score(cross),np.ones(2,dtype=int))
++    assert a[0,0]>.99
++    np.testing.assert_allclose(b,.5,atol=1e-12)

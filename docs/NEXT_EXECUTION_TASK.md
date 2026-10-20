@@ -1,5 +1,11 @@
 # Current execution task
 
+2026-10-20 Capacity-role candidate panel and independent acceptance COMPLETE.
+3000 new updates/48 chains, full3 seeds, original input/randomness pairing.
+Actual extreme-role control improves, ordinary-condition fidelity has costs.
+89+89 checks pass; evidence in experiments/role_specialization_v1_results.
+Stop for review; do not add another candidate, extend training or run large graphs.
+
 2026-10-20 New user delegation: select one minimal correction after prior failed
 late-fusion panel. Frozen-weight diagnosis completed; now capacity-coupled
 forward-degree likelihood soft role readout, see experiments/role_specialization_v1/DESIGN.md.
