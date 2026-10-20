@@ -1,0 +1,790 @@
+diff --git a/experiments/role_target_scalability_v1/PROTOCOL.md b/experiments/role_target_scalability_v1/PROTOCOL.md
+new file mode 100644
+index 0000000..30bbe52
+--- /dev/null
++++ b/experiments/role_target_scalability_v1/PROTOCOL.md
+@@ -0,0 +1,97 @@
++# 固定normal2@6000的新目标验证协议（只准备，未获执行授权）
++
++基线固定33e2c28b6ab1919fcec56f1deb58b1210b63ffce，使用三套normal2最终6000步权重。
++CPU原数值合同、8层原容量耦合软读取/联合CN、FP32网络/float64核、T64、4块；不训练、
++不采用纠错模型、度残差、时间提案、额外概率引导、硬角色匹配、配额或修图。
++基线原有的Xt度编码保留；这里禁止的是后续另试的额外软目标度/度差特征，不删除基线分支。
++本协议、频数和seed在新目标模型输出出现之前冻结。
++
++## 目标与信息边界
++
++固定34节点(D4/A6/M18/G6)、原10族schema及原四活跃族DA/DM/AM/MG，总边数目标
++10/18/36/24。只更换Genre的匿名联合向量多重集，D/A/M完整联合向量及整数频数
++逐项等于原控制目标；不是只保持边际。Movie的MG度保持12个1、6个2。
++
++|条件|Genre度多重集|训练使用|≥8数|≥12数|≤1数|零度数|
++|---|---|---|---:|---:|---:|---:|
++|balanced|4,4,4,4,4,4|是|0|0|0|0|
++|extreme|18,2,1,1,1,1|是|1|1|4|0|
++|moderate|8,6,4,3,2,1|否|1|0|1|0|
++|single12|12,4,3,2,2,1|否|1|1|1|0|
++|double10|10,10,1,1,1,1|否|2|0|4|0|
++
++双hub指两个10度的相对高连接角色；不能用旧≥12阈值把它说成“无双hub”。因此预先
++同时报告统一≥8及≥12计数、top1/top2和完整度频数，不根据生成结果更换阈值。
++三个未见目标来自预定集中度/双峰形态和固定24桩，不依据生成结果选择。读取原36000
++更新记录，只出现balanced/extreme；normal2各seed各条件3000更新。目标指纹亦与
++两个原训练目标不同；这只认证这个训练面板未见，并非相对所有可能外部数据的声明。
++
++`targets.json`只含类型、关系schema、联合向量及频数，不含目标节点ID/边身份或逐节点
++干净目标。每个Genre角色只有MG维非零，但D/A/M仍保留完整多维联合向量。
++
++## 可实现性证据与禁止用途
++
++对每个目标使用完整Movie×Genre合法二部槽，S→Movie容量为原Movie MG度，
++Movie→Genre容量1，Genre→T容量为目标度。五个整型最大流都为24，并独立核对
++Gale–Ryser每条不等式、二值简单边、各Movie度和Genre度。将证明MG边替换到原
++DMA骨架后，再核对全部类型完整联合角色频数及原各族边数。该证明强于只核对桩和。
++
++这些图仅证明存在性。`proof_only`与匿名目标分离，明确禁止用于先验初始化、
++去噪输入、逐节点角色分配、引导或后处理。未来生成入口输入白名单不含证明图。
++单元反例[2,2,0]对[3,1]虽然总度与单槽容量都合格，仍不可实现，必须拒绝。
++
++## 后续执行计划（本轮不执行）
++
++主设计为3固定训练权重×5条件×8采样seed=120条完整T64/R4链。seed固定
++2026102031…2026102038，与原实验一致；跨条件/权重复用相同先验随机安排、逐t查询
++计划及逐槽uniform，记录摘要，不仅比较seed整数。时刻t=64…1，每步完整冻结Xt，
++计算同一目标下的当前度/精确容量边际，四块共享条件输入，网络仍按各查询块重编码，
++全部预测/原Bayes采样完成后统一提交。不能缓存网络隐藏表示或跨t/目标误用条件。
++
++已有48个6000步normal2控制图具备权重、源码和随机流证据，可作为历史参考。
++主预算仍按120条全部运行估计，不默默只跑72条。若审查同意复用控制，需单独确认
++48旧控制逐项绑定后才按72条新增计数；复用不算新独立样本。本票不执行任一选项。
++
++不按效果选权重、目标、seed或重新补抽。失败/未完成如实保留并非零停止，不缩链、
++缩模型、改查询块、提高资源门或扩大预算。原GPU梯度门未通过仍有效，当前建议CPU
++三个单线程seed作业并行；大图/其他设备另议，绝不借用已结束的旧八小时授权。
++
++## 预先评价与解释规则
++
++每张实际离散图先独立评价，再在每个训练seed和条件内汇总8图，最后描述3个训练
++seed及其跨条件配对变化。不能把120图当作120个训练重复，也不挑一个最好条件宣称
++泛化控制成功。固定权重在未见目标上是否响应、是否接近统计目标仍待完整实际生成。
++保留每格全部8个值，对误差/结构标量给均值、中位数和线性P90；不删除失败/NA，
++也不把不同训练seed的图混成一个独立重复样本池。
++
++* schema、无向简单、各族边数及误差；总边数及MG Movie侧/Genre侧度W1。
++* Genre完整整数PMF/频数、联合角色TV、W1、最大/次大度、≥8/≥12计数、≤1/零度数。
++  同时报告有符号偏差与离散波动，不要求逐图精确匹配或W1为0。
++* D/A/M全部联合关系度频数/TV、分关系度W1和尾部，不能以不变的目标统计冒充不变的输出。
++* 连通分量/LCC/孤立点，类型三角形，DMA路径闭合及去重对闭合的分子/分母/比例；
++  分母0记NA，完整报告定义次数。
++* 每个固定模型/条件的类型与关系保持同构类别及完整频率；WL只排除不同，不证同构。
++  报告匿名结构差异(连通/三角形/路径/度谱等分布)，不把标签边差当成匿名多样性。
++  不将不同条件/训练seed类别数相加当全局覆盖，不先去重再算质量。
++
++新目标没有唯一结构真值：DMA闭合/三角形/连通等报告分布和相对控制的变化，不能把
++可行性证明图或旧参考的这些数值设成新条件必须达标的答案。角色/边数目标是已知的，
++其分布误差可以计算；闭合等未确定部分保持描述性。单步期望度或条件向量不同不算
++生成控制成功。最终要看多个训练seed的实际角色形态响应及结构/多样性代价。
++
++## 成本与建议预算
++
++相同normal2@6000的48控制链历史中位10.893秒/P90 11.317秒。纯算法合成LL短测
++显示新目标精确DP增量估计每链约0.089秒；不是新模型或新条件实测。
++120链简单串行约1369 CPU秒(22.8分钟)，三个seed并行约456秒(7.6分钟)，
++两倍并行成本加300秒载入/评价/审计余量约1213秒。建议新授权上限2700秒/45分钟，
++目前未激活。新目标反向状态密度、CN工作量、冷缓存和机器负载未知，估计非保证。
++
++34节点所有活跃槽全占时最多312边，wedge最多5568，低于原2,000,000门；不能因此
++声称大图同样安全。精确DP最大单类型224单元、全部低于200,000门。运行失败不能
++据此自动放宽任何保护。
++
++若需要收紧估计，先申请一次CPU模型短测：总上限120秒，读取旧冻结
++holdout_0_t8状态，3权重×5目标×完整4块=60次eval/no_grad前向，测冷/暖度统计、
++似然、DP、网络与导出成本；不采样、不推进图、不反传、不更新。此短测尚未授权
++也未执行。当前历史估计足以制定建议预算，不冒充该短测已通过。
+diff --git a/experiments/role_target_scalability_v1/README.md b/experiments/role_target_scalability_v1/README.md
+new file mode 100644
+index 0000000..e24313e
+--- /dev/null
++++ b/experiments/role_target_scalability_v1/README.md
+@@ -0,0 +1,37 @@
++# 新角色目标与精确软读取可扩展性准备
++
++基线33e2c28b6ab1919fcec56f1deb58b1210b63ffce。只准备，不训练/调用模型/运行完整链。
++主要结论：小图五目标均可实现且精确读取成本可承受；两张完整大图的原容量DP均被
++原资源门拒绝，不能直接扩展。详见`PROTOCOL.md`和`SCALABILITY.md`。
++
++* `config.json`：预先固定五目标、seed、生成数量和未授权标志。
++* `algorithms.py`：整数成本核算、度核验、微小二部流/Gale–Ryser证明工具。
++* `prepare.py`：只读核对本地权重/原完整检查点及绑定、训练记录、数据；生成匿名目标、
++  证明图和成本证据。没有模型构造/前向或采样入口。
++* `evidence/`：全部实际机器结果。`proof_only/*.npz`只用于存在性证明，严禁作为
++  模型输入、先验初始化、逐节点角色安排、修图或科学输出。
++* `test_planning.py`：本票14项纯算法/绑定检查；旧135模型测试只作为历史证据，不冒充
++  本票重新执行。此票不需要额外神经前向。
++
++复验纯算法：
++
++```bash
++OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 CUDA_VISIBLE_DEVICES= PYTEST_ADDOPTS= \
++  /data2/lyh/miniconda3/envs/dihug/bin/python -m pytest -q \
++  experiments/role_target_scalability_v1/test_planning.py
++```
++
++重做准备只使用调用者明确提供的本地路径，输出必须新建且不与输入/源码重叠：
++
++```bash
++OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 CUDA_VISIBLE_DEVICES= \
++  /data2/lyh/miniconda3/envs/dihug/bin/python \
++  experiments/role_target_scalability_v1/prepare.py \
++  --run /data2/lyh/gnn_project/DiHug/results/role_robust_training_6000_20261021_v1/learning_run01 \
++  --panel /data2/lyh/gnn_project/DiHug/results/role_late_paired_20261020_run01 \
++  --output /tmp/role_target_scalability_review_new
++```
++
++这不是正式验证启动命令。不提供自动进入训练/完整生成的脚本；120条小图链及可选
++120秒CPU前向短测均等待用户决定范围与新预算。GPU数值门失败事实继续保留，不访问
++notebook/BW。所有旧代码、权重与结果不变，交付后停止等待审查。
+diff --git a/experiments/role_target_scalability_v1/REVIEW.md b/experiments/role_target_scalability_v1/REVIEW.md
+new file mode 100644
+index 0000000..2d65311
+--- /dev/null
++++ b/experiments/role_target_scalability_v1/REVIEW.md
+@@ -0,0 +1,63 @@
++# 实际准备结果及审查入口
++
++本票完成方案、文件核验及纯算法检查，未启动训练/模型前向/完整科学链/GPU。
++基线固定33e2c28b6ab1919fcec56f1deb58b1210b63ffce。旧源码、权重、原图和main不变。
++
++## 已确认
++
++三套normal2@6000各482个state_dict张量均有限，并与各自原完整6000步事务检查点
++逐张量相同。配置、源码清单、数据与实际数值依赖绑定均匹配；不是只按文件名判断。
++读取检查点中的robust状态仅因原文件是完整双臂事务，不将其作为模型/目标输入。
++没有实例化神经模型，也没有声称已做新条件前向加载测试。
++
++|训练seed|最终normal2文件SHA256|
++|---|---|
++|2026102011|39b2f0ea852bd849aa4bc3aa5d1ecdfd2f2b564e5a6b6d0291e64359fa6e75a5|
++|2026102012|cb9397bb4b14e4c9905b6a0d0c1b75805ca3b8f3837d2e8ebd0780b52d9622c9|
++|2026102013|b22b8d2476d2d869418c5efa739aa74138d99ca2887a684a70f1ee2855cbfe4b|
++
++五个目标均通过单位容量整型maxflow24、独立Gale–Ryser和完整联合频数核验。
++Genre精确DP单元分别为balanced=7(实际快捷分支)、extreme=28、moderate=224、single12=112、
++double10=21；其他类型40/42/133不变。无新目标用于原训练的记录证据已保存。
++小图资源可行不代表权重能泛化到新目标，尚无新条件预测或生成质量证据。
++
++IMDB1653/4079、PubMed1565/12284全图版本本地可读，两个NPZ既定SHA及12个原来源
++载荷SHA全匹配。共900种匿名完整联合向量/频数已逐项导出CSV，关系容量CSV亦完整。
++两图所有八个类型都实际触发原200000单元DP门，仅分配小LL矩阵，未分配巨大状态表。
++第一个类型IMDB Director至少需272TB F/B表，PubMed Gene至少4.69e69字节，故原方法
++不能直接做完整大图生成；不建议为它申请大图训练/完整链预算。
++
++## 实测与估计分开
++
++准备核心6.298秒/CPU6.277秒、峰RSS630.32MiB，主要包含读取/哈希/检查点张量核对与
++小DP/flow；这些时间不含先前Python/Torch导入，不能当作全过程启动耗时。14项本票
++纯算法/绑定/受保护输出测试全通过、零失败/跳过，pytest报告6.05秒。小枚举仅12种
++合法角色分配作独立真值，没有枚举大图。旧135模型回归是历史结果，本票没有重跑。
++
++小DP计时用清楚标记的合成有限LL，不是神经网络概率或真实链状态。历史相同权重控制
++链中位10.893/P90 11.317秒，加新目标DP纯算法增量估计每链约.089秒；120链简单串行
++约22.8CPU分钟，三单线程seed并行约7.6分钟。加入2倍余量和300秒载入/审计约20.2分钟，
++建议用户另批45分钟上限。该窗口尚未激活，不承接旧八小时；无时间被用来新训练。
++
++大图NN/反向概率/全链新耗时未测。给出度似然完整循环数量和缓存量，不伪造秒数。
++GPU旧门5元素超容差的事实保留，未放宽、修后端或做任何GPU实测。
++
++## 待用户决定
++
++* 是否批准小图5条件×3权重×8seed=120条新完整链及45分钟总预算。
++* 如需先确认前向开销，是否只批准120秒CPU短测(3权重×5目标×4块=60前向；旧冻结Xt，
++  不抽样/推进/反传)。当前并未执行该短测。
++* 大图精确实现直接判不可行；唯一近似提案是完整角色LL的对数域行列缩放，尚未实现。
++  需先在小图对原精确边际做误差/频数/支持/成本比较，不能混入新目标精确验证。
++
++## 证据
++
++* [完整小图验证协议](PROTOCOL.md)，含预定目标/种子/评价与不确定性解释。
++* [大图成本公式、全部类型DP与唯一近似候选](SCALABILITY.md)。
++* [匿名目标工件](evidence/targets.json)与[可行性证明](evidence/feasibility.json)。
++* [全部900个联合向量及频数](evidence/all_joint_roles.csv)。
++* [真实关系及槽容量](evidence/relations_and_capacities.csv)、[DP精确整数成本](evidence/DP_costs.csv)。
++* [数据/来源和完整似然成本](evidence/large_graph_inventory.json)、[实际权重核对](evidence/weights.json)。
++* [成本计划](evidence/cost_plan.json)、[本票执行回执](evidence/receipt.json)、[14项测试](evidence/tests.xml)。
++
++完成后停止等待审查。本票不提交任何“新条件生成成功”或“大图可扩展”结论。
+diff --git a/experiments/role_target_scalability_v1/SCALABILITY.md b/experiments/role_target_scalability_v1/SCALABILITY.md
+new file mode 100644
+index 0000000..b9ef1e8
+--- /dev/null
++++ b/experiments/role_target_scalability_v1/SCALABILITY.md
+@@ -0,0 +1,122 @@
++# 精确软读取的大图可扩展性：静态拒绝，不尝试运行大DP
++
++三套normal2@6000是34节点小图权重，本票不将其冒充IMDB/PubMed大图权重，也不
++因大图缺少同结构私有权重而重新训练或从notebook补取。大图部分独立于这些权重。
++
++只读取本地既有完整二值无向canonical-single版本。IMDB1653节点/4079边、
++PubMed1565节点/12284边；没有裁图、删关系、合并类型或重新预处理。两NPZ与
++独立数据配置的既定哈希相同，原meta/nodes/edges/splits和HGEN原文件的12个
++历史SHA亦全部重新核对相同。它们不等同原始加权/有向存储；历史IMDB原存储含
++11对角项，当前版本早已去自环。数据划分仍是同一参考图，不是未见图划分。
++
++`large_graph_inventory.json`包含每类型全部900种完整联合角色向量及整数频数、
++每关系容量/密度和来源；其中IMDB85种、PubMed815种。没有保存角色对应节点ID。
++
++## 真实实现与精确性范围
++
++容量读取器计算P(z|dXt)∝∏i exp(ell[i,z_i])，每类角色有整数使用次数c_j；
++ell按原前向核的精确关系度二项卷积相加。返回的A_ij是这个“节点度似然乘积”
++工作分布的精确容量分配边际，并非真实图后验，因为相邻度共享边。A行和1、列和c，
++随后对学习角色表示加权送入原联合头；不是固定节点角色或最终边的硬度约束。
++
++设某类型n节点/K个角色，最大频数坐标已按原代码消去，
++
++    S = product_{j≠argmax c}(c_j+1), C=(n+1)S.
++
++实现显式创建forward/backward两张(n+1)×S float64表，故仅它们就至少16C字节；
++另有8S(K−1)字节状态坐标、缓存的每节点/角色(src,dst)转移索引，上界16nKS字节，
++以及Python容器/临时数组。工作量上界O(nKS)，不是O(E)。K=1有实际快捷分支，
++O(n)返回ones，不分配F/B表，报告的cells仅为元数据。本次大图均K>1。
++
++原`MAX_DP_CELLS=200000`不变，所有大图类型在任何状态枚举之前均实际触发该门。
++没有申请/分配以下巨大表，也没有把近似当精确。表中是当前具体实现的成本，
++不能当成所有可能精确算法的复杂度下界或不可计算性证明。
++
++|数据/类型|n|K|C单元|仅F/B内存下界(字节)|原门|
++|---|---:|---:|---:|---:|---|
++|IMDB Director|410|19|1.70056e13|2.72090e14，约272TB|拒绝|
++|IMDB Actor|494|27|1.12819e18|1.80511e19|拒绝|
++|IMDB Movie|726|20|7.24275e21|1.15884e23|拒绝|
++|IMDB Genre|23|19|2.12337e7|339738624，约324MiB|拒绝|
++|PubMed Gene|313|193|2.93222e68|4.69154e69|拒绝|
++|PubMed Disease|643|277|3.29733e106|5.27573e107|拒绝|
++|PubMed Chemical|564|309|8.58852e111|1.37416e113|拒绝|
++|PubMed Species|45|36|3.55623e12|5.68997e13，约56.9TB|拒绝|
++
++具体原整数状态数/单元/转移上界保留在JSON，不用浮点舍入替代保护判断。IMDB的
++Genre虽仅23节点，也已经超门约106倍；孤立考虑它还不能代表其他类型可运行。
++
++## 度似然与缓存：另一个独立成本
++
++原代码对每个(N,d,t,pi)构造完整0…N的logPMF：
++
++    D_t ~ Bin(d,a_t+(1-a_t)pi)+Bin(N-d,(1-a_t)pi).
++
++每张表执行N+1次Python/logsumexp归约，归约项总数恰为(d+1)(N−d+1)，另有二项
++数组计算。`self.tables`按时间缓存，跨条件/链可复用相同键；首链每个时刻冷构造。
++即使pi=0/1，当前通用函数也未绕过完整表循环。不能假装这些操作已经张量化或免费。
++
++|每时刻静态成本|IMDB|PubMed|
++|---|---:|---:|
++|唯一(N,d,pi)表|79|407|
++|Python/logsumexp归约调用|43047|193559|
++|卷积归约项|1108755|4611236|
++|汇总节点角色关系LL查表加法|144340|1657664|
++|1000时刻缓存float64值|.321GiB|1.442GiB|
++
++这里只计算数组值，不含字典/数组头、临时数组或缓存周转。没有测实际大图似然秒数，
++不能用小N耗时线性外推大N。即使解决DP，冷似然及缓存仍需单独测量/优化评审。
++
++重要顺序：当前forward先执行小度网络、构造该类型LL，**再**调用DP门。因此数学上
++已确定的首个致命瓶颈是DP，而真实入口可能先花费一段冷似然成本才拒绝；本次只
++单独调用原DP门作安全检查，没有让大图进入模型去等待这个迟到的拒绝。
++
++## 稀疏网络/查询/全链边界
++
++每步只对活跃关系族查询，活跃由原参考边数>0决定；inactive仍在schema中且精确pi=0。
++以下T1000/R20是本地已有完整数据集配置的成本口径，不是改动本次T64/R4小图权重
++的日程。即使假设大图也用T64/R4，每类型DP单元仍完全相同、仍被拒绝；仅网络调用数
++变为256、缓存时刻数变为64，不能借改变T或块数解决此DP瓶颈。本票不运行任何一种。
++IMDB全槽1365378，其中活跃997313、固定空368065；PubMed全槽1223830且全部活跃。
++每完整链T1000/R20至少20000次查询参与的网络编码，但角色/完整Xt条件每时刻只算
++一次并供20块共享，不缓存网络隐藏表示。单块查询约49866/61192槽(整数族舍入略变)。
++整条链槽预测量分别997313000/1223830000；不能称为端到端线性空间/工作量。
++
++全槽uint8状态约1.37/1.22MB，单份float64全概率约10.92/9.79MB，活跃排列int64约
++7.98/9.79MB。这些不是网络显存峰值。LL/边际矩阵总计每份36085/414416个float64
++值(约.275/3.162MiB)，其本身可承受；真正不可承受的是容量DP。
++
++CN参考wedge数217005/1164378；历史完整前向噪声期望曲线最大亦为这些值，原wedge及
++query-path门均2,000,000。期望小于门不证明任一反向状态安全，实际链偏密仍可能拒绝；
++不截断CN、不提高门。网络层数/宽度本身不变，但本票没有进行大图模型前向，不能用
++旧无容量读取BW耗时或8.3GiB allocated保证新方法在BW/NVIDIA容纳或全链速度。
++
++**结论：原精确读取器对两大图都不能启动有效完整生成，当前无法给出有限全链耗时
++或显存承诺；不建议批准原实现的大图训练/采样预算。**硬门拒绝不是模型预测质量失败，
++本次没有大图概率或权重实测，也没有绕过保护。
++
++## 唯一近似候选（提案，不实现）
++
++候选是对完整联合角色LL进行对数域行/列矩阵缩放：求
++
++    max_A sum_ij A_ij ell_ij − sum_ij A_ij log A_ij,
++    A>=0, sum_j A_ij=1, sum_i A_ij=c_j.
++
++首次tau固定1，保留全部角色及整数频数，不截断、不拆成独立边际。软列和约束作用于
++角色表示读取权重，不是固定输出节点度数或生成图配额。硬支持保持A=0，不加epsilon；
++对数域处理，支持不可行或不收敛则失败，不伪称频数满足。
++
++这**不是原工作分布的精确边际**。反例n=2,c=(1,1),LL对角为L、非对角0：精确
++边际对角为sigmoid(2L)，此候选为sigmoid(L)，L=1时约.8808对.7311，即使行列和都对
++也有明显误差。不可只验证列和就宣称等价，更不能称为真图后验。
++
++复杂度每迭代O(nK)、存储O(nK)，相较乘积DP有潜力。若100迭代，PubMed每时刻约
++4144万矩阵元素扫描(行列两次操作及常数另计)，T1000仍不免费；需包含冷LL、拷贝、
++求解和网络的完整计时，不能只报某个GPU核函数。
++
++单独申请实现/验证后，先在本次5目标及原小图精确实现上比较：逐节点TV/最大绝对
++边际误差、行/列残差、支持、角色顺序/重复合并/节点重编号；加入同似然对称例、尖锐
++似然、不同角色并列和不可行支持。跨t1/4/8/32/64比较真实冻结Xt；如需用现有权重
++看读出p0偏移则另列有界前向预算。记录迭代数、不收敛/失败、冷暖耗时和峰内存。
++只有通过上述比较才能申请大图纯读取短测。该路线不混入本次未见目标精确验证，也
++不修GPU后端或放宽既有GPU容差。没有近似大图运行与科学效果结论。
+diff --git a/experiments/role_target_scalability_v1/algorithms.py b/experiments/role_target_scalability_v1/algorithms.py
+new file mode 100644
+index 0000000..d512cd4
+--- /dev/null
++++ b/experiments/role_target_scalability_v1/algorithms.py
+@@ -0,0 +1,105 @@
++"""Read-only planning arithmetic and tiny proof witnesses; no neural inference."""
++from collections import Counter
++import hashlib
++import json
++import math
++from pathlib import Path
++import networkx as nx
++import numpy as np
++
++
++def sha(path):
++    h=hashlib.sha256()
++    with Path(path).open("rb") as f:
++        for x in iter(lambda:f.read(1024*1024),b""):h.update(x)
++    return h.hexdigest()
++
++
++def checked(path, expected):
++    if not expected or sha(path)!=expected:raise ValueError("pinned input hash mismatch: "+str(path))
++
++
++def degrees(types, edges, families, pairs):
++    types=np.asarray(types);edges=np.asarray(edges);families=np.asarray(families)
++    if edges.shape!=(len(families),2) or types.ndim!=1:raise ValueError("array shape")
++    if not np.issubdtype(edges.dtype,np.integer):raise ValueError("integer endpoints required")
++    if ((edges<0)|(edges>=len(types))).any() or (edges[:,0]>=edges[:,1]).any():raise ValueError("canonical simple endpoints required")
++    if len(set(map(tuple,edges)))!=len(edges):raise ValueError("duplicate edge")
++    if ((families<0)|(families>=len(pairs))).any():raise ValueError("family bounds")
++    if not np.array_equal(np.sort(types[edges],axis=1),np.asarray(pairs)[families]):raise ValueError("relation/type mismatch")
++    d=np.zeros((len(types),len(pairs)),dtype=np.int64)
++    np.add.at(d,(edges[:,0],families),1);np.add.at(d,(edges[:,1],families),1)
++    return d
++
++
++def role_rows(d,types):
++    return tuple(tuple((tuple(map(int,v)),int(c)) for v,c in sorted(Counter(map(tuple,d[types==t])).items())) for t in range(int(types.max())+1))
++
++
++def dp_cost(counts):
++    c=sorted(map(int,counts))
++    if not c or min(c)<=0:raise ValueError("positive role multiplicities required")
++    n=sum(c);k=len(c)
++    size=math.prod(x+1 for x in c[:-1]) if k>1 else 1
++    cells=(n+1)*size
++    # k=1 is an actual special case; no F/B tables or transitions allocated.
++    dense_bytes=16*cells if k>1 else 0
++    return dict(nodes=n,roles=k,frequency_histogram=[list(x) for x in sorted(Counter(c).items())],
++        states=str(size),cells=str(cells),guard_applies=k>1,guard_passed=(k==1 or cells<=200000),
++        forward_backward_bytes_lower_bound=str(dense_bytes),
++        state_coordinates_bytes=str(8*size*(k-1) if k>1 else 0),
++        transition_index_bytes_upper_bound=str(16*n*k*size if k>1 else 0),
++        transition_opportunities_upper_bound=str(n*k*size if k>1 else 0),
++        likelihood_matrix_bytes=8*n*k,output_marginal_bytes=8*n*k,
++        special_case="k1: O(n) ones; receipt cells is bookkeeping" if k==1 else None)
++
++
++def gale_ryser(rows,cols):
++    r=sorted(map(int,rows),reverse=True);c=sorted(map(int,cols),reverse=True)
++    if min(r+c,default=0)<0 or sum(r)!=sum(c):return False,[]
++    checks=[dict(k=k,left=sum(c[:k]),right=sum(min(x,k) for x in r)) for k in range(1,len(c)+1)]
++    return all(x["left"]<=x["right"] for x in checks),checks
++
++
++def flow_witness(rows,cols):
++    rows=list(map(int,rows));cols=list(map(int,cols));ok,gr=gale_ryser(rows,cols)
++    if not ok:raise ValueError("bipartite degree sequence infeasible")
++    G=nx.DiGraph()
++    for i,d in enumerate(rows):G.add_edge("source",("M",i),capacity=d)
++    for j,d in enumerate(cols):G.add_edge(("G",j),"sink",capacity=d)
++    for i in range(len(rows)):
++        for j in range(len(cols)):G.add_edge(("M",i),("G",j),capacity=1)
++    value,flow=nx.maximum_flow(G,"source","sink",flow_func=nx.algorithms.flow.edmonds_karp)
++    if value!=sum(rows):raise ValueError("incomplete feasibility flow")
++    edges=np.array([(i,j) for i in range(len(rows)) for j in range(len(cols)) if flow[("M",i)][("G",j)]],dtype=np.int64).reshape(-1,2)
++    if not np.array_equal(np.bincount(edges[:,0],minlength=len(rows)),rows):raise AssertionError("witness row degree")
++    if not np.array_equal(np.bincount(edges[:,1],minlength=len(cols)),cols):raise AssertionError("witness column degree")
++    return edges,dict(max_flow=int(value),required=sum(rows),unit_edge_capacity=1,gale_ryser=gr,
++        algorithm="NetworkX Edmonds-Karp integral maxflow, proof only",feasible=True)
++
++
++def inventory(types,edges,families,pairs,names):
++    d=degrees(types,edges,families,pairs);sizes=np.bincount(types);roles=role_rows(d,types)
++    counts=np.bincount(families,minlength=len(pairs));cap=[];nodecap=np.zeros((len(sizes),len(pairs)),dtype=int)
++    for j,(a,b) in enumerate(pairs):
++        cap.append(int(sizes[a]*(sizes[a]-1)//2 if a==b else sizes[a]*sizes[b]))
++        nodecap[a,j]=sizes[b]-int(a==b);nodecap[b,j]=sizes[a]-int(a==b)
++    prior=counts/np.maximum(cap,1);active=counts>0;tables=set()
++    typesout=[]
++    for t,rows in enumerate(roles):
++        for v,c in rows:
++            for r,N in enumerate(nodecap[t]):
++                if N:tables.add((int(N),int(v[r]),float(prior[r])))
++        typesout.append(dict(type=t,name=names[t],nodes=int(sizes[t]),role_kinds=len(rows),
++            roles=[dict(vector=list(v),frequency=c) for v,c in rows],capacity_by_relation=nodecap[t].tolist(),DP=dp_cost([c for v,c in rows])))
++    memory=8*sum(N+1 for N,d,p in tables)
++    result=dict(nodes=len(types),physical_edges=len(edges),schema=np.asarray(pairs).tolist(),type_counts=sizes.tolist(),types=typesout,
++        relations=[dict(id=j,types=list(map(int,p)),names=[names[int(p[0])],names[int(p[1])]],edges=int(counts[j]),slots=cap[j],prior=float(prior[j]),active=bool(active[j])) for j,p in enumerate(pairs)],
++        all_slots=sum(cap),active_slots=sum(c for c,on in zip(cap,active) if on),deterministic_empty_slots=sum(c for c,on in zip(cap,active) if not on),
++        likelihood_tables_per_time=len(tables),logpmf_calls_per_time=sum(N+1 for N,d,p in tables),
++        convolution_terms_per_time=sum((d+1)*(N-d+1) for N,d,p in tables),
++        likelihood_cache_bytes_per_time=memory,likelihood_cache_bytes_1000_times=1000*memory,
++        LL_lookup_additions_per_time=sum(len(rows)*int(sizes[t])*int((nodecap[t]>0).sum()) for t,rows in enumerate(roles)),
++        likelihood_table_keys=[dict(N=N,clean_degree=d,prior=p) for N,d,p in sorted(tables)],
++        reference_wedges=int(sum(int(x)*(int(x)-1)//2 for x in d.sum(1))))
++    return result
+diff --git a/experiments/role_target_scalability_v1/config.json b/experiments/role_target_scalability_v1/config.json
+new file mode 100644
+index 0000000..8d23203
+--- /dev/null
++++ b/experiments/role_target_scalability_v1/config.json
+@@ -0,0 +1,29 @@
++{
++  "version": "role_target_scalability_v1",
++  "baseline_commit": "33e2c28b6ab1919fcec56f1deb58b1210b63ffce",
++  "weight_arm": "normal2",
++  "weight_updates": 6000,
++  "train_seeds": [2026102011, 2026102012, 2026102013],
++  "controls": {"balanced": [4,4,4,4,4,4], "extreme": [18,2,1,1,1,1]},
++  "unseen": {
++    "moderate": [8,6,4,3,2,1],
++    "single12": [12,4,3,2,2,1],
++    "double10": [10,10,1,1,1,1]
++  },
++  "target_choice_basis": "predeclared shapes, fixed24 MG stubs, six positive Genre roles; no new model outputs consulted",
++  "T": 64,
++  "rounds": 4,
++  "sampling_seeds": [2026102031,2026102032,2026102033,2026102034,2026102035,2026102036,2026102037,2026102038],
++  "planned_chains": 120,
++  "scientific_generation_authorized": false,
++  "training_authorized": false,
++  "gpu_gate_passed": false,
++  "hub_diagnostic_thresholds": [8,12],
++  "low_degree_threshold": 1,
++  "exact_DP_cell_guard": 200000,
++  "algorithm_benchmark_repetitions": 5,
++  "preparation_algorithm_cap_seconds": 180,
++  "suggested_future_validation_budget_seconds": 2700,
++  "witness_usage": "feasibility proof only; never initializer, network input, role assignment, guidance, or repair",
++  "approximation_candidate": "log-domain entropic row/column scaling of unchanged joint-role likelihood, proposal only; not implemented or mixed into target validation"
++}
+diff --git a/experiments/role_target_scalability_v1/prepare.py b/experiments/role_target_scalability_v1/prepare.py
+new file mode 100644
+index 0000000..cdfd263
+--- /dev/null
++++ b/experiments/role_target_scalability_v1/prepare.py
+@@ -0,0 +1,189 @@
++"""Preparation ONLY: hashes, anonymous targets, flows, exact DP arithmetic/timing.
++
++No denoiser construction, forward, optimizer or diffusion sampling is reachable.
++"""
++import argparse
++from collections import Counter,defaultdict
++import importlib.metadata
++import json
++import math
++import os
++from pathlib import Path
++import resource
++import sys
++import time
++
++os.environ["CUDA_VISIBLE_DEVICES"]=""
++os.environ["OMP_NUM_THREADS"]="1";os.environ["OPENBLAS_NUM_THREADS"]="1"
++import numpy as np
++from algorithms import checked,sha,degrees,role_rows,dp_cost,flow_witness,inventory
++
++HERE=Path(__file__).resolve().parent;EXP=HERE.parent
++sys.path.insert(0,str(EXP/"role_robust_training_v1"))
++from core import load_panel,RoleTarget,torch,canonical,file_manifest
++from capacity_readout import allocation_marginals,degree_logpmf,MAX_DP_CELLS
++from role_condition.model import capacities
++
++
++def save(path,x):path.write_text(json.dumps(x,indent=2,allow_nan=False)+"\n")
++
++
++def main():
++    ap=argparse.ArgumentParser()
++    for key in ("run","panel","output"):ap.add_argument("--"+key,type=Path,required=True)
++    a=ap.parse_args();cfg=json.loads((HERE/"config.json").read_text())
++    # Reject protected overlap before any writes. No source or historical output changes.
++    out=a.output.resolve()
++    protected=[a.run.resolve(),a.panel.resolve(),HERE.resolve(),(EXP/"joint_cn_dual_rounds_v1_1/package/data").resolve()]
++    if out.exists() or any(out==p or p in out.parents or out in p.parents for p in protected):raise ValueError("new separate output required")
++    start=time.monotonic();cpu=time.process_time();deadline=start+cfg["preparation_algorithm_cap_seconds"]
++    def check():
++        if time.monotonic()>deadline:raise TimeoutError("bounded preparation algorithm budget")
++    a.output.mkdir(parents=True);status="failed";reason=None
++    try:
++        pinned=EXP/"role_robust_training_6000_v1_results/evidence/learning_run01"
++        assert json.loads((pinned/"resolved_config.json").read_text())==json.loads((a.run/"resolved_config.json").read_text())
++        config=json.loads((pinned/"resolved_config.json").read_text())
++        assert config["updates"]==6000 and config["T"]==64 and config["rounds"]==4
++        assert file_manifest()==json.loads((pinned/"source_manifest.json").read_text())
++        training=Counter();n=0
++        # Pinned public log; no additional training or target inference from outputs.
++        for line in (pinned/"updates.jsonl").open():
++            r=json.loads(line);n+=1
++            assert r["condition"] in cfg["controls"]
++            if r["arm"]=="normal2":training[r["seed"],r["condition"]]+=1
++        assert n==36000 and set(training.values())=={3000}
++        history=dict(baseline_commit=cfg["baseline_commit"],training_log_sha256=sha(pinned/"updates.jsonl"),
++            panel_sha256=sha(a.panel/"panel.json"),normal2_condition_counts=[dict(seed=k[0],condition=k[1],updates=v) for k,v in sorted(training.items())],
++            seen_targets_only=list(cfg["controls"]),new_targets_used_in_training=False)
++        h=json.loads((pinned/"weight_hashes.json").read_text());weights=[]
++        for seed in cfg["train_seeds"]:
++            check();rel=f"seedjobs/seed{seed}/seed{seed}/normal2_final_6000.pt";cp=f"seedjobs/seed{seed}/seed{seed}/pair_u006000.pt"
++            checked(a.run/rel,h[rel]);checked(a.run/cp,h[cp])
++            state=torch.load(a.run/rel,map_location="cpu",weights_only=True)
++            ck=torch.load(a.run/cp,map_location="cpu",weights_only=False)
++            assert ck["completed"]=={"normal2":6000,"robust":6000} and ck["seed"]==seed
++            assert ck["binding"]["config_sha256"]==sha(EXP/"role_robust_training_v1/config.json")
++            assert ck["binding"]["source_manifest"]==json.loads((pinned/"source_manifest.json").read_text())
++            assert ck["binding"]["inputs"]==json.loads((pinned/"input_bindings.json").read_text())
++            for fp,expected in ck["binding"]["inputs"].items():checked(fp,expected)
++            assert ck["binding"]["environment"]["packages"]=={k:importlib.metadata.version(k) for k in ck["binding"]["environment"]["packages"]}
++            assert state.keys()==ck["models"]["normal2"].keys()
++            assert all(torch.equal(v,ck["models"]["normal2"][k]) for k,v in state.items())
++            assert all(torch.isfinite(v).all() for v in state.values())
++            layers=sorted({int(k.split(".")[2]) for k in state if k.startswith("backbone.tf_layers.")})
++            assert layers==list(range(8)) and tuple(state["backbone.lin_in_X.weight"].shape)[0]==256
++            weights.append(dict(seed=seed,arm="normal2",updates=6000,path=str(a.run/rel),sha256=h[rel],paired_checkpoint_sha256=h[cp],
++                tensors=len(state),all_tensors_match_complete_checkpoint=True,all_finite=True,transformer_layers=len(layers),
++                parameter_count_from_archived_initialization=json.loads((a.run/f"seedjobs/seed{seed}/seed{seed}/initialization.json").read_text())["parameters"],
++                checkpoint_binding=ck["binding"],
++                model_instantiated=False,model_forward_calls=0))
++            del ck,state
++        save(a.output/"weights.json",dict(config_sha256=sha(pinned/"resolved_config.json"),source_manifest_sha256=sha(pinned/"source_manifest.json"),
++            full_resolved_config=config,weights=weights,history=history,source_files_exact=True))
++        records,seen=load_panel(a.panel);base=seen["balanced"]
++        assert all(base.roles[t]==seen["extreme"].roles[t] for t in range(3))
++        case=next(r["case"] for r in records if r["condition"]=="balanced")
++        types=case["space"].types;old=case["clean"].T;fam=case["space"].encode(old.T)[0];R=case["n_families"]
++        d=degrees(types,old,fam,case["space"].pairs);movies=np.flatnonzero(types==2);genres=np.flatnonzero(types==3);relation=case["space"].pairs.index((2,3))
++        assert np.bincount(d[movies,relation],minlength=3).tolist()==[0,12,6]
++        target_records=[];proofs=[];timings=[];bench_start=time.monotonic()
++        proof_dir=a.output/"proof_only";proof_dir.mkdir()
++        for name,vector in {**cfg["controls"],**cfg["unseen"]}.items():
++            check();rows=list(base.roles);cnt=Counter(vector)
++            rows[3]=tuple((tuple(v if r==relation else 0 for r in range(R)),n) for v,n in sorted(cnt.items()))
++            target=RoleTarget(tuple(rows),base.type_counts,base.schema)
++            assert all(target.roles[t]==base.roles[t] for t in range(3))
++            if name in cfg["controls"]:assert target==seen[name]
++            else:assert target.fingerprint not in {v.fingerprint for v in seen.values()}
++            pairs,proof=flow_witness(d[movies,relation],vector)
++            fresh=np.sort(np.column_stack((movies[pairs[:,0]],genres[pairs[:,1]])),axis=1)
++            witness=np.concatenate((old[fam!=relation],fresh),axis=0);wf=np.r_[fam[fam!=relation],np.full(len(fresh),relation)]
++            wd=degrees(types,witness,wf,case["space"].pairs)
++            assert role_rows(wd,types)==target.roles
++            assert np.array_equal(np.bincount(wf,minlength=R),case["counts"])
++            path=proof_dir/(name+".npz");np.savez_compressed(path,types=types,edges=witness,relations=wf+1,schema=np.asarray(target.schema))
++            proofs.append(dict(target=name,**proof,proof_file=str(path.relative_to(a.output)),sha256=sha(path),
++                all_other_node_relation_degrees_preserved=bool(np.array_equal(wd[types!=3],d[types!=3])),
++                full_joint_target_verified=True,physical_edges=len(witness),role_fingerprint=target.fingerprint,
++                forbidden_for_generation=True))
++            target_records.append(dict(name=name,seen_in_training=name in cfg["controls"],Genre_degrees=vector,
++                fingerprint=target.fingerprint,anonymous_target=target.as_dict(),DP=[dp_cost([n for v,n in rows]) for rows in target.roles],
++                degree_ge8=sum(v>=8 for v in vector),degree_ge12=sum(v>=12 for v in vector),degree_le1=sum(v<=1 for v in vector),degree_zero=vector.count(0)))
++            for typ,rows in enumerate(target.roles):
++                n=target.type_counts[typ];k=len(rows);c=np.array([c for v,c in rows])
++                ll=-((np.arange(n)[:,None]+1)/(n+1)-(np.arange(k)[None,:]+1)/(k+1))**2
++                duration=[]
++                for repeat in range(cfg["algorithm_benchmark_repetitions"]):
++                    tick=time.perf_counter();attention,info=allocation_marginals(ll,c);duration.append(time.perf_counter()-tick)
++                    np.testing.assert_allclose(attention.sum(0),c,rtol=0,atol=2e-9)
++                timings.append(dict(target=name,type=typ,role_kinds=k,synthetic_log_likelihood=True,model_probabilities=False,
++                    first_seconds=duration[0],warm_median_seconds=float(np.median(duration[1:])),repetitions=len(duration),DP=info))
++        save(a.output/"targets.json",dict(frozen_before_generation=True,training_history=history,targets=target_records,
++            generation_input_allowlist=["normal2@6000", "anonymous_target", "original_schema_prior_schedule", "paired_sampling_seed"],
++            proof_graphs_forbidden=True,model_calls=0))
++        save(a.output/"feasibility.json",dict(proofs=proofs,all_feasible=True,not_scientific_samples=True))
++        save(a.output/"small_algorithm_timings.json",dict(records=timings,total_wall_seconds=time.monotonic()-bench_start,
++            likelihood="fixed synthetic finite LL, loop-cost probe only; not model predictions or generation quality"))
++        datasets={};origin={};root=EXP/"joint_cn_dual_rounds_v1_1/package"
++        historic=json.loads((root/"data/historical_inventory.json").read_text())
++        archived=json.loads((root/"data/verified_inventory.json").read_text())
++        for name in ("IMDB","PubMed"):
++            check();dcfg=json.loads((root/"configs"/(name+".json")).read_text());path=root/dcfg["data"]["file"];checked(path,dcfg["data"]["sha256"])
++            with np.load(path,allow_pickle=False) as z:inv=inventory(z["types"],z["edges"],z["relations"]-1,z["schema"],dcfg["data"]["type_names"])
++            assert inv["nodes"]==dcfg["data"]["nodes"] and inv["physical_edges"]==dcfg["data"]["edges"]
++            assert inv["reference_wedges"]==archived[name]["CN_forward_noise_risk"]["reference_wedges"]
++            inv["source_path"]=str(path);inv["sha256"]=dcfg["data"]["sha256"]
++            inv["CN_forward_noise_risk_historical"]= {k:v for k,v in archived[name]["CN_forward_noise_risk"].items() if k!="forward_curve"}
++            inv["T_full_scale_planning_only"]=1000;inv["query_rounds_full_scale"]=20
++            inv["backbone_calls_per_chain"]=20000;inv["role_reads_per_chain"]=1000
++            inv["state_uint8_bytes"]=inv["all_slots"];inv["one_float64_full_probability_bytes"]=8*inv["all_slots"]
++            inv["NN_new_timing_executed"]=False;inv["exact_pipeline_can_complete"]=False
++            inv["first_type_DP_guard_failure"]=next(t["name"] for t in inv["types"] if not t["DP"]["guard_passed"])
++            # Actual source guard called only with a small likelihood matrix; never enumerate DP states.
++            for t in inv["types"]:
++                c=np.array([x["frequency"] for x in t["roles"]]);ll=np.zeros((t["nodes"],len(c)))
++                try:allocation_marginals(ll,c)
++                except RuntimeError as exc:
++                    assert "capacity DP resource limit" in str(exc);t["original_guard_checked"]=str(exc)
++                else:raise AssertionError("unexpected full data DP acceptance")
++            key="IMDB_movie" if name=="IMDB" else "PubMed_baseline";rec=historic[key]
++            provenance=[]
++            for fp,expected in rec["input_hashes"].items():
++                pp=Path(fp);actual=sha(pp) if pp.is_file() else None
++                provenance.append(dict(path=fp,expected_historical_sha256=expected,readable=pp.is_file(),sha256=actual,matches=actual==expected if actual else None))
++            inv["provenance"]=dict(source=rec["source"],preprocessed_version=rec["version"],
++                historical_inventory_sha256=sha(root/"data/historical_inventory.json"),verified_inventory_sha256=sha(root/"data/verified_inventory.json"),payloads=provenance)
++            datasets[name]=inv
++        save(a.output/"large_graph_inventory.json",datasets)
++        gen=json.loads((pinned/"generation.json").read_text())
++        old=[r for r in gen if r["arm"]=="normal2" and r["checkpoint_update"]==6000]
++        costs=[r["seconds"] for r in old];p90=float(np.quantile(costs,.9));med=float(np.median(costs))
++        old_soft=max(sum(x["warm_median_seconds"] for x in timings if x["target"]==name) for name in cfg["controls"])
++        new_soft=max(sum(x["warm_median_seconds"] for x in timings if x["target"]==name) for name in cfg["unseen"])
++        extra=max(0,new_soft-old_soft)*64
++        forecast=dict(historical_same_weights_controls=48,historical_chain_median_seconds=med,historical_chain_p90_seconds=p90,
++            historical_generation_sha256=sha(pinned/"generation.json"),planned_chains=120,new_condition_chains=72,controls=48,
++            exact_DP_increment_estimate_per_chain_seconds=extra,estimate_scope="CPU; historical full chain timing plus synthetic-LL exact DP increment; no new model timings",
++            simple_serial_CPU_seconds=120*(p90+extra),three_seed_parallel_simple_wall_seconds=40*(p90+extra),
++            suggested_budget_seconds=2700,budget_formula="2*simple_three_seed_wall + 300 seconds load/evaluation/audit/IO; cap proposed2700, not activated",
++            budget_safety_estimate_seconds=2*40*(p90+extra)+300,
++            unknowns=["unseen-condition reverse-state density/CN and numerical behavior", "cold/warm model/cache effects", "hardware load"],
++            optional_model_short_test=dict(authorized=False,cap_seconds=120,device="CPU",fixed_old_state="frozen holdout_0_t8.npz",
++                work="3 final normal2 weights x5 targets x complete4 query blocks=60 eval/no_grad forwards; no state sampling or update",
++                starts_no_scientific_chain=True),big_graph_estimate="exact DP resource guard rejects; no finite end-to-end runtime or GPU-memory claim")
++        assert forecast["budget_safety_estimate_seconds"]<2700
++        save(a.output/"cost_plan.json",forecast)
++        # End-of-task protected payload checks.
++        for w in weights:checked(w["path"],w["sha256"])
++        for name,inv in datasets.items():checked(inv["source_path"],inv["sha256"])
++        assert not torch.cuda.is_initialized();status="completed"
++    except BaseException as exc:reason=repr(exc);raise
++    finally:
++        save(a.output/"receipt.json",dict(status=status,reason=reason,wall_seconds=time.monotonic()-start,CPU_seconds=time.process_time()-cpu,
++            peak_rss_mib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024,model_instantiations=0,model_forward_calls=0,
++            optimizer_updates=0,scientific_chains=0,GPU=0,proof_witnesses_not_samples=True,
++            environment={k:importlib.metadata.version(k) for k in ("torch","torch-geometric","numpy","scipy","networkx","pytest")},python=sys.version,
++            no_remote_data_access=True,algorithm_cap_seconds=cfg["preparation_algorithm_cap_seconds"]))
++
++if __name__=="__main__":main()
+diff --git a/experiments/role_target_scalability_v1/test_planning.py b/experiments/role_target_scalability_v1/test_planning.py
+new file mode 100644
+index 0000000..99ca1fe
+--- /dev/null
++++ b/experiments/role_target_scalability_v1/test_planning.py
+@@ -0,0 +1,100 @@
++"""Small pure-algorithm checks; no model calls or diffusion chains."""
++from collections import Counter
++import itertools
++import math
++from pathlib import Path
++import sys
++import numpy as np
++import pytest
++from scipy.special import logsumexp
++
++HERE=Path(__file__).resolve().parent
++sys.path.insert(0,str(HERE));sys.path.insert(0,str(HERE.parent/"role_robust_training_v1"))
++from algorithms import dp_cost,gale_ryser,flow_witness,degrees,role_rows,checked
++from core import RoleTarget
++from capacity_readout import allocation_marginals,MAX_DP_CELLS
++
++
++@pytest.mark.parametrize("target",[[4]*6,[18,2,1,1,1,1],[8,6,4,3,2,1],[12,4,3,2,2,1],[10,10,1,1,1,1]])
++def test_full_movie_side_compatibility(target):
++    rows=[2]*6+[1]*12
++    edges,proof=flow_witness(rows,target)
++    assert proof["max_flow"]==24 and len(set(map(tuple,edges)))==24
++    assert np.array_equal(np.bincount(edges[:,0],minlength=18),rows)
++    assert np.array_equal(np.bincount(edges[:,1],minlength=6),target)
++
++
++def test_sum_and_slot_capacity_are_not_sufficient():
++    assert sum([2,2,0])==sum([3,1]) and max([3,1])<=3
++    assert not gale_ryser([2,2,0],[3,1])[0]
++    with pytest.raises(ValueError,match="infeasible"):flow_witness([2,2,0],[3,1])
++
++
++def test_exact_DP_cost_and_original_guard_without_huge_allocation(monkeypatch):
++    assert MAX_DP_CELLS==200000
++    x=dp_cost([289,60,22,9,7,4,3,3,2,2]+[1]*9)
++    assert x["cells"]=="17005599129600" and x["forward_backward_bytes_lower_bound"]=="272089586073600"
++    assert not x["guard_passed"]
++    assert dp_cost([6])["special_case"] is not None and dp_cost([6])["forward_backward_bytes_lower_bound"]=="0"
++    def forbidden(*a,**kw):raise AssertionError("large allocation reached")
++    ll=np.zeros((410,19));monkeypatch.setattr(np,"full",forbidden)
++    with pytest.raises(RuntimeError,match="resource limit"):allocation_marginals(ll,np.array([289,60,22,9,7,4,3,3,2,2]+[1]*9))
++
++
++def test_small_marginals_match_independent_twelve_assignment_truth():
++    counts=np.array([2,1,1]);ll=np.array([[.1,.2,-.4],[-.8,.9,0],[.4,-.2,.6],[.2,.7,-.1]])
++    marginal,info=allocation_marginals(ll,counts)
++    states=[x for x in itertools.product(range(3),repeat=4) if np.array_equal(np.bincount(x,minlength=3),counts)]
++    assert len(states)==12
++    scores=np.array([sum(ll[i,r] for i,r in enumerate(x)) for x in states]);weights=np.exp(scores-logsumexp(scores))
++    exact=np.zeros_like(ll)
++    for x,w in zip(states,weights):
++        for i,r in enumerate(x):exact[i,r]+=w
++    np.testing.assert_allclose(marginal,exact,atol=2e-12,rtol=0)
++    np.testing.assert_allclose(marginal.sum(0),counts,atol=2e-12,rtol=0)
++    assert info["cells"]==int(dp_cost(counts)["cells"])
++
++
++def test_joint_roles_not_independent_marginals_and_no_IDs():
++    schema=((0,1),(0,2));sizes=(2,2,2)
++    a=RoleTarget(((((1,0),1),((0,1),1)),(((1,0),1),((0,0),1)),(((0,1),1),((0,0),1))),sizes,schema)
++    b=RoleTarget(((((1,1),1),((0,0),1)),(((1,0),1),((0,0),1)),(((0,1),1),((0,0),1))),sizes,schema)
++    assert a.fingerprint!=b.fingerprint
++    for r in range(2):assert Counter(v[r] for v,n in a.roles[0] for _ in range(n))==Counter(v[r] for v,n in b.roles[0] for _ in range(n))
++    assert set(a.as_dict())=={"roles","type_counts","schema"}
++
++
++def test_role_duplicate_merging_and_order():
++    a=RoleTarget(((((1,),2),),(((1,),2),)),(2,2),((0,1),))
++    b=RoleTarget(((((1,),1),((1,),1)),(((1,),2),)),(2,2),((0,1),))
++    assert a==b
++
++
++def test_witness_relabel_preserves_complete_joint_multisets():
++    types=np.array([0,0,1,1]);edges=np.array([[0,2],[0,3],[1,2]]);f=np.array([0,0,0]);pairs=((0,1),)
++    before=role_rows(degrees(types,edges,f,pairs),types)
++    perm=np.array([1,0,3,2]);after=np.sort(perm[edges],axis=1)
++    assert before==role_rows(degrees(types,after,f,pairs),types)
++
++
++def test_hash_must_be_pinned_not_current_self_attestation(tmp_path):
++    p=tmp_path/"input";p.write_text("payload")
++    with pytest.raises(ValueError,match="pinned input hash"):checked(p,"0"*64)
++    with pytest.raises(ValueError):checked(p,None)
++
++
++def test_preparation_has_no_model_execution_or_sampling_entry():
++    src=(HERE/"prepare.py").read_text()
++    for forbidden in ("CapacityDenoiser(","reverse_step(","optimizer.step(","make_model(",".backward("):
++        assert forbidden not in src
++    assert 'scientific_generation_authorized' in (HERE/"config.json").read_text()
++
++
++def test_public_preparation_rejects_protected_output_before_writes(tmp_path):
++    import subprocess
++    run=tmp_path/"old_run";run.mkdir();(run/"keep").write_bytes(b"unchanged")
++    panel=tmp_path/"old_panel";panel.mkdir();before=list(run.rglob("*"))
++    r=subprocess.run([sys.executable,str(HERE/"prepare.py"),"--run",str(run),"--panel",str(panel),
++                      "--output",str(run/"invalid_output")],capture_output=True,timeout=30)
++    assert r.returncode!=0 and b"new separate output required" in r.stderr
++    assert list(run.rglob("*"))==before and (run/"keep").read_bytes()==b"unchanged"

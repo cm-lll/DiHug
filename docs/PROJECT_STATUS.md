@@ -1,5 +1,13 @@
 # DiHug current research status
 
+2026-10-21 role_target_scalability_v1准备完成，基线33e2c28；三normal2@6000文件SHA/482张量及完整事务绑定核对通过。
+固定2旧目标及3新Genre目标[8,6,4,3,2,1]/[12,4,3,2,2,1]/[10,10,1,1,1,1]，其余联合角色不变；五个flow=24/GR/完整频数证明均通过。
+规划3权重×5条件×8seed=120条T64/R4，未执行，建议另批45分钟；可选120秒CPU60前向亦未授权执行。
+本地完整IMDB1653/4079、PubMed1565/12284及12原来源哈希匹配；900联合向量/频数完整导出。
+所有8类型原精确DP均超200000门；首类型IMDB Director F/B下界272TB，PubMed Gene4.69e69字节。不是GPU显存优化能解决的直接路径。
+14项纯算法/绑定CPU测试零失败/跳过；准备核心6.298秒/CPU6.277秒/RSS630.32MiB，0模型构造/前向/训练/科学链/GPU。
+仅提出独立对数域行列缩放近似候选，未实现且不混入小图精确验证；GPU旧门未通过不变。发布后停止等范围/预算审查。
+
 2026-10-21 6000-step paired robustness panel completed at source3a8d55234ccbd13859aed7f2d76fe17c5d0d4cf2.
 36000 effective updates,288 raw T64/R4 graphs,84 validation panels,18 full paired milestone checkpoints; audit passed.
 Single original28800s ledger: main wall6938.50s; three scientific CPU workers20367.22CPU-s, peak per-workerRSS1124.27MiB.

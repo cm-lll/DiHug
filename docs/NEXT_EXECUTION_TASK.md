@@ -1,5 +1,10 @@
 # Current execution task
 
+2026-10-21 本票仅role_target_scalability_v1准备与交付；源基线33e2c28，模型/生成规则未改。
+14纯算法测试及权重/目标/完整大图来源核验完成；120小图链、120秒可选CPU前向均未执行/未授权。
+大图原精确DP静态及原门检查拒绝，不批准自动大图运行；近似只提案未实现。
+完成GitHub独立审查提交后停止，等待用户确定新目标正式范围和预算；不启动训练/完整链/notebook/BW。
+
 2026-10-21 Authorized6000-step paired panel completed:36000 updates/288 graphs,within original8h ledger.
 Publish independent results/ZIP/verification at experiments/role_robust_training_6000_v1_results,then stop for review.
 Keep normal2 as comparator; robustness candidate has mixed seed results and connectivity/closure/ordinary-validation costs.
