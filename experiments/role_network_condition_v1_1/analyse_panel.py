@@ -44,9 +44,16 @@ def mp_independent(types,edges,schema):
     for u in range(len(types)):visit([u],(int(types[u]),))
     return result
 
-def main(run):
+def main(run,resume_incomplete_audit=False):
     start=time.monotonic();run=Path(run).resolve();ledger=load(run.with_name(run.name+'.budget.json'))
-    cutoff=ledger['hard_cutoff_epoch'];out=run/'analysis';out.mkdir(exist_ok=False);status='incomplete';reason=None
+    cutoff=ledger['hard_cutoff_epoch'];out=run/'analysis'
+    if resume_incomplete_audit:
+        previous=load(out/'analysis_status.json')
+        assert previous['status']=='incomplete' and previous['original_cutoff_epoch']==cutoff
+        failure=out/'attempt_01_failure.json'
+        with failure.open('x') as f:f.write(json.dumps(previous,indent=2))
+    else:out.mkdir(exist_ok=False)
+    status='incomplete';reason=None
     def check():
         if time.time()>=cutoff or (run/'STOP').exists():raise TimeoutError('original cumulative budget/STOP; never renewed')
     try:
@@ -70,6 +77,9 @@ def main(run):
             check();seed,arm,condition,ss=[row[k] for k in ['seed','arm','condition','sampling_seed']]
             stored_condition=condition if arm=='C' else 'balanced';name=f'seed{seed}/{arm}_{stored_condition}_{ss}.npz'
             ind=graphs[name];g=ind['graph'];d=ind['degree'];ref=refs[condition];m=row['metrics']
+            payload=np.load(run/name,allow_pickle=False)
+            raw_binding=hashlib.sha256(json.dumps(dict(types=types.tolist(),edges=payload['edges'].tolist()),sort_keys=True,allow_nan=False).encode()).hexdigest()
+            assert raw_binding==row['raw_graph_sha256'],'raw graph/request binding mismatch'
             assert ind['family_edges']==m['family_edges'] and sum(ind['family_edges'])==m['edges']
             assert ind['components']==m['component_sizes'] and ind['isolates']==m['isolates'] and ind['triangles']==m['triangles']
             closure=m['imdb_closure'];assert (ind['path_num'],ind['path_den'],ind['pair_num'],ind['pair_den'])==(closure['path_numerator'],closure['path_denominator'],closure['unique_pair_numerator'],closure['unique_pair_denominator'])
@@ -111,7 +121,7 @@ def main(run):
                 for arm in ['A','B','C']:
                     selected=[r for r in numeric if (r['seed'],r['condition'],r['arm'])==(seed,condition,arm)]
                     entry=dict(seed=seed,condition=condition,arm=arm,n=len(selected),planned_n=8,
-                        metrics={f:dict(mean=avg([float(r[f]) for r in selected if r[f] is not None]),median=float(np.median([r[f] for r in selected if r[f] is not None])) if selected and any(r[f] is not None for r in selected) else None,p90=float(np.quantile([r[f] for r in selected if r[f] is not None],.9)) if selected and any(r[f] is not None for r in selected) else None,NA=sum(r[f] is None for r in selected)) for f in fields},
+                        metrics={f:dict(mean=avg([float(r[f]) for r in selected if r[f] is not None]),median=float(np.median([float(r[f]) for r in selected if r[f] is not None])) if selected and any(r[f] is not None for r in selected) else None,p90=float(np.quantile([float(r[f]) for r in selected if r[f] is not None],.9)) if selected and any(r[f] is not None for r in selected) else None,NA=sum(r[f] is None for r in selected)) for f in fields},
                         provably_distinct_topologies_lower_bound=len({r['topology_lower_bound_key'] for r in selected}))
                     if selected:
                         entry['mean_family_edges']=np.mean([r['family_edges'] for r in selected],axis=0).tolist()
@@ -181,6 +191,13 @@ def main(run):
         graph_hashes={name:digest(run/name) for name in graphs};save(out/'raw_graph_hashes.json',graph_hashes)
         save(out/'weight_hashes.json',{str(p.relative_to(run)):digest(p) for p in run.glob('seed*/*.pt')})
         assert len(numeric)==len(rows)
+        if state['status']=='completed':
+            assert len(updates)==9000 and complete_update_triples==3000
+            assert len(graphs)==96 and len(rows)==144 and len(validations)==36
+            for seed in cfg['train_seeds']:
+                for arm in ['A','B','C']:
+                    assert sorted(r['update'] for r in updates if (r['seed'],r['arm'])==(seed,arm))==list(range(1,1001))
+            assert all(cell['n']==8 for cell in summary_rows)
         report=dict(worker_status=state['status'],completed_rows=len(rows),actual_saved_graphs=len(graphs),planned_actual_graphs=96,
             planned_evaluation_rows=144,updates=len(updates),planned_updates=9000,complete_paired_update_triples=complete_update_triples,
             independent_all_saved_graph_counts_degrees_components_triangles_closure=True,independent_all_recorded_W1_joint_TV=True,
@@ -191,4 +208,5 @@ def main(run):
     finally:save(out/'analysis_status.json',dict(status=status,reason=reason,seconds=time.monotonic()-start,original_cutoff_epoch=cutoff,budget_reset=False))
 
 if __name__=='__main__':
-    p=argparse.ArgumentParser();p.add_argument('--run',required=True);a=p.parse_args();raise SystemExit(main(a.run))
+    p=argparse.ArgumentParser();p.add_argument('--run',required=True);p.add_argument('--resume-incomplete-audit',action='store_true')
+    a=p.parse_args();raise SystemExit(main(a.run,a.resume_incomplete_audit))

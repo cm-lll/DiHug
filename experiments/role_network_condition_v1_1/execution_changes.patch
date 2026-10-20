@@ -1,0 +1,552 @@
+diff --git a/experiments/role_network_condition_v1_1/DESIGN.md b/experiments/role_network_condition_v1_1/DESIGN.md
+index 2ebcf90..95c145a 100644
+--- a/experiments/role_network_condition_v1_1/DESIGN.md
++++ b/experiments/role_network_condition_v1_1/DESIGN.md
+@@ -1,4 +1,38 @@
+-# Anonymous joint-role network conditioning v1.1 — review before execution
++# Anonymous joint-role network conditioning v1.1 — reviewed single-panel execution
++
++## Completed execution receipt (2026-10-20)
++
++The one authorized CPU panel completed9000 effective updates,96 actual T64
++chains and144 evaluation rows; A/B outputs were reused across conditions.
++All9 models used final1000-update weights, never a best-CE checkpoint. There
++were no scientific retries, failed requests, configuration changes or new
++output windows. Worker wall3190.15s, launcher wall3192.96s, CPU3189.96s,
++peak RSS912.27MiB. Independent evaluation plus receipt completed3461.03s
++after original activation, within the single5400s budget.
++
++Engineering audit passed for all96 saved graphs and144 rows; independent
++W1 discrepancy at most1.78e-15,12 fixed graphs independently enumerated for
++simple paths. One postprocessing Boolean-quantile error was preserved and
++fixed by numeric casting; audit resumed in the SAME directory and budget.
++No model or sample was rerun. Raw data and all scientific settings stayed
++unchanged. Full60 tests also passed before activation.
++
++Scientific outcome: all24 paired C outputs were exactly the same final graph
++under balanced/extreme target switching. Every arm produced zero Genre
++nodes of degree>=12; the extreme target requires one. Thus this budget did
++not demonstrate useful conditional tail control. C has some average edge/
++closure improvements relative to B, but its extreme-Genre W1 worsens in all
++three training seeds. Initial gradient connectivity and nonzero probabilities
++do not establish learned role control. These are small-graph development
++results, not real-data or unseen-condition generalization evidence.
++
++## Historical v1.1 review-phase notice (superseded by the execution receipt)
++
++2026-10-20 execution authorization: static review found no blocker. The user
++now authorizes ONE complete frozen local panel within the existing cumulative
++5400-second maximum, after all60 tests pass again. This amendment changes
++documentation only. Old cost rejection and authorization requests below are
++explicitly historical; they do not override the reviewed90-minute limit.
+ 
+ 2026-10-20 update: user authorizes a single cumulative maximum of5400 seconds
+ for the complete LOCAL small-graph learning/sampling/evaluation panel, AFTER
+@@ -61,13 +95,20 @@ Degree statistics cost O(E+NR). Degree MLP costs O(N(2R+K)h+NhH). Role encoders
+ 
+ Frozen full plan: 3 paired training seeds, 1000 updates each A/B/C, validation0/250/500/1000, T64/four blocks, final8 paired sampling seeds/condition. A/B outputs are reused across target evaluations:96 actual chains,144 evaluation rows, not144 independent graphs. Seeds/config are fully recorded in package/role_condition/config.json. G>=12 is the predeclared high-degree threshold. Evaluation uses actual binary graphs: per-family edges, typed relation W1 and joint TV, tails, components/LCC/isolates, typed triangles, DMA path and unique-pair closure, exact short paths. Different invariant signatures only prove a lower bound on topology counts; equal signatures do not establish isomorphism. Training-seed-level summaries precede paired comparisons. No new quality threshold/composite score is added.
+ 
+-## Cost gate outcome and evidence boundary
++## Historical v1 cost gate outcome and evidence boundary (30-minute version)
++
++HISTORICAL RECORD ONLY: this section describes the earlier1800-second run,
++not a failed5400-second run. Keep its original receipts unchanged.
+ 
+ Full original width/depth was preserved. Disposable engineering probe:8 updates/arm,8 forwards/arm,8 complete four-block dense-support reverse steps/arm, one fixed validation panel/arm. This is24 engineering updates, not the requested scientific learning panel or complete chains. Forecast includes training9000, sampling96*64 complete steps,36 validations, safety1.25 and20s overhead. Gate failed before scientific training. No shrink, seed deletion, quality-driven stopping or extension occurred.
+ 
+ The delivered input branch and engineering invariances are tested. No trained condition-control effectiveness, actual generated tail improvement, convergence, cross-condition generalization or topology-diversity improvement is claimed. Original T1000/20 compatibility is one bounded reverse step per arm, not a complete chain. No GPU/BW, IMDB/PubMed runs, private weights, guidance or repairs were used.
+ 
+-## Recommended next decision (not executed)
++## Historical v1 next-decision request (superseded; not current instructions)
++
++HISTORICAL RECORD ONLY: the following request for approximately80 minutes
++has already been superseded by the user's reviewed90-minute authorization.
++Do not ask for it again or interpret it as a new execution gate.
+ 
+ 1. Decide whether to authorize approximately80 minutes of single-thread CPU time for the frozen plan, or a separately approved device cost probe. Main cost is full unchanged backbone, not the~1.55ms role attention.
+ 2. Run that frozen paired plan before changing design: discriminate actual tail response, role averaging and ordinary-condition/closure tradeoffs from interface capability.
+diff --git a/experiments/role_network_condition_v1_1/analyse_panel.py b/experiments/role_network_condition_v1_1/analyse_panel.py
+new file mode 100644
+index 0000000..5972542
+--- /dev/null
++++ b/experiments/role_network_condition_v1_1/analyse_panel.py
+@@ -0,0 +1,212 @@
++"""Read-only independent CPU audit/plots of the one frozen panel. No model calls."""
++import argparse,csv,hashlib,json,math,time
++from pathlib import Path
++from collections import Counter,defaultdict
++import numpy as np
++import networkx as nx
++from scipy.stats import wasserstein_distance
++
++def load(p):return json.loads(p.read_text())
++def save(p,obj):p.write_text(json.dumps(obj,indent=2,allow_nan=False))
++def digest(p):return hashlib.sha256(p.read_bytes()).hexdigest()
++def avg(x):return float(np.mean(x)) if len(x) else None
++
++def independent(types,edges,schema):
++    n=len(types);g=nx.Graph();g.add_nodes_from(range(n));g.add_edges_from(map(tuple,edges))
++    assert len(g.edges)==len(edges) and not list(nx.selfloop_edges(g))
++    lookup={tuple(pair):i for i,pair in enumerate(schema)};d=np.zeros((n,len(schema)),dtype=int);counts=np.zeros(len(schema),int)
++    for u,v in edges:
++        assert 0<=u<v<n
++        family=lookup[tuple(sorted((int(types[u]),int(types[v]))))];counts[family]+=1;d[u,family]+=1;d[v,family]+=1
++    triangles=sum(nx.triangles(g).values())//3
++    path_num=path_den=0;pairs=set();closed=set()
++    for m in np.flatnonzero(types==2):
++        for u in [v for v in g[m] if types[v]==0]:
++            for v in [v for v in g[m] if types[v]==1]:
++                path_den+=1;pairs.add((u,v))
++                if g.has_edge(u,v):path_num+=1;closed.add((u,v))
++    return dict(graph=g,degree=d,family_edges=counts.tolist(),components=sorted(map(len,nx.connected_components(g)),reverse=True),
++        triangles=int(triangles),isolates=len(list(nx.isolates(g))),path_num=path_num,path_den=path_den,
++        pair_num=len(closed),pair_den=len(pairs),joint={t:Counter(map(tuple,d[types==t])) for t in range(4)})
++
++def mp_independent(types,edges,schema):
++    # Independent depth-first ACTUAL simple paths, unlike production category-product counts.
++    adj=[{} for _ in types];lookup={tuple(p):r for r,p in enumerate(schema)}
++    for u,v in edges:
++        r=lookup[tuple(sorted((int(types[u]),int(types[v]))))];adj[u][int(v)]=r;adj[v][int(u)]=r
++    result=[Counter(),Counter(),Counter()]
++    def visit(seq,pattern):
++        if len(seq)>1 and seq[0]<seq[-1]:
++            result[len(seq)-2][','.join(map(str,min(pattern,pattern[::-1])))]+=1
++        if len(seq)==4:return
++        for v,r in adj[seq[-1]].items():
++            if v not in seq:visit(seq+[v],pattern+(r,int(types[v])))
++    for u in range(len(types)):visit([u],(int(types[u]),))
++    return result
++
++def main(run,resume_incomplete_audit=False):
++    start=time.monotonic();run=Path(run).resolve();ledger=load(run.with_name(run.name+'.budget.json'))
++    cutoff=ledger['hard_cutoff_epoch'];out=run/'analysis'
++    if resume_incomplete_audit:
++        previous=load(out/'analysis_status.json')
++        assert previous['status']=='incomplete' and previous['original_cutoff_epoch']==cutoff
++        failure=out/'attempt_01_failure.json'
++        with failure.open('x') as f:f.write(json.dumps(previous,indent=2))
++    else:out.mkdir(exist_ok=False)
++    status='incomplete';reason=None
++    def check():
++        if time.time()>=cutoff or (run/'STOP').exists():raise TimeoutError('original cumulative budget/STOP; never renewed')
++    try:
++        check();cfg=load(run/'resolved_config.json');panel=load(run/'panel.json');schema=panel['schema'];types=np.asarray(panel['graphs'][0]['types'])
++        refs={c:independent(types,np.asarray(next(x for x in panel['graphs'] if x['condition']==c)['edges']),schema) for c in ['balanced','extreme']}
++        state=load(run/'summary.json');rows=[];numeric=[];graphs={};partial=[]
++        for seed in cfg['train_seeds']:
++            p=run/('seed'+str(seed))/'generation.json'
++            if p.exists():rows.extend(load(p))
++            else:partial.append(seed)
++        # Recompute every saved binary graph, including graphs whose enclosing seed was interrupted.
++        for p in sorted(run.glob('seed*/*.npz')):
++            check();data=np.load(p,allow_pickle=False);assert np.array_equal(data['types'],types) and np.array_equal(data['schema'],schema)
++            edges=np.asarray(data['edges']);ind=independent(types,edges,schema)
++            rel=np.asarray([schema.index(sorted([int(types[u]),int(types[v])]))+1 for u,v in edges]);assert np.array_equal(data['relations'],rel)
++            graphs[str(p.relative_to(run))]=ind
++            for r,count in enumerate(panel['graphs'][0]['family_counts']):
++                if count==0:assert ind['family_edges'][r]==0
++        mp_audited=0;max_w1_error=0.;row_errors=[];summary_rows=[]
++        for row in rows:
++            check();seed,arm,condition,ss=[row[k] for k in ['seed','arm','condition','sampling_seed']]
++            stored_condition=condition if arm=='C' else 'balanced';name=f'seed{seed}/{arm}_{stored_condition}_{ss}.npz'
++            ind=graphs[name];g=ind['graph'];d=ind['degree'];ref=refs[condition];m=row['metrics']
++            payload=np.load(run/name,allow_pickle=False)
++            raw_binding=hashlib.sha256(json.dumps(dict(types=types.tolist(),edges=payload['edges'].tolist()),sort_keys=True,allow_nan=False).encode()).hexdigest()
++            assert raw_binding==row['raw_graph_sha256'],'raw graph/request binding mismatch'
++            assert ind['family_edges']==m['family_edges'] and sum(ind['family_edges'])==m['edges']
++            assert ind['components']==m['component_sizes'] and ind['isolates']==m['isolates'] and ind['triangles']==m['triangles']
++            closure=m['imdb_closure'];assert (ind['path_num'],ind['path_den'],ind['pair_num'],ind['pair_den'])==(closure['path_numerator'],closure['path_denominator'],closure['unique_pair_numerator'],closure['unique_pair_denominator'])
++            distances={};jtv={}
++            for t,typ in enumerate(panel['type_names']):
++                ix=types==t;distances[typ]=[float(wasserstein_distance(d[ix,r],ref['degree'][ix,r])) for r in range(len(schema))]
++                for a,b in zip(distances[typ],row['comparison']['typed_relation_degree_W1'][typ]):max_w1_error=max(max_w1_error,abs(a-b));assert abs(a-b)<1e-10
++                ra,rb=ind['joint'][t],ref['joint'][t];n=int(ix.sum());jtv[typ]=.5*sum(abs(ra[v]-rb[v])/n for v in ra.keys()|rb.keys())
++                assert abs(jtv[typ]-row['comparison']['joint_relation_degree_TV'][typ])<1e-12
++            # Fixed first sampling ID, every actual model/condition; avoid duplicated A/B evaluations.
++            if ss==cfg['sampling_seeds'][0] and (arm=='C' or condition=='balanced'):
++                data=np.load(run/name,allow_pickle=False);counts=mp_independent(types,data['edges'],schema)
++                assert [dict(c) for c in counts]==[x['counts'] for x in m['mp']];mp_audited+=1
++            gd=d[types==3,8];high=int((gd>=cfg['G_high_degree_threshold']).sum());assert high==row['G_high_ge12']
++            item=dict(seed=seed,arm=arm,condition=condition,sampling_seed=ss,raw_path=name,
++                edges=m['edges'],family_edges=m['family_edges'],family_abs_error=np.abs(np.array(ind['family_edges'])-ref['family_edges']).tolist(),
++                typed_relation_W1=distances,joint_TV=jtv,G_W1=distances['Genre'][8],G_joint_TV=jtv['Genre'],G_degrees=gd.tolist(),
++                G_max=int(gd.max()),G_high_ge12=high,multiple_hubs=high>=2,all_six_hubs=high==6,
++                G_low_le1=int((gd<=1).sum()),G_zero=int((gd==0).sum()),
++                connected=nx.is_connected(g),components=len(ind['components']),LCC=ind['components'][0],isolates=ind['isolates'],
++                triangles=ind['triangles'],path_closed=ind['path_num'],path_total=ind['path_den'],path_closure=ind['path_num']/ind['path_den'] if ind['path_den'] else None,
++                pair_closed=ind['pair_num'],pair_total=ind['pair_den'],pair_closure=ind['pair_num']/ind['pair_den'] if ind['pair_den'] else None,
++                topology_lower_bound_key=row['topology_invariant'],graph_sha256=row['raw_graph_sha256'])
++            numeric.append(item)
++        updates=[json.loads(s) for s in (run/'updates.jsonl').read_text().splitlines()] if (run/'updates.jsonl').exists() else []
++        paired=defaultdict(dict)
++        for row in updates:paired[(row['seed'],row['update'])][row['arm']]=row
++        complete_update_triples=0
++        for key,arms in paired.items():
++            if len(arms)==3:
++                assert len({x['input_sha256'] for x in arms.values()})==1;complete_update_triples+=1
++        validations=[]
++        for p in sorted(run.glob('seed*/*validation_*.json')):
++            v=load(p);v['positive_ce']=sum(sum(r['ce_sum_by_family_label'][j][1] for j in range(len(schema))) for r in v['rows'])/sum(sum(r['counts_by_family_label'][j][1] for j in range(len(schema))) for r in v['rows'])
++            v['negative_ce']=sum(sum(r['ce_sum_by_family_label'][j][0] for j in range(len(schema))) for r in v['rows'])/sum(sum(r['counts_by_family_label'][j][0] for j in range(len(schema))) for r in v['rows']);validations.append(v)
++        fields=['G_W1','G_joint_TV','G_max','G_high_ge12','multiple_hubs','G_low_le1','G_zero','edges','connected','components','LCC','isolates','triangles','path_closure','pair_closure']
++        for seed in cfg['train_seeds']:
++            for condition in ['balanced','extreme']:
++                for arm in ['A','B','C']:
++                    selected=[r for r in numeric if (r['seed'],r['condition'],r['arm'])==(seed,condition,arm)]
++                    entry=dict(seed=seed,condition=condition,arm=arm,n=len(selected),planned_n=8,
++                        metrics={f:dict(mean=avg([float(r[f]) for r in selected if r[f] is not None]),median=float(np.median([float(r[f]) for r in selected if r[f] is not None])) if selected and any(r[f] is not None for r in selected) else None,p90=float(np.quantile([float(r[f]) for r in selected if r[f] is not None],.9)) if selected and any(r[f] is not None for r in selected) else None,NA=sum(r[f] is None for r in selected)) for f in fields},
++                        provably_distinct_topologies_lower_bound=len({r['topology_lower_bound_key'] for r in selected}))
++                    if selected:
++                        entry['mean_family_edges']=np.mean([r['family_edges'] for r in selected],axis=0).tolist()
++                        entry['mean_family_absolute_error']=np.mean([r['family_abs_error'] for r in selected],axis=0).tolist()
++                        entry['joint_TV_by_type']={t:avg([r['joint_TV'][t] for r in selected]) for t in panel['type_names']}
++                        entry['W1_by_type']={t:np.mean([r['typed_relation_W1'][t] for r in selected],axis=0).tolist() for t in panel['type_names']}
++                    summary_rows.append(entry)
++        macro=[];contrasts=[]
++        for condition in ['balanced','extreme']:
++            for arm in ['A','B','C']:
++                cells=[x for x in summary_rows if x['condition']==condition and x['arm']==arm and x['n']==8]
++                macro.append(dict(condition=condition,arm=arm,training_seeds=len(cells),means={f:avg([x['metrics'][f]['mean'] for x in cells if x['metrics'][f]['mean'] is not None]) for f in fields},
++                    mean_family_edges=np.mean([x['mean_family_edges'] for x in cells],axis=0).tolist() if cells else None,
++                    joint_TV_by_type={t:avg([x['joint_TV_by_type'][t] for x in cells]) for t in panel['type_names']}))
++            for left,right in [('B','A'),('C','B'),('C','A')]:
++                for f in fields:
++                    diffs=[]
++                    for seed in cfg['train_seeds']:
++                        a=next(x for x in summary_rows if (x['seed'],x['condition'],x['arm'])==(seed,condition,left));b=next(x for x in summary_rows if (x['seed'],x['condition'],x['arm'])==(seed,condition,right))
++                        if a['n']==b['n']==8 and a['metrics'][f]['mean'] is not None and b['metrics'][f]['mean'] is not None:diffs.append(dict(seed=seed,difference=a['metrics'][f]['mean']-b['metrics'][f]['mean']))
++                    contrasts.append(dict(condition=condition,contrast=left+'-'+right,metric=f,by_training_seed=diffs,mean_difference=avg([d['difference'] for d in diffs]),scope='descriptive paired training-seed means; n=3, no independent-training inference from8 draws'))
++        check();save(out/'raw_graph_metrics.json',numeric);save(out/'seed_summary.json',summary_rows);save(out/'macro_summary.json',macro);save(out/'paired_differences.json',contrasts);save(out/'validation_curve.json',validations)
++        conditional=[]
++        for seed in cfg['train_seeds']:
++            paired_graphs=[]
++            for ss in cfg['sampling_seeds']:
++                a=next((r for r in rows if (r['seed'],r['arm'],r['condition'],r['sampling_seed'])==(seed,'C','balanced',ss)),None)
++                b=next((r for r in rows if (r['seed'],r['arm'],r['condition'],r['sampling_seed'])==(seed,'C','extreme',ss)),None)
++                if a and b:
++                    assert a['initial_state_sha256']==b['initial_state_sha256']
++                    aa=np.load(run/f'seed{seed}/C_balanced_{ss}.npz',allow_pickle=False)['edges'];bb=np.load(run/f'seed{seed}/C_extreme_{ss}.npz',allow_pickle=False)['edges']
++                    distance=len(set(map(tuple,aa))^set(map(tuple,bb)))
++                    paired_graphs.append(dict(sampling_seed=ss,same_initial_noise=True,labeled_edge_symmetric_difference=distance,
++                        balanced_G_high=a['G_high_ge12'],extreme_G_high=b['G_high_ge12'],balanced_G_max=a['G_max'],extreme_G_max=b['G_max']))
++            lp=run/f'seed{seed}/actual_condition_response.json'
++            conditional.append(dict(seed=seed,actual_paired_graphs=paired_graphs,local_fixed_input_response=load(lp) if lp.exists() else None,
++                caution='labeled graph differences are not anonymous topology classes; nonzero p0 response is not quality improvement'))
++        save(out/'conditional_response.json',conditional)
++        with (out/'training_curve.csv').open('w',newline='') as f:
++            writer=csv.DictWriter(f,fieldnames=list(updates[0]) if updates else ['no_updates']);writer.writeheader();writer.writerows(updates)
++        import matplotlib;matplotlib.use('Agg');import matplotlib.pyplot as plt
++        colors={'A':'#4266a9','B':'#d18728','C':'#2b8b64'};fig,axes=plt.subplots(3,2,figsize=(12,10))
++        for i,seed in enumerate(cfg['train_seeds']):
++            for arm in ['A','B','C']:
++                u=[r for r in updates if r['seed']==seed and r['arm']==arm]
++                if u:
++                    y=np.array([r['loss'] for r in u]);x=np.array([r['update'] for r in u]);axes[i,0].plot(x,y,color=colors[arm],alpha=.15,linewidth=.5)
++                    if len(y)>=50:axes[i,0].plot(x[49:],np.convolve(y,np.ones(50)/50,'valid'),color=colors[arm],label=arm)
++                v=sorted([r for r in validations if r['seed']==seed and r['arm']==arm],key=lambda r:r['update'])
++                axes[i,1].plot([r['update'] for r in v],[r['mean_ce'] for r in v],'-o',color=colors[arm],label=arm)
++            axes[i,0].set_title(f'Seed {seed}: train CE,50-update moving mean');axes[i,1].set_title('Fixed full-panel validation CE')
++            for ax in axes[i]:ax.set_xlabel('Effective update');ax.set_ylabel('CE');ax.legend();ax.grid(alpha=.2)
++        check();fig.tight_layout();fig.savefig(out/'learning_curves.png',dpi=150);fig.savefig(out/'learning_curves.svg');plt.close(fig)
++        fig,axes=plt.subplots(1,2,figsize=(11,4))
++        for ax,condition in zip(axes,['balanced','extreme']):
++            target=[0]*19;target[4]=1 if condition=='balanced' else 0
++            if condition=='extreme':target[1]=4/6;target[2]=1/6;target[18]=1/6
++            ax.plot(range(19),target,'k--',label='Target')
++            for arm in ['A','B','C']:
++                pmfs=[]
++                for seed in cfg['train_seeds']:
++                    rs=[r for r in numeric if (r['seed'],r['arm'],r['condition'])==(seed,arm,condition)]
++                    if len(rs)==8:pmfs.append(np.mean([np.bincount(r['G_degrees'],minlength=19)/6 for r in rs],axis=0))
++                if pmfs:ax.plot(range(19),np.mean(pmfs,axis=0),'-o',markersize=3,label=arm,color=colors[arm])
++            ax.set_title(condition+' Genre: actual sampled degree PMF');ax.set_xlabel('Degree');ax.set_ylabel('Probability');ax.legend();ax.grid(alpha=.2)
++        check();fig.tight_layout();fig.savefig(out/'sampled_Genre_degrees.png',dpi=150);fig.savefig(out/'sampled_Genre_degrees.svg');plt.close(fig)
++        graph_hashes={name:digest(run/name) for name in graphs};save(out/'raw_graph_hashes.json',graph_hashes)
++        save(out/'weight_hashes.json',{str(p.relative_to(run)):digest(p) for p in run.glob('seed*/*.pt')})
++        assert len(numeric)==len(rows)
++        if state['status']=='completed':
++            assert len(updates)==9000 and complete_update_triples==3000
++            assert len(graphs)==96 and len(rows)==144 and len(validations)==36
++            for seed in cfg['train_seeds']:
++                for arm in ['A','B','C']:
++                    assert sorted(r['update'] for r in updates if (r['seed'],r['arm'])==(seed,arm))==list(range(1,1001))
++            assert all(cell['n']==8 for cell in summary_rows)
++        report=dict(worker_status=state['status'],completed_rows=len(rows),actual_saved_graphs=len(graphs),planned_actual_graphs=96,
++            planned_evaluation_rows=144,updates=len(updates),planned_updates=9000,complete_paired_update_triples=complete_update_triples,
++            independent_all_saved_graph_counts_degrees_components_triangles_closure=True,independent_all_recorded_W1_joint_TV=True,
++            independently_enumerated_MP_graphs=mp_audited,max_W1_discrepancy=max_w1_error,incomplete_seed_records=partial,
++            scientific_inputs_unchanged=True,sampling_requests_independent_training_seeds=False,new_models_or_samples=0)
++        save(out/'audit.json',report);status='completed';return 0
++    except BaseException as e:reason=repr(e);raise
++    finally:save(out/'analysis_status.json',dict(status=status,reason=reason,seconds=time.monotonic()-start,original_cutoff_epoch=cutoff,budget_reset=False))
++
++if __name__=='__main__':
++    p=argparse.ArgumentParser();p.add_argument('--run',required=True);p.add_argument('--resume-incomplete-audit',action='store_true')
++    a=p.parse_args();raise SystemExit(main(a.run,a.resume_incomplete_audit))
+diff --git a/experiments/role_network_condition_v1_1/bundle_panel.py b/experiments/role_network_condition_v1_1/bundle_panel.py
+new file mode 100644
+index 0000000..ce0bb52
+--- /dev/null
++++ b/experiments/role_network_condition_v1_1/bundle_panel.py
+@@ -0,0 +1,57 @@
++"""Publishable synthetic-panel evidence and per-seed fresh toy weights only."""
++import argparse,hashlib,json,zipfile
++from pathlib import Path
++
++def digest(p):
++    h=hashlib.sha256()
++    with p.open('rb') as f:
++        for chunk in iter(lambda:f.read(1048576),b''):h.update(chunk)
++    return h.hexdigest()
++
++def archive(path,entries,compress=True):
++    with zipfile.ZipFile(path,'w',compression=zipfile.ZIP_DEFLATED if compress else zipfile.ZIP_STORED,compresslevel=3 if compress else None) as z:
++        for source,name in entries:
++            info=zipfile.ZipInfo(name,(2026,10,20,0,0,0));info.external_attr=0o100644<<16
++            info.compress_type=zipfile.ZIP_DEFLATED if compress else zipfile.ZIP_STORED
++            with z.open(info,'w') as target,source.open('rb') as f:
++                for chunk in iter(lambda:f.read(1048576),b''):target.write(chunk)
++
++def main(run,preflight,dest):
++    run=Path(run).resolve();preflight=Path(preflight).resolve();dest=Path(dest).resolve();dest.mkdir(exist_ok=False)
++    cfg=json.loads((run/'resolved_config.json').read_text());panel=json.loads((run/'panel.json').read_text())
++    assert panel['nodes']==34 and panel['type_counts']==[4,6,18,6] and len(panel['graphs'])==12
++    assert cfg['train_seeds']==[2026102011,2026102012,2026102013] and cfg['updates']==1000
++    # These are newly trained SYNTHETIC small-graph weights; no private reference/model files are loaded.
++    entries=[];hashes={};models=[]
++    for p in sorted(run.rglob('*')):
++        if p.is_file():
++            name='run/'+str(p.relative_to(run));hashes[name]=digest(p)
++            if p.suffix!='.pt':entries.append((p,name))
++    for p in sorted(preflight.rglob('*')):
++        if p.is_file():
++            name='preflight/'+str(p.relative_to(preflight));hashes[name]=digest(p);entries.append((p,name))
++    for suffix in ['.budget.json','.console.log']:
++        p=run.with_name(run.name+suffix);hashes[p.name]=digest(p);entries.append((p,p.name))
++    (dest/'input_output_hashes.json').write_text(json.dumps(hashes,sort_keys=True,indent=2))
++    entries.append((dest/'input_output_hashes.json','input_output_hashes.json'))
++    small=dest/'role_condition_panel_results.zip';archive(small,entries)
++    archives=[small]
++    for seed in cfg['train_seeds']:
++        directory=run/('seed'+str(seed));files=sorted(p for p in directory.rglob('*') if p.is_file()) if directory.exists() else []
++        if not files:continue
++        # Store without expensive recompression; each seed package remains below GitHub100MB.
++        path=dest/('synthetic_seed_'+str(seed)+'.zip');archive(path,[(p,str(p.relative_to(run))) for p in files],compress=False)
++        assert path.stat().st_size<100000000,'per-seed archive exceeds public GitHub file limit; do not split/change scientific results'
++        archives.append(path)
++        models.extend(str(p.relative_to(run)) for p in files if p.suffix=='.pt')
++    manifest=dict(run_summary=json.loads((run/'summary.json').read_text()),controller=json.loads((run/'controller.json').read_text()),
++        model_scope='fresh synthetic34-node training only; no private/big-graph/notebook weights',
++        weights=models,archives={p.name:dict(sha256=digest(p),bytes=p.stat().st_size) for p in archives},
++        no_new_training_or_sampling=True,all_planned_training_seeds=cfg['train_seeds'])
++    (dest/'release.json').write_text(json.dumps(manifest,indent=2))
++    (dest/'SHA256SUMS').write_text(''.join(digest(p)+'  '+p.name+'\n' for p in archives+[dest/'input_output_hashes.json',dest/'release.json']))
++    print(json.dumps(manifest,indent=2))
++
++if __name__=='__main__':
++    p=argparse.ArgumentParser();p.add_argument('--run',required=True);p.add_argument('--preflight',required=True);p.add_argument('--output',required=True)
++    args=p.parse_args();main(args.run,args.preflight,args.output)
+diff --git a/experiments/role_network_condition_v1_1/panel_execution_binding.json b/experiments/role_network_condition_v1_1/panel_execution_binding.json
+new file mode 100644
+index 0000000..0ee7d1c
+--- /dev/null
++++ b/experiments/role_network_condition_v1_1/panel_execution_binding.json
+@@ -0,0 +1,197 @@
++{
++  "execution": {
++    "execution_source_commit": "88873960e9874ba550887bde5fc236b8fd7eedca",
++    "reviewed_commit": "bb42a5dec158e0da533e0c01f45ad74bc502a045",
++    "source_status_clean": true,
++    "package_manifest_sha256": "75f558649557f8eb00a940b725eda8defe4012fb566cd96f6c997efad466bb4b",
++    "files": {
++      "source_revision.json": "76f27f457cfba5489bd0536632d8dbc950b339a11d85ce0299db210611fe0b4e",
++      "README.md": "9f33efaf74dc3d4d52603f3841e28ab9fe16bf71e893fe80fed80e84a95caf7e",
++      "manifest.json": "75f558649557f8eb00a940b725eda8defe4012fb566cd96f6c997efad466bb4b",
++      "run.py": "c49576813965b87a3c47814a32dad5dbd8852ab1c2cc82b0c3ea4946f08814ea",
++      "role_condition/panel.py": "31cf50fa21e890a09ce5519adc4b8ef9081c10c532ab4ed3d561a707abd9bd84",
++      "role_condition/metrics.py": "c0f52c195ab8320a841e682837f3cab4ac55c0126b6c5f779f8986a123cbbe6a",
++      "role_condition/experiment.py": "6270de09f4f2934ad6bf989637fa04ecbda09d0677e49afd7b68f52fd300818d",
++      "role_condition/config.json": "a4bb7dd23bd026c8f8fabc8af804e5b83054f0fcf23a32299658059e2924e657",
++      "role_condition/previous_config.json": "bf785c1ce98a48cbc8d3e7d2de97acc7340434e0302c1281f76f5bc18634daf6",
++      "role_condition/__init__.py": "c5a2c3695f8702d7dfcef50fd6e50c8c874126c0456b1c8f8256e46912d6364e",
++      "role_condition/model.py": "7b8458421fc9ceac69b4fc8b2b892afeb0c640e29b95c0e0d960bb87e0f48838",
++      "hsgd/fusion_checks.py": "5f91387075f4d8f8ce9794113cac8350288bf785c40db146d84d69e97cf7fda0",
++      "hsgd/runtime.py": "87cdb9c083516fa693acf6877680f667221f1f78e166bb1d967dd36b412c7046",
++      "hsgd/computational.py": "5af3e6ee29a9a7cb0b0df33a9b4ac885ff7f448fc42c5700538d1445546f88a5",
++      "hsgd/learning_mode.py": "05a3b3991f068a9a1ae0f4c06494cc7c59c5db215d0d7a7dc4a5a7b1572ca576",
++      "hsgd/common_neighbor.py": "d48d75193e25879bfbfdd6e190f45ee3db7d7ef9a23d3ad0da917325bf6f01c8",
++      "hsgd/holders.py": "8ae8714419a2c20d94ccdfa388aaefb409b5b8facea3aac0d6585b6cb0bfde07",
++      "hsgd/kernel.py": "e398606416f2dd6b58c94c67c423bd81c0f04b938b3144989f6044b69a416c74",
++      "hsgd/__init__.py": "a4737e1651429fcffe97f6d5c2b81c056b7caca1b87e880ae88e8152c34abaa2",
++      "hsgd/noising.py": "c8c4586ec5e9dd55ba6bb50c68237130b1cf6af0cb6def5374325906fa7ebd08",
++      "hsgd/fusion_preflight.py": "91fe18b78b4a33b22c5a550c073f8704d7b01af0105cab8b6542135a01202f6c",
++      "hsgd/losses.py": "9dc175d9fa591221bb3c7118151f86b86ab679447e509483f611b69a4a56c8b6",
++      "hsgd/slots.py": "f69709a6c63924e5d5875dbd71a3ed038fdbabe12c76b40fd8cbdbe48a8e5eb6",
++      "hsgd/model.py": "12673bc9ff8f39459d086d4bb2d0303e1a1e47130b99e126439ce34a11e5f14b",
++      "tests/test_fusion.py": "c381c990a573d2cfadbd753f28575d683ce52f7835397d825901870b52906178",
++      "tests/test_contract.py": "e3afa1720e8bb027c2edabbea81ba1abf099efa90db5e1c7fdaf69c9ac2940e4",
++      "tests/test_review_checks.py": "5c6ef43b6bee7afd2d0f955fc5ac752f68121c49c4d530986f0b97b798d9b4dd",
++      "tests/test_role_condition.py": "6ce1192a8c677b2259da502cfc32936e450023e2d5103f30816ee396e3972865",
++      "tests/test_loss_response.py": "2ee144d7fcc3957baf138fffd734ed66978e41c76c4e3180c72fd9770a92a176",
++      "role_degree/role_sampling.py": "9121dbc579b86b007d7abdd6c9738dd076f9f89a4c080ab5b27b470577d35991",
++      "role_degree/role_guidance.py": "c19143afbf6cc445cc1b8ed494849b42db18506e62c6aa0b22ed65fe86c538df",
++      "role_degree/implementation_contract.json": "3738d28c93e081eae9312ea53787772f72a56f64d1f7eebf52c716a32c0d49f6",
++      "role_degree/role_statistics.py": "e033e88f641e16ebd1ac6804339963bf47a88395dfd9bb78b8e6fb953afa2a62",
++      "hsgd/vendor/LICENSE": "59ffc4f084981aec77968bbbe3feb815f1fca429b04a96a318f9f260c640fcf3",
++      "hsgd/vendor/transconv_layer.py": "d8b953639ecd6e971cd1dfb47f74fea1c69db2768978bcfb67403599919c18a2",
++      "hsgd/vendor/conv_transformer_model.py": "1c56ee7795b0172cc8aa2ff7f6ee0b34bf917d3a2338bfc8fbe7460134279818",
++      "hsgd/vendor/layers.py": "5a07827103fc201e601a182798ff5fae32520ab7a557a7dfaeb9cdc3bbd6ad78",
++      "hsgd/vendor/__init__.py": "a9d1e40ec3e568dbe891006f6f0d913b5c508bc43af0fe62f31177bac0211f72",
++      "hsgd/vendor/sample_edges_utils_typed.py": "7653a2dfb4a88be7a0e4f76cdb04325e69cf927071625b22b544a87df24996dc",
++      "hsgd/bw_preflight/common.py": "c6068da392bd551977c514118ba12d092a54b43361eb2866e9d1deef932a95c9",
++      "hsgd/bw_preflight/config.json": "48f3852a99b032c263fbbea6b3360e8269e7d5b837f679834b1227a13caf25ff",
++      "hsgd/bw_preflight/__init__.py": "486d75e373229cd7c8c0f780a7943361a5244e8e1cbd99002cbc04526c362771"
++    },
++    "config_exactly_equal_reviewed": true,
++    "tests": 60,
++    "skips": 0,
++    "test_wall_seconds": 21.02,
++    "test_CPU_seconds": 21.32,
++    "test_peak_rss_mib": 805.8515625,
++    "output": "/data2/lyh/gnn_project/DiHug/results/role_condition_full_panel_20261020_run01",
++    "no_retry": true,
++    "device": "CPU",
++    "command": [
++      "/data2/lyh/miniconda3/envs/dihug/bin/python",
++      "-u",
++      "/tmp/dihug-role-condition-panel-20261020/experiments/role_network_condition_v1_1/package/run.py",
++      "--output",
++      "/data2/lyh/gnn_project/DiHug/results/role_condition_full_panel_20261020_run01"
++    ],
++    "threads": 1,
++    "no_notebook_BW": true
++  },
++  "environment": {
++    "python": "3.9.23 | packaged by conda-forge | (main, Jun  4 2025, 17:57:12) \n[GCC 13.3.0]",
++    "python_version": "3.9.23",
++    "executable": "/data2/lyh/miniconda3/envs/dihug/bin/python",
++    "system": "Linux-5.4.0-216-generic-x86_64-with-glibc2.31",
++    "machine": "x86_64",
++    "packages": {
++      "torch": "2.1.0",
++      "torch-geometric": "2.3.1",
++      "numpy": "1.26.4",
++      "scipy": "1.11.0",
++      "pytest": "7.4.4",
++      "networkx": "2.8.7"
++    },
++    "hip": null,
++    "cuda": "12.1",
++    "requested_device": "cpu",
++    "torch_runtime_version": "2.1.0",
++    "float32_matmul_precision": "highest",
++    "matmul_allow_tf32": false,
++    "deterministic_algorithms": false,
++    "deterministic_warn_only": false,
++    "torch_threads": 1,
++    "utc": "2026-10-20T05:22:44Z",
++    "device_name": "CPU engineering test",
++    "device_type": "CPU"
++  },
++  "budget": {
++    "activation_epoch": 1792473762.3593621,
++    "hard_cutoff_epoch": 1792479162.3593621,
++    "budget_seconds": 5400,
++    "manifest_sha256": "75f558649557f8eb00a940b725eda8defe4012fb566cd96f6c997efad466bb4b",
++    "output": "/data2/lyh/gnn_project/DiHug/results/role_condition_full_panel_20261020_run01",
++    "scope": "one whole paired panel including startup/probe/learning/sampling/evaluation/IO/cleanup",
++    "no_budget_reset": true,
++    "resume_supported": false
++  },
++  "worker": {
++    "status": "completed",
++    "reason": null,
++    "stage": "learning_and_sampling",
++    "wall_seconds": 3190.1487583974376,
++    "CPU_seconds": 3189.9619400700003,
++    "peak_rss_mib": 912.26953125,
++    "budget_seconds": 5400,
++    "computation_cap": 5272.641130203381,
++    "device": "CPU",
++    "large_graph_runs": 0,
++    "scientific_training_started": true,
++    "no_automatic_extension": true
++  },
++  "controller": {
++    "exit_code": 0,
++    "child_exit_code": 0,
++    "reason": null,
++    "wall_seconds": 3192.9599032616243,
++    "cleanup_seconds": 0.00023549795150756836,
++    "computation_cap": 5275,
++    "total_envelope_seconds": 5400,
++    "correctness_reserve_seconds": 120,
++    "budget_ledger": "/data2/lyh/gnn_project/DiHug/results/role_condition_full_panel_20261020_run01.budget.json",
++    "no_budget_reset": true,
++    "full_panel_completed": true,
++    "no_automatic_retry": true
++  },
++  "audit": {
++    "worker_status": "completed",
++    "completed_rows": 144,
++    "actual_saved_graphs": 96,
++    "planned_actual_graphs": 96,
++    "planned_evaluation_rows": 144,
++    "updates": 9000,
++    "planned_updates": 9000,
++    "complete_paired_update_triples": 3000,
++    "independent_all_saved_graph_counts_degrees_components_triangles_closure": true,
++    "independent_all_recorded_W1_joint_TV": true,
++    "independently_enumerated_MP_graphs": 12,
++    "max_W1_discrepancy": 1.7763568394002505e-15,
++    "incomplete_seed_records": [],
++    "scientific_inputs_unchanged": true,
++    "sampling_requests_independent_training_seeds": false,
++    "new_models_or_samples": 0
++  },
++  "cost": {
++    "worker_wall_seconds": 3190.1487583974376,
++    "launcher_wall_seconds": 3192.9599032616243,
++    "worker_CPU_seconds": 3189.9619400700003,
++    "peak_worker_rss_mib": 912.26953125,
++    "training_update_compute_seconds": 2076.065486865118,
++    "actual96_chain_seconds_including_per_graph_metric_IO": 989.6379977483302,
++    "fixed_validation_seconds": 80.1343384096399,
++    "audit_first_attempt_wall_seconds": 1.74,
++    "audit_fixed_wall_seconds": 7.26,
++    "audit_fixed_CPU_seconds": 7.21,
++    "GPUs_used": 0,
++    "notebook_BW_access": 0,
++    "budget_seconds": 5400,
++    "activation_epoch": 1792473762.3593621,
++    "end_evaluation_receipt_epoch": 1792477223.393814,
++    "cumulative_wall_to_receipt_seconds": 3461.0344524383545,
++    "budget_reset": false,
++    "scientific_manifest_unchanged": true,
++    "matplotlib": "3.10.8",
++    "per_arm": {
++      "A": {
++        "update_median": 0.22643236350268126,
++        "update_count": 3000,
++        "complete_chains": 24,
++        "chain_median": 10.159627436194569
++      },
++      "B": {
++        "update_median": 0.22844551969319582,
++        "update_count": 3000,
++        "complete_chains": 24,
++        "chain_median": 10.267402964178473
++      },
++      "C": {
++        "update_median": 0.23358205892145634,
++        "update_count": 3000,
++        "complete_chains": 48,
++        "chain_median": 10.408263939898461
++      }
++    }
++  },
++  "full_data_destination": "experiments/role_network_condition_panel_results_20261020",
++  "scientific_manifest_sha256": "75f558649557f8eb00a940b725eda8defe4012fb566cd96f6c997efad466bb4b",
++  "no_notebook_BW": true
++}
+\ No newline at end of file

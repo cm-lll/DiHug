@@ -1,4 +1,32 @@
-# Anonymous joint-role network conditioning v1.1 — review before execution
+# Anonymous joint-role network conditioning v1.1 — reviewed single-panel execution
+
+## Completed execution receipt (2026-10-20)
+
+The one authorized CPU panel completed9000 effective updates,96 actual T64
+chains and144 evaluation rows; A/B outputs were reused across conditions.
+All9 models used final1000-update weights, never a best-CE checkpoint. There
+were no scientific retries, failed requests, configuration changes or new
+output windows. Worker wall3190.15s, launcher wall3192.96s, CPU3189.96s,
+peak RSS912.27MiB. Independent evaluation plus receipt completed3461.03s
+after original activation, within the single5400s budget.
+
+Engineering audit passed for all96 saved graphs and144 rows; independent
+W1 discrepancy at most1.78e-15,12 fixed graphs independently enumerated for
+simple paths. One postprocessing Boolean-quantile error was preserved and
+fixed by numeric casting; audit resumed in the SAME directory and budget.
+No model or sample was rerun. Raw data and all scientific settings stayed
+unchanged. Full60 tests also passed before activation.
+
+Scientific outcome: all24 paired C outputs were exactly the same final graph
+under balanced/extreme target switching. Every arm produced zero Genre
+nodes of degree>=12; the extreme target requires one. Thus this budget did
+not demonstrate useful conditional tail control. C has some average edge/
+closure improvements relative to B, but its extreme-Genre W1 worsens in all
+three training seeds. Initial gradient connectivity and nonzero probabilities
+do not establish learned role control. These are small-graph development
+results, not real-data or unseen-condition generalization evidence.
+
+## Historical v1.1 review-phase notice (superseded by the execution receipt)
 
 2026-10-20 execution authorization: static review found no blocker. The user
 now authorizes ONE complete frozen local panel within the existing cumulative
