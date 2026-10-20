@@ -1,0 +1,107 @@
+{
+  "baseline": "b8e97cc42e6e835e0ea228a6666e3a22a200e035",
+  "training": {
+    "version": "role_specialization_v1",
+    "base_commit": "1613be145b095f238a805b6a9513561191ef3bd1",
+    "model": {
+      "layers": 8,
+      "width": 256,
+      "edge_width": 64,
+      "global_width": 128,
+      "heads": 8,
+      "ff_node": 256,
+      "ff_edge": 64,
+      "ff_global": 256,
+      "dropout": 0.1,
+      "cn_hidden": 32,
+      "joint_width": 128,
+      "max_wedges": 2000000,
+      "max_query_paths": 2000000
+    },
+    "optimizer": {
+      "type": "AdamW",
+      "lr": 0.0002,
+      "weight_decay": 1e-12,
+      "betas": [
+        0.9,
+        0.999
+      ],
+      "eps": 1e-08,
+      "amsgrad": false
+    },
+    "scheduler": null,
+    "gradient_clipping": null,
+    "class_reweighting": false,
+    "microbatch": 1,
+    "gradient_accumulation": 1,
+    "precision": "FP32 network and stable CE, float64 original probability kernel",
+    "T": 64,
+    "rounds": 4,
+    "schedule_offset": 0.008,
+    "train_seeds": [
+      2026102011,
+      2026102012,
+      2026102013
+    ],
+    "validation_seed": 2026102021,
+    "sampling_seeds": [
+      2026102031,
+      2026102032,
+      2026102033,
+      2026102034,
+      2026102035,
+      2026102036,
+      2026102037,
+      2026102038
+    ],
+    "updates": 1000,
+    "validation_updates": [
+      0,
+      250,
+      500,
+      1000
+    ],
+    "validation_times": [
+      1,
+      32,
+      64
+    ],
+    "panel_seed": 2026102001,
+    "train_graphs_per_condition": 4,
+    "validation_graphs_per_condition": 2,
+    "G_high_degree_threshold": 12,
+    "budget_seconds": 2700,
+    "correctness_reserve_seconds": 120,
+    "parent_cleanup_seconds": 5,
+    "exit_reserve_seconds": 30,
+    "cost_probe_training_updates_per_arm": 8,
+    "cost_probe_forward_repetitions": 8,
+    "cost_forecast_safety_factor": 1.15,
+    "gate": "full paired 9000 updates + 96 T64 chains + full validation/evaluation forecast must fit remaining window minus 60s; otherwise no scientific training",
+    "statistical_scope": "3 paired training seeds; 8 outputs/condition/seed, A/B outputs reused across target conditions, not independent repeats",
+    "role_branch_width": 32,
+    "normalization": "schema capacities only; no per-condition RMS or clean per-node features",
+    "role_branch": "nonlinear joint token encoder + frequency-prior cross attention; zero output projection; no quota assignment",
+    "arms": [
+      "capacity_C"
+    ],
+    "expected_updates": 3000,
+    "expected_chains": 48,
+    "baseline_arm": "late_C",
+    "method": "capacity-coupled forward-degree likelihood soft role readout"
+  },
+  "diagnostic_seeds": [
+    2026102101,
+    2026102102,
+    2026102103,
+    2026102104
+  ],
+  "times": [
+    1,
+    4,
+    8
+  ],
+  "max_seconds": 600,
+  "protocol_sha256": "e4274d415cec83922354fd641ea740758903dffa82b3a037c8bac9e0d98d16f1",
+  "probability_only": true
+}

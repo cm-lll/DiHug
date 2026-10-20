@@ -1,5 +1,16 @@
 # DiHug current research status
 
+2026-10-21 本轮独立解包361载荷哈希、入口及同98测试集合全部通过，零失败/跳过。
+ZIP SHA256 f5d4eeba795370b57263c23ebc8c9f9fb2b4651b85d50872b7eba2e3652b9e20。
+仅发布校验器曾因experiments前缀误判测试身份，已修正并重验；科学源码、ZIP和诊断不变。
+
+2026-10-21 role_error_recovery_v1完成用户授权固定权重诊断。b8e97cc容量读取三套final1000，
+原36固定验证状态逐族零差异；84普通/人工压力输入×3模型=252结果，无不可行。
+极端外围加边至度6的q保留(t1/4/8)=.8881/.9554/.9728，平衡删3边恢复=.01775/.00834/.00654。
+集中/分散对照均显错边纠正缺口，少量原核自然错误也有失败，不能说普通去噪全正常。
+无科学训练/生成/GPU，98测试零跳过，CPU墙钟69.72秒/峰值626.93MiB。
+结果仅概率鲁棒性诊断，不证明自由链失控原因或离散图/多样性改善；发布后等待审查。
+
 2026-10-20 One capacity-coupled anonymous role-readout candidate completed locally.
 Source0efd5b4, results experiments/role_specialization_v1_results and
 results/role_specialization_20261020_v1.3 original seeds×1000 new updates/48 new

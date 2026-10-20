@@ -1,0 +1,31 @@
+{
+  "baseline_commit": "b8e97cc42e6e835e0ea228a6666e3a22a200e035",
+  "diagnostic_source_commit_prefix": "afb3f53",
+  "original_tests": 89,
+  "new_tests": 9,
+  "complete_test_result": {"passed": 98, "failed": 0, "skipped": 0, "warnings": 7, "wall_seconds": 21.31},
+  "initial_targeted_test_result": {"passed": 9, "failed": 0, "skipped": 0, "wall_seconds": 3.09},
+  "diagnostic_invocations": 1,
+  "diagnostic_external_timeout_seconds": 600,
+  "diagnostic_external_kill_cleanup_allowance_seconds": 5,
+  "science_training_updates": 0,
+  "new_generated_graphs": 0,
+  "GPU": 0,
+  "remote_notebook_access": false,
+  "scientific_failures": [],
+  "engineering_incidents": [
+    {
+      "action": "ad hoc result display while independent array audit still running",
+      "error": "FileNotFoundError: summary.json had not yet been written",
+      "resolution": "waited for the existing audit; no diagnostic restart, no altered inputs"
+    },
+    {
+      "action": "documentation update",
+      "error": "apply_patch expected PROJECT_STATUS heading did not match",
+      "resolution": "read actual heading and applied corrected patch; no partial file changes"
+    }
+  ],
+  "preflight_optimizer_unit_tests": "Historical regression tests contain tiny optimizer checks. No scientific model was trained or updated.",
+  "reproduce": "OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 CUDA_VISIBLE_DEVICES= timeout --signal=TERM --kill-after=5 600 python experiments/role_error_recovery_v1/diagnostic.py --run CAPACITY_BASELINE_RUN --panel ARCHIVED_PANEL_RUN --output NEW_OUTPUT",
+  "status": "diagnostic and audit completed"
+}

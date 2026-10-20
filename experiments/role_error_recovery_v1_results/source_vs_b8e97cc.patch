@@ -1,0 +1,458 @@
+diff --git a/experiments/role_error_recovery_v1/DESIGN.md b/experiments/role_error_recovery_v1/DESIGN.md
+new file mode 100644
+index 0000000..aef96ba
+--- /dev/null
++++ b/experiments/role_error_recovery_v1/DESIGN.md
+@@ -0,0 +1,78 @@
++# Frozen-weight wrong-edge recovery diagnostic v1
++
++Baseline: b8e97cc42e6e835e0ea228a6666e3a22a200e035, capacity_C final1000,
++three seeds 2026102011/12/13. No training, sampling, degree residual, importance
++time proposal, output control, hard assignment or repair.
++
++## Frozen panel, before inference
++
++Use the four archived validation topologies (two per condition), not new graphs.
++At t=1,4,8, original T64 forward kernel, one noise draw per graph/time using
++SeedSequence [2026102101, graph_index, t]. Original anonymous condition stays
++unchanged. One selected Genre node per graph, chosen with seed
++[2026102102, graph_index] from clean degree1 nodes (extreme) or all G (balanced).
++The selected node is fixed across times. Clean identities are diagnostic labels,
++never additional model inputs.
++
++Extreme strengths: add one false MG edge; add enough false MG edges to make the
++selected node's current MG degree exactly5 or6. If already at/above the requested
++degree or insufficient legal movable absent slots, mark infeasible, no replacement.
++Balanced strengths: delete1/2/3 clean true MG edges that still exist at the
++selected node. Insufficient availability is infeasible.
++
++For each concentrated edit set, a same-count control edits only OTHER Genre
++nodes, in seeded round-robin order, spreading edits across available nodes.
++Extreme controls also use clean degree1 nodes: the true degree18 hub has no
++clean-absent MG slots. This tests concentration/location, NOT peripheral-vs-hub
++specificity. Balanced controls spread deletions across other G nodes.
++No edits touch fixed priors or other relation families.
++
++Ordinary plus six variants gives at most84 states ×3 frozen models=252 complete
++probability sweeps. All four query blocks in a graph/time triple share plan seed
++[2026102103, graph_index, t], identical across variants and models. Complete Xt
++is frozen; use production StepPredictor and original kernel.reverse. No uniforms,
++state sampling or reverse_step is called. 12 original validation states/model
++are separately reproduced at the historical t=1,32,64.
++
++## Gates and cost
++
++CPU single thread; original numerical environment and baseline source hashes
++must agree. Check frozen weight receipts from the fixed Git baseline, not hashes
++invented from current files. Historical validation rows/counts/CE/expected edges
++must match atol=1e-6, rtol=1e-5 (counts exact). Historical full p0 arrays are not
++available in these validation JSONs: this gate does not claim their bitwise replay.
++Repeat one identical ordinary sweep/model; p0 and q atol=1e-7, rtol=0.
++t=1 q=p0 atol=1e-12. All probability/support/coverage checks mandatory.
++
++Single diagnostic invocation limit600seconds, five-second exit reserve, no reset
++or overwrite. First original validation/model1 also measures cost; conservative
++forecast 2×(remaining validation + 255 sweeps at validation seconds/12) +30sec
++must fit remaining time. No model/seed/strength selection based on outcomes.
++Engineering tests, packaging and publication are recorded separately.
++
++## Analysis fixed before outcomes
++
++Save every Xt, clean diagnostic label, edit mask, query ids/families/endpoints,
++p0 and q. Use identical edit/category masks on each paired ordinary input.
++Report per seed first, then equal-weight three-seed means; edge/node observations
++are not independent training repeats. Empty categories are NA with count0.
++
++For p0 and q report added false edges, remaining clean true edges, deleted clean
++true edges, untouched clean nonedges, plus MG-specific categories. For q, births
++=sum((1-Xt)q), deaths=sum(Xt(1-q)), net=births-deaths, globally/per relation and
++incident to the selected node and edited endpoints. Verify net=sum(q)-sum(Xt).
++The ordinary comparator may have different edge presence, so probability change
++and net birth/death change are separate quantities.
++
++Report Genre sorted expected-MG-degree W1 to target role multiset, and complete
++joint expected-role vector empirical TV (usually1; descriptive and sensitive to
++continuous-vs-integer support). These are statistics of expected degrees, not the
++degree distribution of sampled graphs, nor diversity measures. Also report
++expected degree per node and target multiset without fixed role assignment.
++
++No binary quality gate or post-hoc threshold. False-edge retention up / true
++edge recovery down relative to ordinary are directional degradation evidence;
++measure collateral effects and corrected fraction separately. Pressure failure
++establishes only a robustness gap for this synthetic distribution, not a causal
++explanation of free-chain overconnection or a unique correct topology.
++No training follows automatically. Mixed outcomes remain mixed.
+diff --git a/experiments/role_error_recovery_v1/diagnostic.py b/experiments/role_error_recovery_v1/diagnostic.py
+new file mode 100644
+index 0000000..854dd80
+--- /dev/null
++++ b/experiments/role_error_recovery_v1/diagnostic.py
+@@ -0,0 +1,264 @@
++"""Fixed-weight probability diagnostics. No optimizer or graph sampler."""
++import os
++os.environ.update(OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1", CUDA_VISIBLE_DEVICES="")
++import argparse
++import hashlib
++import json
++from pathlib import Path
++import resource
++import signal
++import sys
++import time
++import numpy as np
++import torch
++
++HERE = Path(__file__).resolve().parent
++EXP = HERE.parent
++sys.path.insert(0, str(EXP/"role_specialization_v1"))
++from panel import CapacityDenoiser, load_panel, c, save, fingerprint, fixed_validation, validate
++from hsgd.runtime import StepPredictor
++from hsgd.kernel import MarginalKernel
++from hsgd.noising import global_noisy_edges
++
++BASELINE = "b8e97cc42e6e835e0ea228a6666e3a22a200e035"
++SEEDS = [2026102011, 2026102012, 2026102013]
++TIMES = [1, 4, 8]
++
++def slots(case):
++    sp = case["space"]
++    edges = np.concatenate([sp.decode(f, np.arange(n)) for f,n in enumerate(sp.counts)], axis=1)
++    fam = np.repeat(np.arange(case["n_families"]), sp.counts)
++    return edges, fam
++
++def degrees(values, edges, fam, n, R):
++    out = np.zeros((n, R))
++    for side in (0,1):
++        np.add.at(out, (edges[side],fam), values)
++    return out
++
++def edit_variants(case, condition, clean, ordinary, selected, rng):
++    edges,fam = slots(case); mg = case["space"].pairs.index((2,3))
++    movable = (case["prior"][fam]>0)&(case["prior"][fam]<1)
++    clean_deg = degrees(clean,edges,fam,len(case["space"].types),case["n_families"])
++    G = np.flatnonzero(case["space"].types==3)
++    allowed = G[clean_deg[G,mg]==1] if condition=="extreme" else G
++    incident = (edges==selected).any(0)
++    candidates = (fam==mg)&movable
++    candidates &= (~clean.astype(bool)&~ordinary.astype(bool)) if condition=="extreme" else (clean.astype(bool)&ordinary.astype(bool))
++    local = rng.permutation(np.flatnonzero(candidates&incident))
++    others = rng.permutation(allowed[allowed!=selected])
++    queues = [list(rng.permutation(np.flatnonzero(candidates&(edges==g).any(0)))) for g in others]
++    spread = []
++    while any(queues):
++        for queue in queues:
++            if queue: spread.append(queue.pop())
++    current = int(ordinary[incident&(fam==mg)].sum())
++    demands = [("add1",1),("to5",5-current),("to6",6-current)] if condition=="extreme" else [("delete1",1),("delete2",2),("delete3",3)]
++    rows = []
++    for strength,k in demands:
++        for location,pool in [("concentrated",local),("distributed",np.asarray(spread,dtype=int))]:
++            reason = None
++            if k<=0: reason = "requested target degree not above ordinary degree"
++            elif len(local)<k: reason = "paired concentrated edit infeasible"
++            elif len(pool)<k: reason = "same-count location control infeasible"
++            row = dict(strength=strength,location=location,requested_edits=k,selected_node=int(selected),
++                       selected_ordinary_degree=current,status="infeasible" if reason else "ready",reason=reason)
++            if reason:
++                rows.append((row,None,None)); continue
++            mask=np.zeros(len(clean),dtype=bool);mask[pool[:k]]=True
++            state=ordinary.copy();state[mask]=1 if condition=="extreme" else 0
++            assert np.count_nonzero(state!=ordinary)==k
++            assert movable[mask].all()
++            rows.append((row,state,mask))
++    return rows
++
++def query_digest(plan):
++    h=hashlib.sha256()
++    for b in range(plan.rounds):
++        for a in plan.block(b): h.update(np.ascontiguousarray(a).tobytes())
++    return h.hexdigest()
++
++def sweep(model,case,state,kernel,t,plan,check):
++    start=time.monotonic(); p0=np.repeat(case["prior"],case["space"].counts).copy()
++    covered=np.zeros(len(state),dtype=int)
++    before=torch.get_rng_state().clone()
++    cb=StepPredictor(model,case,state,kernel,t,check_time=check,profile=True)
++    try:
++        for b in range(plan.rounds):
++            ids,fam,query=plan.block(b)
++            p0[ids]=cb(state,ids,fam,query);covered[ids]+=1
++        assert np.array_equal(covered,np.repeat(case["active"].astype(int),case["space"].counts))
++        fam=slots(case)[1]; q=kernel.reverse(p0,state,fam,t-1,t)
++        assert np.isfinite(q).all() and ((q>=0)&(q<=1)).all()
++        if t==1: np.testing.assert_allclose(q,p0,atol=1e-12,rtol=0)
++        assert torch.equal(before,torch.get_rng_state())
++        return p0,q,dict(seconds=time.monotonic()-start,blocks=cb.blocks,coverage=covered.tolist(),timings=cb.times)
++    finally: cb.close()
++
++def metrics(case,clean,state,edit,selected,p0,q):
++    edges,fam=slots(case);mg=case["space"].pairs.index((2,3))
++    y=clean.astype(bool); x=state.astype(bool)
++    masks=dict(edited=edit,added_false=edit&~y,deleted_true=edit&y,
++               remaining_true=y&x&~edit,untouched_nonedge=~y&~edit)
++    masks.update({k+"_MG":v&(fam==mg) for k,v in list(masks.items())})
++    categories={}
++    for name,mask in masks.items():
++        categories[name]=dict(n=int(mask.sum()),p0=float(p0[mask].mean()) if mask.any() else None,
++                            q=float(q[mask].mean()) if mask.any() else None)
++    birth=(1-state)*q;death=state*(1-q)
++    local=(edges==selected).any(0)
++    nodes=np.unique(edges[:,edit]) if edit.any() else np.array([selected])
++    edited_local=np.isin(edges,nodes).any(0)
++    flows={}
++    for name,mask in [("global",np.ones(len(x),bool)),("selected_node",local),("edited_endpoints",edited_local),("MG",fam==mg)]:
++        flows[name]=dict(births=float(birth[mask].sum()),deaths=float(death[mask].sum()),
++                        net=float((birth-death)[mask].sum()),current_edges=int(state[mask].sum()),
++                        expected_next_edges=float(q[mask].sum()))
++        np.testing.assert_allclose(flows[name]["net"],float((q-state)[mask].sum()),atol=1e-12)
++    G=np.flatnonzero(case["space"].types==3)
++    target=degrees(clean,edges,fam,len(case["space"].types),case["n_families"])
++    role={}
++    for name,values in [("p0",p0),("q",q)]:
++        mu=degrees(values,edges,fam,len(case["space"].types),case["n_families"])
++        # Joint empirical TV over exact vectors; not separate marginal matching.
++        from collections import Counter
++        a=Counter(map(tuple,mu[G]));b=Counter(map(tuple,target[G]))
++        tv=sum(abs(a[k]-b[k]) for k in a.keys()|b.keys())/(2*len(G))
++        role[name]=dict(expected_degree=mu.tolist(),G_expected_W1=float(np.mean(abs(np.sort(mu[G,mg])-np.sort(target[G,mg])))),
++            G_joint_expected_TV=float(tv),G_expected_max=float(mu[G,mg].max()),
++            G_target_multiset=sorted(target[G,mg].tolist()))
++    return dict(categories=categories,flows=flows,role=role,
++        by_family=dict(expected_p0=np.bincount(fam,weights=p0,minlength=case["n_families"]).tolist(),
++        expected_q=np.bincount(fam,weights=q,minlength=case["n_families"]).tolist(),
++        births=np.bincount(fam,weights=birth,minlength=case["n_families"]).tolist(),
++        deaths=np.bincount(fam,weights=death,minlength=case["n_families"]).tolist()))
++
++def compare_validation(old,new):
++    assert len(old["rows"])==len(new["rows"])==12
++    maximum=0.
++    for a,b in zip(old["rows"],new["rows"]):
++        for key in ("id","condition","t","counts_by_family_label"): assert a[key]==b[key]
++        for key in ("ce","ce_sum_by_family_label","expected_edges","expected_edge_bias"):
++            aa=np.asarray(a[key]);bb=np.asarray(b[key])
++            np.testing.assert_allclose(aa,bb,atol=1e-6,rtol=1e-5)
++            maximum=max(maximum,float(np.max(abs(aa-bb))))
++    return dict(max_absolute_error=maximum,old_mean_ce=old["mean_ce"],new_mean_ce=new["mean_ce"])
++
++def run(args):
++    start=time.monotonic();cpu=time.process_time()
++    args.output.mkdir(parents=True,exist_ok=False)
++    status="failed";reason=None;rows=[];infeasible=[];forward_sweeps=0
++    def check():
++        if time.monotonic()-start>595: raise TimeoutError("600 second diagnostic budget reserve")
++        if (args.output/"STOP").exists(): raise InterruptedError("STOP")
++    def interrupted(sig,frame): raise InterruptedError(f"signal {sig}")
++    for sig in (signal.SIGINT,signal.SIGTERM,signal.SIGHUP): signal.signal(sig,interrupted)
++    torch.set_num_threads(1);torch.set_float32_matmul_precision("highest")
++    torch.use_deterministic_algorithms(False)
++    torch.backends.cuda.matmul.allow_tf32=False;torch.backends.cudnn.allow_tf32=False
++    sources={}
++    def bind(p):
++        sources[str(p)]=fingerprint(p);return json.loads(p.read_text())
++    try:
++        historical=EXP/"role_specialization_v1_results/evidence/learning_run01"
++        required=["resolved_config.json","weight_hashes.json","environment.json","source_manifest.json"]
++        required += [f"seed{seed}/capacity_C_validation_1000.json" for seed in SEEDS]
++        for name in required: assert fingerprint(args.run/name)==fingerprint(historical/name),name
++        assert fingerprint(args.panel/"panel.json")=="d69e554a3ec43bea1b039bc25f45bf9f4b49e1485dae4b2504fcbc7ce1df9bf0"
++        cfg=bind(args.run/"resolved_config.json"); assert cfg["train_seeds"]==SEEDS
++        assert cfg["T"]==64 and cfg["rounds"]==4
++        weights=bind(args.run/"weight_hashes.json")
++        archived=json.loads((EXP/"role_specialization_v1_results/evidence/learning_run01/weight_hashes.json").read_text())
++        assert weights==archived
++        env=c.environment("cpu");oldenv=bind(args.run/"environment.json")
++        for key in ("python_version","packages","torch_runtime_version","float32_matmul_precision","matmul_allow_tf32","deterministic_algorithms","torch_threads"):
++            assert env[key]==oldenv[key],key
++        save(args.output/"environment.json",env)
++        manifest=bind(args.run/"source_manifest.json")
++        for name,h in manifest.items():
++            assert fingerprint(EXP/name)==h,name
++        bind(args.panel/"panel.json")
++        records,targets=load_panel(args.panel);case=records[0]["case"]
++        values=fixed_validation(records,cfg)
++        panel=[];frozen=[]
++        for i,rec in enumerate(r for r in records if r["split"]=="validation"):
++            cc=rec["case"];ee,ff=slots(cc);mg=cc["space"].pairs.index((2,3))
++            clean=np.zeros(cc["space"].total,dtype=np.uint8);clean[cc["clean_ids"]]=1
++            deg=degrees(clean,ee,ff,len(cc["space"].types),cc["n_families"])
++            G=np.flatnonzero(cc["space"].types==3);eligible=G[deg[G,mg]==1] if rec["condition"]=="extreme" else G
++            selected=int(np.random.default_rng([2026102102,i]).choice(eligible))
++            for t in TIMES:
++                ne,_,_=global_noisy_edges(cc["space"],cc["clean"],cc["prior"],c.schedule(64)[t],np.random.default_rng([2026102101,i,t]))
++                nf,nl=cc["space"].encode(ne);state=np.zeros(len(clean),dtype=np.uint8);state[cc["space"].offsets[nf]+nl]=1
++                plan=c.plan_for(cc,[2026102103,i,t],4)
++                meta=dict(graph=rec["id"],condition=rec["condition"],t=t,selected_node=selected,query_sha256=query_digest(plan))
++                stem=f"{rec['id']}_t{t}"
++                variants=edit_variants(cc,rec["condition"],clean,state,selected,np.random.default_rng([2026102104,i,t]))
++                arrays=dict(clean=clean,ordinary=state,types=cc["space"].types,endpoints=ee,families=ff)
++                for b in range(4):
++                    ids,fam,query=plan.block(b)
++                    arrays.update({f"ids{b}":ids,f"families{b}":fam,f"query{b}":query})
++                for info,xx,mask in variants:
++                    panel.append(dict(**meta,**{k:v for k,v in info.items() if k!="selected_node"}))
++                    if xx is None: infeasible.append(panel[-1]);continue
++                    name=info["strength"]+"_"+info["location"];arrays[name]=xx;arrays[name+"_edit"]=mask
++                np.savez_compressed(args.output/(stem+"_input.npz"),**arrays)
++                frozen.append((cc,meta,stem,clean,state,selected,plan,variants))
++        save(args.output/"panel.json",panel)
++        save(args.output/"resolved_config.json",dict(baseline=BASELINE,training=cfg,diagnostic_seeds=[2026102101,2026102102,2026102103,2026102104],
++             times=TIMES,max_seconds=600,protocol_sha256=fingerprint(HERE/"DESIGN.md"),probability_only=True))
++        save(args.output/"source_hashes.json",{str(p.relative_to(EXP)):fingerprint(p) for p in sorted(HERE.glob("*")) if p.is_file()})
++        validation=[]
++        for seed in SEEDS:
++            check();path=args.run/f"seed{seed}/capacity_C_final_1000.pt"
++            assert fingerprint(path)==weights[str(path.relative_to(args.run))]
++            sources[str(path)]=fingerprint(path)
++            model=CapacityDenoiser(case["n_types"],case["n_families"],family_pairs=case["space"].pairs,prior=case["prior"],T=64,**cfg["model"])
++            model.load_state_dict(torch.load(path,map_location="cpu",weights_only=True),strict=True);model.eval()
++            old=bind(args.run/f"seed{seed}/capacity_C_validation_1000.json")
++            v=validate(model,values,cfg,targets,check);replay=compare_validation(old,v)
++            validation.append(dict(seed=seed,**replay,seconds=v["seconds"]))
++            save(args.output/f"validation_{seed}.json",v);save(args.output/"validation_replay.json",validation)
++            print("validation reproduced",seed,replay,flush=True)
++            if seed==SEEDS[0]:
++                estimate=2*(2*v["seconds"]+255*v["seconds"]/12)+30
++                gate=dict(forecast_seconds=estimate,remaining_seconds=595-(time.monotonic()-start),passed=estimate<595-(time.monotonic()-start))
++                save(args.output/"cost_gate.json",gate)
++                if not gate["passed"]: raise RuntimeError("finite panel exceeds budget")
++            for index,(cc,meta,stem,clean,state,selected,plan,variants) in enumerate(frozen):
++                check();model.set_target(targets[meta["condition"]]);kernel=MarginalKernel(cc["prior"],c.schedule(64))
++                p,q,info=sweep(model,cc,state,kernel,meta["t"],plan,check);forward_sweeps+=1
++                np.savez_compressed(args.output/f"{seed}_{stem}_ordinary.npz",p0=p,q=q)
++                if index==0:
++                    pp,qq,_=sweep(model,cc,state,kernel,meta["t"],plan,check);forward_sweeps+=1
++                    np.testing.assert_allclose(pp,p,atol=1e-7,rtol=0);np.testing.assert_allclose(qq,q,atol=1e-7,rtol=0)
++                    save(args.output/f"repeat_{seed}.json",dict(p0_max_abs=float(max(abs(pp-p))),q_max_abs=float(max(abs(qq-q)))))
++                rows.append(dict(seed=seed,**meta,variant="ordinary",timing=info,
++                    metrics=metrics(cc,clean,state,np.zeros(len(clean),bool),selected,p,q)))
++                for variant,xx,mask in variants:
++                    if xx is None: continue
++                    check();pp,qq,detail=sweep(model,cc,xx,kernel,meta["t"],plan,check);forward_sweeps+=1
++                    name=variant["strength"]+"_"+variant["location"]
++                    np.savez_compressed(args.output/f"{seed}_{stem}_{name}.npz",p0=pp,q=qq)
++                    rows.append(dict(seed=seed,**meta,variant=name,edits=int(mask.sum()),timing=detail,
++                        metrics=metrics(cc,clean,xx,mask,selected,pp,qq),
++                        paired_ordinary=metrics(cc,clean,state,mask,selected,p,q)))
++                print("probability panel",seed,stem,"sweeps",forward_sweeps,flush=True)
++                save(args.output/"records.json",rows)
++            assert fingerprint(path)==sources[str(path)]
++        assert all(fingerprint(p)==h for p,h in sources.items())
++        save(args.output/"sources.json",sources);status="completed"
++    except BaseException as exc:
++        reason=repr(exc);raise
++    finally:
++        save(args.output/"receipt.json",dict(status=status,reason=reason,records=len(rows),infeasible=infeasible,
++            probability_sweeps=forward_sweeps,training_updates=0,generated_graphs=0,GPU=0,
++            wall_seconds=time.monotonic()-start,CPU_seconds=time.process_time()-cpu,
++            peak_rss_mib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024))
++
++def main():
++    parser=argparse.ArgumentParser()
++    for key in ("run","panel","output"):parser.add_argument("--"+key,type=Path,required=True)
++    run(parser.parse_args())
++
++if __name__=="__main__":main()
+diff --git a/experiments/role_error_recovery_v1/test_diagnostic.py b/experiments/role_error_recovery_v1/test_diagnostic.py
+new file mode 100644
+index 0000000..e3e77de
+--- /dev/null
++++ b/experiments/role_error_recovery_v1/test_diagnostic.py
+@@ -0,0 +1,98 @@
++import copy
++import sys
++from pathlib import Path
++sys.path.insert(0,str(Path(__file__).resolve().parent))
++import numpy as np
++import pytest
++import torch
++from diagnostic import slots,degrees,edit_variants,metrics,sweep,c,compare_validation,query_digest
++from hsgd.kernel import MarginalKernel
++from role_condition.panel import graph_case,skeleton,mg_initial
++from role_condition.model import extract_target
++from capacity_readout import CapacityDenoiser
++from test_late_fusion import SMALL
++
++def fixture(condition):
++    case=graph_case(skeleton()|mg_initial(condition))
++    clean=np.zeros(case["space"].total,dtype=np.uint8);clean[case["clean_ids"]]=1
++    return case,clean
++
++@pytest.mark.parametrize("condition",["balanced","extreme"])
++def test_pressure_identity_counts_legality_and_location(condition):
++    case,x=fixture(condition);before=x.copy()
++    selected=30
++    out=edit_variants(case,condition,x,x,selected,np.random.default_rng(8))
++    ee,ff=slots(case);mg=case["space"].pairs.index((2,3))
++    for i in range(0,6,2):
++        a,b=out[i:i+2]
++        assert a[0]["status"]==b[0]["status"]=="ready"
++        assert a[2].sum()==b[2].sum()
++        assert np.all(ff[a[2]]==mg) and not np.any(a[2]&b[2])
++        assert (ee[:,a[2]]==selected).any(0).all()
++        assert not (ee[:,b[2]]==selected).any()
++        assert (a[1][a[2]]==int(condition=="extreme")).all()
++        if condition=="extreme" and i in (2,4):
++            degree=degrees(a[1],ee,ff,34,10)
++            assert degree[selected,mg]==(5 if i==2 else 6)
++    assert np.array_equal(x,before)
++    again=edit_variants(case,condition,x,x,selected,np.random.default_rng(8))
++    for a,b in zip(out,again):assert np.array_equal(a[1],b[1])
++
++def test_infeasible_does_not_replace_or_reduce():
++    case,x=fixture("balanced");ordinary=x.copy();ee,ff=slots(case)
++    ordinary[(ee==30).any(0)&(ff==8)]=0
++    out=edit_variants(case,"balanced",x,ordinary,30,np.random.default_rng(8))
++    assert all(info["status"]=="infeasible" and state is None and mask is None for info,state,mask in out)
++
++def test_fixed_support_never_edited():
++    case,x=fixture("extreme");case["prior"][8]=0
++    out=edit_variants(case,"extreme",x,x,30,np.random.default_rng(8))
++    assert all(xx is None for _,xx,_ in out)
++
++def test_flow_identity_and_na():
++    case,x=fixture("balanced");p=np.repeat(case["prior"],case["space"].counts)
++    result=metrics(case,x,x,np.zeros(len(x),bool),30,p,p)
++    assert result["categories"]["added_false"]["p0"] is None
++    assert result["categories"]["remaining_true"]["n"]==int(x.sum())
++    assert result["flows"]["global"]["net"]==pytest.approx(p.sum()-x.sum())
++
++def test_both_endpoints_and_query_exact_coverage():
++    case,x=fixture("balanced");ee,ff=slots(case);degree=degrees(x,ee,ff,34,10)
++    assert degree.sum()==2*x.sum()
++    plan=c.plan_for(case,[11,2,3],4);coverage=np.zeros(len(x),int)
++    for b in range(4):
++        ids,fam,query=plan.block(b);coverage[ids]+=1
++        assert np.array_equal(ee[:,ids],query) and np.array_equal(ff[ids],fam)
++    assert np.array_equal(coverage,np.repeat(case["active"].astype(int),case["space"].counts))
++    assert query_digest(plan)==query_digest(c.plan_for(case,[11,2,3],4))
++
++def test_actual_probability_entry_no_sampling_or_target_identity_input():
++    torch.set_num_threads(1);case,x=fixture("extreme")
++    model=CapacityDenoiser(4,10,family_pairs=case["space"].pairs,prior=case["prior"],T=64,**SMALL)
++    model.set_target(extract_target(case));model.eval()
++    plan=c.plan_for(case,[4,1,8],4);kernel=MarginalKernel(case["prior"],c.schedule(64))
++    before=torch.get_rng_state().clone()
++    p,q,_=sweep(model,case,x,kernel,1,plan,lambda:None)
++    np.testing.assert_allclose(p,q,atol=1e-12,rtol=0)
++    changed=dict(case);changed["clean_ids"]=np.array([],dtype=int);changed["clean"]=np.zeros((2,0),dtype=int)
++    pp,qq,_=sweep(model,changed,x,kernel,1,plan,lambda:None)
++    np.testing.assert_array_equal(p,pp);np.testing.assert_array_equal(q,qq)
++    assert torch.equal(before,torch.get_rng_state())
++    fixed=np.repeat(case["prior"]==0,case["space"].counts)
++    assert (p[fixed]==0).all()
++
++def test_validation_replay_fails_on_mismatch():
++    row=dict(id="test",condition="balanced",t=1,counts_by_family_label=[[2,3]],ce=.2,
++             ce_sum_by_family_label=[[.1,.2]],expected_edges=[.4],expected_edge_bias=[-.3])
++    old=dict(rows=[copy.deepcopy(row) for _ in range(12)],mean_ce=.2)
++    assert compare_validation(old,old)["max_absolute_error"]==0
++    new=copy.deepcopy(old);new["rows"][0]["expected_edges"][0]=.8
++    with pytest.raises(AssertionError):compare_validation(old,new)
++
++def test_metrics_same_category_on_paired_input():
++    case,x=fixture("balanced")
++    info,xx,mask=edit_variants(case,"balanced",x,x,30,np.random.default_rng(8))[0]
++    p=np.repeat(case["prior"],case["space"].counts)
++    a=metrics(case,x,x,mask,30,p,p);b=metrics(case,x,xx,mask,30,p,p)
++    assert a["categories"]==b["categories"]
++    assert a["categories"]["deleted_true"]["n"]==1
