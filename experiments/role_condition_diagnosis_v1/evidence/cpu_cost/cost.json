@@ -1,0 +1,55 @@
+{
+  "rows": [
+    {
+      "model": "original_C",
+      "parameters": 6660625,
+      "forward_backward_seconds": [
+        0.1780547797679901,
+        0.16378228645771742,
+        0.16530646476894617,
+        0.16361546143889427
+      ],
+      "warmup_repetitions": 1,
+      "steady_repetitions": 3,
+      "median_forward_backward_seconds": 0.16378228645771742,
+      "p90_forward_backward_seconds": 0.1650016291067004,
+      "complete_four_block_prediction_seconds": [
+        0.15462645143270493,
+        0.1571220150217414,
+        0.1557545755058527,
+        0.15914687886834145
+      ],
+      "median_four_block_prediction_seconds": 0.1571220150217414,
+      "excludes": "optimizer step, posterior/sampling, input construction and evaluation"
+    },
+    {
+      "model": "late_C",
+      "parameters": 6660369,
+      "forward_backward_seconds": [
+        0.17669667396694422,
+        0.16272413171827793,
+        0.16176260728389025,
+        0.16378730162978172
+      ],
+      "warmup_repetitions": 1,
+      "steady_repetitions": 3,
+      "median_forward_backward_seconds": 0.16272413171827793,
+      "p90_forward_backward_seconds": 0.16357466764748096,
+      "complete_four_block_prediction_seconds": [
+        0.16173315327614546,
+        0.1561975572258234,
+        0.1604399187490344,
+        0.15651725511997938
+      ],
+      "median_four_block_prediction_seconds": 0.15651725511997938,
+      "excludes": "optimizer step, posterior/sampling, input construction and evaluation"
+    }
+  ],
+  "wall_seconds": 3.3718104772269726,
+  "cpu_seconds": 3.3717139680000003,
+  "peak_rss_mib": 620.15625,
+  "updates": 0,
+  "full_chains": 0,
+  "device": "CPU",
+  "configuration": "same full8layer FP32 model; original34node fixed state"
+}
