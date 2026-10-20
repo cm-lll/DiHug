@@ -24,7 +24,8 @@ def audit(out,cfg,check):
     start=time.monotonic();updates=[json.loads(x) for x in (out/"updates.jsonl").read_text().splitlines()]
     generations=json.loads((out/"generation.json").read_text())
     assert len(updates)==cfg["expected_updates"] and len(generations)==cfg["expected_chains"]
-    weight_hashes=json.loads((out/"weight_hashes.json").read_text());assert len(weight_hashes)==12
+    weight_hashes=json.loads((out/"weight_hashes.json").read_text())
+    assert len(weight_hashes)==6+3*len(cfg["checkpoint_updates"])+6
     for name,h in weight_hashes.items():check();assert fingerprint(out/name)==h
     update_groups=defaultdict(list)
     for r in updates:
@@ -32,8 +33,13 @@ def audit(out,cfg,check):
         assert abs(r["loss"]-.5*sum(p["loss"] for p in r["parts"]))<1e-12
         update_groups[r["seed"],r["arm"]].append(r)
     for seed in cfg["train_seeds"]:
-        for arm in cfg["arms"]:assert [r["update"] for r in update_groups[seed,arm]]==list(range(1,1001))
-        left,right=[torch.load(out/f"seed{seed}/{arm}_initial.pt",map_location="cpu",weights_only=True) for arm in cfg["arms"]]
+        for arm in cfg["arms"]:assert [r["update"] for r in update_groups[seed,arm]]==list(range(1,cfg["updates"]+1))
+        initial=[]
+        for arm in cfg["arms"]:
+            names=[n for n in weight_hashes if n.endswith(f"seed{seed}/{arm}_initial.pt")]
+            assert len(names)==1
+            initial.append(torch.load(out/names[0],map_location="cpu",weights_only=True))
+        left,right=initial
         assert left.keys()==right.keys() and all(torch.equal(left[k],right[k]) for k in left)
         for l,r in zip(update_groups[seed,"normal2"],update_groups[seed,"robust"]):
             assert l["ordinary_input_sha256"]==r["ordinary_input_sha256"]
@@ -54,15 +60,18 @@ def audit(out,cfg,check):
             joint=Counter(tuple(map(int,x)) for x in d[types==typ])
             stored={tuple(map(int,k.split(","))):v for k,v in met["joint_relation_degree"][name].items()}
             assert dict(joint)==stored
-        key=(r["seed"],r["arm"],r["condition"]);groups[key].append(r);objects[r["graph_file"]]=G
+        key=(r["checkpoint_update"],r["seed"],r["arm"],r["condition"]);groups[key].append(r);objects[r["graph_file"]]=G
         step=json.loads(path.with_name(path.stem+"_steps.json").read_text());assert [s["t"] for s in step]==list(range(64,0,-1))
-        assert all(s["exact_coverage"] for s in step);steps[r["seed"],r["arm"],r["condition"],r["sampling_seed"]]=step
+        assert all(s["exact_coverage"] for s in step);steps[r["checkpoint_update"],r["seed"],r["arm"],r["condition"],r["sampling_seed"]]=step
     for seed in cfg["train_seeds"]:
         for cond in ("balanced","extreme"):
             for sample in cfg["sampling_seeds"]:
-                l,r=(steps[seed,arm,cond,sample] for arm in cfg["arms"])
-                for a,b in zip(l,r):
-                    for k in ("t","uniform_sha256","query_sha256","rng_after"):assert a[k]==b[k]
+                reference=steps[cfg["evaluation_updates"][0],seed,"normal2",cond,sample]
+                for point in cfg["evaluation_updates"]:
+                    for arm in cfg["arms"]:
+                        current=steps[point,seed,arm,cond,sample]
+                        for a,b in zip(reference,current):
+                            for k in ("t","uniform_sha256","query_sha256","rng_after"):assert a[k]==b[k]
     summaries=[]
     for key,rows in sorted(groups.items()):
         assert len(rows)==8;classes=[];freq=[]
@@ -81,7 +90,7 @@ def audit(out,cfg,check):
             values=[r["metrics"]["imdb_closure"][key] for r in rows]
             return float(np.mean(values)) if all(v is not None for v in values) else None
         mg_bias=mean(lambda r:r["comparison"]["family_edge_difference"][8])
-        summaries.append(dict(seed=key[0],arm=key[1],condition=key[2],graphs=8,
+        summaries.append(dict(checkpoint_update=key[0],seed=key[1],arm=key[2],condition=key[3],graphs=8,
             G_W1=mean(lambda r:r["G_W1"]),G_joint_TV=mean(lambda r:r["G_joint_TV"]),G_max=mean(lambda r:r["G_max"]),
             G_high_ge12=mean(lambda r:r["G_high_ge12"]),G_multiple_hubs=mean(lambda r:r["G_multiple_hubs"]),G_low_le1=mean(lambda r:r["G_low_le1"]),
             G_zero=mean(lambda r:r["G_zero"]),MG_signed_bias=mg_bias,MG_absolute_error=mean(lambda r:abs(r["comparison"]["family_edge_difference"][8])),
@@ -95,12 +104,34 @@ def audit(out,cfg,check):
             topology_classes=len(freq),topology_frequencies=freq,inverse_simpson=1/sum((f/8)**2 for f in freq)))
     differences=[]
     fields=("G_W1","G_joint_TV","G_max","G_high_ge12","G_multiple_hubs","G_low_le1","G_zero","MG_signed_bias","MG_absolute_error","edges","connected","lcc","isolates","triangles","closure_path","closure_pair")
+    for point in cfg["evaluation_updates"]:
+        for seed in cfg["train_seeds"]:
+            for cond in ("balanced","extreme"):
+                l=next(r for r in summaries if (r["checkpoint_update"],r["seed"],r["condition"],r["arm"])==(point,seed,cond,"normal2"))
+                r=next(r for r in summaries if (r["checkpoint_update"],r["seed"],r["condition"],r["arm"])==(point,seed,cond,"robust"))
+                differences.append(dict(checkpoint_update=point,seed=seed,condition=cond,**{f:r[f]-l[f] if r[f] is not None and l[f] is not None else None for f in fields}))
+    duration=[]
     for seed in cfg["train_seeds"]:
-        for cond in ("balanced","extreme"):
-            l=next(r for r in summaries if (r["seed"],r["condition"],r["arm"])==(seed,cond,"normal2"))
-            r=next(r for r in summaries if (r["seed"],r["condition"],r["arm"])==(seed,cond,"robust"))
-            differences.append(dict(seed=seed,condition=cond,**{f:r[f]-l[f] if r[f] is not None and l[f] is not None else None for f in fields}))
-    save(out/"paired_results.json",dict(per_seed=summaries,robust_minus_normal2=differences,
+        for arm in cfg["arms"]:
+            for cond in ("balanced","extreme"):
+                base=next(r for r in summaries if (r["checkpoint_update"],r["seed"],r["condition"],r["arm"])==(1000,seed,cond,arm))
+                for point in (3000,6000):
+                    now=next(r for r in summaries if (r["checkpoint_update"],r["seed"],r["condition"],r["arm"])==(point,seed,cond,arm))
+                    duration.append(dict(seed=seed,arm=arm,condition=cond,from_update=1000,to_update=point,
+                        **{f:now[f]-base[f] if now[f] is not None and base[f] is not None else None for f in fields}))
+    index=json.loads((out/"checkpoint_index.json").read_text());assert len(index)==18
+    for row in index:
+        check();assert fingerprint(out/row["path"])==row["sha256"]
+        ck=torch.load(out/row["path"],map_location="cpu",weights_only=False)
+        assert ck["completed"]==row["completed"] and ck["seed"]==row["seed"]
+        assert ck["budget"]["budget_seconds"]==cfg["learning_budget_seconds"]
+        u=next(iter(ck["completed"].values()));assert u in cfg["checkpoint_updates"]
+        for arm in cfg["arms"]:
+            assert all(int(v["step"])==u for v in ck["optimizers"][arm]["state"].values())
+        del ck
+    save(out/"paired_results.json",dict(per_seed=summaries,robust_minus_normal2=differences,extension_from_1000=duration,
         scope="eight graphs first summarized within each of three independent training seeds; descriptive development results"))
+    validations=list(out.rglob("*_validation_*.json"))
+    assert len(validations)==len(cfg["train_seeds"])*2*len(cfg["validation_updates"])
     save(out/"audit.json",dict(status="passed",updates=len(updates),graphs=len(generations),wall_seconds=time.monotonic()-start,
         checks=["initial tensors and hashes","all two-input paired updates","full64step RNG/query contracts","raw schema/degrees/joint frequencies","independent connectivity/triangles/W1","exact typed topology classes"]))

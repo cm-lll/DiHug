@@ -1,5 +1,6 @@
 """One robust objective; no architecture, kernel, or sampler modification."""
 import copy
+import os
 import hashlib
 import json
 from pathlib import Path
@@ -10,15 +11,31 @@ import torch
 
 HERE=Path(__file__).resolve().parent
 EXP=HERE.parent
-sys.path.insert(0,str(EXP/"role_specialization_v1"))
-from panel import CapacityDenoiser,load_panel,c,fingerprint
+PREVIOUS=EXP/"role_condition_diagnosis_v1"
+sys.path[:0]=[str(EXP/"role_specialization_v1"),str(EXP/"role_late_paired_v1"),str(PREVIOUS),str(PREVIOUS/"baseline")]
+# Import the actual model and helpers, not historical CPU-only launch scripts
+# that erase CUDA visibility before PyG initializes the CUDA runtime.
+from capacity_readout import CapacityDenoiser
+from hsgd.bw_preflight import common as c
 from pairing import input_digest,atomic_weights,sha,uniform_contract
 from role_condition.experiment import opt,save,emit,fixed_validation,validate
 from role_condition.panel import augment,NAMES,swap,graph_case,skeleton,isomorphic,save_panel
-from role_condition.model import extract_target
+from role_condition.model import extract_target,RoleTarget
 from hsgd.runtime import predict,reverse_step
 from hsgd.losses import supported_binary_ce
 from hsgd.kernel import MarginalKernel
+
+def fingerprint(path):return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+def load_panel(run):
+    # Exact data contract from role_condition_diagnosis_v1/diagnose.py, without
+    # that diagnostic launcher's import-time environment mutation.
+    p=json.loads((Path(run)/"panel.json").read_text())
+    records=[dict(id=r["id"],condition=r["condition"],split=r["split"],
+        case=c.make_case(np.array(r["types"]),np.array(r["edges"]).T,tuple(map(tuple,p["schema"])))) for r in p["graphs"]]
+    targets={k:RoleTarget(tuple(tuple((tuple(v),int(n)) for v,n in rows) for rows in x["roles"]),
+        tuple(x["type_counts"]),tuple(map(tuple,x["schema"]))) for k,x in p["anonymous_targets"].items()}
+    return records,targets
 
 def config():return json.loads((HERE/"config.json").read_text())
 
@@ -109,11 +126,13 @@ def pair_models(case,cfg,seed,source):
 def double_update(model,optimizer,case,inputs,T,edit=None,check=lambda:None,step=True,diagnostics=None):
     """Two original R/S CE estimates, ordinary mean, ONE optimizer step."""
     if len(inputs)!=2:raise ValueError("exactly two inputs required")
-    start=time.monotonic();optimizer.zero_grad(set_to_none=True);model.train();parts=[]
+    device=next(model.parameters()).device.type
+    c.sync(device);start=time.monotonic();optimizer.zero_grad(set_to_none=True);model.train();parts=[]
     before=model.backbone.lin_out_E.weight.detach().clone()
     rng=torch.get_rng_state().clone()
+    gpu_rng=torch.cuda.get_rng_state().clone() if device=="cuda" else None
     for j,inp in enumerate(inputs):
-        check();tick=time.monotonic();timings={}
+        check();c.sync(device);tick=time.monotonic();timings={}
         logits,p=predict(model,case["space"].types,inp["edges"],inp["edge_families"],inp["query"],inp["f"],
                          inp["t"]/T,details=True,times=timings)
         c.check_prob_device(p,inp["f"],case,device_prior=model.prior)
@@ -122,8 +141,8 @@ def double_update(model,optimizer,case,inputs,T,edit=None,check=lambda:None,step
         item=supported_binary_ce(logits,labels,prior)
         ce=item.sum()*inp["ce_weight"]
         if not torch.isfinite(ce):raise FloatingPointError("nonfinite CE")
-        forward=time.monotonic()-tick;tick=time.monotonic()
-        (.5*ce).backward();backward=time.monotonic()-tick
+        c.sync(device);forward=time.monotonic()-tick;tick=time.monotonic()
+        (.5*ce).backward();c.sync(device);backward=time.monotonic()-tick
         if any(v.grad is not None and not torch.isfinite(v.grad).all() for v in model.parameters()):raise FloatingPointError("nonfinite accumulated gradient")
         counts={}
         for label in (0,1):
@@ -132,7 +151,7 @@ def double_update(model,optimizer,case,inputs,T,edit=None,check=lambda:None,step
         changed=np.zeros(len(inp["ids"]),bool) if edit is None or j==0 else edit[inp["ids"]]
         splits={}
         for changed_value,name in ((True,"edited"),(False,"untouched")):
-            ix=torch.as_tensor(changed==changed_value)
+            ix=torch.as_tensor(changed==changed_value,device=logits.device)
             splits[name]=dict(n=int(ix.sum()),ce_sum=float(item[ix].detach().sum()))
         parts.append(dict(loss=float(ce.detach()),t=inp["t"],query_count=len(inp["ids"]),query_block=inp["round_id"],
             forward_seconds=forward,backward_seconds=backward,timings=timings,labels=counts,splits=splits,
@@ -143,8 +162,10 @@ def double_update(model,optimizer,case,inputs,T,edit=None,check=lambda:None,step
     if not torch.isfinite(norm):raise FloatingPointError("nonfinite gradient norm")
     if diagnostics is not None:diagnostics.update(gradients={n:p.grad.clone() for n,p in named})
     assert torch.equal(rng,torch.get_rng_state()),"original forward unexpectedly consumed Torch RNG"
+    if gpu_rng is not None:assert torch.equal(gpu_rng,torch.cuda.get_rng_state()),"forward consumed CUDA RNG"
     tick=time.monotonic()
     if step:optimizer.step()
+    c.sync(device)
     opt_seconds=time.monotonic()-tick
     if step and any(not torch.isfinite(p).all() for p in model.parameters()):raise FloatingPointError("nonfinite updated parameter")
     if step and torch.equal(before,model.backbone.lin_out_E.weight):raise RuntimeError("edge head did not update")

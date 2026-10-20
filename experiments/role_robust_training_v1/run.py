@@ -20,22 +20,27 @@ def new_output(path,protected):
     path.mkdir(parents=True)
     return path
 
-def supervise(command,out,deadline):
+def supervise(command,out,deadline,graceful_stop=False,runtime_env=None):
     child=None;status="failed";code=1;reason=None;clean_start=None
-    def interrupt(sig,frame):raise InterruptedError(f"parent signal {sig}")
+    def interrupt(sig,frame):
+        if graceful_stop:
+            (out/"STOP").touch();return
+        raise InterruptedError(f"parent signal {sig}")
     previous={s:signal.signal(s,interrupt) for s in (signal.SIGINT,signal.SIGTERM,signal.SIGHUP)}
     try:
         env=dict(os.environ,OMP_NUM_THREADS="1",OPENBLAS_NUM_THREADS="1",CUDA_VISIBLE_DEVICES="")
+        if runtime_env:env.update(runtime_env)
         with (out/"worker.log").open("w") as f:
             child=subprocess.Popen(command,stdout=f,stderr=subprocess.STDOUT,env=env,start_new_session=True)
             print(json.dumps(dict(pid=child.pid,output=str(out),deadline_epoch=deadline)),flush=True)
             while child.poll() is None:
                 if time.time()>=deadline:raise TimeoutError("single cumulative deadline")
-                if (out/"STOP").exists():raise InterruptedError("STOP")
+                if (out/"STOP").exists() and not graceful_stop:raise InterruptedError("STOP")
                 time.sleep(.2)
             code=int(child.returncode)
             receipt=json.loads((out/"worker_receipt.json").read_text())
-            status="completed" if code==0 and receipt["status"]=="completed" else "failed"
+            status="completed" if code==0 and receipt["status"]=="completed" else ("stopped" if receipt["status"]=="stopped" else "failed")
+            if status=="stopped":reason=receipt.get("reason","child stopped at boundary")
             if status!="completed" and code==0:code=1
     except BaseException as exc:
         reason=repr(exc);code=124 if isinstance(exc,TimeoutError) else 1
@@ -61,11 +66,21 @@ def main():
     p.add_argument("--source",type=Path,required=True);p.add_argument("--panel",type=Path,required=True)
     p.add_argument("--frozen",type=Path);p.add_argument("--output",type=Path,required=True)
     p.add_argument("--execute-learning-panel",action="store_true")
+    p.add_argument("--device",choices=("cpu","cuda"),default="cpu")
+    p.add_argument("--gpus",nargs="+")
     a=p.parse_args()
     if a.mode=="panel" and not a.execute_learning_panel:
         p.error("panel requires explicit --execute-learning-panel; preparation does not start learning")
     if a.mode!="freeze" and a.frozen is None:p.error("--frozen required")
+    if a.device=="cuda":
+        if not a.gpus:p.error("--gpus required for explicit device isolation")
+        if a.mode=="panel" and len(set(a.gpus))!=3:p.error("three independent seed workers require three distinct assigned GPUs")
+        visible=os.environ.get("CUDA_VISIBLE_DEVICES")
+        if visible is not None and not set(a.gpus)<=set(visible.split(",")):
+            p.error("requested GPU is outside caller visibility; isolation cannot be widened")
     config=json.loads((HERE/"config.json").read_text())
+    if a.mode=="panel" and a.device!=config["validated_training_device"]:
+        p.error("requested training backend has not passed this release's numerical gate")
     cap=config["learning_budget_seconds"] if a.mode=="panel" else config["probe_budget_seconds"]
     protected=[a.source,a.panel,HERE,HERE.parent/"role_specialization_v1",HERE.parent/"role_late_paired_v1",HERE.parent/"role_condition_diagnosis_v1"]
     if a.frozen:protected.append(a.frozen)
@@ -75,7 +90,14 @@ def main():
     args=[sys.executable,"-u",str(HERE/"worker.py"),a.mode,"--source",str(a.source.resolve()),
           "--panel",str(a.panel.resolve()),"--output",str(out),"--deadline",str(deadline)]
     if a.frozen:args += ["--frozen",str(a.frozen.resolve())]
-    code=supervise(args,out,deadline)
+    env={"CUDA_VISIBLE_DEVICES":a.gpus[0]} if a.device=="cuda" else None
+    if a.mode=="panel":
+        args=[sys.executable,"-u",str(HERE/"parallel.py"),"--source",str(a.source.resolve()),"--panel",str(a.panel.resolve()),
+              "--output",str(out),"--deadline",str(deadline),"--frozen",str(a.frozen.resolve()),"--device",a.device]
+        if a.gpus:args += ["--gpus",*a.gpus]
+        env=None  # lightweight manager sees no accelerator; each child gets one.
+    else:args += ["--device",a.device]
+    code=supervise(args,out,deadline,graceful_stop=a.mode=="panel",runtime_env=env)
     r=json.loads((out/"controller.json").read_text());r.update(wall_seconds=time.time()-started,
          budget_seconds=cap,within_budget_plus_cleanup=time.time()-started<=cap+5,learning_panel_activated=a.mode=="panel")
     (out/"controller.json").write_text(json.dumps(r,indent=2)+"\n");print(json.dumps(r),flush=True)

@@ -1,4 +1,55 @@
-# One paired correction-training candidate: frozen proposal v1
+# Authorized 6000-update paired panel: 2026-10-21 amendment
+
+This section supersedes all update counts, budgets and release stop instructions
+in the historical proposal below. The model, perturbation, loss, optimizer, LR,
+uniform time distribution and sampler are unchanged. User authorized execution.
+
+User additionally authorized all eight local GPUs. All eight2080Ti cards were
+idle, but the bounded GPU parity gate exceeded the PREDECLARED gradient tolerance:
+max2.519169e-6 versus2e-6 (five elements), while logits/p0 passed. No tolerance was
+relaxed, and no GPU scientific training is authorized by this release's gate.
+Use the validated CPU numerical path, three independent single-thread seed
+workers in parallel. Each worker keeps both arms and their update transaction
+together. This changes scheduling only, not random inputs, optimizer ordering
+within a model, or scientific scope. One global eight-hour ledger is inherited
+by all workers; no per-worker clock reset. Global outputs are merged with explicit
+path remapping and all288 graphs audited jointly. No extra seed or experiment.
+
+3 original training seeds ×2 arms ×6000 optimizer updates=36000 updates and72000
+training query forwards. Retain initial weights. Atomic complete paired
+checkpoints at1000/2000/3000/4000/5000/6000 include both models, both continuously
+running optimizer states, all RNG/private data RNG, individual counts, source/
+config/data/environment binding and the original budget activation/deadline.
+Validation at0/250/500 and every500 thereafter. No optimizer reload during training.
+
+After each seed finishes uninterrupted6000-update training, evaluate read-only
+model copies from1000/3000/6000. Each point produces96 chains across all seeds,
+288 total. Same sampling seeds/query plans/per-slot uniforms across arms AND
+checkpoints. Snapshot/restore all training RNG around evaluation; no selection,
+repair, extra sample, or result-dependent budget/setting change.
+
+One cumulative28800-second window starts at formal panel parent activation,
+including import/probe/training/validation/all evaluation/audit/saving. No old
+learning panel was active; frozen/probe runs were engineering only. The full
+new cost gate includes36000 updates,288chains,84 validations, final heldout
+pressure panel, measured complete checkpoint serialization/reload cost, audit
+allowance and15% safety factor. Reject if it does not fit remaining time.
+
+Active STOP and catchable termination are deferred until BOTH arms complete
+the current two-microbatch optimizer updates. Hard deadlines still interrupt;
+save individual counts and partial state without claiming a complete pair.
+Parent waits for graceful boundary on STOP; it still kills its own process
+group at the hard deadline plus at most5seconds cleanup. No automatic resume,
+budget reset, seed replacement, extra candidate, BW/notebook/large-graph task.
+
+Results must compare normal2 training extension and robust-vs-normal2 at all
+three fixed points.6000 is a budget endpoint, not convergence certification.
+Complete local results, archive/ZIP/hash and independent GitHub review commit,
+then stop. Partial/failed outputs are retained and explicitly incomplete.
+
+---
+
+# Historical proposal v1 (1000 updates /90minutes; no longer authoritative)
 
 Status: preparation and bounded engineering tests only. The 90-minute learning
 panel is NOT activated or authorized by this release. No scientific training or
