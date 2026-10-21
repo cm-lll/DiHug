@@ -1,0 +1,100 @@
+[
+  {
+    "phase": "cold",
+    "completed_full_step": true,
+    "network_freshly_executed": true,
+    "full_step_seconds": 273.163280043751,
+    "audit_seconds": 0.5585107896476984,
+    "IO_seconds": 1.8432398159056902,
+    "runtime_timings": {
+      "query_plan_seconds": 0.024783859960734844,
+      "query_plan_seconds_cpu": 0.02478429900000023,
+      "uniform_seconds": 0.007606665603816509,
+      "uniform_seconds_cpu": 0.007608498000000186,
+      "posterior_seconds": 0.37174406088888645,
+      "posterior_seconds_cpu": 0.37142517600000247,
+      "full_sweep_seconds": 272.88691233471036,
+      "full_sweep_seconds_cpu": 272.760112536,
+      "state_edge_extraction_seconds": 0.0035002995282411575,
+      "state_edge_extraction_seconds_cpu": 0.0035019850000002073,
+      "context_seconds": 0.23131779488176107,
+      "context_seconds_cpu": 0.23132589599999998,
+      "query_validation_seconds": 0.13647170085459948,
+      "query_validation_seconds_cpu": 0.13650062900001103,
+      "query_transfer_seconds": 0.00409042090177536,
+      "query_transfer_seconds_cpu": 0.004123166999931982,
+      "graph_assembly_seconds": 1.3839980280026793,
+      "graph_assembly_seconds_cpu": 1.3838695850000136,
+      "network_seconds": 270.106359208934,
+      "network_seconds_cpu": 269.98045809099995,
+      "probability_check_export_seconds": 0.03529843222349882,
+      "probability_check_export_seconds_cpu": 0.03535216099993477
+    },
+    "module_timings": {
+      "current_relation_degrees_seconds": 0.0005997875705361366,
+      "degree_encoder_seconds": 0.0006629694253206253,
+      "degree_projection_seconds": 0.0006366511806845665,
+      "degree_law_cache_construction_seconds": 9.733070482499897,
+      "new_degree_law_tables": 407,
+      "Newton_solver_seconds": 0.3129608817398548,
+      "Newton_support_seconds": 0.0046362197026610374,
+      "independent_read_validation_seconds": 0.0165508845821023,
+      "Newton_plus_validation_seconds": 0.33093585167080164,
+      "role_encoder_seconds": 0.000932302325963974,
+      "role_value_seconds": 0.0001436835154891014,
+      "transformer_backbone_seconds": 237.53419958800077,
+      "CN_existing_Xt_node_encoding_seconds": 0.24398791790008545,
+      "CN_full_aggregation_seconds": 3.063759172335267,
+      "joint_readout_seconds": 3.978029520250857,
+      "role_fusion_projection_seconds": 0.496849000453949
+    },
+    "condition_diagnostic": {
+      "statistics_seconds": 0.0014496436342597008,
+      "degree_network_seconds": 0.001339588314294815,
+      "role_attention_seconds": 10.201263377442956
+    },
+    "likelihood_lookup_assembly_and_role_loop_residual_seconds": 0.13618105743080378,
+    "blocks": 20,
+    "covered_slots": 1223830,
+    "coverage_sha256": "7dd0d669b0254ee355388763df248c9871d4230f370f8d098f7ff2b6819b5581",
+    "input_state_sha256": "4dac071a42bc2891e593ecd918b69d39294b69d5c9ed743880afad39368a5601",
+    "output_state_sha256": "ffa2066399edb73422fb9e0e103a388eed7c7f86b4eface4ad2446ec3f3e0df8",
+    "uniform_sha256": "3fd9c986a6b138d87c1325ff05388f1dfd864e99da55054acb36bcf680ab5a2e",
+    "rng_before": {
+      "bit_generator": "PCG64",
+      "state": {
+        "state": 272914474965099892373262350419760220414,
+        "inc": 88227228313888090734150285704703179637
+      },
+      "has_uint32": 0,
+      "uinteger": 0
+    },
+    "rng_after": {
+      "bit_generator": "PCG64",
+      "state": {
+        "state": 287136738158587609155562271865717441032,
+        "inc": 88227228313888090734150285704703179637
+      },
+      "has_uint32": 0,
+      "uinteger": 0
+    },
+    "cache_tables_before": 0,
+    "cache_tables_after": 407,
+    "cache_bytes": 1548472,
+    "cache_reuse": "repeat only degree-law tables for identical t; no graph/hidden/P/logit/q reuse",
+    "read_count": 4,
+    "read_statuses": [
+      "converged_bounded_tail",
+      "converged_bounded_tail",
+      "converged_bounded_tail",
+      "converged_bounded_tail"
+    ],
+    "peak_rss_mib": 1829.31640625,
+    "output_sha256": "c0c0024fb54715041a662d34c0ac0d6a6958ec89c652431b6e8920d574b75ead",
+    "readouts_sha256": "edb6b71705c614109557daf13e7f8e99da64fd3bebf046c6e2a3f94d510748d7",
+    "peak_rss_after_step_mib": 1829.31640625,
+    "independent_full_posterior_audit_seconds": 0.4376119412481785,
+    "independent_sampling_commit_replay_seconds": 0.0027522798627614975,
+    "trace_overhead": "original trace=True computes diagnostic posterior once additionally per block and saves p0/q; same policy both paths"
+  }
+]

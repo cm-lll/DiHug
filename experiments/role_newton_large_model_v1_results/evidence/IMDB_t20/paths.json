@@ -1,0 +1,196 @@
+[
+  {
+    "phase": "cold",
+    "completed_full_step": true,
+    "network_freshly_executed": true,
+    "full_step_seconds": 176.64493511337787,
+    "audit_seconds": 0.638202091678977,
+    "IO_seconds": 1.3100838279351592,
+    "runtime_timings": {
+      "query_plan_seconds": 0.019893689081072807,
+      "query_plan_seconds_cpu": 0.01989442100000005,
+      "uniform_seconds": 0.008704816922545433,
+      "uniform_seconds_cpu": 0.0087065850000001,
+      "posterior_seconds": 0.3038836643099785,
+      "posterior_seconds_cpu": 0.30391314700003136,
+      "full_sweep_seconds": 176.5635680053383,
+      "full_sweep_seconds_cpu": 176.514895611,
+      "state_edge_extraction_seconds": 0.0028042523190379143,
+      "state_edge_extraction_seconds_cpu": 0.002805841999999892,
+      "context_seconds": 0.040197295136749744,
+      "context_seconds_cpu": 0.04020191700000009,
+      "query_validation_seconds": 0.11228421051055193,
+      "query_validation_seconds_cpu": 0.11231406400005994,
+      "query_transfer_seconds": 0.004125397652387619,
+      "query_transfer_seconds_cpu": 0.004157632999948646,
+      "graph_assembly_seconds": 1.0246918499469757,
+      "graph_assembly_seconds_cpu": 1.0248557240000196,
+      "network_seconds": 174.3367652259767,
+      "network_seconds_cpu": 174.33080818700003,
+      "probability_check_export_seconds": 0.01998385228216648,
+      "probability_check_export_seconds_cpu": 0.020040023000007068
+    },
+    "module_timings": {
+      "current_relation_degrees_seconds": 0.0002457760274410248,
+      "degree_encoder_seconds": 0.0006563169881701469,
+      "degree_projection_seconds": 0.000622178427875042,
+      "degree_law_cache_construction_seconds": 2.2149913338944316,
+      "new_degree_law_tables": 79,
+      "Newton_solver_seconds": 0.04342897143214941,
+      "Newton_support_seconds": 0.0013219937682151794,
+      "independent_read_validation_seconds": 0.0031145447865128517,
+      "Newton_plus_validation_seconds": 0.04676051065325737,
+      "role_encoder_seconds": 0.0006298553198575974,
+      "role_value_seconds": 0.00012718793004751205,
+      "transformer_backbone_seconds": 157.21429544873536,
+      "CN_existing_Xt_node_encoding_seconds": 0.06407350115478039,
+      "CN_full_aggregation_seconds": 0.3430857053026557,
+      "joint_readout_seconds": 3.0943758757784963,
+      "role_fusion_projection_seconds": 0.2644423060119152
+    },
+    "condition_diagnostic": {
+      "statistics_seconds": 0.0012104827910661697,
+      "degree_network_seconds": 0.0013219425454735756,
+      "role_attention_seconds": 2.283807854168117
+    },
+    "likelihood_lookup_assembly_and_role_loop_residual_seconds": 0.021298966370522976,
+    "blocks": 20,
+    "covered_slots": 997313,
+    "coverage_sha256": "9ab7791fe10e6e8b6dc52b98c2793fa063ac6f03535d1aa987750bb73fd7839f",
+    "input_state_sha256": "bdc3be43e7f9938bff87af7bb7980ee718520dd159c5cb8f63f97be09cf7f394",
+    "output_state_sha256": "652e3f760e6f772c7a519154482fe95da0a723b9864b9717ebd52596191db778",
+    "uniform_sha256": "84c512324b8b58af610aff4337019a19d349fd5d0eae01a7760c3d4563d875d2",
+    "rng_before": {
+      "bit_generator": "PCG64",
+      "state": {
+        "state": 91491895270767236214730505308011544880,
+        "inc": 133721003749686528886508340325094915829
+      },
+      "has_uint32": 0,
+      "uinteger": 0
+    },
+    "rng_after": {
+      "bit_generator": "PCG64",
+      "state": {
+        "state": 56961206698226740678763307889809945390,
+        "inc": 133721003749686528886508340325094915829
+      },
+      "has_uint32": 0,
+      "uinteger": 0
+    },
+    "cache_tables_before": 0,
+    "cache_tables_after": 79,
+    "cache_bytes": 344376,
+    "cache_reuse": "repeat only degree-law tables for identical t; no graph/hidden/P/logit/q reuse",
+    "read_count": 4,
+    "read_statuses": [
+      "converged_original",
+      "converged_original",
+      "converged_original",
+      "converged_bounded_tail"
+    ],
+    "peak_rss_mib": 1677.33984375,
+    "output_sha256": "eb4cccddfb9a80bde2352cb13706dac521d4e65eb8011ec1d64a53b0ed1fa3b6",
+    "readouts_sha256": "adfdaa148ec30bd40e5ce734a8ef669d9e4beaa8ed2429cbccf41fe2c5ce5b59",
+    "peak_rss_after_step_mib": 1677.33984375,
+    "independent_full_posterior_audit_seconds": 0.5142206996679306,
+    "independent_sampling_commit_replay_seconds": 0.005820508114993572,
+    "trace_overhead": "original trace=True computes diagnostic posterior once additionally per block and saves p0/q; same policy both paths"
+  },
+  {
+    "phase": "repeat",
+    "completed_full_step": true,
+    "network_freshly_executed": true,
+    "full_step_seconds": 172.33501807134598,
+    "audit_seconds": 0.755018774420023,
+    "IO_seconds": 1.3074782928451896,
+    "runtime_timings": {
+      "query_plan_seconds": 0.01739129051566124,
+      "query_plan_seconds_cpu": 0.017392212999993717,
+      "uniform_seconds": 0.005782339721918106,
+      "uniform_seconds_cpu": 0.00578403599999433,
+      "posterior_seconds": 0.30897701997309923,
+      "posterior_seconds_cpu": 0.3090228320000392,
+      "full_sweep_seconds": 172.27604588493705,
+      "full_sweep_seconds_cpu": 172.258482378,
+      "state_edge_extraction_seconds": 0.002697431482374668,
+      "state_edge_extraction_seconds_cpu": 0.002698792000018102,
+      "context_seconds": 0.02530394308269024,
+      "context_seconds_cpu": 0.025309136000004173,
+      "query_validation_seconds": 0.11213603150099516,
+      "query_validation_seconds_cpu": 0.11215019000007942,
+      "query_transfer_seconds": 0.004107247106730938,
+      "query_transfer_seconds_cpu": 0.004138715999886244,
+      "graph_assembly_seconds": 1.0251687783747911,
+      "graph_assembly_seconds_cpu": 1.0253231430001506,
+      "network_seconds": 170.06731356400996,
+      "network_seconds_cpu": 170.05003688299985,
+      "probability_check_export_seconds": 0.02168336883187294,
+      "probability_check_export_seconds_cpu": 0.021722085000192237
+    },
+    "module_timings": {
+      "current_relation_degrees_seconds": 0.00023886561393737793,
+      "degree_encoder_seconds": 0.00046593695878982544,
+      "degree_projection_seconds": 0.0005904650315642357,
+      "Newton_solver_seconds": 0.03954650927335024,
+      "Newton_support_seconds": 0.0010488741099834442,
+      "independent_read_validation_seconds": 0.002808930352330208,
+      "Newton_plus_validation_seconds": 0.04253503307700157,
+      "role_encoder_seconds": 0.00036641117185354233,
+      "role_value_seconds": 0.00010390393435955048,
+      "transformer_backbone_seconds": 155.14054932445288,
+      "CN_existing_Xt_node_encoding_seconds": 0.0636984296143055,
+      "CN_full_aggregation_seconds": 0.34425555542111397,
+      "joint_readout_seconds": 3.10196727886796,
+      "role_fusion_projection_seconds": 0.28605372831225395
+    },
+    "condition_diagnostic": {
+      "statistics_seconds": 0.0010951785370707512,
+      "degree_network_seconds": 0.0010907677933573723,
+      "role_attention_seconds": 0.04991425573825836
+    },
+    "likelihood_lookup_assembly_and_role_loop_residual_seconds": 0.006908907555043697,
+    "blocks": 20,
+    "covered_slots": 997313,
+    "coverage_sha256": "9ab7791fe10e6e8b6dc52b98c2793fa063ac6f03535d1aa987750bb73fd7839f",
+    "input_state_sha256": "bdc3be43e7f9938bff87af7bb7980ee718520dd159c5cb8f63f97be09cf7f394",
+    "output_state_sha256": "652e3f760e6f772c7a519154482fe95da0a723b9864b9717ebd52596191db778",
+    "uniform_sha256": "84c512324b8b58af610aff4337019a19d349fd5d0eae01a7760c3d4563d875d2",
+    "rng_before": {
+      "bit_generator": "PCG64",
+      "state": {
+        "state": 91491895270767236214730505308011544880,
+        "inc": 133721003749686528886508340325094915829
+      },
+      "has_uint32": 0,
+      "uinteger": 0
+    },
+    "rng_after": {
+      "bit_generator": "PCG64",
+      "state": {
+        "state": 56961206698226740678763307889809945390,
+        "inc": 133721003749686528886508340325094915829
+      },
+      "has_uint32": 0,
+      "uinteger": 0
+    },
+    "cache_tables_before": 79,
+    "cache_tables_after": 79,
+    "cache_bytes": 344376,
+    "cache_reuse": "repeat only degree-law tables for identical t; no graph/hidden/P/logit/q reuse",
+    "read_count": 4,
+    "read_statuses": [
+      "converged_original",
+      "converged_original",
+      "converged_original",
+      "converged_bounded_tail"
+    ],
+    "peak_rss_mib": 1785.21484375,
+    "output_sha256": "eb4cccddfb9a80bde2352cb13706dac521d4e65eb8011ec1d64a53b0ed1fa3b6",
+    "readouts_sha256": "adfdaa148ec30bd40e5ce734a8ef669d9e4beaa8ed2429cbccf41fe2c5ce5b59",
+    "peak_rss_after_step_mib": 1785.21484375,
+    "independent_full_posterior_audit_seconds": 0.5980002135038376,
+    "independent_sampling_commit_replay_seconds": 0.0027008550241589546,
+    "trace_overhead": "original trace=True computes diagnostic posterior once additionally per block and saves p0/q; same policy both paths"
+  }
+]

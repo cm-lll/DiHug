@@ -1,0 +1,32 @@
+...F.......................................                              [100%]
+=================================== FAILURES ===================================
+________________ test_instrumented_step_same_as_original_Newton ________________
+
+tmp_path = PosixPath('/tmp/pytest-of-lyh/pytest-594/test_instrumented_step_same_as0')
+
+    def test_instrumented_step_same_as_original_Newton(tmp_path):
+        from probe import Measurement
+        types=l.np.array([0,0,1,1,2,2,2,3,3]);edges=l.np.array([[0,0,1,2,3,4,5],[2,4,5,4,6,7,8]])
+        import itertools
+        case=l.c.base.c.make_case(types,edges,tuple(itertools.combinations_with_replacement(range(4),2)));target=l.c.base.extract_target(case)
+        cfg=l.read(l.EXP/'joint_cn_dual_rounds_v1_1/package/configs/IMDB.json');m=l.make_model(case,cfg);m.set_target(target)
+        state=l.np.zeros(case['space'].total,l.np.uint8);f,loc=case['space'].encode(edges);state[case['space'].offsets[f]+loc]=1
+        kernel=l.c.base.MarginalKernel(case['prior'],l.c.base.c.schedule(1000));original=l.cap.allocation_marginals
+        l.cap.allocation_marginals=lambda L,c:l.solver.required(L,c,lambda:None)
+        try:
+            with l.torch.no_grad():a,aa=l.c.base.reverse_step(m,case,state,kernel,500,20,123,l.np.random.default_rng(123),'cpu',trace=True)
+        finally:l.cap.allocation_marginals=original
+        m.branch.tables.clear();mon=Measurement(m,tmp_path,lambda:None);mon.case=case;mon.install()
+        try:
+            with l.torch.no_grad():b,bb=l.c.base.reverse_step(m,case,state,kernel,500,20,123,l.np.random.default_rng(123),'cpu',trace=True)
+            for key in ('p0','q','uniform','state','coverage'):l.np.testing.assert_array_equal(aa['trace'][key],bb['trace'][key])
+>           assert len(mon.reads)==4 and bb['blocks']==20
+E           AssertionError: assert (4 == 4 and 15 == 20)
+E            +  where 4 = len([{'column_residual': 1.032174345994008e-11, 'components': [{'backtracks': 0, 'converged': True, 'damping': 1.111111111...e, 'damping': 1e-06, 'evaluations': 1, ...}], 'constraint_forced_zeros': 0, 'context_FP32_conversion_bound': 0.0, ...}])
+E            +    where [{'column_residual': 1.032174345994008e-11, 'components': [{'backtracks': 0, 'converged': True, 'damping': 1.111111111...e, 'damping': 1e-06, 'evaluations': 1, ...}], 'constraint_forced_zeros': 0, 'context_FP32_conversion_bound': 0.0, ...}] = <probe.Measurement object at 0x7f8b632b0730>.reads
+
+experiments/role_newton_large_model_v1/test_probe.py:36: AssertionError
+- generated xml file: /data2/lyh/gnn_project/DiHug/results/role_newton_large_model_20261021_v1/tests_final.xml -
+=========================== short test summary info ============================
+FAILED experiments/role_newton_large_model_v1/test_probe.py::test_instrumented_step_same_as_original_Newton
+1 failed, 42 passed in 5.34s

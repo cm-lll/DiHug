@@ -1,0 +1,2610 @@
+{
+  "dataset": "IMDB",
+  "data_sha256": "10f1dbbbe55c6a069594b2dcb590d1b8295ca5436320ef4597cd30e6b7f73e42",
+  "source_config_path": "/tmp/dihug-role-newton-large-model-v1/experiments/joint_cn_dual_rounds_v1_1/package/configs/IMDB.json",
+  "source_config_sha256": "001ef83c7553c350b9327ac4765db70fc26ddc811b0b3548f9f1fa7a04acae05",
+  "config": {
+    "version": "joint_cn_dual_rounds_v1",
+    "dataset": "IMDB",
+    "base_commit": "dd53b6431303263e740abedf67e01d7dfc13d15b",
+    "backend": "upstream",
+    "T": 1000,
+    "rounds": 20,
+    "schedule_offset": 0.008,
+    "model": {
+      "layers": 8,
+      "width": 256,
+      "edge_width": 64,
+      "global_width": 128,
+      "heads": 8,
+      "ff_node": 256,
+      "ff_edge": 64,
+      "ff_global": 256,
+      "dropout": 0.1,
+      "cn_hidden": 32,
+      "joint_width": 128,
+      "max_wedges": 2000000,
+      "max_query_paths": 2000000
+    },
+    "optimizer": {
+      "type": "AdamW",
+      "lr": 0.0002,
+      "weight_decay": 1e-12,
+      "betas": [
+        0.9,
+        0.999
+      ],
+      "eps": 1e-08,
+      "amsgrad": false
+    },
+    "scheduler": null,
+    "microbatch": 1,
+    "gradient_accumulation": 1,
+    "gradient_clipping": null,
+    "lr_warmup": null,
+    "precision": "FP32 network/stable CE; float64 probability kernel",
+    "train_seed": 2026101901,
+    "validation_seed": 2026101911,
+    "sample_seed": 2026101921,
+    "validation_times": [
+      1,
+      250,
+      500,
+      750,
+      1000
+    ],
+    "validation_every_updates": 1000,
+    "max_updates": 12000,
+    "checkpoint_every_updates": 1000,
+    "evaluation_updates": [
+      3000,
+      6000,
+      9000,
+      10000,
+      12000
+    ],
+    "samples_per_checkpoint": 1,
+    "deterministic_training": false,
+    "tf32": false,
+    "torch_threads": 1,
+    "role_guidance": false,
+    "postprocessing": false,
+    "data": {
+      "file": "data/IMDB.npz",
+      "sha256": "10f1dbbbe55c6a069594b2dcb590d1b8295ca5436320ef4597cd30e6b7f73e42",
+      "nodes": 1653,
+      "edges": 4079,
+      "type_counts": [
+        410,
+        494,
+        726,
+        23
+      ],
+      "type_names": [
+        "Director",
+        "Actor",
+        "Movie",
+        "Genre"
+      ],
+      "family_counts": [
+        0,
+        604,
+        642,
+        0,
+        15,
+        739,
+        0,
+        0,
+        2079,
+        0
+      ],
+      "relation_storage": "one-based in NPZ, zero-based in model; one relation per unordered type pair"
+    },
+    "provenance": {
+      "confirmed": "Baseline model, stable CE, cosine kernel and engineering entry optimizer",
+      "formal_6000_entry_verified": false,
+      "missing": [
+        "old formal 6000-update launcher",
+        "old formal resolved_config and optimizer/seed receipt"
+      ],
+      "optimizer_source": "dd53 hsgd/fusion_preflight.py AdamW; default betas/eps expanded explicitly",
+      "dropout": "configured 0.1; vendor forward contains no active dropout operation",
+      "new_engineering_choices": [
+        "new train/validation/sample seeds",
+        "12000-update schedule and permanent milestones",
+        "full-cover fixed validation panel",
+        "no scheduler or LR warmup, per engineering entry; old formal setup not independently verified"
+      ]
+    }
+  },
+  "model_architecture": "anonymous_capacity_degree_likelihood_v1",
+  "random_seed": 2026102147,
+  "random_weight_state_sha256": "acda36341079665ede77ad8d899f58205c32e21dbee16cdb949eee5c8d2e7b69",
+  "dimensions": {
+    "parameters": 6658481,
+    "common_neighbor_parameters": 10080,
+    "linear_layers": {
+      "backbone.lin_in_X": {
+        "in": 4,
+        "out": 256
+      },
+      "backbone.lin_in_E": {
+        "in": 21,
+        "out": 64
+      },
+      "backbone.lin_in_y": {
+        "in": 1,
+        "out": 128
+      },
+      "backbone.tf_layers.0.self_attn.lin_key": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.0.self_attn.lin_query": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.0.self_attn.lin_value": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.0.self_attn.lin_skip": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.0.self_attn.e_add": {
+        "in": 64,
+        "out": 8
+      },
+      "backbone.tf_layers.0.self_attn.e_mul": {
+        "in": 64,
+        "out": 8
+      },
+      "backbone.tf_layers.0.self_attn.y_e_mul": {
+        "in": 128,
+        "out": 64
+      },
+      "backbone.tf_layers.0.self_attn.y_e_add": {
+        "in": 128,
+        "out": 64
+      },
+      "backbone.tf_layers.0.self_attn.y_x_mul": {
+        "in": 128,
+        "out": 256
+      },
+      "backbone.tf_layers.0.self_attn.y_x_add": {
+        "in": 128,
+        "out": 256
+      },
+      "backbone.tf_layers.0.self_attn.y_y": {
+        "in": 128,
+        "out": 128
+      },
+      "backbone.tf_layers.0.self_attn.x_y.lin": {
+        "in": 1024,
+        "out": 128
+      },
+      "backbone.tf_layers.0.self_attn.e_y.lin": {
+        "in": 256,
+        "out": 128
+      },
+      "backbone.tf_layers.0.self_attn.y_out.0": {
+        "in": 128,
+        "out": 128
+      },
+      "backbone.tf_layers.0.self_attn.y_out.2": {
+        "in": 128,
+        "out": 128
+      },
+      "backbone.tf_layers.0.self_attn.x_out": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.0.self_attn.e_out": {
+        "in": 256,
+        "out": 64
+      },
+      "backbone.tf_layers.0.linX1": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.0.linX2": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.0.linE1": {
+        "in": 64,
+        "out": 64
+      },
+      "backbone.tf_layers.0.linE2": {
+        "in": 64,
+        "out": 64
+      },
+      "backbone.tf_layers.0.lin_y1": {
+        "in": 128,
+        "out": 256
+      },
+      "backbone.tf_layers.0.lin_y2": {
+        "in": 256,
+        "out": 128
+      },
+      "backbone.tf_layers.1.self_attn.lin_key": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.1.self_attn.lin_query": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.1.self_attn.lin_value": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.1.self_attn.lin_skip": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.1.self_attn.e_add": {
+        "in": 64,
+        "out": 8
+      },
+      "backbone.tf_layers.1.self_attn.e_mul": {
+        "in": 64,
+        "out": 8
+      },
+      "backbone.tf_layers.1.self_attn.y_e_mul": {
+        "in": 128,
+        "out": 64
+      },
+      "backbone.tf_layers.1.self_attn.y_e_add": {
+        "in": 128,
+        "out": 64
+      },
+      "backbone.tf_layers.1.self_attn.y_x_mul": {
+        "in": 128,
+        "out": 256
+      },
+      "backbone.tf_layers.1.self_attn.y_x_add": {
+        "in": 128,
+        "out": 256
+      },
+      "backbone.tf_layers.1.self_attn.y_y": {
+        "in": 128,
+        "out": 128
+      },
+      "backbone.tf_layers.1.self_attn.x_y.lin": {
+        "in": 1024,
+        "out": 128
+      },
+      "backbone.tf_layers.1.self_attn.e_y.lin": {
+        "in": 256,
+        "out": 128
+      },
+      "backbone.tf_layers.1.self_attn.y_out.0": {
+        "in": 128,
+        "out": 128
+      },
+      "backbone.tf_layers.1.self_attn.y_out.2": {
+        "in": 128,
+        "out": 128
+      },
+      "backbone.tf_layers.1.self_attn.x_out": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.1.self_attn.e_out": {
+        "in": 256,
+        "out": 64
+      },
+      "backbone.tf_layers.1.linX1": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.1.linX2": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.1.linE1": {
+        "in": 64,
+        "out": 64
+      },
+      "backbone.tf_layers.1.linE2": {
+        "in": 64,
+        "out": 64
+      },
+      "backbone.tf_layers.1.lin_y1": {
+        "in": 128,
+        "out": 256
+      },
+      "backbone.tf_layers.1.lin_y2": {
+        "in": 256,
+        "out": 128
+      },
+      "backbone.tf_layers.2.self_attn.lin_key": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.2.self_attn.lin_query": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.2.self_attn.lin_value": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.2.self_attn.lin_skip": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.2.self_attn.e_add": {
+        "in": 64,
+        "out": 8
+      },
+      "backbone.tf_layers.2.self_attn.e_mul": {
+        "in": 64,
+        "out": 8
+      },
+      "backbone.tf_layers.2.self_attn.y_e_mul": {
+        "in": 128,
+        "out": 64
+      },
+      "backbone.tf_layers.2.self_attn.y_e_add": {
+        "in": 128,
+        "out": 64
+      },
+      "backbone.tf_layers.2.self_attn.y_x_mul": {
+        "in": 128,
+        "out": 256
+      },
+      "backbone.tf_layers.2.self_attn.y_x_add": {
+        "in": 128,
+        "out": 256
+      },
+      "backbone.tf_layers.2.self_attn.y_y": {
+        "in": 128,
+        "out": 128
+      },
+      "backbone.tf_layers.2.self_attn.x_y.lin": {
+        "in": 1024,
+        "out": 128
+      },
+      "backbone.tf_layers.2.self_attn.e_y.lin": {
+        "in": 256,
+        "out": 128
+      },
+      "backbone.tf_layers.2.self_attn.y_out.0": {
+        "in": 128,
+        "out": 128
+      },
+      "backbone.tf_layers.2.self_attn.y_out.2": {
+        "in": 128,
+        "out": 128
+      },
+      "backbone.tf_layers.2.self_attn.x_out": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.2.self_attn.e_out": {
+        "in": 256,
+        "out": 64
+      },
+      "backbone.tf_layers.2.linX1": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.2.linX2": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.2.linE1": {
+        "in": 64,
+        "out": 64
+      },
+      "backbone.tf_layers.2.linE2": {
+        "in": 64,
+        "out": 64
+      },
+      "backbone.tf_layers.2.lin_y1": {
+        "in": 128,
+        "out": 256
+      },
+      "backbone.tf_layers.2.lin_y2": {
+        "in": 256,
+        "out": 128
+      },
+      "backbone.tf_layers.3.self_attn.lin_key": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.3.self_attn.lin_query": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.3.self_attn.lin_value": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.3.self_attn.lin_skip": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.3.self_attn.e_add": {
+        "in": 64,
+        "out": 8
+      },
+      "backbone.tf_layers.3.self_attn.e_mul": {
+        "in": 64,
+        "out": 8
+      },
+      "backbone.tf_layers.3.self_attn.y_e_mul": {
+        "in": 128,
+        "out": 64
+      },
+      "backbone.tf_layers.3.self_attn.y_e_add": {
+        "in": 128,
+        "out": 64
+      },
+      "backbone.tf_layers.3.self_attn.y_x_mul": {
+        "in": 128,
+        "out": 256
+      },
+      "backbone.tf_layers.3.self_attn.y_x_add": {
+        "in": 128,
+        "out": 256
+      },
+      "backbone.tf_layers.3.self_attn.y_y": {
+        "in": 128,
+        "out": 128
+      },
+      "backbone.tf_layers.3.self_attn.x_y.lin": {
+        "in": 1024,
+        "out": 128
+      },
+      "backbone.tf_layers.3.self_attn.e_y.lin": {
+        "in": 256,
+        "out": 128
+      },
+      "backbone.tf_layers.3.self_attn.y_out.0": {
+        "in": 128,
+        "out": 128
+      },
+      "backbone.tf_layers.3.self_attn.y_out.2": {
+        "in": 128,
+        "out": 128
+      },
+      "backbone.tf_layers.3.self_attn.x_out": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.3.self_attn.e_out": {
+        "in": 256,
+        "out": 64
+      },
+      "backbone.tf_layers.3.linX1": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.3.linX2": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.3.linE1": {
+        "in": 64,
+        "out": 64
+      },
+      "backbone.tf_layers.3.linE2": {
+        "in": 64,
+        "out": 64
+      },
+      "backbone.tf_layers.3.lin_y1": {
+        "in": 128,
+        "out": 256
+      },
+      "backbone.tf_layers.3.lin_y2": {
+        "in": 256,
+        "out": 128
+      },
+      "backbone.tf_layers.4.self_attn.lin_key": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.4.self_attn.lin_query": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.4.self_attn.lin_value": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.4.self_attn.lin_skip": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.4.self_attn.e_add": {
+        "in": 64,
+        "out": 8
+      },
+      "backbone.tf_layers.4.self_attn.e_mul": {
+        "in": 64,
+        "out": 8
+      },
+      "backbone.tf_layers.4.self_attn.y_e_mul": {
+        "in": 128,
+        "out": 64
+      },
+      "backbone.tf_layers.4.self_attn.y_e_add": {
+        "in": 128,
+        "out": 64
+      },
+      "backbone.tf_layers.4.self_attn.y_x_mul": {
+        "in": 128,
+        "out": 256
+      },
+      "backbone.tf_layers.4.self_attn.y_x_add": {
+        "in": 128,
+        "out": 256
+      },
+      "backbone.tf_layers.4.self_attn.y_y": {
+        "in": 128,
+        "out": 128
+      },
+      "backbone.tf_layers.4.self_attn.x_y.lin": {
+        "in": 1024,
+        "out": 128
+      },
+      "backbone.tf_layers.4.self_attn.e_y.lin": {
+        "in": 256,
+        "out": 128
+      },
+      "backbone.tf_layers.4.self_attn.y_out.0": {
+        "in": 128,
+        "out": 128
+      },
+      "backbone.tf_layers.4.self_attn.y_out.2": {
+        "in": 128,
+        "out": 128
+      },
+      "backbone.tf_layers.4.self_attn.x_out": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.4.self_attn.e_out": {
+        "in": 256,
+        "out": 64
+      },
+      "backbone.tf_layers.4.linX1": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.4.linX2": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.4.linE1": {
+        "in": 64,
+        "out": 64
+      },
+      "backbone.tf_layers.4.linE2": {
+        "in": 64,
+        "out": 64
+      },
+      "backbone.tf_layers.4.lin_y1": {
+        "in": 128,
+        "out": 256
+      },
+      "backbone.tf_layers.4.lin_y2": {
+        "in": 256,
+        "out": 128
+      },
+      "backbone.tf_layers.5.self_attn.lin_key": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.5.self_attn.lin_query": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.5.self_attn.lin_value": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.5.self_attn.lin_skip": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.5.self_attn.e_add": {
+        "in": 64,
+        "out": 8
+      },
+      "backbone.tf_layers.5.self_attn.e_mul": {
+        "in": 64,
+        "out": 8
+      },
+      "backbone.tf_layers.5.self_attn.y_e_mul": {
+        "in": 128,
+        "out": 64
+      },
+      "backbone.tf_layers.5.self_attn.y_e_add": {
+        "in": 128,
+        "out": 64
+      },
+      "backbone.tf_layers.5.self_attn.y_x_mul": {
+        "in": 128,
+        "out": 256
+      },
+      "backbone.tf_layers.5.self_attn.y_x_add": {
+        "in": 128,
+        "out": 256
+      },
+      "backbone.tf_layers.5.self_attn.y_y": {
+        "in": 128,
+        "out": 128
+      },
+      "backbone.tf_layers.5.self_attn.x_y.lin": {
+        "in": 1024,
+        "out": 128
+      },
+      "backbone.tf_layers.5.self_attn.e_y.lin": {
+        "in": 256,
+        "out": 128
+      },
+      "backbone.tf_layers.5.self_attn.y_out.0": {
+        "in": 128,
+        "out": 128
+      },
+      "backbone.tf_layers.5.self_attn.y_out.2": {
+        "in": 128,
+        "out": 128
+      },
+      "backbone.tf_layers.5.self_attn.x_out": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.5.self_attn.e_out": {
+        "in": 256,
+        "out": 64
+      },
+      "backbone.tf_layers.5.linX1": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.5.linX2": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.5.linE1": {
+        "in": 64,
+        "out": 64
+      },
+      "backbone.tf_layers.5.linE2": {
+        "in": 64,
+        "out": 64
+      },
+      "backbone.tf_layers.5.lin_y1": {
+        "in": 128,
+        "out": 256
+      },
+      "backbone.tf_layers.5.lin_y2": {
+        "in": 256,
+        "out": 128
+      },
+      "backbone.tf_layers.6.self_attn.lin_key": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.6.self_attn.lin_query": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.6.self_attn.lin_value": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.6.self_attn.lin_skip": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.6.self_attn.e_add": {
+        "in": 64,
+        "out": 8
+      },
+      "backbone.tf_layers.6.self_attn.e_mul": {
+        "in": 64,
+        "out": 8
+      },
+      "backbone.tf_layers.6.self_attn.y_e_mul": {
+        "in": 128,
+        "out": 64
+      },
+      "backbone.tf_layers.6.self_attn.y_e_add": {
+        "in": 128,
+        "out": 64
+      },
+      "backbone.tf_layers.6.self_attn.y_x_mul": {
+        "in": 128,
+        "out": 256
+      },
+      "backbone.tf_layers.6.self_attn.y_x_add": {
+        "in": 128,
+        "out": 256
+      },
+      "backbone.tf_layers.6.self_attn.y_y": {
+        "in": 128,
+        "out": 128
+      },
+      "backbone.tf_layers.6.self_attn.x_y.lin": {
+        "in": 1024,
+        "out": 128
+      },
+      "backbone.tf_layers.6.self_attn.e_y.lin": {
+        "in": 256,
+        "out": 128
+      },
+      "backbone.tf_layers.6.self_attn.y_out.0": {
+        "in": 128,
+        "out": 128
+      },
+      "backbone.tf_layers.6.self_attn.y_out.2": {
+        "in": 128,
+        "out": 128
+      },
+      "backbone.tf_layers.6.self_attn.x_out": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.6.self_attn.e_out": {
+        "in": 256,
+        "out": 64
+      },
+      "backbone.tf_layers.6.linX1": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.6.linX2": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.6.linE1": {
+        "in": 64,
+        "out": 64
+      },
+      "backbone.tf_layers.6.linE2": {
+        "in": 64,
+        "out": 64
+      },
+      "backbone.tf_layers.6.lin_y1": {
+        "in": 128,
+        "out": 256
+      },
+      "backbone.tf_layers.6.lin_y2": {
+        "in": 256,
+        "out": 128
+      },
+      "backbone.tf_layers.7.self_attn.lin_key": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.7.self_attn.lin_query": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.7.self_attn.lin_value": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.7.self_attn.lin_skip": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.7.self_attn.e_add": {
+        "in": 64,
+        "out": 8
+      },
+      "backbone.tf_layers.7.self_attn.e_mul": {
+        "in": 64,
+        "out": 8
+      },
+      "backbone.tf_layers.7.self_attn.y_e_mul": {
+        "in": 128,
+        "out": 64
+      },
+      "backbone.tf_layers.7.self_attn.y_e_add": {
+        "in": 128,
+        "out": 64
+      },
+      "backbone.tf_layers.7.self_attn.y_x_mul": {
+        "in": 128,
+        "out": 256
+      },
+      "backbone.tf_layers.7.self_attn.y_x_add": {
+        "in": 128,
+        "out": 256
+      },
+      "backbone.tf_layers.7.self_attn.x_out": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.7.self_attn.e_out": {
+        "in": 256,
+        "out": 64
+      },
+      "backbone.tf_layers.7.linX1": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.7.linX2": {
+        "in": 256,
+        "out": 256
+      },
+      "backbone.tf_layers.7.linE1": {
+        "in": 64,
+        "out": 64
+      },
+      "backbone.tf_layers.7.linE2": {
+        "in": 64,
+        "out": 64
+      },
+      "backbone.lin_out_X": {
+        "in": 256,
+        "out": 4
+      },
+      "backbone.lin_out_E": {
+        "in": 64,
+        "out": 11
+      },
+      "joint_head.0": {
+        "in": 776,
+        "out": 128
+      },
+      "joint_head.2": {
+        "in": 128,
+        "out": 2
+      },
+      "common_neighbor.phi.0": {
+        "in": 281,
+        "out": 32
+      },
+      "common_neighbor.phi.2": {
+        "in": 32,
+        "out": 32
+      },
+      "branch.degree_encoder.0": {
+        "in": 25,
+        "out": 32
+      },
+      "branch.degree_encoder.2": {
+        "in": 32,
+        "out": 32
+      },
+      "branch.degree_out": {
+        "in": 32,
+        "out": 256
+      },
+      "branch.role_encoder.0": {
+        "in": 22,
+        "out": 32
+      },
+      "branch.role_encoder.2": {
+        "in": 32,
+        "out": 32
+      },
+      "branch.value": {
+        "in": 32,
+        "out": 32
+      },
+      "role_fusion": {
+        "in": 64,
+        "out": 128
+      }
+    },
+    "layer_norms": {
+      "backbone.tf_layers.0.normX1": {
+        "shape": [
+          256
+        ],
+        "eps": 1e-05
+      },
+      "backbone.tf_layers.0.normX2": {
+        "shape": [
+          256
+        ],
+        "eps": 1e-05
+      },
+      "backbone.tf_layers.0.normE1": {
+        "shape": [
+          64
+        ],
+        "eps": 1e-05
+      },
+      "backbone.tf_layers.0.normE2": {
+        "shape": [
+          64
+        ],
+        "eps": 1e-05
+      },
+      "backbone.tf_layers.0.norm_y1": {
+        "shape": [
+          128
+        ],
+        "eps": 1e-05
+      },
+      "backbone.tf_layers.0.norm_y2": {
+        "shape": [
+          128
+        ],
+        "eps": 1e-05
+      },
+      "backbone.tf_layers.1.normX1": {
+        "shape": [
+          256
+        ],
+        "eps": 1e-05
+      },
+      "backbone.tf_layers.1.normX2": {
+        "shape": [
+          256
+        ],
+        "eps": 1e-05
+      },
+      "backbone.tf_layers.1.normE1": {
+        "shape": [
+          64
+        ],
+        "eps": 1e-05
+      },
+      "backbone.tf_layers.1.normE2": {
+        "shape": [
+          64
+        ],
+        "eps": 1e-05
+      },
+      "backbone.tf_layers.1.norm_y1": {
+        "shape": [
+          128
+        ],
+        "eps": 1e-05
+      },
+      "backbone.tf_layers.1.norm_y2": {
+        "shape": [
+          128
+        ],
+        "eps": 1e-05
+      },
+      "backbone.tf_layers.2.normX1": {
+        "shape": [
+          256
+        ],
+        "eps": 1e-05
+      },
+      "backbone.tf_layers.2.normX2": {
+        "shape": [
+          256
+        ],
+        "eps": 1e-05
+      },
+      "backbone.tf_layers.2.normE1": {
+        "shape": [
+          64
+        ],
+        "eps": 1e-05
+      },
+      "backbone.tf_layers.2.normE2": {
+        "shape": [
+          64
+        ],
+        "eps": 1e-05
+      },
+      "backbone.tf_layers.2.norm_y1": {
+        "shape": [
+          128
+        ],
+        "eps": 1e-05
+      },
+      "backbone.tf_layers.2.norm_y2": {
+        "shape": [
+          128
+        ],
+        "eps": 1e-05
+      },
+      "backbone.tf_layers.3.normX1": {
+        "shape": [
+          256
+        ],
+        "eps": 1e-05
+      },
+      "backbone.tf_layers.3.normX2": {
+        "shape": [
+          256
+        ],
+        "eps": 1e-05
+      },
+      "backbone.tf_layers.3.normE1": {
+        "shape": [
+          64
+        ],
+        "eps": 1e-05
+      },
+      "backbone.tf_layers.3.normE2": {
+        "shape": [
+          64
+        ],
+        "eps": 1e-05
+      },
+      "backbone.tf_layers.3.norm_y1": {
+        "shape": [
+          128
+        ],
+        "eps": 1e-05
+      },
+      "backbone.tf_layers.3.norm_y2": {
+        "shape": [
+          128
+        ],
+        "eps": 1e-05
+      },
+      "backbone.tf_layers.4.normX1": {
+        "shape": [
+          256
+        ],
+        "eps": 1e-05
+      },
+      "backbone.tf_layers.4.normX2": {
+        "shape": [
+          256
+        ],
+        "eps": 1e-05
+      },
+      "backbone.tf_layers.4.normE1": {
+        "shape": [
+          64
+        ],
+        "eps": 1e-05
+      },
+      "backbone.tf_layers.4.normE2": {
+        "shape": [
+          64
+        ],
+        "eps": 1e-05
+      },
+      "backbone.tf_layers.4.norm_y1": {
+        "shape": [
+          128
+        ],
+        "eps": 1e-05
+      },
+      "backbone.tf_layers.4.norm_y2": {
+        "shape": [
+          128
+        ],
+        "eps": 1e-05
+      },
+      "backbone.tf_layers.5.normX1": {
+        "shape": [
+          256
+        ],
+        "eps": 1e-05
+      },
+      "backbone.tf_layers.5.normX2": {
+        "shape": [
+          256
+        ],
+        "eps": 1e-05
+      },
+      "backbone.tf_layers.5.normE1": {
+        "shape": [
+          64
+        ],
+        "eps": 1e-05
+      },
+      "backbone.tf_layers.5.normE2": {
+        "shape": [
+          64
+        ],
+        "eps": 1e-05
+      },
+      "backbone.tf_layers.5.norm_y1": {
+        "shape": [
+          128
+        ],
+        "eps": 1e-05
+      },
+      "backbone.tf_layers.5.norm_y2": {
+        "shape": [
+          128
+        ],
+        "eps": 1e-05
+      },
+      "backbone.tf_layers.6.normX1": {
+        "shape": [
+          256
+        ],
+        "eps": 1e-05
+      },
+      "backbone.tf_layers.6.normX2": {
+        "shape": [
+          256
+        ],
+        "eps": 1e-05
+      },
+      "backbone.tf_layers.6.normE1": {
+        "shape": [
+          64
+        ],
+        "eps": 1e-05
+      },
+      "backbone.tf_layers.6.normE2": {
+        "shape": [
+          64
+        ],
+        "eps": 1e-05
+      },
+      "backbone.tf_layers.6.norm_y1": {
+        "shape": [
+          128
+        ],
+        "eps": 1e-05
+      },
+      "backbone.tf_layers.6.norm_y2": {
+        "shape": [
+          128
+        ],
+        "eps": 1e-05
+      },
+      "backbone.tf_layers.7.normX1": {
+        "shape": [
+          256
+        ],
+        "eps": 1e-05
+      },
+      "backbone.tf_layers.7.normX2": {
+        "shape": [
+          256
+        ],
+        "eps": 1e-05
+      },
+      "backbone.tf_layers.7.normE1": {
+        "shape": [
+          64
+        ],
+        "eps": 1e-05
+      },
+      "backbone.tf_layers.7.normE2": {
+        "shape": [
+          64
+        ],
+        "eps": 1e-05
+      },
+      "backbone.out_ln_X": {
+        "shape": [
+          256
+        ],
+        "eps": 1e-05
+      },
+      "backbone.out_ln_E": {
+        "shape": [
+          64
+        ],
+        "eps": 1e-05
+      }
+    },
+    "graph_output_head": false,
+    "mutable_node_charge_dims": 0,
+    "dropout_config": 0.1,
+    "dropout_active": false,
+    "features": "shared nonlinear joint edge/global readout; complete Xt counts/density; optional mean CN + log1p typed counts + existence; no scalar CN addition",
+    "architecture": "anonymous_capacity_degree_likelihood_v1",
+    "joint_input": 776,
+    "joint_hidden": 128,
+    "joint_slices": {
+      "edge": [
+        0,
+        64
+      ],
+      "endpoint_mean": [
+        64,
+        320
+      ],
+      "endpoint_absdiff": [
+        320,
+        576
+      ],
+      "backbone_global": [
+        576,
+        704
+      ],
+      "time": [
+        704,
+        705
+      ],
+      "Xt_statistics": [
+        705,
+        725
+      ],
+      "family": [
+        725,
+        735
+      ],
+      "current_state": [
+        735,
+        737
+      ],
+      "backbone_logits": [
+        737,
+        739
+      ],
+      "CN": [
+        739,
+        776
+      ]
+    },
+    "degree_encoder_input": 25,
+    "role_encoder_input": 22,
+    "role_fusion_input": 64,
+    "joint_head_input": 776,
+    "parameter_count": 6658481
+  },
+  "random_weights_cannot_evaluate_quality": true,
+  "anonymous_target": {
+    "roles": [
+      [
+        [
+          [
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          2
+        ],
+        [
+          [
+            0,
+            1,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          289
+        ],
+        [
+          [
+            0,
+            1,
+            2,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          7
+        ],
+        [
+          [
+            0,
+            2,
+            2,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          60
+        ],
+        [
+          [
+            0,
+            2,
+            3,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          3
+        ],
+        [
+          [
+            0,
+            2,
+            4,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          1
+        ],
+        [
+          [
+            0,
+            2,
+            5,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          1
+        ],
+        [
+          [
+            0,
+            3,
+            3,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          22
+        ],
+        [
+          [
+            0,
+            3,
+            4,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          3
+        ],
+        [
+          [
+            0,
+            3,
+            5,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          2
+        ],
+        [
+          [
+            0,
+            4,
+            4,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          9
+        ],
+        [
+          [
+            0,
+            4,
+            5,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          1
+        ],
+        [
+          [
+            0,
+            4,
+            6,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          1
+        ],
+        [
+          [
+            0,
+            4,
+            9,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          1
+        ],
+        [
+          [
+            0,
+            5,
+            5,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          4
+        ],
+        [
+          [
+            0,
+            5,
+            7,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          1
+        ],
+        [
+          [
+            0,
+            6,
+            6,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          1
+        ],
+        [
+          [
+            0,
+            7,
+            8,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          1
+        ],
+        [
+          [
+            0,
+            11,
+            14,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          1
+        ]
+      ],
+      [
+        [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0
+          ],
+          54
+        ],
+        [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            2,
+            0,
+            0,
+            0,
+            0
+          ],
+          1
+        ],
+        [
+          [
+            0,
+            0,
+            0,
+            0,
+            1,
+            1,
+            0,
+            0,
+            0,
+            0
+          ],
+          9
+        ],
+        [
+          [
+            0,
+            0,
+            0,
+            0,
+            1,
+            2,
+            0,
+            0,
+            0,
+            0
+          ],
+          1
+        ],
+        [
+          [
+            0,
+            0,
+            0,
+            0,
+            3,
+            4,
+            0,
+            0,
+            0,
+            0
+          ],
+          1
+        ],
+        [
+          [
+            0,
+            1,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0
+          ],
+          326
+        ],
+        [
+          [
+            0,
+            1,
+            0,
+            0,
+            0,
+            2,
+            0,
+            0,
+            0,
+            0
+          ],
+          11
+        ],
+        [
+          [
+            0,
+            1,
+            0,
+            0,
+            1,
+            2,
+            0,
+            0,
+            0,
+            0
+          ],
+          3
+        ],
+        [
+          [
+            0,
+            1,
+            0,
+            0,
+            6,
+            8,
+            0,
+            0,
+            0,
+            0
+          ],
+          1
+        ],
+        [
+          [
+            0,
+            2,
+            0,
+            0,
+            0,
+            2,
+            0,
+            0,
+            0,
+            0
+          ],
+          40
+        ],
+        [
+          [
+            0,
+            2,
+            0,
+            0,
+            0,
+            3,
+            0,
+            0,
+            0,
+            0
+          ],
+          3
+        ],
+        [
+          [
+            0,
+            2,
+            0,
+            0,
+            0,
+            4,
+            0,
+            0,
+            0,
+            0
+          ],
+          1
+        ],
+        [
+          [
+            0,
+            2,
+            0,
+            0,
+            0,
+            5,
+            0,
+            0,
+            0,
+            0
+          ],
+          1
+        ],
+        [
+          [
+            0,
+            2,
+            0,
+            0,
+            3,
+            10,
+            0,
+            0,
+            0,
+            0
+          ],
+          1
+        ],
+        [
+          [
+            0,
+            3,
+            0,
+            0,
+            0,
+            3,
+            0,
+            0,
+            0,
+            0
+          ],
+          16
+        ],
+        [
+          [
+            0,
+            3,
+            0,
+            0,
+            0,
+            4,
+            0,
+            0,
+            0,
+            0
+          ],
+          4
+        ],
+        [
+          [
+            0,
+            4,
+            0,
+            0,
+            0,
+            4,
+            0,
+            0,
+            0,
+            0
+          ],
+          6
+        ],
+        [
+          [
+            0,
+            4,
+            0,
+            0,
+            1,
+            5,
+            0,
+            0,
+            0,
+            0
+          ],
+          3
+        ],
+        [
+          [
+            0,
+            5,
+            0,
+            0,
+            0,
+            5,
+            0,
+            0,
+            0,
+            0
+          ],
+          2
+        ],
+        [
+          [
+            0,
+            5,
+            0,
+            0,
+            0,
+            6,
+            0,
+            0,
+            0,
+            0
+          ],
+          2
+        ],
+        [
+          [
+            0,
+            6,
+            0,
+            0,
+            0,
+            6,
+            0,
+            0,
+            0,
+            0
+          ],
+          1
+        ],
+        [
+          [
+            0,
+            6,
+            0,
+            0,
+            1,
+            9,
+            0,
+            0,
+            0,
+            0
+          ],
+          1
+        ],
+        [
+          [
+            0,
+            6,
+            0,
+            0,
+            1,
+            10,
+            0,
+            0,
+            0,
+            0
+          ],
+          1
+        ],
+        [
+          [
+            0,
+            7,
+            0,
+            0,
+            0,
+            9,
+            0,
+            0,
+            0,
+            0
+          ],
+          2
+        ],
+        [
+          [
+            0,
+            7,
+            0,
+            0,
+            0,
+            10,
+            0,
+            0,
+            0,
+            0
+          ],
+          1
+        ],
+        [
+          [
+            0,
+            8,
+            0,
+            0,
+            0,
+            9,
+            0,
+            0,
+            0,
+            0
+          ],
+          1
+        ],
+        [
+          [
+            0,
+            8,
+            0,
+            0,
+            0,
+            11,
+            0,
+            0,
+            0,
+            0
+          ],
+          1
+        ]
+      ],
+      [
+        [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            1,
+            0
+          ],
+          8
+        ],
+        [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            2,
+            0
+          ],
+          20
+        ],
+        [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            3,
+            0
+          ],
+          22
+        ],
+        [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            4,
+            0
+          ],
+          11
+        ],
+        [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            5,
+            0
+          ],
+          5
+        ],
+        [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            6,
+            0
+          ],
+          3
+        ],
+        [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            2,
+            0,
+            0,
+            1,
+            0
+          ],
+          2
+        ],
+        [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            2,
+            0,
+            0,
+            2,
+            0
+          ],
+          3
+        ],
+        [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            2,
+            0,
+            0,
+            3,
+            0
+          ],
+          5
+        ],
+        [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            2,
+            0,
+            0,
+            4,
+            0
+          ],
+          4
+        ],
+        [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            2,
+            0,
+            0,
+            5,
+            0
+          ],
+          1
+        ],
+        [
+          [
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0
+          ],
+          1
+        ],
+        [
+          [
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            2,
+            0
+          ],
+          1
+        ],
+        [
+          [
+            0,
+            0,
+            1,
+            0,
+            0,
+            1,
+            0,
+            0,
+            1,
+            0
+          ],
+          78
+        ],
+        [
+          [
+            0,
+            0,
+            1,
+            0,
+            0,
+            1,
+            0,
+            0,
+            2,
+            0
+          ],
+          169
+        ],
+        [
+          [
+            0,
+            0,
+            1,
+            0,
+            0,
+            1,
+            0,
+            0,
+            3,
+            0
+          ],
+          220
+        ],
+        [
+          [
+            0,
+            0,
+            1,
+            0,
+            0,
+            1,
+            0,
+            0,
+            4,
+            0
+          ],
+          126
+        ],
+        [
+          [
+            0,
+            0,
+            1,
+            0,
+            0,
+            1,
+            0,
+            0,
+            5,
+            0
+          ],
+          35
+        ],
+        [
+          [
+            0,
+            0,
+            1,
+            0,
+            0,
+            1,
+            0,
+            0,
+            6,
+            0
+          ],
+          8
+        ],
+        [
+          [
+            0,
+            0,
+            1,
+            0,
+            0,
+            1,
+            0,
+            0,
+            7,
+            0
+          ],
+          4
+        ]
+      ],
+      [
+        [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0
+          ],
+          1
+        ],
+        [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            4,
+            0
+          ],
+          1
+        ],
+        [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            18,
+            0
+          ],
+          1
+        ],
+        [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            26,
+            0
+          ],
+          2
+        ],
+        [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            29,
+            0
+          ],
+          2
+        ],
+        [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            46,
+            0
+          ],
+          2
+        ],
+        [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            61,
+            0
+          ],
+          1
+        ],
+        [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            65,
+            0
+          ],
+          1
+        ],
+        [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            67,
+            0
+          ],
+          1
+        ],
+        [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            78,
+            0
+          ],
+          1
+        ],
+        [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            80,
+            0
+          ],
+          1
+        ],
+        [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            81,
+            0
+          ],
+          1
+        ],
+        [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            83,
+            0
+          ],
+          1
+        ],
+        [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            123,
+            0
+          ],
+          1
+        ],
+        [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            132,
+            0
+          ],
+          1
+        ],
+        [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            138,
+            0
+          ],
+          1
+        ],
+        [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            143,
+            0
+          ],
+          1
+        ],
+        [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            153,
+            0
+          ],
+          2
+        ],
+        [
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            497,
+            0
+          ],
+          1
+        ]
+      ]
+    ],
+    "type_counts": [
+      410,
+      494,
+      726,
+      23
+    ],
+    "schema": [
+      [
+        0,
+        0
+      ],
+      [
+        0,
+        1
+      ],
+      [
+        0,
+        2
+      ],
+      [
+        0,
+        3
+      ],
+      [
+        1,
+        1
+      ],
+      [
+        1,
+        2
+      ],
+      [
+        1,
+        3
+      ],
+      [
+        2,
+        2
+      ],
+      [
+        2,
+        3
+      ],
+      [
+        3,
+        3
+      ]
+    ]
+  },
+  "target_sha256": "fa8eb6af02dbd5af18da4ba69d6c011f75b1e07e35c8893320a041e88e18dce7",
+  "environment": {
+    "python": "3.9.23 | packaged by conda-forge | (main, Jun  4 2025, 17:57:12) \n[GCC 13.3.0]",
+    "python_version": "3.9.23",
+    "executable": "/data2/lyh/miniconda3/envs/dihug/bin/python",
+    "system": "Linux-5.4.0-216-generic-x86_64-with-glibc2.31",
+    "machine": "x86_64",
+    "packages": {
+      "torch": "2.1.0",
+      "torch-geometric": "2.3.1",
+      "numpy": "1.26.4",
+      "scipy": "1.11.0",
+      "pytest": "7.4.4",
+      "networkx": "2.8.7"
+    },
+    "hip": null,
+    "cuda": "12.1",
+    "requested_device": "cpu",
+    "torch_runtime_version": "2.1.0",
+    "float32_matmul_precision": "highest",
+    "matmul_allow_tf32": false,
+    "deterministic_algorithms": false,
+    "deterministic_warn_only": false,
+    "torch_threads": 1,
+    "utc": "2026-10-21T07:10:56Z",
+    "device_name": "CPU engineering test",
+    "device_type": "CPU"
+  }
+}

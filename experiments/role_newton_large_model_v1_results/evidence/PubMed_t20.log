@@ -1,0 +1,41 @@
+PubMed 20 cold block 1 /20
+PubMed 20 cold block 2 /20
+PubMed 20 cold block 3 /20
+PubMed 20 cold block 4 /20
+PubMed 20 cold block 5 /20
+PubMed 20 cold block 6 /20
+PubMed 20 cold block 7 /20
+PubMed 20 cold block 8 /20
+PubMed 20 cold block 9 /20
+PubMed 20 cold block 10 /20
+PubMed 20 cold block 11 /20
+PubMed 20 cold block 12 /20
+PubMed 20 cold block 13 /20
+PubMed 20 cold block 14 /20
+PubMed 20 cold block 15 /20
+PubMed 20 cold block 16 /20
+PubMed 20 cold block 17 /20
+PubMed 20 cold block 18 /20
+PubMed 20 cold block 19 /20
+PubMed 20 cold block 20 /20
+PubMed 20 repeat block 1 /20
+Traceback (most recent call last):
+  File "/tmp/dihug-role-newton-large-model-v1/experiments/role_newton_large_model_v1/probe.py", line 90, in run
+    with torch.no_grad():new,info=c.base.reverse_step(model,case,state,kernel,t,20,meta['draw_seed'],rng,'cpu',event=event,check_time=gate,trace=True)
+  File "/tmp/dihug-role-newton-large-model-v1/experiments/role_condition_diagnosis_v1/baseline/hsgd/runtime.py", line 172, in reverse_step
+    value = timed(device,times,"full_sweep_seconds",lambda: full_sweep(plan,state,TimedKernel(),predict_clean,uniform,t-1,t))
+  File "/tmp/dihug-role-newton-large-model-v1/experiments/role_condition_diagnosis_v1/baseline/hsgd/runtime.py", line 30, in timed
+    value = fn()
+  File "/tmp/dihug-role-newton-large-model-v1/experiments/role_condition_diagnosis_v1/baseline/hsgd/runtime.py", line 172, in <lambda>
+    value = timed(device,times,"full_sweep_seconds",lambda: full_sweep(plan,state,TimedKernel(),predict_clean,uniform,t-1,t))
+  File "/tmp/dihug-role-newton-large-model-v1/experiments/role_condition_diagnosis_v1/baseline/hsgd/kernel.py", line 75, in full_sweep
+    p0 = predict_clean(x.copy(), ids, f, edges)
+  File "/tmp/dihug-role-newton-large-model-v1/experiments/role_condition_diagnosis_v1/baseline/hsgd/runtime.py", line 160, in predict_clean
+    value = callback(frozen,ids,fam,query)
+  File "/tmp/dihug-role-newton-large-model-v1/experiments/role_condition_diagnosis_v1/baseline/hsgd/runtime.py", line 123, in __call__
+    if self.check_time: self.check_time()
+  File "/tmp/dihug-role-newton-large-model-v1/experiments/role_newton_large_model_v1/probe.py", line 64, in gate
+    check()
+  File "/tmp/dihug-role-newton-large-model-v1/experiments/role_newton_large_model_v1/large_common.py", line 12, in check
+    if (OUT/'STOP').exists():raise InterruptedError('STOP')
+InterruptedError: STOP

@@ -1,0 +1,494 @@
+diff --git a/experiments/role_newton_large_model_v1/PROTOCOL.md b/experiments/role_newton_large_model_v1/PROTOCOL.md
+new file mode 100644
+index 0000000..0f20194
+--- /dev/null
++++ b/experiments/role_newton_large_model_v1/PROTOCOL.md
+@@ -0,0 +1,28 @@
++# Large full-model Newton CPU step: frozen engineering protocol
++
++Baseline8855b78b. Original DP/Newton/model/kernel/query methods retained unchanged.
++Complete datasets IMDB1653/4079,PubMed1565/12284,complete4-type10-family anonymous joint roles,verified source SHA.
++Source-bound large config8layers,256/64/128,heads8,FF256/64/256,joint128,CN32,FP32/T1000/20blocks.
++Existing three broad final6000 weight bytes/source/env checked. Strict tensor loading and semantic binding reported separately.
++Different prior and T64 training binding invalidate cross-scale quality claims even if shapes load.
++Use brand-new random initialized CapacityDenoiser from SAME existing class and width config,seed2026102147;no partial transfer/no training.
++All times random weights,not generation quality. All six states independently forward-noised from known reference,not free chain states.
++Noise seed[2026102148,dataset_index,t],sample uniform RNG[2026102149,dataset_index,t],query original seed[2026102149+index,t,61].
++Order IMDB20/500/1000,thenPubMed20/500/1000. No resampling or state replacement.
++Before model step: exact wedge2m and unchanged querypath2m guards;Newton2m-elements/256MiB-workspace;full memory estimate<=6GiB.
++Every process RSS<=8GiB parent monitor;address-space hard16GiB;item cold+repeat420s including imports,construction,checks,IO,cleanup.
++Newton unchanged max200iterations,4000eval,30s/matrix,cold bias,line search,damping,support and tail gates.
++Each new read independently residual<=1e-8,KKT<=2e-10,lognorm<=2e-12,rowtail<=1e-280,total<=1e-276.
++Actual role values/context checked for tail bound<=1e-250 and predeclaredFP32 arithmetic bound.
++No DP fallback,role truncation,smaller graph,layer/query reduction,mixed precision,new backend or optimizer.
++One frozen Xt per20-block full_sweep,all active slots exactly once;only complete returned state committed.
++Cold clears one-time degree-law tables;repeat keeps only identical-time degree-law tables. Every Newton/graph/backbone/head reruns.
++CN contextual node cache only inside original one-step context;no reuse across cold/repeat. No 1000-time precache.
++Use original runtime.reverse_step(trace=True),which computes one EXTRA diagnostic posterior per block;report overhead,not pure uninstrumented throughput.
++Timing source wrappers only:degree_law/degrees/Newton/modules. Network_seconds and submodules are inclusive;do not add nested counters.
++Role loop residual=role_attention minus convolution/Newton/role encoder+value;includes likelihood lookup/assembly,context merge and loop bookkeeping,not pure lookup alone.
++Model construct,query/context/assembly,backbone,CN,head,posterior,sample/audit,certificate IO,baseline currentRSS and process peak all separate.
++Repeat restores same frozen input/uniform RNG,no old prediction reuse;compare new p0/q/state and role allocation.
++All six-state full-step results retained inclfailures. Every next item needs remaining>=420+720s,otherwise not-run explicitly.
++Unique3600s clock from first preparation1792566249,reserve12min audit/publication. No new full chains/train/GPU/BW/notebook.
++Full forward success does not validate backward memory,quality,cross-backend reproducibility or all1000-step costs.
+diff --git a/experiments/role_newton_large_model_v1/audit.py b/experiments/role_newton_large_model_v1/audit.py
+new file mode 100644
+index 0000000..6aa30c5
+--- /dev/null
++++ b/experiments/role_newton_large_model_v1/audit.py
+@@ -0,0 +1,61 @@
++"""Model-free independent audit, including failures/not-run items."""
++import resource
++from large_common import *
++def audit():
++    started=time.perf_counter();f=frozen();controller=read(OUT/'controller.json');items=[];paths=[];maxima={};reads=0;status_counts={}
++    for meta in f['inputs']:
++        ctrl=next((x for x in controller['rows'] if x.get('key')==f"{meta['dataset']}_t{meta['t']}"),dict(status='not_run_supervisor_failure'))
++        if time.time()>read(OUT/'activation.json')['deadline_epoch']-540:raise TimeoutError('audit/publication reserve9min')
++        name,t=meta['dataset'],meta['t'];folder=OUT/f'{name}_t{t}';case,target,cfg,inv,source=dataset(name)
++        assert sha(OUT/meta['path'])==meta['sha256']
++        bind=read(OUT/f'{name}_binding.json');assert sha(OUT/f'{name}_binding.json')==f['data_bindings'][name]
++        assert bind['data_sha256']==sha(source)==cfg['data']['sha256'] and bind['target_sha256']==target.fingerprint
++        with np.load(OUT/meta['path']) as z:state=z['state'];ei=z['edges'];ef=z['families'];types=z['types']
++        np.testing.assert_array_equal(types,case['space'].types);ff,loc=case['space'].encode(ei)
++        np.testing.assert_array_equal(ff,ef);st=np.zeros(case['space'].total,np.uint8);st[case['space'].offsets[ff]+loc]=1;np.testing.assert_array_equal(st,state)
++        degree=np.bincount(ei.ravel(),minlength=len(types));assert int(np.sum(degree*(degree-1)//2))==meta['raw_wedges']
++        plan=c.base.c.plan_for(case,[meta['draw_seed'],t,61],20);seen=np.zeros(len(state),np.uint8);hh=hashlib.sha256()
++        for b in range(20):
++            ids,fam,q=plan.block(b);assert not seen[ids].any();seen[ids]+=1
++            for ar in (ids,fam,q):hh.update(np.ascontiguousarray(ar).tobytes())
++            encoded,local=case['space'].encode(q);np.testing.assert_array_equal(fam,encoded);np.testing.assert_array_equal(ids,case['space'].offsets[encoded]+local)
++        assert hh.hexdigest()==meta['query_sha256'];np.testing.assert_array_equal(seen,case['active'].repeat(case['space'].counts).astype(np.uint8))
++        receipt=read(folder/'receipt.json') if (folder/'receipt.json').exists() else None
++        observed=read(folder/'paths.json') if (folder/'paths.json').exists() else []
++        kernel=c.base.MarginalKernel(case['prior'],c.base.c.schedule(1000));before=None
++        for row in observed:
++            phase=row['phase'];assert row['completed_full_step'] and row['network_freshly_executed'] and row['blocks']==20
++            assert sha(folder/(phase+'_output.npz'))==row['output_sha256'] and sha(folder/(phase+'_readouts.npz'))==row['readouts_sha256']
++            with np.load(folder/(phase+'_output.npz')) as z:d={k:z[k].copy() for k in z.files}
++            np.testing.assert_array_equal(d['coverage'],seen);p0=d['p0'].astype(float);fam=np.repeat(np.arange(case['n_families']),case['space'].counts)
++            q=kernel.reverse(p0,state,fam,t-1,t);np.testing.assert_array_equal(q,d['q'])
++            rng=np.random.default_rng([DRAW_SEED,0 if name=='IMDB' else 1,t]);assert rng.bit_generator.state==row['rng_before'];u=rng.random(len(state));assert rng.bit_generator.state==row['rng_after']
++            assert hashlib.sha256(u.tobytes()).hexdigest()==row['uniform_sha256'];np.testing.assert_array_equal((u<q).astype(np.uint8),d['state'])
++            edges,rel=c.base.c.state_edges(case,d['state']);np.testing.assert_array_equal(edges,d['edges']);np.testing.assert_array_equal(rel,d['families'])
++            ff,local=case['space'].encode(edges);ids=case['space'].offsets[ff]+local;assert len(np.unique(ids))==len(ids) and np.all(edges[0]<edges[1])
++            from scipy.sparse import coo_matrix
++            A=coo_matrix((np.ones(2*len(rel)),(np.r_[edges[0],edges[1]],np.r_[edges[1],edges[0]])),shape=(len(types),len(types))).tocsr()
++            assert A.nnz==2*len(rel) and not A.diagonal().any() and (A-A.T).nnz==0
++            with np.load(folder/(phase+'_readouts.npz')) as z:alloc={k:z[k].copy() for k in z.files}
++            rr=read(folder/(phase+'_reads.json'));assert len(rr)==4
++            for typ,r in enumerate(rr):
++                L,P,LP,counts=[alloc[f'type{typ}_{k}'] for k in ('L','P','logP','counts')]
++                np.testing.assert_array_equal(counts,np.array([n for v,n in target.roles[typ]]));cert=g.verify(P,LP,L,counts,r)
++                assert r['context_tail_bound']<=1e-250 and r['context_observed_error']<=r['context_FP32_conversion_bound']+r['context_FP32_dot_bound']+1e-12
++                status_counts[r['status']]=status_counts.get(r['status'],0)+1;reads+=1
++                for k,v in [('independent_KKT',cert['independent_KKT']),('row',cert['independent_row']),('column',cert['independent_column']),('tail_mass',cert['independent_tail_mass']),('context_tail',r['context_tail_bound'])]:maxima[k]=max(maxima.get(k,0),v or 0)
++            if before is not None:
++                for k in ('p0','q','coverage','state'):np.testing.assert_array_equal(before[k],d[k])
++                assert row['module_timings'].get('new_degree_law_tables',0)==0
++            before=d;paths.append(dict(dataset=name,t=t,**row));print('audited',name,t,phase,'all20blocks',flush=True)
++        if ctrl['status']=='completed':assert receipt and receipt['status']=='completed' and len(observed)==2
++        partial=read(folder/'last_read_receipts.json') if (folder/'last_read_receipts.json').exists() else []
++        items.append(dict(dataset=name,t=t,status=ctrl['status'],supervisor_reason=ctrl.get('supervisor_reason'),completed_paths=len(observed),worker_receipt=receipt,planned_query_slots=int(seen.sum()),
++            last_attempt_reported_read_count=len(partial),last_attempt_reported_read_statuses=[x.get('status') for x in partial],partial_only_certificates_independently_checked=False if ctrl['status']!='completed' else None))
++    save(OUT/'audited_paths.json',paths);save(OUT/'audit.json',dict(status='passed_for_available_evidence',complete_scheduled_panel=all(x['status']=='completed' for x in items),items=items,
++        complete_items=sum(x['status']=='completed' for x in items),complete_paths=len(paths),Newton_reads=reads,read_statuses=status_counts,maxima=maxima,
++        seconds=time.perf_counter()-started,peak_rss_mib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024,model_calls=0,new_draws_for_science=0,
++        checks=['all frozen data/source/input bindings','complete20 block slots/families/query digest','full posterior and same-uniform state replay','schema/simple/symmetric/no-self-loop',
++            'every available Newton L/P/logP/capacity/KKT/tail certificate','cold versus fresh repeat exact output and same RNG','failures and missing items retained'],
++        limitations=['random weights only','runtime role-value/context error certificates not independently recomputed through model','peak includes full posterior audits/IO','trace duplicates diagnostic posterior','block progress IO not separately timed,inside step residual']))
++if __name__=='__main__':audit()
+diff --git a/experiments/role_newton_large_model_v1/config.json b/experiments/role_newton_large_model_v1/config.json
+new file mode 100644
+index 0000000..bf5e86d
+--- /dev/null
++++ b/experiments/role_newton_large_model_v1/config.json
+@@ -0,0 +1,15 @@
++{
++  "baseline":"8855b78b8b5b79f0a1671c2c3427647754291f21",
++  "datasets":["IMDB","PubMed"],"times":[20,500,1000],"T":1000,"rounds":20,
++  "model_seed":2026102147,"noise_seed":2026102148,"sample_seed":2026102149,
++  "weight_policy":"fresh fixed-seed initialization from existing CapacityDenoiser and source-bound large width configuration; no transferred weights; not quality evaluation",
++  "device":"cpu","threads":1,"precision":"FP32 network; float64 likelihood,Newton,kernel",
++  "process_RSS_observation_limit_bytes":8589934592,
++  "process_RLIMIT_AS_bytes":17179869184,
++  "memory_estimate_gate_bytes":6442450944,
++  "item_total_seconds":420,"item_compute_seconds":410,"cleanup_reserve_seconds":10,
++  "delivery_audit_reserve_seconds":720,"global_budget_seconds":3600,
++  "repeat":"new full inference,same input/random stream,only same-time likelihood tables reused",
++  "read_support":"unchanged;no DP fallback,no truncation",
++  "trace":"original trace=True adds duplicate diagnostic posterior; report this overhead"
++}
+diff --git a/experiments/role_newton_large_model_v1/forecast_guard.py b/experiments/role_newton_large_model_v1/forecast_guard.py
+new file mode 100644
+index 0000000..844c53c
+--- /dev/null
++++ b/experiments/role_newton_large_model_v1/forecast_guard.py
+@@ -0,0 +1,29 @@
++"""Budget-only stage boundary guard, no model/config/numerical changes.
++
++User requires stop on expected item overrun. Wait for fully saved cold proof;
++use90% of measured cold minus convolution as optimistic fresh-repeat forecast.
++If even this exceeds frozen remaining420s item budget,request STOP,never extend.
++"""
++import time,json,hashlib
++from pathlib import Path
++OUT=Path('/data2/lyh/gnn_project/DiHug/results/role_newton_large_model_20261021_v1')
++def main():
++    start=time.time();ledger=json.loads((OUT/'activation.json').read_text());folder=OUT/'PubMed_t20'
++    while time.time()<ledger['deadline_epoch']-720 and time.time()-start<300:
++        if (OUT/'controller.json').exists():return
++        p=folder/'paths.json';progress=folder/'progress.json'
++        if p.exists():
++            rows=json.loads(p.read_text());cold=next(x for x in rows if x['phase']=='cold')
++            elapsed=json.loads(progress.read_text())['elapsed_seconds'] if progress.exists() else cold['full_step_seconds']
++            optimistic=.9*(cold['full_step_seconds']-cold['module_timings'].get('degree_law_cache_construction_seconds',0))
++            remaining=420-elapsed-3
++            receipt=dict(scope='budget supervision only,unchanged frozen numerical/scientific settings',cold_complete_evidence=True,
++                cold_seconds=cold['full_step_seconds'],optimistic_fresh_repeat_estimate=optimistic,remaining_frozen_item_seconds=remaining,
++                optimistic_factor=.9,source_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),epoch=time.time())
++            if optimistic>remaining:
++                receipt['decision']='STOP projected item overrun; no parameter/state substitution,do not launch additional PubMed probes'
++                (OUT/'forecast_stop_receipt.json').write_text(json.dumps(receipt,indent=2)+'\n')
++                (OUT/'STOP').write_text(json.dumps(receipt)+'\n');return
++            receipt['decision']='continue within existing gate';(OUT/'forecast_continue_receipt.json').write_text(json.dumps(receipt,indent=2)+'\n');return
++        time.sleep(.1)
++if __name__=='__main__':main()
+diff --git a/experiments/role_newton_large_model_v1/large_common.py b/experiments/role_newton_large_model_v1/large_common.py
+new file mode 100644
+index 0000000..b93de36
+--- /dev/null
++++ b/experiments/role_newton_large_model_v1/large_common.py
+@@ -0,0 +1,35 @@
++import os,sys,time,json,hashlib
++from pathlib import Path
++os.environ.update(CUDA_VISIBLE_DEVICES='',OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1')
++HERE=Path(__file__).resolve().parent;EXP=HERE.parent
++sys.path.insert(0,str(EXP/'role_newton_generation_v1'))
++import generation_common as g
++c=g.c;np=g.np;torch=g.torch;cap=g.old.cap;solver=g.newton
++OUT=Path('/data2/lyh/gnn_project/DiHug/results/role_newton_large_model_20261021_v1')
++read=g.read;save=g.save;sha=g.sha
++SEED=2026102147;NOISE_SEED=2026102148;DRAW_SEED=2026102149
++def check():
++    if (OUT/'STOP').exists():raise InterruptedError('STOP')
++    if time.time()>read(OUT/'activation.json')['deadline_epoch']-720:raise TimeoutError('60min ledger; reserve12min audit/publication')
++def dataset(name):
++    inv=read(EXP/'role_target_scalability_v1/evidence/large_graph_inventory.json')[name]
++    path=EXP/'joint_cn_dual_rounds_v1_1/package/data'/f'{name}.npz';assert sha(path)==inv['sha256']
++    cfg=read(EXP/f'joint_cn_dual_rounds_v1_1/package/configs/{name}.json');assert cfg['model']==c.settings()['model'] and cfg['T']==1000 and cfg['rounds']==20
++    with np.load(path,allow_pickle=False) as z:types=z['types'];edges=z['edges'].T;pairs=tuple(map(tuple,z['schema']));fam=z['relations']-1
++    case=c.base.c.make_case(types,edges,pairs);target=c.base.extract_target(case)
++    np.testing.assert_array_equal(case['space'].encode(edges)[0],fam)
++    assert len(types)==inv['nodes'] and edges.shape[1]==inv['physical_edges'] and np.bincount(types).tolist()==inv['type_counts']
++    for typ,rows in enumerate(target.roles):assert [(list(v),n) for v,n in rows]==[(v['vector'],v['frequency']) for v in inv['types'][typ]['roles']]
++    return case,target,cfg,inv,path
++def make_model(case,cfg):
++    c.base.c.seed_all(SEED)
++    model=c.base.CapacityDenoiser(case['n_types'],case['n_families'],family_pairs=case['space'].pairs,prior=case['prior'],T=1000,**cfg['model']).eval()
++    assert np.array_equal(model.prior.numpy(),case['prior']) and model.branch.T==1000
++    return model
++def state_digest(model):return c.base.sha([(k,hashlib.sha256(v.detach().cpu().numpy().tobytes()).hexdigest()) for k,v in model.state_dict().items()])
++def frozen():
++    f=read(OUT/'freeze.json')
++    for n,h in f['source'].items():assert sha(EXP/n)==h,n
++    for x in f['inputs']:assert sha(OUT/x['path'])==x['sha256']
++    assert sha(OUT/'activation.json')==f['activation_sha256']
++    return f
+diff --git a/experiments/role_newton_large_model_v1/prepare.py b/experiments/role_newton_large_model_v1/prepare.py
+new file mode 100644
+index 0000000..cd56416
+--- /dev/null
++++ b/experiments/role_newton_large_model_v1/prepare.py
+@@ -0,0 +1,50 @@
++import resource,sys,time
++from large_common import *
++def prepare():
++    start=time.perf_counter();out=[];compat=[];weights=read(c.RESULT/'sealed_final_weights.json')['weights'];small=next(w for w in weights if w['arm']=='broad' and w['seed']==2026102011)
++    records,targets=c.load_data();smallcase=c.metadata_case(c.base,c.PANEL,targets);bindings=[]
++    for seed in g.SEEDS:
++        check();m,b=g.old.get_model(seed,smallcase);bindings.append(b);del m
++    save(OUT/'existing_weights_source_binding.json',bindings)
++    wp=c.RESULT/small['path'];assert sha(wp)==small['sha256'];state=torch.load(wp,map_location='cpu',weights_only=True)
++    for index,name in enumerate(('IMDB','PubMed')):
++        check();case,target,cfg,inv,path=dataset(name);model=make_model(case,cfg);random_hash=state_digest(model)
++        initial_prior=model.prior.clone();status='strict_tensor_load_passed';error=None
++        try:model.load_state_dict(state,strict=True)
++        except RuntimeError as exc:status='strict_tensor_load_failed';error=str(exc)
++        semantic=status=='strict_tensor_load_passed' and torch.equal(initial_prior,model.prior) and c.settings()['T']==1000
++        assert not semantic,'unexpected compatible trained configuration; stop before choosing probe weights'
++        compat.append(dict(dataset=name,source_weight=small,source_weight_hash_checked=True,tensor_load=status,error=error,
++            source_T=c.settings()['T'],target_T=1000,prior_equal=status=='strict_tensor_load_passed' and torch.equal(initial_prior,model.prior),
++            scientifically_compatible=False,action='fresh fixed-seed initialization, no transferred parameters, no quality evaluation'))
++        model=make_model(case,cfg);assert state_digest(model)==random_hash
++        dims=dict(c.base.c.dimensions(model),degree_encoder_input=model.branch.degree_encoder[0].in_features,
++            role_encoder_input=model.branch.role_encoder[0].in_features,role_fusion_input=model.role_fusion.in_features,
++            joint_head_input=model.joint_head[0].in_features,parameter_count=sum(p.numel() for p in model.parameters()))
++        params=sum(p.numel()*p.element_size() for p in model.parameters());capm=cap.capacities(case['space'].types,case['space'].pairs)
++        save(OUT/f'{name}_binding.json',dict(dataset=name,data_sha256=sha(path),source_config_path=str(path.parent.parent/'configs'/f'{name}.json'),source_config_sha256=sha(path.parent.parent/'configs'/f'{name}.json'),
++            config=cfg,model_architecture=model.architecture_version,random_seed=SEED,random_weight_state_sha256=random_hash,dimensions=dims,
++            random_weights_cannot_evaluate_quality=True,anonymous_target=target.as_dict(),target_sha256=target.fingerprint,environment=c.base.c.environment('cpu')))
++        for t in (20,500,1000):
++            check();tick=time.perf_counter();ei,ef,_=c.base.c.global_noisy_edges(case['space'],case['clean'],case['prior'],c.base.c.schedule(1000)[t],np.random.default_rng([NOISE_SEED,index,t]))
++            f,loc=case['space'].encode(ei);st=np.zeros(case['space'].total,np.uint8);st[case['space'].offsets[f]+loc]=1
++            degree=np.bincount(ei.ravel(),minlength=len(case['space'].types));wedges=int(np.sum(degree*(degree-1)//2))
++            plan=c.base.c.plan_for(case,[DRAW_SEED+index,t,61],20);inventory=c.base.c.query_inventory(case,plan)
++            sizes=inventory['query_sizes'];planhash=hashlib.sha256()
++            for b in range(20):
++                for x in plan.block(b):planhash.update(np.ascontiguousarray(x).tobytes())
++            pathin=OUT/f'{name}_t{t}_input.npz';np.savez_compressed(pathin,state=st,edges=ei,families=ef,types=case['space'].types,schema=np.asarray(case['space'].pairs))
++            matrices=[dict(type=typ,n=target.type_counts[typ],k=len(rows),elements=target.type_counts[typ]*len(rows),workspace_bytes=target.type_counts[typ]*len(rows)*128+len(rows)**2*32) for typ,rows in enumerate(target.roles)]
++            directed=2*(len(ef)+max(sizes));network=directed*256*4*16+len(st)*64+min(wedges,2000000)*128+len(case['space'].types)*256*4*16
++            estimate=512*1024**2+params+network+max(x['workspace_bytes'] for x in matrices)+inv['likelihood_cache_bytes_per_time']
++            gates=dict(wedges=wedges<=cfg['model']['max_wedges'],Newton_memory=all(x['elements']<=2000000 and x['workspace_bytes']<=256*1024**2 for x in matrices),estimated_RSS=estimate<=6*1024**3)
++            row=dict(dataset=name,t=t,path=pathin.name,sha256=sha(pathin),noise_seed=[NOISE_SEED,index,t],draw_seed=DRAW_SEED+index,
++                forward_noise_only=True,not_free_generation_state=True,noise_seconds=time.perf_counter()-tick,physical_noise_edges=len(ef),raw_wedges=wedges,
++                query=inventory,query_sha256=planhash.hexdigest(),matrices=matrices,estimated_parameters_bytes=params,
++                estimated_state_and_trace_bytes=len(st)*64,estimated_directed_computational_edges=directed,estimated_network_and_CN_workspace_bytes=network,
++                estimated_likelihood_cache_bytes=inv['likelihood_cache_bytes_per_time'],estimated_RSS_upper_engineering_bytes=estimate,resource_gates=gates,resource_gate_pass=all(gates.values()))
++            out.append(row);print(name,t,'edges',len(ef),'wedge',wedges,'query',min(sizes),max(sizes),'estMiB',round(estimate/1024**2),gates,flush=True)
++        del model
++    save(OUT/'weight_compatibility.json',compat);save(OUT/'input_manifest.json',out)
++    save(OUT/'preparation_receipt.json',dict(status='passed',inputs=6,seconds=time.perf_counter()-start,peak_rss_mib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024,trained_weights_used=False,random_weights_only=True))
++if __name__=='__main__':prepare()
+diff --git a/experiments/role_newton_large_model_v1/probe.py b/experiments/role_newton_large_model_v1/probe.py
+new file mode 100644
+index 0000000..9d15678
+--- /dev/null
++++ b/experiments/role_newton_large_model_v1/probe.py
+@@ -0,0 +1,132 @@
++"""Complete20-block frozen-Xt step, cold and fresh repeated inference. CPU only."""
++import argparse,resource,signal,traceback,copy
++from large_common import *
++
++class Measurement:
++    def __init__(self,m,folder,check_fn):
++        self.m=m;self.folder=folder;self.check=check_fn;self.times={};self.reads=[];self.arrays={};self.hooks=[];self.values=[];self.phase='cold';self.blocks=[]
++    def add(self,key,dt):self.times[key]=self.times.get(key,0.)+dt
++    def module_timer(self,module,key):
++        stack=[]
++        def before(m,args):stack.append(time.perf_counter())
++        def after(m,args,out):self.add(key,time.perf_counter()-stack.pop())
++        self.hooks.extend([module.register_forward_pre_hook(before),module.register_forward_hook(after)])
++    def install(self):
++        self.original=(cap.allocation_marginals,cap.degree_logpmf,cap.degrees)
++        def law(*args,**kwargs):
++            tick=time.perf_counter();v=self.original[1](*args,**kwargs);self.add('degree_law_cache_construction_seconds',time.perf_counter()-tick);self.times['new_degree_law_tables']=self.times.get('new_degree_law_tables',0)+1;self.check();return v
++        def degree(*args,**kwargs):
++            tick=time.perf_counter();v=self.original[2](*args,**kwargs);self.add('current_relation_degrees_seconds',time.perf_counter()-tick);return v
++        def allocation(L,counts):
++            self.check();tick=time.perf_counter();P,LP,r=solver.solve(L,counts,self.check)
++            if not r.get('new_contract_pass'):
++                np.savez_compressed(self.folder/(self.phase+'_failed_matrix.npz'),L=L,counts=counts);save(self.folder/(self.phase+'_failed_matrix.json'),r)
++                raise solver.ReadoutFailure(str(r))
++            self.add('Newton_solver_seconds',r['seconds']);self.add('Newton_support_seconds',r['support_seconds'])
++            vt=time.perf_counter();ind=g.verify(P,LP,L,counts,r);self.add('independent_read_validation_seconds',time.perf_counter()-vt)
++            typ=len(self.reads);self.reads.append(dict(type=typ,**r,**ind));self.arrays.update({f'type{typ}_L':L.copy(),f'type{typ}_counts':counts.copy(),f'type{typ}_P':P.copy(),f'type{typ}_logP':LP.copy()})
++            self.add('Newton_plus_validation_seconds',time.perf_counter()-tick);return P,r
++        cap.allocation_marginals=allocation;cap.degree_logpmf=law;cap.degrees=degree
++        for module,key in [(self.m.backbone,'transformer_backbone_seconds'),(self.m.branch.degree_encoder,'degree_encoder_seconds'),(self.m.branch.degree_out,'degree_projection_seconds'),(self.m.branch.role_encoder,'role_encoder_seconds'),(self.m.branch.value,'role_value_seconds'),(self.m.role_fusion,'role_fusion_projection_seconds')]:self.module_timer(module,key)
++        for module in self.m.joint_head:self.module_timer(module,'joint_readout_seconds')
++        def vh(mod,args,value):self.values.append(value.detach().cpu().numpy().copy())
++        def bh(mod,args,output):
++            assert len(self.reads)==len(self.values)==self.m.n_types
++            self.diagnostic={k:float(v) for k,v in output[1].items() if k.endswith('_seconds')}
++            context=output[1]['role_context'].detach().cpu().numpy()
++            types=self.case['space'].types
++            for r,v in zip(self.reads,self.values):
++                assert np.isfinite(v).all();P=self.arrays[f"type{r['type']}_P"];rows=np.asarray(r['tail_row_mass']);M=float(abs(v).max())
++                r['context_tail_bound']=float(rows.max(initial=0)*M);r['role_value_max']=M;assert r['context_tail_bound']<=1e-250
++                f32=P.astype(np.float32).astype(float);k=P.shape[1];gamma=k*2**-24/(1-k*2**-24)
++                conversion=(abs(f32-P)@abs(v.astype(float))).max(1);dot=(gamma*(abs(f32)@abs(v.astype(float)))).max(1)+k*np.finfo(np.float32).tiny
++                observed=abs(context[types==r['type']]-(P@v.astype(float))).max(1)
++                assert np.all(observed<=conversion+dot+1e-12)
++                r.update(context_FP32_conversion_bound=float(conversion.max()),context_FP32_dot_bound=float(dot.max()),context_observed_error=float(observed.max()))
++        self.hooks.extend([self.m.branch.value.register_forward_hook(vh),self.m.branch.register_forward_hook(bh)])
++        cn=self.m.common_neighbor;self.old_contextual=cn.contextual_nodes;self.old_aggregate=cn.aggregate
++        def contextual(*args,**kwargs):
++            tick=time.perf_counter();v=self.old_contextual(*args,**kwargs);self.add('CN_existing_Xt_node_encoding_seconds',time.perf_counter()-tick);return v
++        def aggregate(*args,**kwargs):
++            tick=time.perf_counter();v=self.old_aggregate(*args,**kwargs);self.add('CN_full_aggregation_seconds',time.perf_counter()-tick);return v
++        cn.contextual_nodes=contextual;cn.aggregate=aggregate
++    def reset(self,phase):self.phase=phase;self.times={};self.reads=[];self.arrays={};self.values=[];self.blocks=[];self.diagnostic={}
++    def close(self):
++        cap.allocation_marginals,cap.degree_logpmf,cap.degrees=self.original
++        self.m.common_neighbor.contextual_nodes=self.old_contextual;self.m.common_neighbor.aggregate=self.old_aggregate
++        for h in self.hooks:h.remove()
++
++def run(name,t):
++    start=time.perf_counter();cpu=time.process_time();folder=OUT/f'{name}_t{t}';folder.mkdir();status='failed';reason=None;stage='binding';monitor=None;rows=[]
++    def stop(s,f):(folder/'STOP').touch()
++    for s in (signal.SIGINT,signal.SIGTERM,signal.SIGHUP):signal.signal(s,stop)
++    def gate():
++        check()
++        if (folder/'STOP').exists():raise InterruptedError('item STOP')
++        if time.perf_counter()-start>=410:raise TimeoutError('item410s cooperative reserve10s')
++    try:
++        gate();f=frozen();meta=next(x for x in f['inputs'] if x['dataset']==name and x['t']==t);assert meta['resource_gate_pass']
++        resource.setrlimit(resource.RLIMIT_AS,(16*1024**3,16*1024**3))
++        case,target,cfg,inv,path=dataset(name)
++        with np.load(OUT/meta['path']) as z:state=z['state'].copy()
++        baseline_peak=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024
++        baseline_rss=float(next(line.split()[1] for line in Path('/proc/self/status').read_text().splitlines() if line.startswith('VmRSS:')))/1024
++        stage='model_construction';tick=time.perf_counter();model=make_model(case,cfg);construction=time.perf_counter()-tick
++        bind=read(OUT/f'{name}_binding.json');assert state_digest(model)==bind['random_weight_state_sha256'];model.set_target(target)
++        assert not torch.cuda.is_initialized();monitor=Measurement(model,folder,gate);monitor.case=case;monitor.install()
++        kernel=c.base.MarginalKernel(case['prior'],c.base.c.schedule(1000));old_state=state.copy();model_hash=state_digest(model)
++        outputs=[];random_before=None
++        for phase in ('cold','repeat'):
++            gate();stage=phase+'_full_step';monitor.reset(phase)
++            if phase=='cold':model.branch.tables.clear()
++            cache_before=len(model.branch.tables);rng=np.random.default_rng([DRAW_SEED,0 if name=='IMDB' else 1,t]);rng_before=copy.deepcopy(rng.bit_generator.state)
++            if random_before is None:random_before=rng_before
++            else:assert random_before==rng_before
++            def event(kind,**kwargs):
++                if kind=='reverse_block':
++                    monitor.blocks.append(dict(**kwargs,elapsed=time.perf_counter()-tick));print(name,t,phase,'block',kwargs['block_completed'],'/20',flush=True)
++                    save(folder/'progress.json',dict(stage=stage,completed_blocks=kwargs['block_completed'],elapsed_seconds=time.perf_counter()-start))
++            tick=time.perf_counter()
++            with torch.no_grad():new,info=c.base.reverse_step(model,case,state,kernel,t,20,meta['draw_seed'],rng,'cpu',event=event,check_time=gate,trace=True)
++            full_seconds=time.perf_counter()-tick;step_peak=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024
++            assert np.array_equal(state,old_state) and len(monitor.reads)==4
++            gate();stage=phase+'_audit';at=time.perf_counter();trace=info['trace'];expected=case['active'].repeat(case['space'].counts).astype(np.uint8)
++            np.testing.assert_array_equal(trace['coverage'],expected);assert info['blocks']==20 and info['covered_slots']==sum(meta['query']['query_sizes'])
++            fam=np.repeat(np.arange(case['n_families']),case['space'].counts);pt=time.perf_counter();q=kernel.reverse(trace['p0'],state,fam,t-1,t);posterior_audit_seconds=time.perf_counter()-pt
++            np.testing.assert_array_equal(q,trace['q']);pt=time.perf_counter();replayed_commit=(trace['uniform']<q).astype(np.uint8);sampling_replay_seconds=time.perf_counter()-pt
++            np.testing.assert_array_equal(new,replayed_commit)
++            if phase=='repeat':
++                for k in ('p0','q','coverage','state'):np.testing.assert_array_equal(trace[k],outputs[0][k])
++            outputs.append({k:v.copy() for k,v in trace.items() if k!='uniform'})
++            edges,families=c.base.c.state_edges(case,new);ff,loc=case['space'].encode(edges)
++            assert np.array_equal(ff,families) and len(np.unique(case['space'].offsets[ff]+loc))==len(families) and np.all(edges[0]<edges[1])
++            assert np.array_equal(model.prior.numpy(),case['prior']) and state_digest(model)==model_hash
++            audit_seconds=time.perf_counter()-at;gate();stage=phase+'_IO';it=time.perf_counter()
++            p0=trace['p0'].astype(np.float32);np.testing.assert_array_equal(p0.astype(float),trace['p0'])
++            np.savez_compressed(folder/(phase+'_output.npz'),p0=p0,q=trace['q'],state=new,coverage=trace['coverage'],edges=edges,families=families)
++            np.savez_compressed(folder/(phase+'_readouts.npz'),**monitor.arrays)
++            save(folder/(phase+'_reads.json'),monitor.reads);io_seconds=time.perf_counter()-it
++            timing=info['timings'];role_attention=monitor.diagnostic['role_attention_seconds']
++            residual=max(0.,role_attention-monitor.times.get('degree_law_cache_construction_seconds',0)-monitor.times.get('Newton_plus_validation_seconds',0)-monitor.times.get('role_encoder_seconds',0)-monitor.times.get('role_value_seconds',0))
++            row=dict(phase=phase,completed_full_step=True,network_freshly_executed=True,full_step_seconds=full_seconds,audit_seconds=audit_seconds,IO_seconds=io_seconds,
++                runtime_timings=timing,module_timings=monitor.times,condition_diagnostic=monitor.diagnostic,
++                likelihood_lookup_assembly_and_role_loop_residual_seconds=residual,blocks=20,covered_slots=info['covered_slots'],coverage_sha256=hashlib.sha256(trace['coverage'].tobytes()).hexdigest(),
++                input_state_sha256=hashlib.sha256(state.tobytes()).hexdigest(),output_state_sha256=hashlib.sha256(new.tobytes()).hexdigest(),
++                uniform_sha256=hashlib.sha256(trace['uniform'].tobytes()).hexdigest(),rng_before=rng_before,rng_after=rng.bit_generator.state,
++                cache_tables_before=cache_before,cache_tables_after=len(model.branch.tables),cache_bytes=sum(v.nbytes for v in model.branch.tables.values()),
++                cache_reuse='repeat only degree-law tables for identical t; no graph/hidden/P/logit/q reuse',read_count=len(monitor.reads),read_statuses=[r['status'] for r in monitor.reads],
++                peak_rss_mib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024,output_sha256=sha(folder/(phase+'_output.npz')),readouts_sha256=sha(folder/(phase+'_readouts.npz')),
++                peak_rss_after_step_mib=step_peak,independent_full_posterior_audit_seconds=posterior_audit_seconds,independent_sampling_commit_replay_seconds=sampling_replay_seconds,
++                trace_overhead='original trace=True computes diagnostic posterior once additionally per block and saves p0/q; same policy both paths')
++            rows.append(row);save(folder/'paths.json',rows);gate()
++        status='completed';stage='completed'
++    except BaseException as exc:reason=repr(exc);traceback.print_exc()
++    finally:
++        if monitor is not None:
++            save(folder/'last_read_receipts.json',monitor.reads);monitor.close()
++        save(folder/'receipt.json',dict(status=status,reason=reason,failure_stage=stage,dataset=name,t=t,completed_paths=len(rows),wall_seconds=time.perf_counter()-start,cpu_seconds=time.process_time()-cpu,
++            baseline_current_rss_mib=locals().get('baseline_rss'),baseline_prior_peak_rss_mib=locals().get('baseline_peak'),peak_rss_mib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024,
++            model_construction_seconds=locals().get('construction'),random_weights=True,quality_evaluation=False,training=0,GPU=0))
++    return int(status!='completed')
++if __name__=='__main__':
++    p=argparse.ArgumentParser();p.add_argument('dataset',choices=('IMDB','PubMed'));p.add_argument('t',type=int,choices=(20,500,1000));a=p.parse_args();sys.exit(run(a.dataset,a.t))
+diff --git a/experiments/role_newton_large_model_v1/run.py b/experiments/role_newton_large_model_v1/run.py
+new file mode 100644
+index 0000000..f0932a5
+--- /dev/null
++++ b/experiments/role_newton_large_model_v1/run.py
+@@ -0,0 +1,52 @@
++"""Sequential dataset/time supervisor; all imports/startup inside bounded child."""
++import os,sys,time,json,signal,subprocess
++from pathlib import Path
++HERE=Path(__file__).resolve().parent;OUT=Path('/data2/lyh/gnn_project/DiHug/results/role_newton_large_model_20261021_v1')
++def save(p,x):
++    q=p.with_suffix('.tmp');q.write_text(json.dumps(x,indent=2)+'\n');q.replace(p)
++def rss(pid):
++    try:return int(next(x.split()[1] for x in Path(f'/proc/{pid}/status').read_text().splitlines() if x.startswith('VmRSS:')))*1024
++    except (StopIteration,FileNotFoundError,ProcessLookupError):return 0
++def main():
++    ledger=json.loads((OUT/'activation.json').read_text());meta=json.loads((OUT/'input_manifest.json').read_text());rows=[];stop=[None];status='incomplete';p=None
++    def signal_stop(s,f):stop[0]=signal.Signals(s).name;(OUT/'STOP').touch()
++    for s in (signal.SIGINT,signal.SIGTERM,signal.SIGHUP):signal.signal(s,signal_stop)
++    def kill(child):
++        if child.poll() is None:
++            try:os.killpg(child.pid,signal.SIGTERM)
++            except ProcessLookupError:pass
++            try:child.wait(timeout=3)
++            except subprocess.TimeoutExpired:
++                try:os.killpg(child.pid,signal.SIGKILL)
++                except ProcessLookupError:pass
++        child.wait()
++    try:
++        with (OUT/'launch.json').open('x') as f:json.dump(dict(launch_epoch=time.time(),ledger=ledger),f)
++        for item in meta:
++            remaining=ledger['deadline_epoch']-time.time();key=f"{item['dataset']}_t{item['t']}"
++            if not item['resource_gate_pass']:
++                rows.append(dict(key=key,status='not_run_resource_gate',resource_gates=item['resource_gates']));continue
++            if remaining<420+720 or stop[0] or (OUT/'STOP').exists():
++                rows.append(dict(key=key,status='not_run_budget_or_STOP',remaining_seconds=remaining));continue
++            log=(OUT/(key+'.log')).open('w');started=time.monotonic();maxrss=0;reason=None
++            p=subprocess.Popen([sys.executable,'-u',str(HERE/'probe.py'),item['dataset'],str(item['t'])],env=dict(os.environ,OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1',CUDA_VISIBLE_DEVICES=''),stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
++            print('START',key,'cap420s RSS8GiB',flush=True)
++            while p.poll() is None:
++                used=time.monotonic()-started;maxrss=max(maxrss,rss(p.pid))
++                if used>=410:reason='item_compute410s_reserve10s_cleanup_within420s'
++                elif maxrss>8*1024**3:reason='item_RSS_8GiB'
++                elif stop[0] or (OUT/'STOP').exists() or time.time()>=ledger['deadline_epoch']-720:reason='STOP/deadline_delivery_reserve'
++                if reason:kill(p);break
++                time.sleep(.15)
++            code=p.wait();log.close();folder=OUT/key
++            receipt=json.loads((folder/'receipt.json').read_text()) if (folder/'receipt.json').exists() else None
++            row=dict(key=key,status='completed' if code==0 and receipt and receipt['status']=='completed' else 'failed_or_incomplete',exit_code=code,supervisor_reason=reason,
++                child_wall_seconds=time.monotonic()-started,parent_observed_peak_rss_bytes=maxrss,worker_receipt=receipt)
++            rows.append(row);save(OUT/'controller_partial.json',dict(rows=rows,elapsed_seconds=time.time()-ledger['activation_epoch']));print('END',key,row['status'],round(row['child_wall_seconds'],2),flush=True);p=None
++        status='completed' if len(rows)==6 and all(r['status']=='completed' for r in rows) else 'incomplete'
++    except BaseException as exc:rows.append(dict(status='supervisor_failure',reason=repr(exc)))
++    finally:
++        if p is not None:kill(p)
++        save(OUT/'controller.json',dict(status=status,rows=rows,all_children_reaped=True,elapsed_seconds=time.time()-ledger['activation_epoch'],budget_seconds=3600,no_budget_reset=True))
++    return int(status!='completed')
++if __name__=='__main__':sys.exit(main())
+diff --git a/experiments/role_newton_large_model_v1/test_probe.py b/experiments/role_newton_large_model_v1/test_probe.py
+new file mode 100644
+index 0000000..aa9a344
+--- /dev/null
++++ b/experiments/role_newton_large_model_v1/test_probe.py
+@@ -0,0 +1,38 @@
++import sys
++from pathlib import Path
++sys.path.insert(0,str(Path(__file__).resolve().parent))
++import large_common as l
++import pytest
++def test_source_configs_are_exact_same_existing_widths():
++    for name in ('IMDB','PubMed'):
++        c=l.read(l.EXP/f'joint_cn_dual_rounds_v1_1/package/configs/{name}.json')
++        assert c['model']==l.c.settings()['model'] and (c['T'],c['rounds'])==(1000,20)
++def test_full_scale_query_plan_has_no_holes():
++    for name in ('IMDB','PubMed'):
++        c,t,cfg,inv,p=l.dataset(name);plan=l.c.base.c.plan_for(c,[l.DRAW_SEED,20,61],20)
++        q=l.c.base.c.query_inventory(c,plan)
++        assert q['active_slots']==sum(q['query_sizes']) and q['rounds']==20
++        assert len(c['space'].types)==inv['nodes']
++def test_numerical_newton_gate_rejects_bad_row():
++    p,lp,r=l.solver.solve(l.np.zeros((4,2)),l.np.array([1,3]));l.g.verify(p,lp,l.np.zeros((4,2)),l.np.array([1,3]),r)
++    p[0,0]+=.1
++    with pytest.raises(AssertionError):l.g.verify(p,lp,l.np.zeros((4,2)),l.np.array([1,3]),r)
++def test_instrumented_step_same_as_original_Newton(tmp_path):
++    from probe import Measurement
++    types=l.np.array([0,0,1,1,2,2,2,3,3]);edges=l.np.array([[0,0,1,2,3,4,5],[2,4,5,4,6,7,8]])
++    import itertools
++    case=l.c.base.c.make_case(types,edges,tuple(itertools.combinations_with_replacement(range(4),2)));target=l.c.base.extract_target(case)
++    cfg=l.read(l.EXP/'joint_cn_dual_rounds_v1_1/package/configs/IMDB.json');m=l.make_model(case,cfg);m.set_target(target)
++    state=l.np.zeros(case['space'].total,l.np.uint8);f,loc=case['space'].encode(edges);state[case['space'].offsets[f]+loc]=1
++    kernel=l.c.base.MarginalKernel(case['prior'],l.c.base.c.schedule(1000));original=l.cap.allocation_marginals
++    l.cap.allocation_marginals=lambda L,c:l.solver.required(L,c,lambda:None)
++    try:
++        with l.torch.no_grad():a,aa=l.c.base.reverse_step(m,case,state,kernel,500,20,123,l.np.random.default_rng(123),'cpu',trace=True)
++    finally:l.cap.allocation_marginals=original
++    m.branch.tables.clear();mon=Measurement(m,tmp_path,lambda:None);mon.case=case;mon.install()
++    try:
++        with l.torch.no_grad():b,bb=l.c.base.reverse_step(m,case,state,kernel,500,20,123,l.np.random.default_rng(123),'cpu',trace=True)
++        for key in ('p0','q','uniform','state','coverage'):l.np.testing.assert_array_equal(aa['trace'][key],bb['trace'][key])
++        plan=l.c.base.c.plan_for(case,[123,500,61],20)
++        assert len(mon.reads)==4 and bb['blocks']==sum(bool(len(plan.block(j)[0])) for j in range(20))
++    finally:mon.close()

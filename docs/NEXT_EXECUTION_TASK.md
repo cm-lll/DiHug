@@ -1,5 +1,12 @@
 # Current execution task
 
+2026-10-21 本票科学计算/审计/43源与43独立解包回归已结束，仅完成独立GitHub审查发布后停止。
+结果results/role_newton_large_model_20261021_v1：IMDB三时刻双路径全部完成，PubMed20冷路径完成；其余因预估单项超时未完成。
+总预算未耗尽时按420秒单项门停止，不能误报PubMed模型或Newton故障；保留失败/STOP和部分证据。
+无训练/完整链/GPU/BW/notebook，不自动补测；下一步仅建议另批20–30分钟后端数值与完整单步资源测量，等待用户决定。
+发布工作树迁至research_branches/role_newton_large_model_v1_review；原/tmp副本与旧结果保留，激活账本不变。
+
+
 2026-10-21 最新授权大图Newton完整模型CPU工程探针，基线8855，独立目录role_newton_large_model_v1。
 唯一3600秒账本results/role_newton_large_model_20261021_v1，首次准备1792566249激活不重置。
 IMDB/PubMed各独立前向t20/500/1000，T1000/20块全覆盖，冷/同输入重复，各项420秒/RSS8GiB/AS16GiB，保留12分钟审计发布。
