@@ -1,0 +1,36 @@
+{
+  "checks": [
+    "base_forward_loss_gradients_strict_update_resume",
+    "role_forward_loss_gradients_strict_update_resume"
+  ],
+  "arms": {
+    "base": {
+      "logits_max_abs": 0.0,
+      "p0_max_abs": 0.0,
+      "gradient_max_abs": 0.0,
+      "cross_backend_Adam_parameter_max_abs_descriptive": 0.0,
+      "strict_repeat_exact": true,
+      "strict_save_resume_pass": true,
+      "parameter_changed": true,
+      "participating_gradients": 469,
+      "CPU_GPU_updated_weights_required_identical": false
+    },
+    "role": {
+      "logits_max_abs": 0.0,
+      "p0_max_abs": 0.0,
+      "gradient_max_abs": 0.0,
+      "cross_backend_Adam_parameter_max_abs_descriptive": 0.0,
+      "strict_repeat_exact": true,
+      "strict_save_resume_pass": true,
+      "parameter_changed": true,
+      "participating_gradients": 475,
+      "CPU_GPU_updated_weights_required_identical": false
+    }
+  },
+  "seconds": 16.68115997221321,
+  "tolerance": {
+    "atol": 2e-06,
+    "rtol": 1e-05
+  },
+  "strict": true
+}
