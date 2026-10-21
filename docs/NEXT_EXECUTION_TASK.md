@@ -1,5 +1,10 @@
 # Current execution task
 
+2026-10-21 IMDB配对运行包交付完成，固定83356d5fb34e90a856f3efc9eb88d088341bb026，远端ZIP字节已核验。
+当前停止。用户下一步仅在notebook手动preflight，回传GPU数值门/完整IMDB临时更新与20块单步成本；未测前不授权正式训练。
+formal默认禁用，三seed/12000/normal2/96链为待确认方案；源/解包75项通过不能代替GPU梯度门或正式预算确认。
+
+
 2026-10-21 本轮准备/回归/解包完成，只完成GitHub审查交付后停止；75源+75解包、CPU工程入口通过不认证GPU。
 新包imdb_role_pair_gpu_v1含preflight（570秒）与默认禁用formal；formal须目标GPU完整预检、确认总预算/冻结方案哈希/持久卷。
 待确认提议：三配对seed，每臂12000有效更新，normal2双输入；6000/12000各8配对样本，共72000更新/96完整T1000链，不自动执行。
