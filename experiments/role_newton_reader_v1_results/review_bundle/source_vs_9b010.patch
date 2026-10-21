@@ -1,0 +1,787 @@
+diff --git a/experiments/role_newton_reader_v1/PROTOCOL.md b/experiments/role_newton_reader_v1/PROTOCOL.md
+new file mode 100644
+index 0000000..ed562e6
+--- /dev/null
++++ b/experiments/role_newton_reader_v1/PROTOCOL.md
+@@ -0,0 +1,43 @@
++# 冻结的约化对偶阻尼Newton（唯一候选）
++
++固定原完整联合角色L、整数c、熵系数1。最小化
++F(b)=Σ_i logΣ_j exp(L_ij+b_j)−Σ_j c_j b_j，
++P_ij=softmax_j(L_ij+b_j)，g=Pᵀ1−c，H=diag(Pᵀ1)−PᵀP。
++只改变求解器，不改变目标。阻尼只进入(H+λI)d=−g，不进入F/g。
++先移除零频数列，独立整数maxflow验证支持。以任一可行整数流构造二部残余图，
++未使用的允许边在所有可行分配中为0，当且仅当它不属于任何残余有向环；
++用强连通分量证明并移除这些强制零，不按概率/似然大小删边。
++剩余每个支持连通分量单独固定最后一个角色偏置为0；各分量总容量必须等于节点数。
++满支持直接无强制零，不运行巨大枚举。积分流仅作支持证书，不送给网络作角色分配。
++
++config.json在面板运行前冻结。float64，行/列规范化L后零偏置起点，无跨矩阵暖启动。
++200迭代/4000函数评估/30秒单矩阵/2m元素/256MiB估算门。
++每迭代最多8次方向阻尼尝试，λ初始1e-6，方向通过则λ/3最低1e-12，失败λ×10最高1e12。
++Cholesky解约化方向；初始线搜索步≤1，单次偏置增量∞范数≤1000，最多32减半；
++Armijo1e-4，稳定计算F差，允许64机器epsilon的浮点求和误差（不是放宽最终约束）。
++独立验收行绝对/归一化列残差≤1e-8及logP对偶平稳残差≤2e-10；不看优化器success。
++不可行、超时、迭代/评估上限、线搜索失败、非有限值均拒绝，无任何回退。
++
++## 新的显式输出合同（不冒称原严格合同通过）
++所有未被支持证明删除的位置保留有限logP，包括极小正概率。
++普通概率接口仅对logP≥−700取exp，其余输出舍入0，但不从支持/目标删除。
++每行遗漏质量≤该行舍入数×exp(−700)，全局为这些上界之和；
++必须分别≤1e-280和1e-276。内部梯度/Hessian同样只忽略这些有证书界的尾部，
++目标值和线搜索仍用完整L的log-sum-exp。没有epsilon，没有角色截断。
++每行上下文舍入误差∞范数≤遗漏质量上界×max_j||角色value_j||∞；
++soft目标度误差同理。另列FP32转换/矩阵乘法误差，不以此界涵盖网络误差。
++输出同时给logP、普通P、数学零/约束强制零/有限正概率舍入零分类。
++有舍入时只能叫新有界尾部合同通过，不能叫原不允许数值零的合同通过。
++
++## 固定输入及比较
++核验9b010提交643载荷清单。132小图×4类型=528原LL直接读取，成功/失败全纳入。
++旧16大图LL未保存字节；从已封存原输入种子/原源码确定性重建，先核对旧边状态哈希，
++完整联合角色/数据hash/原缩放状态与迭代残差再核验，明确重建来源和新增LLhash。
++不重新抽取状态、不删难例、不加载大图网络。独立保存每个LL的hash。
++原缩放已收敛矩阵逐项比较P与同目标值，预定maxabs1e-6及相对目标1e-8作审查标记。
++DP仅参照，不要求相等。高精度80位预定3案例，与原缩放及Newton交叉核对。
++全544矩阵首调用和一次重复，含支持/求解/验收，独立峰内存；所有失败保留。
++若预算允许，仅对132个旧Xt补p0/q固定权重预测，不抽样、不重放新链。
++
++唯一3600秒账本从本票第一次准备激活；保留120秒退出/交付余量。
++原DP、缩放及旧结果全部保留，完成发布后停止，不训练/新完整生成/GPU/BW。
+diff --git a/experiments/role_newton_reader_v1/README.md b/experiments/role_newton_reader_v1/README.md
+new file mode 100644
+index 0000000..be21efa
+--- /dev/null
++++ b/experiments/role_newton_reader_v1/README.md
+@@ -0,0 +1,30 @@
++# 角色偏置约化对偶＋线搜索阻尼Newton
++
++唯一科学目标仍为原熵系数1的完整联合角色软分配，源码/数值合同见PROTOCOL.md和config.json。
++solve返回普通P、完整logP、独立验收回执；required只接纳new_contract_pass。
++538个实际矩阵满足原普通概率接口，6个大图矩阵仅满足有遗漏质量证书的新尾部输出合同，必须区分。
++数学零/约束强制零/有限logP但普通输出舍入零分别记录，不按概率删支持。
++原DP和行列缩放均保留，没有回退、温度变化、训练或完整新链。
++
++完整本地工程复验（不需要私有权重，不运行面板）：
++```
++OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 CUDA_VISIBLE_DEVICES= PYTEST_ADDOPTS= \
++ python -m pytest -q experiments/role_newton_reader_v1/test_newton.py \
++ experiments/role_newton_reader_v1/test_receipt.py \
++ experiments/role_newton_reader_v1/test_imports.py \
++ experiments/role_logscale_reader_v1/test_scaling.py \
++ experiments/role_logscale_reader_v1/test_additional.py \
++ experiments/role_logscale_reader_v1/test_numeric_guard.py
++```
++实际环境为Python3.9.23/NumPy1.26.4/SciPy1.11.0/mpmath1.3.0，旧回归还需要已存在的Torch/PyG。
++不自动安装依赖。run.py --execute为本票已执行一次的诊断入口，绑定唯一已有60分钟账本，
++不得为复验重建预算或自动重开面板。原始初次JSON故障及辅助导入故障日志均保留。
++
++输入边界：528个小图LL来自已封存132状态，逐载荷核对9b010的预期哈希；
++16个大图LL旧版本未保存数组字节，本票只按旧源码/旧种子确定性重建，先核对旧状态哈希，
++再核对旧缩放状态/迭代/残差完全一致。不能声称核对了不存在的历史LL哈希。
++新生成的544矩阵各自哈希封存；不抽取新状态。
++
++predict.py只在原132个Xt上使用已验收的Newton分配，逐一核对重新计算的LL与封存输入一致；
++原角色编码、主干、预测头和后验均复用，记录普通FP32算术界与尾部舍入界，绝不抽样。
++全部结果及源码补丁见../role_newton_reader_v1_results。完成发布后停止等待审查。
+diff --git a/experiments/role_newton_reader_v1/audit.py b/experiments/role_newton_reader_v1/audit.py
+new file mode 100644
+index 0000000..79d0bf3
+--- /dev/null
++++ b/experiments/role_newton_reader_v1/audit.py
+@@ -0,0 +1,63 @@
++"""Independent full panel KKT/constraints/rounding and cost summary."""
++import json,time,resource,tracemalloc
++from collections import Counter
++from pathlib import Path
++import numpy as np
++from scipy.special import logsumexp
++from prepare import OUT,HERE,read,sha,save,check
++from solver import solve
++
++def stats(v):
++    a=np.array(v,float);return dict(n=len(a),median=float(np.median(a)),P90=float(np.quantile(a,.9)),max=float(a.max()),total=float(a.sum()))
++def main():
++    start=time.perf_counter();rows=read(OUT/'small_partial.json')+read(OUT/'large_partial.json');assert len(rows)==544
++    status=Counter();old=Counter();comparisons=[];bounds=[];independent=[];classification=Counter()
++    for row in rows:
++        check();meta=row['input'];r=row['result'];status[r['status']]+=1;old[meta['old_scaling']['status']]+=1
++        assert sha(OUT/meta['path'])==meta['sha256']
++        if not r.get('new_contract_pass'):continue
++        assert sha(OUT/row['output_path'])==row['output_sha256']
++        with np.load(OUT/meta['path']) as z:L=z['L'];c=z['counts']
++        with np.load(OUT/row['output_path']) as z:P=z['P'];LP=z['logP']
++        assert np.isfinite(P).all() and np.all(P>=0);assert abs(P.sum(1)-1).max()<=1e-8
++        assert np.max(abs(P.sum(0)-c)/np.maximum(1,c))<=1e-8
++        finite=np.isfinite(LP);mathematical=np.isneginf(L);forced=np.isfinite(L)&~finite
++        rounded=finite&(P==0);assert np.all(LP[rounded]<-700)
++        assert rounded.sum()==r['rounded_positive_count'] and forced.sum()==r['constraint_forced_zeros']
++        np.testing.assert_array_equal(P[~finite],0)
++        np.testing.assert_array_equal(P[finite&~rounded],np.exp(LP[finite&~rounded]))
++        mass=rounded.sum(1)*np.exp(-700);np.testing.assert_array_equal(mass,np.array(r['row_omitted_mass_upper']))
++        assert mass.max(initial=0)<=1e-280 and mass.sum()<=1e-276
++        # Independent additive row/column-potential KKT recovery, not solver's bias.
++        assert finite.all(),'actual panel expected full support; sparse support handled by exhaustive tests'
++        D=LP-L;residual=float(abs(D-D[:,:1]-D[:1,:]+D[0,0]).max())
++        assert residual<=2e-10
++        normalized=float(abs(logsumexp(LP,axis=1)).max());assert normalized<=2e-12
++        independent.append(dict(index=meta['index'],stationarity=residual,log_row_normalization=normalized))
++        bounds.append(float(mass.sum()))
++        if row.get('same_target_comparison_pass') is not None:comparisons.append(dict(index=meta['index'],passed=row['same_target_comparison_pass'],max_abs=row['old_scaled_max_abs'],objective_abs=row['objective_abs_difference']))
++        inputLP=L-logsumexp(L,axis=1)[:,None]
++        classification['full_support_concentrated' if np.max(inputLP,axis=1).max()>np.log1p(-1e-12) else 'full_support_other']+=1
++    assert all(x['passed'] for x in comparisons),'same entropy target mismatch; stop before optional NN'
++    memory=[]
++    for index in (0,527,537,541):
++        row=next(x for x in rows if x['input']['index']==index)
++        with np.load(OUT/row['input']['path']) as z:L=z['L'].copy();c=z['counts'].copy()
++        check();tracemalloc.start();tick=time.perf_counter();p,lp,r=solve(L,c,check);current,peak=tracemalloc.get_traced_memory();tracemalloc.stop()
++        memory.append(dict(index=index,traced_peak_bytes=peak,seconds_with_tracing=time.perf_counter()-tick,status=r['status']))
++    costs={}
++    for scope in ('small','large'):
++        rr=[x for x in rows if x['input']['scope']==scope]
++        costs[scope]=dict(first=stats([x['result']['seconds'] for x in rr]),repeat=stats([x['repeat']['seconds'] for x in rr]),
++            support=stats([x['result']['support_seconds'] for x in rr]),solver=stats([x['result']['solver_seconds'] for x in rr]),
++            iterations=stats([x['result']['iterations'] for x in rr]),evaluations=stats([x['result']['function_evaluations'] for x in rr]))
++    save(OUT/'independent_KKT.json',independent);save(OUT/'same_target_comparisons.json',comparisons)
++    save(OUT/'audit.json',dict(status='passed',matrices=len(rows),accepted=sum(r['result'].get('new_contract_pass',False) for r in rows),
++        statuses=dict(status),original_scaling=dict(old),classification=dict(classification),same_target_pairs=len(comparisons),
++        max_same_target_P_difference=max(x['max_abs'] for x in comparisons),
++        maximum_independent_stationarity=max(x['stationarity'] for x in independent),
++        maximum_global_tail_mass_bound=max(bounds),costs=costs,memory=memory,
++        worst_process_rss_mib=max(x['peak_rss_mib'] for x in rows),seconds=time.perf_counter()-start,
++        contract='new bounded-tail contract explicitly distinguished from original strict output'))
++    print('independent audit',dict(status), 'same-target pairs',len(comparisons),flush=True)
++if __name__=='__main__':main()
+diff --git a/experiments/role_newton_reader_v1/config.json b/experiments/role_newton_reader_v1/config.json
+new file mode 100644
+index 0000000..b77a22d
+--- /dev/null
++++ b/experiments/role_newton_reader_v1/config.json
+@@ -0,0 +1,14 @@
++{
++ "baseline":"9b010a6b41b39755a9bb36f34fa210b32b8fd689",
++ "dtype":"float64","entropy":1,"initialization":"zero biases after row/column gauge centering; no warm starts",
++ "max_iterations":200,"max_function_evaluations":4000,"matrix_seconds":30,
++ "line_search_halvings":32,"Armijo":0.0001,"max_bias_step":1000,
++ "initial_damping":0.000001,"minimum_damping":1e-12,"maximum_damping":1e12,"direction_attempts":8,
++ "row_absolute_tolerance":1e-8,"column_normalized_tolerance":1e-8,"stationarity_tolerance":2e-10,
++ "tail_log_cutoff":-700,"row_tail_mass_limit":1e-280,"total_tail_mass_limit":1e-276,
++ "max_elements":2000000,"memory_estimate_limit":268435456,
++ "same_target_comparison_max_abs":1e-6,"same_target_objective_relative":1e-8,
++ "high_precision_dps":80,
++ "high_precision_cases":["two_by_two_4to1","three_by_three_moderate","two_by_two_concentrated_80"],
++ "new_model_predictions_optional":true
++}
+diff --git a/experiments/role_newton_reader_v1/final_audit.py b/experiments/role_newton_reader_v1/final_audit.py
+new file mode 100644
+index 0000000..8a9e248
+--- /dev/null
++++ b/experiments/role_newton_reader_v1/final_audit.py
+@@ -0,0 +1,48 @@
++"""Final source, manifest, optional NN probabilities and bound audit."""
++import hashlib,subprocess,time,json
++from pathlib import Path
++import numpy as np
++from prepare import OUT,HERE,EXP,SOURCE,old,read,sha,save,check
++
++def main():
++    check();expected={n:h for h,n in (x.split('  ',1) for x in (EXP/'role_logscale_reader_v1_results/review_bundle/SHA256SUMS').read_text().splitlines())}
++    p=EXP/'role_logscale_reader_v1_results/review_bundle/SHA256SUMS'
++    blob=subprocess.check_output(['git','show','9b010a6b41b39755a9bb36f34fa210b32b8fd689:experiments/role_logscale_reader_v1_results/review_bundle/SHA256SUMS'],cwd=EXP.parent)
++    assert hashlib.sha256(blob).hexdigest()==sha(p)
++    for name in ('large_input_identity.json','guard_cost/IMDB_reader.json','guard_cost/PubMed_reader.json'):
++        assert sha(SOURCE/name)==expected['results/'+name]
++    old.binding() # Full original model/kernel/source/data binding, no NN construction.
++    manifest=read(OUT/'input_manifest.json')
++    for row in manifest:assert sha(OUT/row['path'])==row['sha256']
++    frozen=read(OUT/'freeze.json')
++    for n,h in frozen['source'].items():assert sha(HERE/n)==h,n
++    assert read(OUT/'high_precision.json')['status']=='passed'
++    assert read(OUT/'reference_cost.json')['status']=='completed' and len(read(OUT/'reference_cost.json')['rows'])==544
++    rr,targets=old.c.load_data();case=old.c.metadata_case(old.c.base,old.c.PANEL,targets)
++    fam=np.repeat(np.arange(10),case['space'].counts);kernel=old.c.base.MarginalKernel(case['prior'],old.c.base.c.schedule(64));prediction=[]
++    for seed in (2026102011,2026102012,2026102013):
++        folder=OUT/f'prediction_seed{seed}';receipt=read(folder/'receipt.json');assert receipt['status']=='completed' and receipt['rows']==44
++        for r in read(folder/'rows.json'):
++            check();assert r['status']=='completed';name=r['condition'];t=r['t'];p=folder/f'{name}_t{t}.npz';assert sha(p)==r['output_sha256']
++            source=next(x for x in manifest if x['scope']=='small' and x['seed']==seed and x['condition']==name and x['t']==t)
++            with np.load(EXP/source['source_payload']) as z:state=z['state'];exactp=z['p0_exact'];exactq=z['q_exact']
++            with np.load(p) as z:
++                assert np.isfinite(z['p0']).all() and np.isfinite(z['q']).all() and ((z['q']>=0)&(z['q']<=1)).all()
++                np.testing.assert_array_equal(kernel.reverse(z['p0'],state,fam,t-1,t),z['q'])
++                if t==1:np.testing.assert_allclose(z['q'],z['p0'],atol=2e-12,rtol=0)
++                assert np.all(z['p0'][case['prior'][fam]==0]==0) and np.all(z['q'][case['prior'][fam]==0]==0)
++                for rel in r['relations']:
++                    ix=fam==rel['family'];assert abs(rel['p0_max_abs']-abs(z['p0'][ix]-exactp[ix]).max(initial=0))<1e-14
++                    assert abs(rel['expected_edge_delta']-(z['q'][ix].sum()-exactq[ix].sum()))<1e-12
++            prediction.append(r)
++    assert len(prediction)==132
++    save(OUT/'prediction_summary.json',dict(rows=prediction,newly_available_states=55,all132_complete=True,
++        context_tail_error_bound_max=max(x['tail_context_bound'] for r in prediction for x in r['context_error_bounds']),
++        observed_context_float32_error_max=max(x['observed_context_error'] for r in prediction for x in r['context_error_bounds'])))
++    save(OUT/'final_audit.json',dict(status='passed',matrices=544,small_original_archived=528,large_deterministically_reconstructed=16,
++        historical_large_LL_hash_available=False,old_large_state_hashes_verified=True,old_scaling_status_and_residuals_match=True,
++        original_reference_manifest_bound_to_baseline_commit=True,source_config_and_weights_verified=True,
++        same_target_pairs=442,high_precision_cases=3,prediction_pairs=132,posterior_and_exact_support_checked=True,
++        no_training=True,no_sampling=True,no_GPU=True,all_failures_preserved=True))
++    print('final audit544 matrices,442 same-target checks,132 NN pairs; passed')
++if __name__=='__main__':main()
+diff --git a/experiments/role_newton_reader_v1/high_precision.py b/experiments/role_newton_reader_v1/high_precision.py
+new file mode 100644
+index 0000000..aa81f8e
+--- /dev/null
++++ b/experiments/role_newton_reader_v1/high_precision.py
+@@ -0,0 +1,29 @@
++"""Predeclared80-digit reference cases; explicit machine-readable values."""
++import numpy as np
++import mpmath as mp
++from solver import solve
++from prepare import OUT,save,check
++import scaling as scaling_reference
++def main():
++    mp.mp.dps=80;rows=[]
++    for name,L in [('two_by_two_4to1',np.array([[np.log(4.),0],[0,np.log(4.)]])),
++                   ('three_by_three_moderate',np.array([[2.,1,0],[0,1,3.],[1.,2,.5]])),
++                   ('two_by_two_concentrated_80',np.array([[80.,0],[0,80.]]))]:
++        check();n,k=L.shape;c=np.ones(k,dtype=int)
++        def probs(b):
++            b=list(b)+[mp.mpf(0)];result=[]
++            for row in L:
++                v=[mp.exp(mp.mpf(float(x))+y) for x,y in zip(row,b)];result.append([x/sum(v) for x in v])
++            return result
++        def gradient(*b):
++            p=probs(b);return tuple(sum(p[i][j] for i in range(n))-int(c[j]) for j in range(k-1))
++        bias=mp.findroot(gradient,tuple(mp.mpf(0) for _ in range(k-1)),tol=mp.mpf('1e-65'),maxsteps=100)
++        if k==2:bias=[bias[0] if hasattr(bias,'rows') else bias]
++        ref=probs(bias);floatref=np.array([[float(x) for x in row] for row in ref])
++        p,lp,r=solve(L,c,check);q,s=scaling_reference.scale(L,c,check)
++        assert r['new_contract_pass'];np.testing.assert_allclose(p,floatref,atol=2e-8,rtol=0)
++        rows.append(dict(case=name,dps=80,reference_probabilities=[[mp.nstr(x,80) for x in row] for row in ref],
++            newton_max_abs=float(abs(p-floatref).max()),scaling_max_abs=float(abs(q-floatref).max()),
++            newton=r,scaling=s))
++    save(OUT/'high_precision.json',dict(status='passed',cases=rows))
++if __name__=='__main__':main()
+diff --git a/experiments/role_newton_reader_v1/panel.py b/experiments/role_newton_reader_v1/panel.py
+new file mode 100644
+index 0000000..00dbc6d
+--- /dev/null
++++ b/experiments/role_newton_reader_v1/panel.py
+@@ -0,0 +1,54 @@
++"""All544 LLs, first + repeat, independent residuals and original target comparisons."""
++import argparse,json,resource,sys,time,traceback
++from pathlib import Path
++import numpy as np
++from scipy.special import logsumexp
++from solver import solve
++from prepare import OUT,HERE,SOURCE,read,sha,save,check
++import scaling as scaling_reference
++
++def objective(P,LP,L):
++    ix=P>0;return float(np.sum(P[ix]*(L[ix]-LP[ix])))
++def run(scope):
++    start=time.perf_counter();rows=[];status='failed';reason=None
++    try:
++        frozen=read(OUT/'freeze.json')
++        for n,h in frozen['source'].items():assert sha(HERE/n)==h,n
++        assert sha(OUT/'input_manifest.json')==frozen['input_manifest_sha256']
++        cases=[x for x in read(OUT/'input_manifest.json') if x['scope']==scope]
++        for meta in cases:
++            check();path=OUT/meta['path'];assert sha(path)==meta['sha256']
++            with np.load(path) as z:L=z['L'].copy();c=z['counts'].copy()
++            p,lp,r=solve(L,c,check);again,logs,s=solve(L,c,check)
++            assert s['status']==r['status']
++            if p is not None:np.testing.assert_array_equal(p,again);np.testing.assert_array_equal(lp,logs)
++            row=dict(input=meta,result=r,repeat=s,peak_rss_mib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024)
++            if p is not None:
++                assert np.isfinite(p).all() and (p>=0).all();assert abs(p.sum(1)-1).max()<=1e-8
++                assert (abs(p.sum(0)-c)/np.maximum(1,c)).max()<=1e-8
++                # Independent primal values include declared tiny-tail loss bounds.
++                row['objective']=objective(p,lp,L)
++                reference=None
++                if scope=='small':
++                    src=HERE.parents[0]/meta['source_payload']
++                    with np.load(src) as z:reference=z[meta['old_scaling_P_key']].copy()
++                else:
++                    reference,oldr=scaling_reference.scale(L,c,check)
++                    row['old_scaling_recomputed']=oldr
++                    for key in ('status','iterations','row_residual','column_residual','underflow_count'):
++                        assert oldr[key]==meta['old_scaling'][key],(meta['index'],key)
++                if meta['old_scaling']['status']=='converged':
++                    row['old_scaled_max_abs']=float(abs(p-reference).max())
++                    ix=reference>0;Jold=float(np.sum(reference[ix]*(L[ix]-np.log(reference[ix]))))
++                    row['old_scaled_objective']=Jold;row['objective_abs_difference']=abs(row['objective']-Jold)
++                    row['same_target_comparison_pass']=row['old_scaled_max_abs']<=1e-6 and row['objective_abs_difference']<=1e-8*max(1,abs(Jold))
++                dst=OUT/f'outputs/matrix{meta["index"]:04d}.npz';dst.parent.mkdir(exist_ok=True)
++                np.savez_compressed(dst,P=p,logP=lp);row['output_path']=str(dst.relative_to(OUT));row['output_sha256']=sha(dst)
++            rows.append(row);save(OUT/f'{scope}_partial.json',rows)
++            if len(rows)%20==0 or scope=='large':print(scope,len(rows),meta['index'],r['status'],r['iterations'],r.get('column_residual'),r['seconds'],flush=True)
++        status='completed'
++    except BaseException as exc:reason=repr(exc);traceback.print_exc()
++    finally:save(OUT/f'{scope}_receipt.json',dict(status=status,reason=reason,rows=len(rows),seconds=time.perf_counter()-start,peak_rss_mib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024))
++    return int(status!='completed')
++if __name__=='__main__':
++    p=argparse.ArgumentParser();p.add_argument('scope',choices=['small','large']);sys.exit(run(p.parse_args().scope))
+diff --git a/experiments/role_newton_reader_v1/predict.py b/experiments/role_newton_reader_v1/predict.py
+new file mode 100644
+index 0000000..9aa8015
+--- /dev/null
++++ b/experiments/role_newton_reader_v1/predict.py
+@@ -0,0 +1,67 @@
++"""Optional same Xt fixed-weight prediction using validated saved Newton allocations."""
++import argparse,sys,time,resource,traceback
++import numpy as np
++from prepare import OUT,HERE,SOURCE,read,sha,save,check,old
++
++def run(seed):
++    out=OUT/f'prediction_seed{seed}';out.mkdir();started=time.perf_counter();status='failed';reason=None;rows=[]
++    try:
++        assert read(OUT/'audit.json')['status']=='passed'
++        records,targets=old.c.load_data();case=old.c.metadata_case(old.c.base,old.c.PANEL,targets);model,binding=old.get_model(seed,case)
++        save(out/'binding.json',binding)
++        allrows=read(OUT/'small_partial.json');oldcheck=old.check;oldrequired=old.required
++        for name in old.c.read(old.c.RESULT/'conditions.json')['final_targets']:
++            for t in (1,8,32,64):
++                check();group=[x for x in allrows if x['input']['seed']==seed and x['input']['condition']==name and x['input']['t']==t]
++                assert len(group)==4;group.sort(key=lambda x:x['input']['type'])
++                if not all(x['result'].get('new_contract_pass') for x in group):
++                    rows.append(dict(seed=seed,condition=name,t=t,status='not_run_reader_rejected'));continue
++                meta=group[0]['input'];path=HERE.parent/meta['source_payload'];assert sha(path)==meta['source_sha256']
++                with np.load(path) as z:data={k:z[k].copy() for k in z.files}
++                allocations=[];counter=[0];values=[]
++                for x in group:
++                    assert sha(OUT/x['output_path'])==x['output_sha256']
++                    with np.load(OUT/x['output_path']) as z:allocations.append(z['P'].copy())
++                def cached(L,c,ignored_check):
++                    j=counter[0];counter[0]+=1
++                    np.testing.assert_array_equal(L,data[f'type{j}_LL']);np.testing.assert_array_equal(c,data[f'type{j}_counts'])
++                    return allocations[j].copy(),group[j]['result'].copy()
++                def value_hook(module,args,v):values.append(v.detach().cpu().numpy().copy())
++                torch_rng=old.c.torch.get_rng_state().clone();numpy_rng=np.random.get_state()
++                old.required=cached;old.check=check;hook=model.branch.value.register_forward_hook(value_hook)
++                try:prediction=old.predict(model,case,data['state'],targets[name],t,2026102031,'scaled')
++                finally:hook.remove();old.required=oldrequired;old.check=oldcheck
++                assert old.c.torch.equal(torch_rng,old.c.torch.get_rng_state())
++                after=np.random.get_state();assert numpy_rng[0]==after[0] and np.array_equal(numpy_rng[1],after[1]) and numpy_rng[2:]==after[2:]
++                steps=read(old.c.RESULT/f'jobs/broad_{seed}/generated/{name}_2026102031_steps.json')
++                assert prediction['query_sha256']==next(x['query_sha256'] for x in steps if x['t']==t)
++                assert counter[0]==4 and len(values)==4
++                checks=[]
++                for typ,x in enumerate(group):
++                    P=allocations[typ];V=values[typ];ix=case['space'].types==typ
++                    mass=np.array(x['result']['row_omitted_mass_upper'])
++                    tail=mass*np.max(abs(V));f32=P.astype(np.float32).astype(float)
++                    conversion=(abs(f32-P)@abs(V.astype(float))).max(1)
++                    k=P.shape[1];u=2**-24;gamma=k*u/(1-k*u)
++                    multiplication=(gamma*(abs(f32)@abs(V.astype(float)))).max(1)+k*np.finfo(np.float32).tiny
++                    actual=abs(prediction['context'][ix]-(P@V.astype(float))).max(1)
++                    assert np.all(actual<=conversion+multiplication+1e-12)
++                    checks.append(dict(type=typ,tail_context_bound=float(tail.max(initial=0)),
++                       fp32_conversion_bound=float(conversion.max()),fp32_product_bound=float(multiplication.max()),observed_context_error=float(actual.max())))
++                families=np.repeat(np.arange(10),case['space'].counts);delta=[]
++                for rel in range(10):
++                    ix=families==rel;new=prediction['q'][ix];reference=data['q_exact'][ix];st=data['state'][ix]
++                    delta.append(dict(family=rel,p0_max_abs=float(abs(prediction['p0'][ix]-data['p0_exact'][ix]).max(initial=0)),
++                        q_max_abs=float(abs(new-reference).max(initial=0)),expected_edge_delta=float(new.sum()-reference.sum()),
++                        birth_delta=float(new[st==0].sum()-reference[st==0].sum()),death_delta=float((1-new[st==1]).sum()-(1-reference[st==1]).sum())))
++                target=out/f'{name}_t{t}.npz';np.savez_compressed(target,p0=prediction['p0'],q=prediction['q'],role_context=prediction['context'])
++                rows.append(dict(seed=seed,condition=name,t=t,status='completed',query_sha256=prediction['query_sha256'],
++                    source_sha256=meta['source_sha256'],output_sha256=sha(target),relations=delta,context_error_bounds=checks,
++                    neural_seconds_with_cached_certified_allocation=prediction['seconds'],mode='Newton allocation; original network/kernel; no draw'))
++                save(out/'rows.json',rows)
++        status='completed'
++    except BaseException as exc:reason=repr(exc);traceback.print_exc()
++    finally:save(out/'receipt.json',dict(status=status,reason=reason,rows=len(rows),seconds=time.perf_counter()-started,peak_rss_mib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024,training=0,new_chains=0))
++    return int(status!='completed')
++if __name__=='__main__':
++    p=argparse.ArgumentParser();p.add_argument('--seed',type=int,required=True);sys.exit(run(p.parse_args().seed))
+diff --git a/experiments/role_newton_reader_v1/prepare.py b/experiments/role_newton_reader_v1/prepare.py
+new file mode 100644
+index 0000000..5c943d4
+--- /dev/null
++++ b/experiments/role_newton_reader_v1/prepare.py
+@@ -0,0 +1,72 @@
++"""Verify sealed small arrays; deterministically reconstruct unsaved large LL, no new states."""
++import hashlib,json,os,sys,time
++from pathlib import Path
++os.environ.update(CUDA_VISIBLE_DEVICES='',OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1')
++HERE=Path(__file__).resolve().parent;EXP=HERE.parent
++sys.path.insert(0,str(EXP/'role_logscale_reader_v1'))
++import diagnose as old
++import numpy as np
++OUT=Path('/data2/lyh/gnn_project/DiHug/results/role_newton_20261021_v1')
++SOURCE=EXP/'role_logscale_reader_v1_results/evidence'
++def read(p):return json.loads(p.read_text())
++def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
++def save(p,x):
++    q=p.with_suffix('.tmp')
++    q.write_text(json.dumps(x,indent=2,allow_nan=False,default=lambda value:value.item() if isinstance(value,np.generic) else (_ for _ in ()).throw(TypeError(type(value).__name__)))+'\n')
++    q.replace(p)
++def check():
++    if (OUT/'STOP').exists():raise InterruptedError('STOP')
++    if time.time()>read(OUT/'activation.json')['deadline_epoch']-120:raise TimeoutError('original60min budget reserve120')
++def main():
++    check();dest=OUT/'inputs';dest.mkdir();manifest=[]
++    expected={n:h for h,n in (line.split('  ',1) for line in (EXP/'role_logscale_reader_v1_results/review_bundle/SHA256SUMS').read_text().splitlines())}
++    names=read(old.c.RESULT/'conditions.json')['final_targets'];count=0
++    for seed in (2026102011,2026102012,2026102013):
++        for name in names:
++            for t in (1,8,32,64):
++                check();stem=f'seed{seed}/{name}_t{t}';meta=read(SOURCE/(stem+'.json'));passed=meta['status']=='completed'
++                suffix='.npz' if passed else '_failure_evidence.npz';p=SOURCE/(stem+suffix)
++                assert sha(p)==expected['results/'+stem+suffix]
++                rr=meta['allocation'] if passed else read(SOURCE/(stem+'_failure_evidence.json'))['allocations']
++                with np.load(p,allow_pickle=False) as z:
++                    for typ in range(4):
++                        L=z[f'type{typ}_LL'];c=z[f'type{typ}_counts'];out=dest/f'matrix{count:04d}.npz'
++                        np.savez_compressed(out,L=L,counts=c)
++                        a=rr[typ]
++                        manifest.append(dict(index=count,scope='small',seed=seed,condition=name,t=t,type=typ,n=L.shape[0],k=L.shape[1],
++                           path=str(out.relative_to(OUT)),sha256=sha(out),source_payload=str(p.relative_to(EXP)),source_sha256=sha(p),
++                           source_manifest_expected_sha256=expected['results/'+stem+suffix],fields='original saved arrays',
++                           old_scaling=a['scaled'],old_scaling_P_key=f'type{typ}_'+('scaled' if passed else 'unaccepted_scaled')))
++                        count+=1
++    identities=read(SOURCE/'large_input_identity.json');inventory=read(EXP/'role_target_scalability_v1/evidence/large_graph_inventory.json')
++    for name in ('IMDB','PubMed'):
++        check();path=EXP/f'joint_cn_dual_rounds_v1_1/package/data/{name}.npz';assert sha(path)==inventory[name]['sha256']
++        with np.load(path) as z:case=old.c.base.c.make_case(z['types'],z['edges'].T,tuple(map(tuple,z['schema'])))
++        target=old.c.base.extract_target(case);types=case['space'].types;capacity=old.cap.capacities(types,case['space'].pairs)
++        receipts=read(SOURCE/f'guard_cost/{name}_reader.json')['rows']
++        for t in (20,500):
++            check();ei,ef,_=old.c.base.c.global_noisy_edges(case['space'],case['clean'],case['prior'],old.c.base.c.schedule(1000)[t],np.random.default_rng([2026102141,t]))
++            source=next(x for x in identities if x['dataset']==name and x['t']==t)
++            h=hashlib.sha256(ei.tobytes()+ef.tobytes()).hexdigest();assert h==source['edge_array_sha256']
++            d=old.cap.degrees(types,ei,ef,len(case['space'].pairs));tables={}
++            for typ,roles in enumerate(target.roles):
++                tick=time.perf_counter();ix=types==typ;L=np.zeros((int(ix.sum()),len(roles)));c=np.array([n for v,n in roles])
++                for j,(v,_) in enumerate(roles):
++                    for r,N in enumerate(capacity[typ]):
++                        if not N:continue
++                        check();key=(int(N),v[r],float(case['prior'][r]))
++                        if key not in tables:tables[key]=old.cap.degree_logpmf(int(N),v[r],old.c.base.c.schedule(1000)[t],float(case['prior'][r]))
++                        L[:,j]+=tables[key][d[ix,r]]
++                out=dest/f'matrix{count:04d}.npz';np.savez_compressed(out,L=L,counts=c)
++                oldr=next(r for r in receipts if r['t']==t and r['type']==typ)
++                manifest.append(dict(index=count,scope='large',dataset=name,t=t,type=typ,n=L.shape[0],k=L.shape[1],
++                  path=str(out.relative_to(OUT)),sha256=sha(out),fields='deterministic reconstruction; old LL byte hash NOT available',
++                  original_state_sha256=h,data_sha256=sha(path),old_state_hash_verified=True,
++                  derivation_source_sha256=sha(EXP/'role_logscale_reader_v1/large.py'),degree_law_source_sha256=sha(EXP/'role_specialization_v1/capacity_readout.py'),
++                  old_scaling=oldr['scaling'],LL_reconstruction_seconds=time.perf_counter()-tick))
++                count+=1
++    assert count==544;save(OUT/'input_manifest.json',manifest)
++    save(OUT/'preparation_receipt.json',dict(status='passed',small_matrices=528,large_reconstructed=16,new_states=0,
++       limitations='no historical large LL hash existed; only source/state hashes independently verified'))
++    print('prepared544 matrices;528 archived,16 deterministic reconstructed',flush=True)
++if __name__=='__main__':main()
+diff --git a/experiments/role_newton_reader_v1/reference_cost.py b/experiments/role_newton_reader_v1/reference_cost.py
+new file mode 100644
+index 0000000..bc7e4d0
+--- /dev/null
++++ b/experiments/role_newton_reader_v1/reference_cost.py
+@@ -0,0 +1,17 @@
++"""Same544 matrices, original scaling first+repeat; no model or new state."""
++import time
++import numpy as np
++from prepare import OUT,read,save,sha,check
++import scaling as scaling_reference
++def main():
++    rows=[];start=time.perf_counter()
++    for meta in read(OUT/'input_manifest.json'):
++        check();path=OUT/meta['path'];assert sha(path)==meta['sha256']
++        with np.load(path) as z:L=z['L'].copy();c=z['counts'].copy()
++        p,r=scaling_reference.scale(L,c,check);q,s=scaling_reference.scale(L,c,check)
++        for key in ('status','iterations','row_residual','column_residual','underflow_count'):assert r[key]==s[key]==meta['old_scaling'][key]
++        if p is not None:np.testing.assert_array_equal(p,q)
++        rows.append(dict(index=meta['index'],scope=meta['scope'],first=r,repeat=s))
++        if len(rows)%50==0:save(OUT/'reference_cost_partial.json',rows)
++    save(OUT/'reference_cost.json',dict(status='completed',rows=rows,seconds=time.perf_counter()-start,new_states=0))
++if __name__=='__main__':main()
+diff --git a/experiments/role_newton_reader_v1/run.py b/experiments/role_newton_reader_v1/run.py
+new file mode 100644
+index 0000000..bc22cdd
+--- /dev/null
++++ b/experiments/role_newton_reader_v1/run.py
+@@ -0,0 +1,45 @@
++"""Light supervisor; all costs share already activated unique60min ledger."""
++import argparse,json,os,signal,subprocess,sys,time,hashlib
++from pathlib import Path
++HERE=Path(__file__).resolve().parent;OUT=Path('/data2/lyh/gnn_project/DiHug/results/role_newton_20261021_v1')
++def read(p):return json.loads(p.read_text())
++def save(p,x):p.write_text(json.dumps(x,indent=2)+'\n')
++def main():
++    parser=argparse.ArgumentParser();parser.add_argument('--execute',action='store_true');a=parser.parse_args()
++    if not a.execute:parser.error('explicit --execute required; no training/generation')
++    ledger=read(OUT/'activation.json');f=read(OUT/'freeze.json')
++    for n,h in f['source'].items():assert hashlib.sha256((HERE/n).read_bytes()).hexdigest()==h,n
++    with (OUT/'launch.json').open('x') as ff:json.dump(dict(epoch=time.time(),original_activation=ledger['activation_epoch']),ff)
++    jobs=[];stop=[None];status='failed';reason=None
++    def handler(s,frame):stop[0]=signal.Signals(s).name
++    for s in (signal.SIGINT,signal.SIGTERM,signal.SIGHUP):signal.signal(s,handler)
++    def kill(p):
++        if p.poll() is None:
++            try:os.killpg(p.pid,signal.SIGTERM)
++            except ProcessLookupError:pass
++            try:p.wait(timeout=3)
++            except subprocess.TimeoutExpired:
++                try:os.killpg(p.pid,signal.SIGKILL)
++                except ProcessLookupError:pass
++        p.wait()
++    try:
++        for scope in ('small','large'):
++            log=(OUT/(scope+'.log')).open('w');p=subprocess.Popen([sys.executable,'-u',str(HERE/'panel.py'),scope],
++              env=dict(os.environ,OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1',CUDA_VISIBLE_DEVICES=''),stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
++            jobs.append(dict(scope=scope,p=p,log=log,start=time.monotonic()))
++        tick=0
++        while any(x['p'].poll() is None for x in jobs):
++            if stop[0] or (OUT/'STOP').exists() or time.time()>ledger['deadline_epoch']-120:raise InterruptedError(stop[0] or 'STOP/deadline')
++            if time.monotonic()-tick>20:print([(x['scope'],x['p'].poll()) for x in jobs],flush=True);tick=time.monotonic()
++            time.sleep(.2)
++        if any(x['p'].returncode for x in jobs):raise RuntimeError('child failed; no implicit retry')
++        status='completed'
++    except BaseException as exc:reason=repr(exc)
++    finally:
++        records=[]
++        for x in jobs:
++            kill(x['p']);x['log'].close();records.append(dict(scope=x['scope'],exit_code=x['p'].returncode,observation_window_seconds=time.monotonic()-x['start']))
++        save(OUT/'controller.json',dict(status=status,reason=reason,jobs=records,all_children_reaped=True,
++          elapsed_seconds=time.time()-ledger['activation_epoch'],budget_seconds=3600,training=0,new_chains=0,GPU=0))
++    return int(status!='completed')
++if __name__=='__main__':sys.exit(main())
+diff --git a/experiments/role_newton_reader_v1/solver.py b/experiments/role_newton_reader_v1/solver.py
+new file mode 100644
+index 0000000..1498a25
+--- /dev/null
++++ b/experiments/role_newton_reader_v1/solver.py
+@@ -0,0 +1,120 @@
++"""Unit-entropy reduced role-bias dual, damped Newton. No alternate solver."""
++import time
++import numpy as np
++from scipy.special import logsumexp
++from scipy.linalg import cho_factor,cho_solve
++from scipy.sparse import coo_matrix
++from scipy.sparse.csgraph import maximum_flow,connected_components
++
++def reduce_support(s,c):
++    n,k=s.shape
++    if s.all():return s.copy(),[(np.arange(n),np.arange(k))],dict(feasible=True,forced_zero=0,certificate='full support')
++    i,j=np.nonzero(s);source=n+k;sink=source+1
++    row=np.r_[np.full(n,source),i,n+np.arange(k)];col=np.r_[np.arange(n),n+j,np.full(k,sink)]
++    val=np.r_[np.ones(n,dtype=np.int64),np.ones(len(i),dtype=np.int64),c]
++    flow=maximum_flow(coo_matrix((val,(row,col)),shape=(sink+1,sink+1),dtype=np.int64).tocsr(),source,sink)
++    if flow.flow_value!=n:return None,None,dict(feasible=False,certificate='integer maxflow',flow=int(flow.flow_value))
++    used=flow.flow[:n,n:n+k].toarray()>0
++    ui,uj=np.nonzero(used);vi,vj=np.nonzero(s&~used)
++    residual=coo_matrix((np.ones(len(ui)+len(vi)),(np.r_[n+uj,vi],np.r_[ui,n+vj])),shape=(n+k,n+k)).tocsr()
++    _,lab=connected_components(residual,directed=True,connection='strong')
++    keep=used|(s&(lab[:n,None]==lab[n:][None,:]))
++    ii,jj=np.nonzero(keep)
++    graph=coo_matrix((np.ones(2*len(ii)),(np.r_[ii,n+jj],np.r_[n+jj,ii])),shape=(n+k,n+k)).tocsr()
++    nc,lab=connected_components(graph,directed=False)
++    components=[(np.flatnonzero(lab[:n]==a),np.flatnonzero(lab[n:]==a)) for a in range(nc)]
++    assert all(len(ix)==int(c[jx].sum()) and len(ix) and len(jx) for ix,jx in components)
++    return keep,components,dict(feasible=True,forced_zero=int((s&~keep).sum()),certificate='integer flow + residual SCC',assignment=np.argmax(used,axis=1).tolist())
++
++def dual(L,c,b,hessian=True):
++    logits=L+b;z=logsumexp(logits,axis=1);lp=logits-z[:,None]
++    p=np.zeros_like(lp);use=lp>=-700;p[use]=np.exp(lp[use])
++    g=p.sum(0)-c
++    H=np.diag(p.sum(0))-p.T@p if hessian else None
++    return float(z.sum()-c@b),g,H,lp,p
++
++def objective_difference(lp,p,c,d):
++    # Stable log E exp(d), subtract linear part before summing at small d.
++    if np.max(abs(d))<.5:
++        m=p@d;z=d[None,:]-m[:,None]
++        rem=np.expm1(z)-z
++        row=m+np.log1p(np.sum(p*z,axis=1)+np.sum(p*rem,axis=1))
++    else:row=logsumexp(lp+d,axis=1)
++    return float(row.sum()-c@d),float(np.abs(row).sum()+abs(c@d))
++
++def solve(ll,counts,check=lambda:None):
++    started=time.perf_counter();r=dict(status='failed',iterations=0,function_evaluations=0,components=[])
++    L0=np.asarray(ll,dtype=np.float64);c0=np.asarray(counts)
++    if L0.ndim!=2 or c0.ndim!=1 or L0.shape[1]!=len(c0) or not len(L0) or not len(c0):raise ValueError('matrix/count shape')
++    if not np.issubdtype(c0.dtype,np.integer) or (c0<0).any() or int(c0.sum())!=len(L0):raise ValueError('integer capacities')
++    if np.isnan(L0).any() or np.isposinf(L0).any():raise ValueError('likelihood NaN/+inf')
++    if L0.size>2000000 or L0.size*128+L0.shape[1]**2*32>256*1024**2:raise MemoryError('resource gate')
++    def gate():
++        check()
++        if time.perf_counter()-started>30:raise TimeoutError('single matrix30s')
++    try:
++        gate();active=c0>0;L=L0[:,active].copy();c=c0[active];support=np.isfinite(L)
++        keep,components,proof=reduce_support(support,c);r['support']=proof;r['support_seconds']=time.perf_counter()-started
++        if keep is None:r['status']='support_infeasible';return None,None,r
++        L[~keep]=-np.inf;P=np.zeros_like(L);LP=np.full_like(L,-np.inf);bias=np.zeros(len(c))
++        for ix,jx in components:
++            gate();B=L[np.ix_(ix,jx)].copy();cc=c[jx]
++            row=B.max(1);B-=row[:,None];col=B.max(0);B-=col
++            if not np.isfinite(B[np.isfinite(L[np.ix_(ix,jx)])]).all():raise FloatingPointError('gauge range')
++            b=np.zeros(len(jx));damping=1e-6;accepted=False;iters=evals=0;backtracks=0
++            for it in range(201):
++                gate();f,g,H,lp,p=dual(B,cc,b);evals+=1;r['function_evaluations']+=1
++                if r['function_evaluations']>4000:raise RuntimeError('function evaluation limit')
++                if not np.isfinite(f) or not np.isfinite(g).all():raise FloatingPointError('dual nonfinite')
++                if np.max(abs(g)/np.maximum(1,cc))<=1e-8:accepted=True;iters=it;break
++                if it==200:break
++                moved=False
++                for attempt in range(8):
++                    if len(jx)==1:break
++                    A=H[:-1,:-1]+damping*np.eye(len(jx)-1)
++                    try:direction=np.r_[cho_solve(cho_factor(A,lower=True,check_finite=False),-g[:-1],check_finite=False),0.]
++                    except np.linalg.LinAlgError:damping=min(1e12,damping*10);continue
++                    slope=float(g@direction)
++                    if not np.isfinite(direction).all() or slope>=0:damping=min(1e12,damping*10);continue
++                    step=min(1.,1000/max(abs(direction).max(),1.))
++                    for bt in range(32):
++                        gate();change,scale=objective_difference(lp,p,cc,step*direction);evals+=1;r['function_evaluations']+=1
++                        if r['function_evaluations']>4000:raise RuntimeError('function evaluation limit')
++                        if np.isfinite(change) and change<=1e-4*step*slope+64*np.finfo(float).eps*max(1.,scale):
++                            b+=step*direction;damping=max(1e-12,damping/3);moved=True;backtracks+=bt;break
++                        step*=.5
++                    if moved:break
++                    damping=min(1e12,damping*10)
++                if not moved:r['status']='line_search_failed';break
++                iters=it+1
++            r['iterations']+=iters
++            r['components'].append(dict(n=len(ix),k=len(jx),iterations=iters,evaluations=evals,backtracks=backtracks,damping=damping,converged=accepted))
++            if not accepted:
++                r['status']=r['status'] if r['status']!='failed' else 'iteration_limit'
++                return None,None,r
++            P[np.ix_(ix,jx)]=p;LP[np.ix_(ix,jx)]=lp;bias[jx]=b-col
++        gate();fullp=np.zeros_like(L0);fullLP=np.full_like(L0,-np.inf);fullp[:,active]=P;fullLP[:,active]=LP
++        residual=abs(fullp.sum(0)-c0)/np.maximum(1,c0)
++        rowres=float(abs(fullp.sum(1)-1).max());colres=float(residual.max())
++        rounded=np.isfinite(LP)&(LP<-700);mass=rounded.sum(1)*np.exp(-700.)
++        # Independently reconstruct full log-softmax from original L and role biases.
++        Z=logsumexp(L+bias,axis=1);reference=L+bias-Z[:,None]
++        station=float(abs(reference[keep]-LP[keep]).max(initial=0))
++        original = int(rounded.sum())==0
++        valid=rowres<=1e-8 and colres<=1e-8 and station<=2e-10 and mass.max(initial=0)<=1e-280 and mass.sum()<=1e-276
++        r.update(status=('converged_original' if original else 'converged_bounded_tail') if valid else 'independent_validation_failed',
++            original_contract_pass=valid and original,new_contract_pass=valid,row_residual=rowres,column_residual=colres,stationarity_residual=station,
++            rounded_positive_count=int(rounded.sum()),row_omitted_mass_upper=mass.tolist(),total_omitted_mass_upper=float(mass.sum()),
++            input_mathematical_zeros=int(np.isneginf(L0).sum()),constraint_forced_zeros=proof['forced_zero'],zero_frequency_columns=int((~active).sum()))
++        good=P>0
++        r['primal_objective']=float(np.sum(P[good]*(L[good]-LP[good])))
++        return (fullp,fullLP,r) if valid else (None,None,r)
++    except (TimeoutError,InterruptedError,RuntimeError,FloatingPointError) as exc:
++        r.update(status='timeout' if isinstance(exc,TimeoutError) else 'solver_failed',reason=repr(exc));return None,None,r
++    finally:r['seconds']=time.perf_counter()-started;r['solver_seconds']=r['seconds']-r.get('support_seconds',0)
++
++class ReadoutFailure(RuntimeError):pass
++def required(L,c,check=lambda:None):
++    p,lp,r=solve(L,c,check)
++    if not r.get('new_contract_pass',False):raise ReadoutFailure(str(r))
++    return p,r
+diff --git a/experiments/role_newton_reader_v1/test_imports.py b/experiments/role_newton_reader_v1/test_imports.py
+new file mode 100644
+index 0000000..9936b6a
+--- /dev/null
++++ b/experiments/role_newton_reader_v1/test_imports.py
+@@ -0,0 +1,8 @@
++import runpy
++from pathlib import Path
++def test_auxiliary_imports_do_not_resolve_legacy_panel():
++    here=Path(__file__).resolve().parent
++    for n in ('reference_cost.py','high_precision.py'):
++        code=runpy.run_path(str(here/n),run_name='test_import_only')
++        assert callable(code['main'])
++        assert 'role_logscale_reader_v1' in code['scaling_reference'].__file__
+diff --git a/experiments/role_newton_reader_v1/test_newton.py b/experiments/role_newton_reader_v1/test_newton.py
+new file mode 100644
+index 0000000..c38706f
+--- /dev/null
++++ b/experiments/role_newton_reader_v1/test_newton.py
+@@ -0,0 +1,78 @@
++import itertools
++import numpy as np
++import pytest
++from solver import solve,dual,reduce_support,required
++
++@pytest.mark.parametrize('L,c',[(np.zeros((3,1)),[3]),(np.zeros((4,2)),[3,1]),(np.array([[80.,0],[0,80.]]),[1,1]),(np.array([[0.,0],[-np.inf,0.]]),[1,1]),(np.zeros((4,3)),[2,0,2])])
++def test_basic(L,c):
++    p,lp,r=solve(L,np.array(c));assert r.get('new_contract_pass'),r
++    np.testing.assert_allclose(p.sum(1),1,atol=1e-8);np.testing.assert_allclose(p.sum(0),c,atol=1e-8)
++
++def test_forced_zero_proof_exhaustive():
++    # All64 supports for3 nodes,2 columns; exact capacity assignments provide independent union.
++    for mask in range(64):
++        s=np.array([(mask>>i)&1 for i in range(6)],bool).reshape(3,2);c=np.array([2,1]);allx=[]
++        for a in itertools.product(range(2),repeat=3):
++            if np.array_equal(np.bincount(a,minlength=2),c) and all(s[i,j] for i,j in enumerate(a)):allx.append(a)
++        keep,components,r=reduce_support(s,c)
++        assert r['feasible']==bool(allx)
++        if allx:
++            union=np.zeros_like(s)
++            for a in allx:union[np.arange(3),a]=True
++            np.testing.assert_array_equal(keep,union)
++
++def test_gradient_hessian():
++    L=np.array([[2.,1.,-.5],[.2,1.,2.],[1.,.2,-.8],[2.,3.,1.]])
++    c=np.array([2,1,1]);b=np.array([.4,-.3,.1]);f,g,H,*_=dual(L,c,b)
++    eps=1e-5
++    for j in range(3):
++        d=np.eye(3)[j]*eps
++        fp,gp,*_=dual(L,c,b+d);fm,gm,*_=dual(L,c,b-d)
++        np.testing.assert_allclose((fp-fm)/(2*eps),g[j],atol=1e-9)
++        np.testing.assert_allclose((gp-gm)/(2*eps),H[:,j],atol=1e-9)
++    np.testing.assert_allclose(H@np.ones(3),0,atol=1e-14)
++
++def test_permutations_and_constants():
++    L=np.array([[2,1,0],[3,2,.5],[-2,1,2],[.2,.5,.1]])
++    p,_,r=solve(L,np.array([2,1,1]));assert r['new_contract_pass']
++    nodes=[2,0,3,1];cols=[2,0,1]
++    q,_,s=solve(L[nodes][:,cols],np.array([1,2,1]));assert s['new_contract_pass']
++    np.testing.assert_allclose(q,p[nodes][:,cols],atol=2e-8,rtol=0)
++    q,_,s=solve(L+np.array([3,-4,1,5])[:,None]+np.array([2,-7,3]),np.array([2,1,1]))
++    np.testing.assert_allclose(q,p,atol=2e-8,rtol=0)
++
++def test_components_infeasible_and_tail_contract():
++    p,lp,r=solve(np.array([[0.,-np.inf],[-np.inf,0.]]),np.ones(2,dtype=int));assert r['new_contract_pass'] and len(r['components'])==2
++    p,lp,r=solve(np.array([[0.,-np.inf],[0,-np.inf]]),np.ones(2,dtype=int));assert r['status']=='support_infeasible'
++    p,lp,r=solve(np.array([[0.,-1000],[-1000,0.]]),np.ones(2,dtype=int))
++    assert r['status']=='converged_bounded_tail' and not r['original_contract_pass']
++    assert np.isfinite(lp).all() and r['rounded_positive_count']==2 and r['total_omitted_mass_upper']<1e-280
++    np.testing.assert_array_equal(p,np.eye(2))
++
++def test_same_entropy_solution_not_DP():
++    L=np.array([[np.log(4),0],[0,np.log(4)]])
++    p,_,r=solve(L,np.ones(2,dtype=int));np.testing.assert_allclose(p,[[.8,.2],[.2,.8]],atol=1e-12)
++    assert abs(p[0,0]-16/17)>.14
++
++def test_high_precision_fixed_cases():
++    import mpmath as mp
++    mp.mp.dps=80
++    cases=[np.array([[np.log(4.),0],[0,np.log(4.)]]),np.array([[2.,1,0],[0,1,3.],[1.,2,.5]]),np.array([[80.,0],[0,80.]])]
++    for L in cases:
++        n,k=L.shape;c=np.ones(k,dtype=int)
++        def probs(b):
++            bb=list(b)+[mp.mpf('0')];out=[]
++            for row in L:
++                w=[mp.exp(mp.mpf(float(x))+v) for x,v in zip(row,bb)];out.append([x/sum(w) for x in w])
++            return out
++        def grad(*b):
++            p=probs(b);return tuple(sum(p[i][j] for i in range(n))-int(c[j]) for j in range(k-1))
++        b=mp.findroot(grad,tuple(mp.mpf(0) for _ in range(k-1)),tol=mp.mpf('1e-65'),maxsteps=100)
++        if k==2:b=[b[0] if hasattr(b,'rows') else b]
++        ref=np.array([[float(x) for x in row] for row in probs(b)])
++        p,lp,r=solve(L,c);assert r['new_contract_pass'],r;np.testing.assert_allclose(p,ref,atol=2e-8,rtol=0)
++
++def test_stop_no_rng():
++    before=np.random.get_state();p,lp,r=solve(np.zeros((3,2)),np.array([1,2]),lambda:(_ for _ in ()).throw(InterruptedError('STOP')))
++    assert p is None and r['status']=='solver_failed'
++    after=np.random.get_state();assert np.array_equal(before[1],after[1]) and before[2:]==after[2:]
+diff --git a/experiments/role_newton_reader_v1/test_receipt.py b/experiments/role_newton_reader_v1/test_receipt.py
+new file mode 100644
+index 0000000..fa426af
+--- /dev/null
++++ b/experiments/role_newton_reader_v1/test_receipt.py
+@@ -0,0 +1,9 @@
++import json
++import numpy as np
++from prepare import save
++
++def test_numpy_scalar_receipts_and_nonfinite_rejection(tmp_path):
++    p=tmp_path/'receipt.json';save(p,dict(ok=np.bool_(True),n=np.int64(3),x=np.float64(.25)))
++    assert json.loads(p.read_text())==dict(ok=True,n=3,x=.25)
++    import pytest
++    with pytest.raises(ValueError):save(tmp_path/'bad.json',dict(x=float('nan')))

@@ -1,0 +1,22 @@
+Traceback (most recent call last):
+  File "/tmp/dihug-role-newton-reader-v1/experiments/role_newton_reader_v1/panel.py", line 47, in run
+    rows.append(row);save(OUT/f'{scope}_partial.json',rows)
+  File "/tmp/dihug-role-newton-reader-v1/experiments/role_newton_reader_v1/prepare.py", line 13, in save
+    def save(p,x):q=p.with_suffix('.tmp');q.write_text(json.dumps(x,indent=2,allow_nan=False)+'\n');q.replace(p)
+  File "/data2/lyh/miniconda3/envs/dihug/lib/python3.9/json/__init__.py", line 234, in dumps
+    return cls(
+  File "/data2/lyh/miniconda3/envs/dihug/lib/python3.9/json/encoder.py", line 201, in encode
+    chunks = list(chunks)
+  File "/data2/lyh/miniconda3/envs/dihug/lib/python3.9/json/encoder.py", line 429, in _iterencode
+    yield from _iterencode_list(o, _current_indent_level)
+  File "/data2/lyh/miniconda3/envs/dihug/lib/python3.9/json/encoder.py", line 325, in _iterencode_list
+    yield from chunks
+  File "/data2/lyh/miniconda3/envs/dihug/lib/python3.9/json/encoder.py", line 405, in _iterencode_dict
+    yield from chunks
+  File "/data2/lyh/miniconda3/envs/dihug/lib/python3.9/json/encoder.py", line 405, in _iterencode_dict
+    yield from chunks
+  File "/data2/lyh/miniconda3/envs/dihug/lib/python3.9/json/encoder.py", line 438, in _iterencode
+    o = _default(o)
+  File "/data2/lyh/miniconda3/envs/dihug/lib/python3.9/json/encoder.py", line 179, in default
+    raise TypeError(f'Object of type {o.__class__.__name__} '
+TypeError: Object of type bool_ is not JSON serializable

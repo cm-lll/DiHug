@@ -1,0 +1,50 @@
+{
+  "time_epoch": 1792552827.795236,
+  "source": {
+    "panel.py": "8d3773d127f5cd7b2e6ec81de2d4e4b877b267ec3794ae5c53699890d8e88090",
+    "config.json": "9a1cf1cb0b9cdadbb6444ffe999a3526406de8b332a44bd1713a60838946dae8",
+    "test_receipt.py": "b2f31ff188d0c137c8e6751479a2af86b42532fd75e3cb8d673a4a0df02bb1f7",
+    "PROTOCOL.md": "875b16329849ae1ed0f277f0575869a7d3a0d116b3daef0de999f27f8e8c45cd",
+    "test_newton.py": "5f7ff4fdeb8aac77af23154a7fb8f3cd465826ecbd838787afb6862b2ed28487",
+    "prepare.py": "cf86600338475b8e6e4abb3383df71dcf6260357b725ec53ac4dec26ed939c80",
+    "solver.py": "9c35e7e630dab51ea265cda74caf87b3559938e23892b88818d9d42dcdc944af",
+    "run.py": "64d1663628daad22a39c90072c4a2761c2f1efc3454fa39d95e36544210f6738"
+  },
+  "config": {
+    "baseline": "9b010a6b41b39755a9bb36f34fa210b32b8fd689",
+    "dtype": "float64",
+    "entropy": 1,
+    "initialization": "zero biases after row/column gauge centering; no warm starts",
+    "max_iterations": 200,
+    "max_function_evaluations": 4000,
+    "matrix_seconds": 30,
+    "line_search_halvings": 32,
+    "Armijo": 0.0001,
+    "max_bias_step": 1000,
+    "initial_damping": 1e-06,
+    "minimum_damping": 1e-12,
+    "maximum_damping": 1000000000000.0,
+    "direction_attempts": 8,
+    "row_absolute_tolerance": 1e-08,
+    "column_normalized_tolerance": 1e-08,
+    "stationarity_tolerance": 2e-10,
+    "tail_log_cutoff": -700,
+    "row_tail_mass_limit": 1e-280,
+    "total_tail_mass_limit": 1e-276,
+    "max_elements": 2000000,
+    "memory_estimate_limit": 268435456,
+    "same_target_comparison_max_abs": 1e-06,
+    "same_target_objective_relative": 1e-08,
+    "high_precision_dps": 80,
+    "high_precision_cases": [
+      "two_by_two_4to1",
+      "three_by_three_moderate",
+      "two_by_two_concentrated_80"
+    ],
+    "new_model_predictions_optional": true
+  },
+  "input_manifest_sha256": "7fecc41d6ca3711f8038110c0cadf15a194ff7db4ba87bff0bad26b4d82355aa",
+  "tests": 34,
+  "zero_skips": true,
+  "amendment": "only receipt scalar serialization; exact original solver/config unchanged"
+}

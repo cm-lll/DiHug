@@ -1,0 +1,17 @@
+{
+  "version": "role_unseen_target_validation_v1",
+  "protocol_commit": "bdd30efba7353dea9bb789a56f313718a4ead584",
+  "budget_seconds": 2700,
+  "exit_reserve_seconds": 10,
+  "device": "cpu",
+  "seed_workers": 3,
+  "expected_chains": 120,
+  "expected_reverse_steps": 7680,
+  "expected_network_forwards": 30720,
+  "training_authorized": false,
+  "new_control_chains_required": true,
+  "target_order": ["balanced", "extreme", "moderate", "single12", "double10"],
+  "analysis": "per graph then per training seed; eight paired draws, no filtering, no graph repair",
+  "isolate_policy": "descriptive only, never a hard rejection",
+  "proof_graphs_allowed": false
+}

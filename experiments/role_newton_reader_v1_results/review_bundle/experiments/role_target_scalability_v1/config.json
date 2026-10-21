@@ -1,0 +1,29 @@
+{
+  "version": "role_target_scalability_v1",
+  "baseline_commit": "33e2c28b6ab1919fcec56f1deb58b1210b63ffce",
+  "weight_arm": "normal2",
+  "weight_updates": 6000,
+  "train_seeds": [2026102011, 2026102012, 2026102013],
+  "controls": {"balanced": [4,4,4,4,4,4], "extreme": [18,2,1,1,1,1]},
+  "unseen": {
+    "moderate": [8,6,4,3,2,1],
+    "single12": [12,4,3,2,2,1],
+    "double10": [10,10,1,1,1,1]
+  },
+  "target_choice_basis": "predeclared shapes, fixed24 MG stubs, six positive Genre roles; no new model outputs consulted",
+  "T": 64,
+  "rounds": 4,
+  "sampling_seeds": [2026102031,2026102032,2026102033,2026102034,2026102035,2026102036,2026102037,2026102038],
+  "planned_chains": 120,
+  "scientific_generation_authorized": false,
+  "training_authorized": false,
+  "gpu_gate_passed": false,
+  "hub_diagnostic_thresholds": [8,12],
+  "low_degree_threshold": 1,
+  "exact_DP_cell_guard": 200000,
+  "algorithm_benchmark_repetitions": 5,
+  "preparation_algorithm_cap_seconds": 180,
+  "suggested_future_validation_budget_seconds": 2700,
+  "witness_usage": "feasibility proof only; never initializer, network input, role assignment, guidance, or repair",
+  "approximation_candidate": "log-domain entropic row/column scaling of unchanged joint-role likelihood, proposal only; not implemented or mixed into target validation"
+}
