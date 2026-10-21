@@ -23,3 +23,6 @@ review_bundle提供源码、全部新证据、原132个源NPZ及可信旧清单�
 ZIP：role_newton_reader_v1_review.zip（20,088,366字节）
 SHA256：e58feeb924fb0c2649577facda99059e955b09e00d86a8c2e533301bda15eda6
 数值实现固定源码：ad562a70c9f3e5d8fc1801afbd8d0d80772fcb48。
+
+GitHub首次发布提交5967533b9ec4bdaae8602aa6e20dab6848856284已从远端重新下载ZIP，
+大小与SHA256均一致。publication_receipt.json记录同一60分钟账本的发布耗时和明确停止状态。
