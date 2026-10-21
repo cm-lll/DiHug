@@ -1,5 +1,10 @@
 # Current execution task
 
+2026-10-21 本票已完成发布与远端ZIP哈希复核，固定5d064d073eae43ca4e0521f6a0a81c8ff98dc0b1，现停止等待审查。
+IMDB三时刻双路径、PubMed20冷路径之外未完成部分保持未完成，不自动延时补测。main及旧结果不变。
+没有正式训练或完整大图链授权；不访问GPU/BW/notebook或追加候选。
+
+
 2026-10-21 本票科学计算/审计/43源与43独立解包回归已结束，仅完成独立GitHub审查发布后停止。
 结果results/role_newton_large_model_20261021_v1：IMDB三时刻双路径全部完成，PubMed20冷路径完成；其余因预估单项超时未完成。
 总预算未耗尽时按420秒单项门停止，不能误报PubMed模型或Newton故障；保留失败/STOP和部分证据。
