@@ -31,7 +31,7 @@ def main():
         m=p['module_timings'];r=p['runtime_timings'];query=sum(r.get(k,0) for k in ('query_plan_seconds','query_validation_seconds','query_transfer_seconds','graph_assembly_seconds'))
         values=[m.get('transformer_backbone_seconds',0),m.get('CN_full_aggregation_seconds',0),m.get('joint_readout_seconds',0),m.get('degree_law_cache_construction_seconds',0),p['likelihood_lookup_assembly_and_role_loop_residual_seconds'],m.get('Newton_solver_seconds',0),query,r.get('posterior_seconds',0),p['audit_seconds'],p['IO_seconds']]
         lines.append('|'+f"{p['dataset']}/{p['t']}/{p['phase']}|"+'|'.join(f'{x:.4f}' for x in values)+'|')
-    lines+=['','冷路径建造该时刻需要的精确度分布表；repeat只复用这些表，新ton/角色编码/查询/整网络/后验/抽样均重算。',
+    lines+=['','冷路径建造该时刻需要的精确度分布表；repeat只复用这些表，Newton/角色编码/查询/整网络/后验/抽样均重算。',
       '原FrozenTypedContext每次新建，全部20块共享同一Xt；内部既有CN节点表示和条件输入只在该次完整步内缓存，不跨冷/重复路径。',
       'role_loop_residual包含似然查询/LL装配、上下文矩阵乘法和Python记账，不伪称全部为纯似然时间。',
       'trace=True按原实现每块额外计算诊断q，实际后验counter只计真实转移调用；额外诊断、状态复制、采样和逐块进度IO处于整步残差内，未单独计纯内核。',
@@ -48,5 +48,17 @@ def main():
       '大图模型能否完成只逐项依据上表；不将少量时刻前向成功解释为训练反向可承受、T1000整链速度保证或跨规模质量成功。',
       '若粗估1000步，可将实测单步×1000仅作静态输入假设；自由链边数/度数/CN wedge/似然难度会变化，可能触发不同资源门，不能当完成时间承诺。',
       '本票停止后只提出下一阶段预算，未自动换GPU/修数值门/训练/长链/结构优化。','']
+    lines+=['## 实际判定与未完成范围','',
+      'IMDB三个时刻全部完成冷+重复20块覆盖，新计算p0/q/state逐位一致。单步约168–182秒，主干约155–162秒，四类型Newton总和约.04秒；第一瓶颈是CPU主干20轮编码。',
+      'PubMed t20完整冷步273.163秒，主干237.534秒（约87%），Newton.313秒，似然冷建表9.733秒，峰RSS1829.32MiB。一次完整前向/后验/抽样提交通过，整个冷+重复项目未完成。',
+      '冷证据落盘后依用户预估超限停止要求使用独立预算守卫：重复乐观估计=.9×(cold−建表)=237.087秒，单项冻结预算只余143.451秒，因此STOP。源哈希、公式、时刻在forecast_stop_receipt.json。',
+      '守卫只控制停止，没有改Newton/模型/参数/状态或重置时间。原worker failed/InterruptedError(STOP)与parent状态保留，不伪装模型故障。',
+      'PubMed500/1000因该预估STOP未启动；当时总预算尚余约1222秒，不能说已耗尽总预算。相同规模双路径预计超出单项420秒门。',
+      '完整路径28次读取独立审计：22原合同、6显式尾部合同。未完成重复另4次运行时读取收据，矩阵未单独保存，不计入完整重复或28次独立矩阵审计。',
+      '最大总遗漏质量9.426e-301、上下文尾误差界9.602e-303、行误差7.772e-16、归一列9.711e-9、独立KKT9.237e-13。无数值门失败、角色截断或DP回退。',
+      '仅静态粗估：同密度冷步×1000给IMDB约49–51小时、PubMed t20约76小时，不是整链承诺。实际Xt/CN路径数/度数/求解难度会变化。',
+      '原branch.tables按时间键驻留；本票每条件新进程只测一时刻。若未来保留1000时刻，原始表数组约344.4MB(IMDB)/1548.5MB(PubMed)，另有字典开销，未预建或实测全链缓存。',
+      '下一阶段仅建议另批20–30分钟加速后端数值兼容与完整单步资源门，沿原容差/配置/20块；未获授权不执行，原GPU门未通过事实保留。',
+      '前向不证明训练反向资源可承受，随机新权重不提供大图质量证据，未自动训练或长采样。','']
     (ROOT/'RESULTS.md').write_text('\n'.join(lines));print('report generated')
 if __name__=='__main__':main()
