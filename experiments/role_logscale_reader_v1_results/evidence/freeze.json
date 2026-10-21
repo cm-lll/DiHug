@@ -1,0 +1,46 @@
+{
+  "time_epoch": 1792547573.2794335,
+  "source": {
+    "large.py": "50adb40b5dfe0b570f20287c1019d4a6ad2724115d3f7f2a651a5fc797c3be4e",
+    "config.json": "7f98c337a59de0ed58bad3543070287ae076bc5aead8231524f5eaed1487ecfe",
+    "PROTOCOL.md": "966cf919f936440fa01e0028d7681413e6e940a42b507feef2037f64685ff714",
+    "test_scaling.py": "4c6356b7a053612a36b27cd6b4875f7064e2369dcc0d0d8ceafc3eeef34adde7",
+    "run.py": "c0dfe525ebc1de960fdf0237c9e50556ebe0f6bf02ed20fd0c8a096bfa1994f7",
+    "diagnose.py": "541ec3f9ec7064b693f17c2f28c0751ca4ac3c612a21eb91098b2e63c3a45b95",
+    "scaling.py": "deeb8505b9c61bff6b417d8030a9db46020544576f4acf74a453a36618081608"
+  },
+  "config": {
+    "baseline_commit": "7b45d502e34b283192e19212c343b79a5910298a",
+    "dtype": "float64",
+    "entropy_coefficient": 1.0,
+    "initialization": "zero log column potential, row then column gauge centering",
+    "update_order": "row then column; one complete iteration",
+    "row_absolute_tolerance": 1e-08,
+    "column_relative_tolerance": 1e-08,
+    "max_iterations": 1000,
+    "max_elements": 2000000,
+    "workspace_estimate_bytes_per_element": 128,
+    "workspace_limit_bytes": 268435456,
+    "diagnostic_times": [
+      1,
+      8,
+      32,
+      64
+    ],
+    "sample_seed": 2026102031,
+    "large_times": [
+      20,
+      500
+    ],
+    "large_noise_seed": 2026102141,
+    "large_child_seconds": 150,
+    "replay_source": "all original complete-step hashes checked; replay only, no new independent samples",
+    "prediction_error_descriptive_levels": {
+      "p0_max_abs": 0.01,
+      "MG_expected_edges_abs": 1.0
+    },
+    "levels_are_not_quality_certification": true
+  },
+  "tests": 16,
+  "before_paired_comparison": true
+}
