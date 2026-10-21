@@ -1,0 +1,951 @@
+diff --git a/experiments/role_condition_coverage_v1/PROTOCOL.md b/experiments/role_condition_coverage_v1/PROTOCOL.md
+new file mode 100644
+index 0000000..60cedd5
+--- /dev/null
++++ b/experiments/role_condition_coverage_v1/PROTOCOL.md
+@@ -0,0 +1,83 @@
++# 条件与合法干净图覆盖：唯一三小时CPU配对面板
++
++最新用户授权，基线fdc446ca2a3f33ec5ae89b167d659559d2662641。
++激活账本已在第一次实际准备时创建：results/role_coverage_20261021_v1/activation.json，
++北京时间2026-10-21 06:44:34.002至09:44:34.002。准备/修复/检查/短测/训练/528链/
++评价/审计/保存/发布共享10800秒，不因入口启动、错误或重试重新授时。
++
++## 唯一科学干预和假设
++
++只改变训练条件及其对应合法干净图覆盖。保持容量耦合精确软读取、8层256/64/128宽、
++8头、FF256/64/256、联合头128/CN32、FP32网络和float64概率核、原余弦T64、4块、
++原CE每输入sum*R/S、两普通输入各1/2、AdamW lr2e-4/wd1e-12/betas.9,.999/eps1e-8/
++AMSGradFalse，无裁剪/调度器/类别加权，普通CPU单线程，highest/TF32False。无新增参数。
++仅在实际离散图上验证覆盖是否改善；条件＋对应图覆盖不是只改变条件数字的纯因果干预。
++
++## 冻结目标划分（不参考模型输出）
++
++先固定训练允许度值{1,…,18}去除7/11，留出0/7/11。枚举长度6、和24、最大≤18的非增
++整数向量。排除旧开发三个多重集8/6/4/3/2/1、12/4/3/2/2/1、10/10/1/1/1/1。
++从两原条件开始，逐个最大化新增度值覆盖、再最大化与既选向量最小平方距离，升序字典
++破平局，直到12个。完整训练度值集合确实等于预定集合。
++
++广训练12个：4/4/4/4/4/4，18/2/1/1/1/1，8/6/5/3/1/1，10/9/2/1/1/1，
++13/3/3/3/1/1，14/6/1/1/1/1，12/5/4/1/1/1，15/2/2/2/2/1，16/4/1/1/1/1，
++17/2/2/1/1/1，9/3/3/3/3/3，5/5/5/5/3/1。
++窄训练仅前两个。新增10个按平方和/字典排序，取下中位得到正控制train_06=12/5/4/1/1/1。
++
++其余仅用训练度值的可行向量按平方和/字典排序取四分位，得到新组合测试：
++8/4/4/4/3/1，10/4/3/3/2/2，10/8/3/1/1/1。
++对每个留出值，其他值只能来自训练集合，按同排序取中位得到数值测试：
++13/4/3/3/1/0（0低于训练范围，外推），7/6/6/2/2/1、11/5/3/3/1/1（范围内插值）。
++完整conditions.json和split_binding.json在新学习前封存；六个独立测试不用于验证选择。
++
++所有目标固定34节点D4/A6/M18/G6、原schema和DA/DM/AM/MG总数10/18/36/24，
++Movie MG度固定12个1与6个2，其他类型完整联合向量多重集不变。整型流和完整角色
++统计核验全部目标可实现。目标工件只含匿名角色向量/整数频数，不含原节点角色对应。
++
++## 合法干净图与监督
++
++固定原DMA骨架，用带固定seed的Movie/Genre顺序做整型二部流，然后160次尝试合法
++degree-preserving2switch。两臂同一构造器；不称均匀图采样。每条件先预留2个不同验证
++拓扑；训练拒绝与其同构，先取得4个不同训练拓扑，窄臂原条件继续取至24个源样本，
++允许并记录训练内部重复。极端只有最多C(6,2)=15个匿名MG配对，不能假定存在24独立拓扑。
++原两条件的首4个源图两臂逐张共享。总训练源图各48，广臂12×4，窄臂2×24。
++验证共24图，跨不同目标联合度多重集不同自动排除同构，同目标完整VF2检查。
++类型内重编号只在划分后进行，不将重编号称为新拓扑。每个训练标签来自当前合法干净图，
++匿名条件与其真实完整统计严格相等。构造图不用于自由生成初始化/硬角色分配/修图。
++
++## 配对学习与预算门
++
++三原训练seed2026102011/12/13，各臂6000有效更新，共36000。两臂均从同一实际原始
++capacity_C_initial.pt逐张量复制；新鲜独立AdamW，连续训练，不加载normal2@6000或临时
++短测权重。每步均匀抽取本臂条件，再抽源图；记录实际条件更新及2倍输入样本次数。
++条件选择共用uniform来源；增强/噪声/时间/查询采用相同counter(seed,u,micro)安排。
++因为条件和图可能不同，不声称干净/带噪输入逐张相同。
++
++保存初始实际权重，1000/3000/6000完整model/optimizer/RNG/计数/源码/预算检查点。
++固定验证0/250/500/1000/3000/6000，覆盖每个广训练条件的2个独立验证图×t1/32/64×4全块，
++eval/no_grad、独立冻结noise/query，恢复训练所有RNG。验证不包含六个新独立测试，不挑检查点。
++
++先三模型原验证复现、编码/似然/软读取正确性，通过才短测。六CPU进程分别短测两臂/三seed，
++每个训练条件做3个完整双输入更新（t1/32/64），最终11目标做dense Xt的完整4块步
++（t1/32/64/32），还测固定验证和保存/重载。临时工程权重隔离，正式入口固定加载原初始文件。
++取所有条件/两臂/六进程最慢训练P90和最慢完整扫步，估计6000训练＋每模型88×64步＋
++6次验证＋保存和启动余量，乘1.2并加360秒审计/交付。必须≤剩余原账本时间的80%。
++六并行CPU各1线程；不使用GPU、不改变DP200000/CN路径2m门。失败则整面板不开始，
++不缩组/seed/6000步/11目标/528链。正式异常或超时保存部分及RNG后停止，不另开窗口。
++
++## 最终离散生成与验收
++
++全部六个最终6000权重先封存，再统一启动两臂×三seed×11目标×8seed=528全新T64/R4链。
++11目标为原2、旧single/double开发2、训练正控制1、新组合3、新数值3。旧moderate不生成。
++采样seed2026102031…38配对；原reverse_step冻结Xt、4块后原子提交，完整561槽uniform
++及先验/查询/RNG摘要逐步核对。推理case无clean/clean_ids，不用构造或证明图/硬配额。
++
++逐图实际Genre W1、完整频数、排序有符号度偏差、MG-24、最大/次大/≥8/≥12/≤1/0，
++Movie/D/A完整联合TV/分关系W1，闭合/三角形/MP1/2/3/连通/LCC/孤立点和精确类型保持
++同构类别。孤立点仅描述。先每训练seed8图均值/中位/P90，再3seed等权，保留配对差异，
++按原/开发/训练正控制/新组合/新数值分开，不用总平均遮盖失败。
++关键图指标独立从原始NPZ核算；MP模式另用节点简单DFS核对，不复用生产分类乘积逻辑。
++完整528图不筛选、不去重后算质量、不补抽、不复用历史图。8类不等于总体多样性充分。
++检验广覆盖同目标是否改善、正控制是否学好、组合/数值是否分别泛化及其他结构代价；
++6000步非自动充分收敛。成功/退化/混合/未完成全部保留，完成发布后停止。
+diff --git a/experiments/role_condition_coverage_v1/common.py b/experiments/role_condition_coverage_v1/common.py
+new file mode 100644
+index 0000000..290bd66
+--- /dev/null
++++ b/experiments/role_condition_coverage_v1/common.py
+@@ -0,0 +1,101 @@
++"""Adapters only: unchanged capacity model, normal2 update, kernel and sampler."""
++import hashlib,json,os,sys,time
++from pathlib import Path
++os.environ.update(CUDA_VISIBLE_DEVICES='',OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1')
++HERE=Path(__file__).resolve().parent;EXP=HERE.parent
++sys.path.insert(0,str(EXP/'role_robust_training_v1'))
++import core as base
++base.setup()
++import numpy as np
++import torch
++from device_eval import validate_device
++from hsgd.computational import FrozenTypedContext
++from role_condition.metrics import graph
++from role_condition.panel import nx_graph
++sys.path.insert(0,str(EXP/'role_unseen_target_validation_v1'))
++from execute import chain as original_chain,verify_inputs,target_objects,metadata_case
++from analyse import independent_graph,features,stat as old_stat,target_errors,NAMES
++
++RESULT=Path('/data2/lyh/gnn_project/DiHug/results/role_coverage_20261021_v1')
++OLD=Path('/data2/lyh/gnn_project/DiHug/results/role_robust_training_6000_20261021_v1/learning_run01')
++PANEL=Path('/data2/lyh/gnn_project/DiHug/results/role_late_paired_20261020_run01')
++INITIAL=Path('/data2/lyh/gnn_project/DiHug/results/role_specialization_20261020_v1/learning_run01')
++
++def read(p):return json.loads(Path(p).read_text())
++def save(p,x):
++    p=Path(p);q=p.with_name(p.name+'.tmp');q.write_text(json.dumps(x,indent=2,allow_nan=False)+'\n');q.replace(p)
++def sha(p):return hashlib.sha256(Path(p).read_bytes()).hexdigest()
++def append(p,x):
++    with Path(p).open('a') as f:f.write(json.dumps(x,allow_nan=False)+'\n')
++def settings():
++    cfg=read(EXP/'role_robust_training_v1/config.json')
++    cfg.update(version='role_condition_coverage_v1',arms=['narrow','broad'],updates=6000,
++        checkpoint_updates=[1000,3000,6000],validation_updates=[0,250,500,1000,3000,6000],
++        expected_updates=36000,expected_chains=528,evaluation_updates=[6000],selection_seed=2026102121,
++        graph_seed=2026102122,augmentation_seed=2026102123,
++        total_train_graphs_per_arm=48,wide_graphs_per_condition=4,narrow_graphs_per_condition=24,
++        validation_graphs_per_condition=2,graph_attempt_cap=2000,
++        forbidden=['corruption','extra_features','new_losses','probability_control','matching','repair','approximate_readout'],
++        budget_seconds=10800,learning_budget_seconds=10800,training_device='cpu',parallel_workers=6,parallel_seed_workers=6,
++        remaining_budget_fraction_gate=.8,cost_safety_factor=1.2,audit_delivery_reserve_seconds=360)
++    cfg.pop('perturbation')
++    for key in list(cfg):
++        if key.startswith('holdout_'):cfg.pop(key)
++    return cfg
++def check():
++    if time.time()>read(RESULT/'activation.json')['deadline_epoch']-30:raise TimeoutError('unique3h deadline; save/exit reserve')
++    if (RESULT/'STOP').exists():raise InterruptedError('STOP')
++def source_manifest():
++    result=base.file_manifest()
++    for directory in (HERE,EXP/'role_unseen_target_validation_v1',EXP/'role_target_scalability_v1'):
++        for p in directory.glob('*'):
++            if p.is_file() and p.suffix in ('.py','.json','.md'):result[str(p.relative_to(EXP))]=sha(p)
++    return result
++def check_binding():
++    f=read(RESULT/'freeze.json')
++    for n,h in f['source'].items():assert sha(EXP/n)==h,n
++    for n,h in f['inputs'].items():assert sha(RESULT/n)==h,n
++    assert f['config']==settings()
++    return f
++def target(x):return base.RoleTarget(tuple(tuple((tuple(v),int(n)) for v,n in rows) for rows in x['roles']),tuple(x['type_counts']),tuple(map(tuple,x['schema'])))
++def load_data():
++    p=read(RESULT/'panel.json');targets={n:target(x) for n,x in read(RESULT/'conditions.json')['targets'].items()}
++    records=[dict(id=r['id'],condition=r['condition'],split=r['split'],arm=r['arm'],
++             case=base.c.make_case(np.asarray(r['types']),np.asarray(r['edges']).T,tuple(map(tuple,p['schema'])))) for r in p['graphs']]
++    return records,targets
++def make_model(case,cfg,seed):
++    base.c.seed_all(seed)
++    h=read(EXP/'role_specialization_v1_results/evidence/learning_run01/weight_hashes.json')[f'seed{seed}/capacity_C_initial.pt']
++    p=INITIAL/f'seed{seed}/capacity_C_initial.pt';assert sha(p)==h
++    model=base.CapacityDenoiser(4,10,family_pairs=case['space'].pairs,prior=case['prior'],T=64,**cfg['model'])
++    state=torch.load(p,map_location='cpu',weights_only=True)
++    model.load_state_dict({k:v.clone() for k,v in state.items()},strict=True)
++    assert all(torch.equal(v,model.state_dict()[k]) for k,v in state.items())
++    return model,dict(source=str(p),source_sha256=h,tensors=len(state),strict_tensor_copy=True,
++                       parameters=sum(p.numel() for p in model.parameters()))
++def inputs_for(records,targets,arm,seed,u,cfg):
++    names=read(RESULT/'conditions.json')['training'][arm]
++    # Uniform condition draw, shared scalar source; graph/augmentation/noise independent streams.
++    selector=np.random.default_rng([cfg['selection_seed'],seed,u])
++    uniform=float(selector.random());name=names[min(int(uniform*len(names)),len(names)-1)]
++    pool=[r for r in records if r['split']=='train' and r['arm']==arm and r['condition']==name]
++    k=int(selector.integers(len(pool)));rec=pool[k]
++    case=base.augment(rec['case'],np.random.default_rng([cfg['augmentation_seed'],seed,u]))
++    inp=[base.c.train_input(case,64,4,seed,2*u+j,np.random.default_rng([cfg['input_seed'],seed,u,j])) for j in (0,1)]
++    query=[]
++    for x in inp:
++        hh=hashlib.sha256()
++        for k in ('ids','f','query'):hh.update(np.ascontiguousarray(x[k]).tobytes())
++        query.append(hh.hexdigest())
++    return name,case,inp,dict(graph_id=rec['id'],condition_uniform=uniform,
++        augmentation_seed=[cfg['augmentation_seed'],seed,u],noise_seeds=[[cfg['input_seed'],seed,u,j] for j in (0,1)],
++        t=[x['t'] for x in inp],query_sha256=query)
++def stat(v):
++    r=old_stat([float(x) if x is not None else None for x in v]);r['values']=v;return r
++
++def error_stats(metrics,targ):
++    e=target_errors(metrics,targ)
++    for i,name in enumerate(NAMES):
++        a=metrics['joint_relation_degree'][name];b={','.join(map(str,v)):n for v,n in targ['roles'][i]}
++        e[name]['joint_TV']=sum(abs(a.get(k,0)-b.get(k,0)) for k in a.keys()|b.keys())/(2*targ['type_counts'][i])
++    return e
+diff --git a/experiments/role_condition_coverage_v1/coverage_evaluation.py b/experiments/role_condition_coverage_v1/coverage_evaluation.py
+new file mode 100644
+index 0000000..3228dea
+--- /dev/null
++++ b/experiments/role_condition_coverage_v1/coverage_evaluation.py
+@@ -0,0 +1,155 @@
++"""All528 actual graphs, independent integer/path audit and paired seed summaries.
++
++Unique module name prevents collision with historical evaluate.py adapters.
++"""
++from collections import defaultdict,Counter
++import itertools,math
++import networkx as nx
++from common import *
++
++def independent(row,targets):
++    G,d,counts,types=independent_graph(RESULT/row['graph_file']);m=row['metrics'];targ=targets[row['condition']].as_dict()
++    assert counts.tolist()==m['family_edges'] and G.number_of_edges()==m['edges']
++    assert len(G)==m['nodes']==34
++    cc=sorted(map(len,nx.connected_components(G)),reverse=True)
++    assert cc==m['component_sizes'] and m['lcc']==cc[0] and m['isolates']==nx.number_of_isolates(G)
++    assert m['connected']==(len(cc)==1)
++    for typ,name in enumerate(NAMES):
++        rows=d[types==typ]
++        assert dict(Counter(','.join(map(str,v)) for v in rows))==m['joint_relation_degree'][name]
++        for r in range(10):assert np.bincount(rows[:,r]).tolist()==m['typed_degree'][name]['by_relation'][r]['histogram']
++    hist=sorted(d[types==3,8]);want=sorted(v[8] for v,n in targ['roles'][3] for _ in range(n))
++    assert abs(np.mean(abs(np.array(hist)-want))-row['target_errors']['Genre']['W1'])<1e-12
++    assert row['target_errors']==error_stats(m,targ)
++    triangles=Counter()
++    for tri in itertools.combinations(G,3):
++        if all(G.has_edge(u,v) for u,v in itertools.combinations(tri,2)):triangles[tuple(sorted(int(types[x]) for x in tri))]+=1
++    assert sum(triangles.values())==m['triangles']
++    assert {str(k):v for k,v in sorted(triangles.items())}==m['typed_triangles']
++    # Independent node-simple DFS; count reverse once by numeric endpoint orientation.
++    paths=[Counter(),Counter(),Counter()]
++    def visit(nodes,pattern):
++        if len(nodes)>1 and nodes[0]<nodes[-1]:
++            key=min(tuple(pattern),tuple(reversed(pattern)));paths[len(nodes)-2][','.join(map(str,key))]+=1
++        if len(nodes)==4:return
++        for v,edge in G[nodes[-1]].items():
++            if v in nodes:continue
++            visit(nodes+[v],pattern+[edge['relation'],int(types[v])])
++    for u in G:visit([u],[int(types[u])])
++    for a,b in zip(paths,m['mp']):assert dict(a)==b['counts'] and sum(a.values())==b['total']
++    closure=[(u,mov,v) for mov in np.flatnonzero(types==2) for u in G[mov] for v in G[mov] if types[u]==0 and types[v]==1]
++    closed=[x for x in closure if G.has_edge(x[0],x[2])];c=m['imdb_closure']
++    assert [len(closed),len(closure),len({(u,v) for u,_,v in closed}),len({(u,v) for u,_,v in closure})]==[
++        c['path_numerator'],c['path_denominator'],c['unique_pair_numerator'],c['unique_pair_denominator']]
++    return G
++
++def category(name,conditions):
++    if name in ('balanced','extreme'):return 'original_controls'
++    if name.startswith('dev_'):return 'seen_development'
++    if name==conditions['positive_control']:return 'training_middle_control'
++    if name in conditions['combination_tests']:return 'unseen_combinations'
++    return 'unseen_values'
++
++def audit():
++    start=time.monotonic();cfg=settings();records,targets=load_data();conditions=read(RESULT/'conditions.json')
++    # All data source roles and all train-validation isomorphism exclusions rechecked.
++    train=[r for r in records if r['split']=='train'];vals=[r for r in records if r['split']=='validation']
++    for arm in cfg['arms']:assert sum(r['arm']==arm for r in train)==48
++    for r in records:assert base.extract_target(r['case'])==targets[r['condition']]
++    for v in vals:
++        check()
++        for r in train:
++            if r['condition']==v['condition']:assert not base.isomorphic(v['case'],r['case'])
++    update_groups={};validation_rows=[];checkpoint_files=[]
++    for seed in cfg['train_seeds']:
++        initials=[]
++        for arm in cfg['arms']:
++            check();folder=RESULT/'jobs'/f'{arm}_{seed}'
++            updates=[json.loads(l) for l in (folder/'updates.jsonl').read_text().splitlines()]
++            assert [r['update'] for r in updates]==list(range(1,6001))
++            assert all(r['forward_count']==2 and r['optimizer_updates']==1 and abs(r['loss']-.5*sum(p['loss'] for p in r['parts']))<1e-12 for r in updates)
++            assert all(r['condition'] in conditions['training'][arm] for r in updates)
++            update_groups[arm,seed]=updates
++            state=torch.load(folder/'initial.pt',map_location='cpu',weights_only=True);initials.append(state)
++            for point in cfg['validation_updates']:
++                v=read(folder/f'validation_u{point:06d}.json');validation_rows.append(dict(arm=arm,seed=seed,update=point,**v))
++            for line in (folder/'checkpoint_index.jsonl').read_text().splitlines():
++                check();r=json.loads(line);path=RESULT/r['path'];assert sha(path)==r['sha256']
++                ck=torch.load(path,map_location='cpu',weights_only=False)
++                assert ck['completed_updates']==r['completed_updates'] and ck['completed_updates'] in (1000,3000,6000)
++                assert ck['binding']==read(RESULT/'freeze.json') and ck['budget']==read(RESULT/'activation.json')
++                assert all(int(s['step'])==ck['completed_updates'] for s in ck['optimizer']['state'].values())
++                if r['completed_updates']==6000:
++                    final=torch.load(folder/'final6000.pt',map_location='cpu',weights_only=True)
++                    assert all(torch.equal(t,final[k]) for k,t in ck['model'].items())
++                checkpoint_files.append(r);del ck
++        assert initials[0].keys()==initials[1].keys()
++        assert all(torch.equal(initials[0][k],initials[1][k]) for k in initials[0])
++        left,right=update_groups['narrow',seed],update_groups['broad',seed]
++        for a,b in zip(left,right):
++            for k in ('condition_uniform','augmentation_seed','noise_seeds','t','query_sha256'):assert a[k]==b[k]
++        del initials
++    assert sum(map(len,update_groups.values()))==36000 and len(checkpoint_files)==18
++    save(RESULT/'validation_curves.json',validation_rows)
++    # All newly generated chains, never a historical substitute.
++    rows=[read(p) for p in sorted(RESULT.glob('jobs/*/generated/*_result.json'))]
++    assert len(rows)==528
++    expected=set(itertools.product(cfg['arms'],cfg['train_seeds'],conditions['final_targets'],cfg['sampling_seeds']))
++    assert {(r['arm'],r['seed'],r['condition'],r['sampling_seed']) for r in rows}==expected
++    paired={};graphs={};groups=defaultdict(list)
++    case=metadata_case(base,PANEL,targets)
++    for i,r in enumerate(rows):
++        check();assert sha(RESULT/r['graph_file'])==r['graph_sha256'] and sha(RESULT/r['steps_file'])==r['steps_sha256']
++        assert r['target_fingerprint']==targets[r['condition']].fingerprint and r['newly_executed_chain']
++        steps=read(RESULT/r['steps_file']);assert [s['t'] for s in steps]==list(range(64,0,-1))
++        assert all(s['exact_coverage'] and s['blocks']==4 and s['covered_slots']==312 for s in steps)
++        random=(r['initial_state_sha256'],[(s['uniform_sha256'],s['query_sha256'],s['rng_after']) for s in steps])
++        if r['sampling_seed'] in paired:assert paired[r['sampling_seed']]==random
++        else:paired[r['sampling_seed']]=random
++        G=independent(r,targets);graphs[r['graph_file']]=G
++        with np.load(RESULT/r['graph_file'],allow_pickle=False) as z:
++            f,loc=case['space'].encode(z['edges'].T);state=np.zeros(case['space'].total,np.uint8)
++            state[case['space'].offsets[f]+loc]=1
++            assert base.sha(state.tolist())==steps[-1]['state_sha256']
++        groups[r['arm'],r['seed'],r['condition']].append(r)
++        if i%50==0:print('independent graph/path audit',i,'/528',flush=True)
++    summaries=[];classes=[]
++    for (arm,seed,name),group in sorted(groups.items()):
++        check();group.sort(key=lambda r:r['sampling_seed']);assert len(group)==8
++        reps=[];freq=[];assign=[]
++        for r in group:
++            G=graphs[r['graph_file']];h=nx.weisfeiler_lehman_graph_hash(G,node_attr='type',edge_attr='relation');found=None
++            for j,(other,oh) in enumerate(reps):
++                if h==oh and nx.is_isomorphic(G,other,node_match=lambda x,y:x['type']==y['type'],edge_match=lambda x,y:x['relation']==y['relation']):found=j;break
++            if found is None:found=len(reps);reps.append((G,h));freq.append(0)
++            freq[found]+=1;assign.append(dict(sampling_seed=r['sampling_seed'],local_class=found))
++        ff=[features(r) for r in group];tv=sorted(v[8] for v,n in targets[name].roles[3] for _ in range(n))[::-1]
++        ranks=[r['target_errors']['Genre']['degrees_descending'] for r in group]
++        summaries.append(dict(arm=arm,seed=seed,condition=name,category=category(name,conditions),graphs=8,
++            statistics={k:stat([f[k] for f in ff]) for k in ff[0]},
++            G_sorted_degree_mean=np.mean(ranks,axis=0).tolist(),G_target_sorted=tv,
++            G_signed_rank_bias=np.mean(np.asarray(ranks)-tv,axis=0).tolist(),
++            G_mean_histogram=np.mean([np.bincount(x,minlength=19) for x in ranks],axis=0).tolist(),
++            topology_classes=len(freq),topology_frequencies=freq,effective_classes=math.exp(-sum(n/8*math.log(n/8) for n in freq))))
++        classes.append(dict(arm=arm,seed=seed,condition=name,assignments=assign,frequencies=freq))
++    differences=[]
++    for seed in cfg['train_seeds']:
++        for name in conditions['final_targets']:
++            a=next(r for r in summaries if (r['arm'],r['seed'],r['condition'])==('narrow',seed,name))
++            b=next(r for r in summaries if (r['arm'],r['seed'],r['condition'])==('broad',seed,name))
++            differences.append(dict(seed=seed,condition=name,category=category(name,conditions),
++                mean_broad_minus_narrow={k:b['statistics'][k]['mean']-a['statistics'][k]['mean'] if a['statistics'][k]['mean'] is not None and b['statistics'][k]['mean'] is not None else None for k in a['statistics']}))
++    save(RESULT/'generation.json',rows);save(RESULT/'per_seed.json',dict(summaries=summaries,paired_differences=differences))
++    save(RESULT/'topology_classes.json',classes)
++    counts=[dict(arm=arm,seed=seed,updates=dict(Counter(r['condition'] for r in u)),
++                 samples={k:2*v for k,v in Counter(r['condition'] for r in u).items()}) for (arm,seed),u in update_groups.items()]
++    save(RESULT/'training_condition_counts.json',counts)
++    save(RESULT/'audit.json',dict(status='passed',updates=36000,checkpoint_count=18,graphs=528,
++        reverse_steps=528*64,sampling_network_forwards=528*64*4,wall_seconds=time.monotonic()-start,
++        checks=['source/data/complete target binding','initial482 tensors exactly paired','continuous optimizer steps/checkpoints/RNG',
++                'condition/time/query random sources paired; noisy inputs NOT claimed identical','all train/validation topology exclusions',
++                'all528 raw graphs with independent integer degree/joint/W1/connectivity/typed triangles/DMA closure',
++                'independent node-simple MP1/2/3 full pattern counts','all64step coverage/RNG/final-state links','exact typed topology classes per8draw cell'],
++        GPU_used=False,postprocessing=False,isolates_not_a_gate=True))
++
++if __name__=='__main__':audit()
+diff --git a/experiments/role_condition_coverage_v1/freeze.py b/experiments/role_condition_coverage_v1/freeze.py
+new file mode 100644
+index 0000000..09ca096
+--- /dev/null
++++ b/experiments/role_condition_coverage_v1/freeze.py
+@@ -0,0 +1,25 @@
++"""Seal already prepared data/config/source after zero-skip gates; no learning."""
++import xml.etree.ElementTree as ET
++from common import *
++
++def main():
++    check();assert not (RESULT/'freeze.json').exists()
++    assert read(RESULT/'correctness.json')['status']=='passed'
++    assert read(RESULT/'preparation_receipt.json')['status']=='completed'
++    xml=ET.parse(RESULT/'tests.xml')
++    assert len(xml.findall('.//testcase'))==33
++    assert not xml.findall('.//failure')+xml.findall('.//error')+xml.findall('.//skipped')
++    current=settings();previous=read(RESULT/'resolved_config.json')
++    if previous!=current:
++        # Preserve preparation metadata; only remove inherited unused old-run budget/holdout keys.
++        save(RESULT/'preparation_resolved_config.json',previous)
++        assert previous['model']==current['model'] and previous['optimizer']==current['optimizer']
++        assert all(previous[k]==current[k] for k in ('input_seed','graph_seed','augmentation_seed','selection_seed','T','rounds','updates'))
++        save(RESULT/'resolved_config.json',current)
++    inputs={n:sha(RESULT/n) for n in ('activation.json','conditions.json','panel.json','construction.json','split_binding.json','correctness.json','resolved_config.json','tests.xml')}
++    save(RESULT/'freeze.json',dict(source=source_manifest(),inputs=inputs,config=current,time_epoch=time.time(),
++         source_commit='recorded in formal_launch.json after commit',original_init_manifest=read(EXP/'role_specialization_v1_results/evidence/learning_run01/weight_hashes.json'),
++         tests=33,zero_skips=True,method_unchanged=True))
++    check_binding();print('FROZEN',sha(RESULT/'freeze.json'),'elapsed',time.time()-read(RESULT/'activation.json')['activation_epoch'])
++
++if __name__=='__main__':main()
+diff --git a/experiments/role_condition_coverage_v1/prepare.py b/experiments/role_condition_coverage_v1/prepare.py
+new file mode 100644
+index 0000000..8d87f09
+--- /dev/null
++++ b/experiments/role_condition_coverage_v1/prepare.py
+@@ -0,0 +1,196 @@
++"""Freeze deterministic splits and clean supervised graphs BEFORE model checks."""
++from collections import Counter
++import itertools,time,resource
++from types import SimpleNamespace
++from common import *
++sys.path.insert(0,str(EXP/'role_target_scalability_v1'))
++from algorithms import flow_witness,gale_ryser
++from role_condition.model import capacities,features as degree_features
++from scipy.special import logsumexp
++from capacity_readout import allocation_marginals,degree_logpmf
++
++DEVELOPMENT={(8,6,4,3,2,1),(12,4,3,2,2,1),(10,10,1,1,1,1)}
++ALLOWED=set(range(1,19))-{7,11}
++HELDOUT={0,7,11}
++
++def partitions(total=24,length=6,ceiling=18):
++    def rec(rem,k,hi):
++        if k==0:
++            if rem==0:yield ()
++            return
++        for d in range(min(hi,rem),-1,-1):
++            if rem-d>(k-1)*d:continue
++            for rest in rec(rem-d,k-1,d):yield (d,)+rest
++    return list(rec(total,length,ceiling))
++
++def choose():
++    allp=partitions();wide=[(4,4,4,4,4,4),(18,2,1,1,1,1)]
++    available=[v for v in allp if set(v)<=ALLOWED and v not in DEVELOPMENT and v not in wide]
++    # Predeclared greedy coverage, then max-min squared distance; ascending tuple breaks ties.
++    while len(wide)<12:
++        used=set(itertools.chain.from_iterable(wide))
++        v=min(available,key=lambda v:(-len(set(v)-used),-min(sum((a-b)**2 for a,b in zip(v,w)) for w in wide),v))
++        wide.append(v);available.remove(v)
++    covered=set(itertools.chain.from_iterable(wide));assert covered==ALLOWED
++    unseen=[v for v in allp if set(v)<=covered and v not in wide and v not in DEVELOPMENT]
++    unseen.sort(key=lambda v:(sum(x*x for x in v),v))
++    combo=[unseen[int((len(unseen)-1)*q/4)] for q in (1,2,3)]
++    numeric=[]
++    for value in (0,7,11):
++        pool=[v for v in allp if value in v and set(v)<=(covered|{value}) and v not in DEVELOPMENT and v not in combo]
++        pool.sort(key=lambda v:(sum(x*x for x in v),v));numeric.append(pool[len(pool)//2])
++    new=sorted(wide[2:],key=lambda v:(sum(x*x for x in v),v));positive=new[(len(new)-1)//2]
++    assert len(set(wide+combo+numeric))==18
++    return wide,combo,numeric,positive
++
++def freeze_panel():
++    cfg=settings();wide,combo,numeric,positive=choose()
++    oldrecords,oldtargets=base.load_panel(PANEL);base_target=oldtargets['balanced']
++    names=['balanced','extreme']+[f'train_{i:02d}' for i in range(2,12)]
++    vectors=dict(zip(names,wide));vectors.update({f'combo_{i+1}':v for i,v in enumerate(combo)})
++    vectors.update({f'value_{value}':v for value,v in zip((0,7,11),numeric)})
++    vectors.update(dev_single=(12,4,3,2,2,1),dev_double=(10,10,1,1,1,1))
++    targets={}
++    for name,vec in vectors.items():
++        rows=list(base_target.roles);counts=Counter(vec)
++        rows[3]=tuple((tuple(v if r==8 else 0 for r in range(10)),n) for v,n in sorted(counts.items()))
++        targets[name]=base.RoleTarget(tuple(rows),base_target.type_counts,base_target.schema)
++    positive_name=next(n for n in names if vectors[n]==positive)
++    final=['balanced','extreme','dev_single','dev_double',positive_name]+[f'combo_{i}' for i in (1,2,3)]+['value_0','value_7','value_11']
++    conditions=dict(rule='ALLOWED=1..18 excluding7/11; HELDOUT=0,7,11; sorted feasible partitions24/6/max18; greedy new-value coverage then max-min L2, ascending tuple tie; combo concentration quartiles; numeric concentration median; middle positive lower median concentration',
++        allowed_training_values=sorted(ALLOWED),heldout_values=sorted(HELDOUT),
++        vectors={n:list(v) for n,v in vectors.items()},targets={n:t.as_dict() for n,t in targets.items()},
++        fingerprints={n:t.fingerprint for n,t in targets.items()},training=dict(narrow=names[:2],broad=names),
++        combination_tests=[f'combo_{i}' for i in (1,2,3)],numerical_tests=['value_0','value_7','value_11'],
++        numerical_interpretation={'value_0':'below positive training range: extrapolation','value_7':'within1..18 interpolation','value_11':'within1..18 interpolation'},
++        positive_control=positive_name,final_targets=final,excluded_development=[list(v) for v in sorted(DEVELOPMENT)],frozen_before_any_new_learning=True)
++    if (RESULT/'conditions.json').exists():assert read(RESULT/'conditions.json')==json.loads(json.dumps(conditions)),'frozen split cannot change'
++    else:save(RESULT/'conditions.json',conditions)
++    template=oldrecords[0]['case'];d=np.zeros((34,10),int)
++    ff=template['space'].encode(template['clean'])[0]
++    np.add.at(d,(template['clean'][0],ff),1);np.add.at(d,(template['clean'][1],ff),1)
++    movies=np.flatnonzero(template['space'].types==2);genres=np.flatnonzero(template['space'].types==3)
++    skeleton=set(map(tuple,template['clean'][:,ff!=8].T));graphs=[];evidence=[];selected={}
++    def construct(vec,rng):
++        mp=rng.permutation(18);gp=rng.permutation(6)
++        ed,proof=flow_witness(d[movies[mp],8],np.asarray(vec)[gp])
++        mg={(int(movies[mp[u]]),int(genres[gp[v]])) for u,v in ed}
++        mg=base.swap(mg,rng,attempts=160)
++        cc=base.graph_case(skeleton|mg)
++        return cc,proof
++    # All new graphs use same deterministic flow +160 attempted legal2switches factory.
++    # Controls share first4 of the same24 new source topologies across arms.
++    for i,name in enumerate(names):
++        check();vec=vectors[name];rng=np.random.default_rng([cfg['graph_seed'],i]);train=[];val=[];attempts=0
++        needed=24 if name in names[:2] else 4
++        while len(train)<needed or len(val)<2:
++            check();attempts+=1
++            if attempts>cfg['graph_attempt_cap']:raise RuntimeError('bounded topology construction exhausted; no fallback')
++            cc,proof=construct(vec,rng)
++            assert base.extract_target(cc)==targets[name]
++            assert np.array_equal(cc['counts'],template['counts'])
++            if len(val)<2:
++                if not any(base.isomorphic(cc,x) for x in val):val.append(cc)
++                continue
++            if any(base.isomorphic(cc,x) for x in val):continue
++            # At least4 distinct clean sources in EVERY condition; remaining narrow
++            # sources may repeat topologies and their frequencies are disclosed.
++            # Extreme has at mostC(6,2)=15 unlabeled MG choices;24 distinct was impossible.
++            if len(train)<4 and any(base.isomorphic(cc,x) for x in train):continue
++            train.append(cc)
++        selected[name]=(train,val)
++        for arm in ('narrow','broad'):
++            if arm=='narrow' and name not in names[:2]:continue
++            pool=train if arm=='narrow' else train[:4]
++            for j,cc in enumerate(pool):graphs.append(dict(id=f'{name}_source{j:02d}',arm=arm,condition=name,split='train',types=cc['space'].types.tolist(),edges=cc['clean'].T.tolist()))
++        for j,cc in enumerate(val):graphs.append(dict(id=f'{name}_validation{j}',arm='shared',condition=name,split='validation',types=cc['space'].types.tolist(),edges=cc['clean'].T.tolist()))
++        reps=[];frequencies=[]
++        for cc in train:
++            i=next((j for j,rep in enumerate(reps) if base.isomorphic(cc,rep)),None)
++            if i is None:i=len(reps);reps.append(cc);frequencies.append(0)
++            frequencies[i]+=1
++        evidence.append(dict(condition=name,vector=list(vec),train_sources=len(train),distinct_train_topologies=len(reps),train_class_frequencies=frequencies,narrow_graphs=len(train) if name in names[:2] else 0,
++             broad_graphs=4,validation_graphs=2,attempts=attempts,all_train_validation_nonisomorphic=True,
++             complete_joint_fingerprint=targets[name].fingerprint,switch_attempts_per_construct=160,uniform_graph_sampling_claim=False))
++    feasibility=[]
++    for name,vec in vectors.items():
++        ed,proof=flow_witness(d[movies,8],vec)
++        witness=base.graph_case(skeleton|{(int(movies[u]),int(genres[v])) for u,v in ed})
++        assert base.extract_target(witness)==targets[name]
++        feasibility.append(dict(condition=name,**proof,complete_joint_verified=True,witness_used_in_inference=False))
++    panel=dict(schema=template['space'].pairs,type_names=NAMES,type_counts=[4,6,18,6],graphs=graphs,
++        factory='fixed original DMA skeleton; seeded row/column order integral bipartite flow;160 attempted degree-preserving legal swaps; type relabeling only after train/validation split',
++        sampled_uniformly=False,train_graphs_per_arm=48,shared_control_training_topologies=8)
++    save(RESULT/'panel.json',panel);save(RESULT/'construction.json',dict(graphs=evidence,feasibility=feasibility,all_feasible=True))
++    save(RESULT/'resolved_config.json',cfg)
++    save(RESULT/'split_binding.json',dict(conditions_sha256=sha(RESULT/'conditions.json'),panel_sha256=sha(RESULT/'panel.json'),
++        construction_sha256=sha(RESULT/'construction.json'),time_frozen_epoch=time.time(),model_outputs_consulted=False))
++    return oldrecords,targets
++
++def correctness(oldrecords,targets):
++    from scipy.stats import binom
++    expected,environment=verify_inputs(SimpleNamespace(run=OLD,panel=PANEL),base)
++    cfg=settings();values=base.fixed_validation(oldrecords,cfg);rows=[];allocations=[];encoding=[]
++    case=oldrecords[0]['case'];inp=base.c.train_input(case,64,4,2026102124,0,np.random.default_rng(2026102124),force_t=8)
++    for w in expected['weights']:
++        check();m,_=make_model(case,cfg,w['seed']);m.load_state_dict(torch.load(w['path'],map_location='cpu',weights_only=True),strict=True)
++        v=validate_device(m,values,cfg,{n:t for n,t in targets.items() if n in ('balanced','extreme')},check)
++        old=read(OLD/f"seedjobs/seed{w['seed']}/seed{w['seed']}/normal2_validation_6000.json")
++        maximum=0.
++        assert len(v['rows'])==len(old['rows'])==12
++        for a,b in zip(v['rows'],old['rows']):
++            for k in ('id','condition','t','counts_by_family_label'):assert a[k]==b[k]
++            for k in ('ce','ce_sum_by_family_label','expected_edges','expected_edge_bias'):
++                np.testing.assert_allclose(a[k],b[k],atol=1e-6,rtol=1e-5)
++                maximum=max(maximum,float(np.max(np.abs(np.asarray(a[k])-b[k]))))
++        rows.append(dict(seed=w['seed'],weight_sha256=w['sha256'],maximum_validation_difference=maximum,old_mean=old['mean_ce'],new_mean=v['mean_ce']))
++        # For all frozen targets, inspect actual nonzero trained encoder inputs and exact occupancy.
++        m.eval()
++        for name,targ in targets.items():
++            check();m.set_target(targ);captures=[]
++            hook=m.branch.role_encoder.register_forward_pre_hook(lambda mod,args:captures.append(args[0].detach().numpy().copy()))
++            ctx=FrozenTypedContext(m,case['space'].types,inp['edges'],inp['edge_families'],'check')
++            with torch.no_grad():_,info=m.branch(ctx,8/64,targ)
++            hook.remove();ctx.close()
++            cap=capacities(case['space'].types,targ.schema)
++            for typ,role in enumerate(targ.roles):
++                vec=np.array([v for v,n in role]);cnt=np.array([n for v,n in role])
++                want=np.c_[degree_features(vec,cap[typ]),cnt/targ.type_counts[typ],np.log1p(cnt)/np.log1p(targ.type_counts[typ])].astype(np.float32)
++                np.testing.assert_array_equal(captures[typ],want)
++                att=info['allocation'][typ]['attention']
++                np.testing.assert_allclose(att.sum(1),1,atol=2e-10,rtol=0)
++                np.testing.assert_allclose(att.sum(0),cnt,atol=2e-9,rtol=0)
++            allocations.append(dict(seed=w['seed'],target=name,encoder_exact=True,row_column_contract=True,max_DP_cells=max(x['cells'] for x in info['allocation'])))
++            # Same-type permutation, same target; no network output requirement imposed.
++            perm=np.arange(34);rng=np.random.default_rng(2026102125)
++            for typ in range(4):
++                ix=np.flatnonzero(case['space'].types==typ);perm[ix]=rng.permutation(ix)
++            pc=FrozenTypedContext(m,case['space'].types,np.sort(perm[inp['edges']],axis=0),inp['edge_families'],'permuted')
++            with torch.no_grad():_,pi=m.branch(pc,8/64,targ)
++            pc.close()
++            torch.testing.assert_close(pi['role_context'][torch.from_numpy(perm)],info['role_context'],atol=2e-6,rtol=1e-5)
++            for typ in range(4):
++                ix=np.flatnonzero(case['space'].types==typ);local=perm[ix]-ix[0]
++                np.testing.assert_allclose(pi['allocation'][typ]['attention'][local],info['allocation'][typ]['attention'],atol=2e-10,rtol=0)
++        del m
++    # Independent finite-binomial convolution tests every legal clean Genre degree, no clipping/indexing.
++    pmfs=[]
++    for step in (0,1,8,32,64):
++        a=base.c.schedule(64)[step];p=a+(1-a)*24/108;q=(1-a)*24/108
++        for d in range(19):
++            ref=np.convolve(binom.pmf(np.arange(d+1),d,p),binom.pmf(np.arange(19-d),18-d,q))
++            actual=np.exp(degree_logpmf(18,d,a,24/108))
++            np.testing.assert_allclose(actual,ref,atol=2e-12,rtol=0)
++            pmfs.append(dict(t=step,degree=d,max_abs=float(abs(actual-ref).max())))
++    save(RESULT/'correctness.json',dict(status='passed',validation=rows,condition_checks=allocations,Genre_likelihood=pmfs,
++        computation_error_found=False,model_prediction_quality_not_a_gate=True,environment=environment,
++        note='encoder vectors, unchanged capacity normalization and frequencies inspected; exact PMF and row/column sums; permutation checked using nonzero learned weights; no model change'))
++
++if __name__=='__main__':
++    start=time.monotonic();status='failed';reason=None
++    try:
++        assert not (RESULT/'panel.json').exists(),'do not replace frozen completed data'
++        oldrecords,targets=freeze_panel();correctness(oldrecords,targets);check();status='completed'
++    except BaseException as exc:reason=repr(exc);raise
++    finally:save(RESULT/'preparation_receipt.json',dict(status=status,reason=reason,wall_seconds=time.monotonic()-start,
++        elapsed_from_activation=time.time()-read(RESULT/'activation.json')['activation_epoch'],formal_updates=0,scientific_chains=0))
+diff --git a/experiments/role_condition_coverage_v1/run.py b/experiments/role_condition_coverage_v1/run.py
+new file mode 100644
+index 0000000..f15f9bf
+--- /dev/null
++++ b/experiments/role_condition_coverage_v1/run.py
+@@ -0,0 +1,97 @@
++"""One inherited three-hour ledger, six isolated CPU jobs, gated formal learning."""
++import argparse,json,os,signal,subprocess,sys,time,traceback
++from pathlib import Path
++HERE=Path(__file__).resolve().parent
++
++def save(p,x):
++    q=p.with_name(p.name+'.tmp');q.write_text(json.dumps(x,indent=2)+'\n');q.replace(p)
++
++def main():
++    parser=argparse.ArgumentParser()
++    parser.add_argument('--execute',action='store_true',help='use existing unique3h ledger; gate then full fixed panel')
++    args=parser.parse_args()
++    if not args.execute:parser.error('--execute is required; no implicit learning')
++    from common import (RESULT,EXP,read,settings,check,check_binding,sha,source_manifest)
++    cfg=settings();activation=read(RESULT/'activation.json');jobs=[];stage='probe';status='failed';reason=None
++    if (RESULT/'formal_launch.json').exists():raise FileExistsError('single invocation; no reset/retry launch')
++    save(RESULT/'formal_launch.json',dict(time_epoch=time.time(),activation=activation,source_commit=subprocess.check_output(['git','rev-parse','HEAD'],cwd=HERE,text=True).strip()))
++    def interrupt(sig,frame):(RESULT/'STOP').touch()
++    for sig in (signal.SIGINT,signal.SIGTERM,signal.SIGHUP):signal.signal(sig,interrupt)
++    def launch(mode,arm,seed):
++        folder=RESULT/('cost' if mode=='probe' else 'jobs')/f'{arm}_{seed}'
++        folder.parent.mkdir(exist_ok=True)
++        logfile=RESULT/f'{mode}_{arm}_{seed}.log';stream=logfile.open('w')
++        env=dict(os.environ,CUDA_VISIBLE_DEVICES='',OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1')
++        child=subprocess.Popen([sys.executable,'-u',str(HERE/'worker.py'),mode,'--arm',arm,'--seed',str(seed),'--folder',str(folder)],
++             stdout=stream,stderr=subprocess.STDOUT,env=env,start_new_session=True)
++        job=dict(process=child,folder=folder,log=stream,mode=mode,arm=arm,seed=seed);jobs.append(job);return job
++    def wait(active):
++        last=0
++        while any(j['process'].poll() is None for j in active):
++            check()
++            for j in active:
++                code=j['process'].poll()
++                if code not in (0,None):raise RuntimeError(f"{stage} {j['arm']} {j['seed']} exit{code}; see saved log")
++            if time.monotonic()-last>20:
++                rows=[]
++                for j in active:
++                    f=j['folder']/'progress.json';rows.append(dict(arm=j['arm'],seed=j['seed'],exit_code=j['process'].poll(),progress=read(f) if f.exists() else None))
++                save(RESULT/'progress.json',dict(stage=stage,remaining_seconds=activation['deadline_epoch']-time.time(),jobs=rows))
++                print(json.dumps(dict(stage=stage,jobs=rows)),flush=True);last=time.monotonic()
++            time.sleep(.5)
++        for j in active:
++            assert j['process'].wait()==0
++            receipt=read(j['folder']/(j['mode']+'_receipt.json'));assert receipt['status']=='completed'
++            j['log'].close()
++    try:
++        check();check_binding();assert len(os.sched_getaffinity(0))>=6
++        active=[launch('probe',arm,seed) for arm in cfg['arms'] for seed in cfg['train_seeds']]
++        wait(active);check()
++        probes=[read(j['folder']/'probe.json') for j in active]
++        worst_update=max(p['training_worst_P90'] for p in probes);worst_sweep=max(p['sweep_worst_seconds'] for p in probes)
++        train=6000*worst_update;sample=88*64*worst_sweep
++        validation=len(cfg['validation_updates'])*max(p['validation_seconds'] for p in probes)
++        saves=5*max(p['save_reload_seconds'] for p in probes)
++        predicted=cfg['cost_safety_factor']*(train+sample+validation+saves+120)+cfg['audit_delivery_reserve_seconds']
++        remaining=activation['deadline_epoch']-time.time();passed=predicted<=.8*remaining
++        save(RESULT/'cost_gate.json',dict(passed=passed,remaining_seconds=remaining,allowed80percent_seconds=.8*remaining,
++             forecast_wall_seconds=predicted,training_wall_seconds=train,sampling528_wall_seconds=sample,
++             validation_wall_seconds=validation,save_reload_wall_seconds=saves,
++             safety_factor=cfg['cost_safety_factor'],audit_delivery_reserve_seconds=cfg['audit_delivery_reserve_seconds'],
++             CPU_parallel_jobs=6,full_model_conditions_considered=True,probes=probes))
++        if not passed:
++            status='cost_blocked';reason='all fixed work exceeds80percent of remaining original budget; no scientific updates';return 3
++        save(RESULT/'learning_authorization.json',dict(cost_gate_sha256=sha(RESULT/'cost_gate.json'),activation_sha256=sha(RESULT/'activation.json'),time_epoch=time.time(),updates=36000,chains=528))
++        stage='training';active=[launch('train',arm,seed) for arm in cfg['arms'] for seed in cfg['train_seeds']]
++        wait(active);check();check_binding()
++        weights=[read(j['folder']/'final_weight.json') for j in active]
++        assert len(weights)==6 and all(w['completed_updates']==6000 and sha(RESULT/w['path'])==w['sha256'] for w in weights)
++        save(RESULT/'sealed_final_weights.json',dict(all_six_complete=True,weights=weights,time_epoch=time.time(),
++             unseen_test_results_viewed=False,selection='all final6000, no checkpoint selection'))
++        stage='sampling';active=[launch('sample',arm,seed) for arm in cfg['arms'] for seed in cfg['train_seeds']]
++        wait(active);check();check_binding()
++        stage='audit'
++        from coverage_evaluation import audit
++        audit();check();check_binding();status='completed'
++    except BaseException as exc:
++        reason=repr(exc);traceback.print_exc();(RESULT/'STOP').touch()
++        status='stopped' if isinstance(exc,(InterruptedError,TimeoutError)) else 'failed'
++    finally:
++        for j in jobs:
++            if j['process'].poll() is None:
++                try:os.killpg(j['process'].pid,signal.SIGTERM)
++                except ProcessLookupError:pass
++        cleanup=time.monotonic()
++        for j in jobs:
++            try:j['process'].wait(timeout=max(.1,15-(time.monotonic()-cleanup)))
++            except subprocess.TimeoutExpired:
++                try:os.killpg(j['process'].pid,signal.SIGKILL)
++                except ProcessLookupError:pass
++                j['process'].wait()
++            j['log'].close()
++        save(RESULT/'controller.json',dict(status=status,stage=stage,reason=reason,elapsed_from_original_activation=time.time()-activation['activation_epoch'],
++             budget_seconds=10800,activation_preserved=True,cleanup_seconds=time.monotonic()-cleanup,
++             scientific_updates_recorded=sum(sum(1 for _ in p.open()) for p in RESULT.glob('jobs/*/updates.jsonl')),
++             scientific_graphs_recorded=len(list(RESULT.glob('jobs/*/generated/*_result.json')))))
++    return 0 if status=='completed' else 1
++if __name__=='__main__':sys.exit(main())
+diff --git a/experiments/role_condition_coverage_v1/test_coverage.py b/experiments/role_condition_coverage_v1/test_coverage.py
+new file mode 100644
+index 0000000..d27ad0a
+--- /dev/null
++++ b/experiments/role_condition_coverage_v1/test_coverage.py
+@@ -0,0 +1,86 @@
++from pathlib import Path
++import sys,subprocess,json
++sys.path.insert(0,str(Path(__file__).resolve().parent))
++from common import *
++from prepare import choose,ALLOWED,HELDOUT,DEVELOPMENT
++from coverage_evaluation import independent
++
++def test_frozen_split_reproducible_and_disjoint():
++    wide,combo,num,positive=choose();f=read(RESULT/'conditions.json')
++    assert len(wide)==12 and len(combo)==len(num)==3 and len(set(wide+combo+num))==18
++    assert set(x for v in wide for x in v)==ALLOWED and not (ALLOWED&HELDOUT)
++    assert not set(wide+combo+num)&DEVELOPMENT
++    assert all(set(v)<=ALLOWED for v in combo)
++    assert all(set(v)-ALLOWED for v in num)
++    assert list(positive)==f['vectors'][f['positive_control']]
++    assert len(f['final_targets'])==11
++
++def test_clean_supervision_inventory_sources_and_shared_controls():
++    records,targets=load_data();f=read(RESULT/'conditions.json')
++    for arm in ('narrow','broad'):assert sum(r['arm']==arm and r['split']=='train' for r in records)==48
++    assert sum(r['split']=='validation' for r in records)==24
++    for r in records:
++        assert base.extract_target(r['case'])==targets[r['condition']]
++        assert r['case']['counts'].tolist()==[0,10,18,0,0,36,0,0,24,0]
++    for name in ('balanced','extreme'):
++        a=[r for r in records if r['arm']=='narrow' and r['condition']==name]
++        b=[r for r in records if r['arm']=='broad' and r['condition']==name]
++        assert len(a)==24 and len(b)==4
++        for x,y in zip(a,b):assert np.array_equal(x['case']['clean'],y['case']['clean'])
++    for name in f['training']['broad']:
++        tr=[r for r in records if r['split']=='train' and r['arm']=='broad' and r['condition']==name]
++        assert len(tr)==4
++        for i,a in enumerate(tr):
++            for b in tr[:i]:assert not base.isomorphic(a['case'],b['case'])
++        for v in (r for r in records if r['split']=='validation' and r['condition']==name):
++            for t in (r for r in records if r['split']=='train' and r['condition']==name):assert not base.isomorphic(v['case'],t['case'])
++
++def test_paired_full_model_original_initialization():
++    rec,tar=load_data();cfg=settings();case=rec[0]['case']
++    for seed in cfg['train_seeds']:
++        a,ia=make_model(case,cfg,seed);b,ib=make_model(case,cfg,seed)
++        assert ia['source_sha256']==ib['source_sha256']
++        assert all(torch.equal(v,b.state_dict()[k]) for k,v in a.state_dict().items())
++        assert all(x.data_ptr()!=y.data_ptr() for x,y in zip(a.parameters(),b.parameters()))
++        assert not base.opt(a,cfg).state and not base.opt(b,cfg).state
++        del a,b
++
++def test_training_sources_times_and_queries_are_paired():
++    rec,tar=load_data();cfg=settings()
++    for u in (0,1,12,5900):
++        a,ca,ia,ra=inputs_for(rec,tar,'narrow',cfg['train_seeds'][0],u,cfg)
++        b,cb,ib,rb=inputs_for(rec,tar,'broad',cfg['train_seeds'][0],u,cfg)
++        for k in ('condition_uniform','augmentation_seed','noise_seeds','t','query_sha256'):assert ra[k]==rb[k]
++        for inp in ia+ib:assert inp['ce_weight']==4/561
++
++def test_independent_full_MP_pattern_and_metric_audit(tmp_path,monkeypatch):
++    import coverage_evaluation
++    rec,tar=load_data();r=next(r for r in rec if r['split']=='validation');case=r['case'];edges=case['clean'];f=case['space'].encode(edges)[0]
++    path=tmp_path/'fixture.npz';np.savez_compressed(path,types=case['space'].types,edges=edges.T,relations=f+1,schema=np.asarray(case['space'].pairs))
++    m=graph(case,edges,NAMES);row=dict(graph_file='fixture.npz',condition=r['condition'],metrics=m,target_errors=error_stats(m,tar[r['condition']].as_dict()))
++    monkeypatch.setattr(coverage_evaluation,'RESULT',tmp_path);independent(row,tar)
++    assert row['target_errors']['Genre']['W1']==0
++
++def test_boolean_statistics_no_quantile_subtract_error():
++    r=stat([False,True,None]);assert r['mean']==.5 and r['P90']==.9 and r['NA']==1
++
++def test_stable_exact_integer_joint_TV():
++    rec,tar=load_data();case=rec[0]['case'];m=graph(case,case['clean'],NAMES)
++    e=error_stats(m,tar[rec[0]['condition']].as_dict());assert all(e[n]['joint_TV']==0 for n in NAMES)
++
++def test_public_help_never_activates_training():
++    before=(RESULT/'formal_launch.json').exists()
++    r=subprocess.run([sys.executable,str(Path(__file__).with_name('run.py')),'--help'],capture_output=True,timeout=10)
++    assert r.returncode==0 and b'--execute' in r.stdout
++    assert (RESULT/'formal_launch.json').exists()==before
++
++def test_no_forbidden_method_change_and_original_optimizer():
++    cfg=settings();assert cfg['model']==read(EXP/'role_robust_training_v1/config.json')['model']
++    assert cfg['optimizer']==read(EXP/'role_robust_training_v1/config.json')['optimizer']
++    assert cfg['T']==64 and cfg['rounds']==4 and cfg['updates']==6000 and cfg['expected_chains']==528
++    assert cfg['scheduler'] is None and cfg['gradient_clipping'] is None and not cfg['class_reweighting']
++
++def test_original_correctness_receipt():
++    r=read(RESULT/'correctness.json');assert r['status']=='passed' and not r['computation_error_found']
++    assert len(r['validation'])==3 and all(x['maximum_validation_difference']==0 for x in r['validation'])
++    assert len(r['condition_checks'])==60 and max(x['max_DP_cells'] for x in r['condition_checks'])<=200000
+diff --git a/experiments/role_condition_coverage_v1/worker.py b/experiments/role_condition_coverage_v1/worker.py
+new file mode 100644
+index 0000000..752dc8c
+--- /dev/null
++++ b/experiments/role_condition_coverage_v1/worker.py
+@@ -0,0 +1,160 @@
++"""CPU probe/train/sample jobs. Scientific weights always start from original initialization."""
++import argparse,resource,signal,traceback,copy,gc
++from collections import Counter
++from common import *
++from transaction import UpdateBoundary
++
++def progress(folder,phase,**kw):
++    r=dict(phase=phase,utc_epoch=time.time(),elapsed_from_activation=time.time()-read(RESULT/'activation.json')['activation_epoch'],**kw)
++    save(folder/'progress.json',r);print(json.dumps(r),flush=True)
++
++def validate(model,records,targets,cfg,folder,u):
++    before=base.c.rng_save(np.random.default_rng(0),'cpu')
++    values=base.fixed_validation(records,cfg)
++    v=validate_device(model,values,cfg,targets,check)
++    after=base.c.rng_save(np.random.default_rng(0),'cpu')
++    assert before['python']==after['python']
++    assert torch.equal(before['torch'],after['torch'])
++    assert before['numpy'][0]==after['numpy'][0] and np.array_equal(before['numpy'][1],after['numpy'][1]) and before['numpy'][2:]==after['numpy'][2:]
++    save(folder/f'validation_u{u:06d}.json',v)
++    return v
++
++def checkpoint(folder,model,optimizer,u,binding,tag):
++    assert int(optimizer.state.get(model.backbone.lin_out_E.weight,{}).get('step',0))==u
++    record=dict(model=base.c.cpu_tree(model.state_dict()),optimizer=base.c.cpu_tree(optimizer.state_dict()),
++        completed_updates=u,binding=binding,budget=read(RESULT/'activation.json'),
++        random=base.c.rng_save(np.random.default_rng(0),'cpu'),
++        training_inputs='counter-based(seed,update,micro) and frozen configuration; nextupdate=completed_updates',
++        next_update=u,trained_continuously=True)
++    path=folder/(tag+'.pt');assert not path.exists()
++    h=base.atomic_weights(path,record)
++    append(folder/'checkpoint_index.jsonl',dict(path=str(path.relative_to(RESULT)),sha256=h,completed_updates=u,tag=tag))
++    return dict(path=str(path.relative_to(RESULT)),sha256=h,completed_updates=u)
++
++def probe(a,records,targets,cfg):
++    folder=a.folder;case=records[0]['case'];m,init=make_model(case,cfg,a.seed);o=base.opt(m,cfg)
++    names=read(RESULT/'conditions.json')['training'][a.arm];costs=[];sweeps=[]
++    for name in names:
++        cc=next(r['case'] for r in records if r['arm']==a.arm and r['condition']==name and r['split']=='train')
++        times=[];m.set_target(targets[name])
++        for j,t in enumerate((1,32,64)):
++            check();inp=[base.c.train_input(cc,64,4,a.seed,100*j+k,np.random.default_rng([2026102126,a.seed,j,k]),force_t=t) for k in (0,1)]
++            r=base.double_update(m,o,cc,inp,64,check=check);times.append(r['seconds'])
++        costs.append(dict(condition=name,role_kinds=len(targets[name].roles[3]),seconds=times,
++             first_seconds=times[0],stable_P90=float(np.quantile(times[1:],.9))))
++    m.eval();dense=np.repeat(case['active'].astype(np.uint8),case['space'].counts)
++    kernel=base.MarginalKernel(case['prior'],base.c.schedule(64))
++    for name in read(RESULT/'conditions.json')['final_targets']:
++        m.set_target(targets[name]);dur=[]
++        for j,t in enumerate((1,32,64,32)):
++            check();start=time.monotonic()
++            with torch.no_grad():base.reverse_step(m,case,dense,kernel,t,4,a.seed,np.random.default_rng([2026102127,j]),'cpu',check_time=check)
++            dur.append(time.monotonic()-start)
++        sweeps.append(dict(condition=name,role_kinds=len(targets[name].roles[3]),complete4block_seconds=dur,maximum=max(dur)))
++    v=validate_device(m,base.fixed_validation(records,cfg),cfg,targets,check)
++    # Disposable save/strict reload cost; never used as formal initial state.
++    path=folder/'engineering_roundtrip.pt';start=time.monotonic()
++    h=base.atomic_weights(path,dict(model=m.state_dict(),optimizer=o.state_dict(),engineering_only=True))
++    ck=torch.load(path,map_location='cpu',weights_only=False)
++    assert all(torch.equal(v,ck['model'][k]) for k,v in m.state_dict().items())
++    save_cost=time.monotonic()-start
++    save(folder/'probe.json',dict(status='completed',arm=a.arm,seed=a.seed,updates=costs,sweeps=sweeps,
++        validation_seconds=v['seconds'],save_reload_seconds=save_cost,checkpoint_bytes=path.stat().st_size,
++        training_worst_P90=max(x['stable_P90'] for x in costs),sweep_worst_seconds=max(x['maximum'] for x in sweeps),
++        parameters=init['parameters'],precision='unchangedFP32/float64',disposable=True,
++        engineering_updates=3*len(names),scientific_updates=0,science_chains=0))
++    # Retain fixture weights only locally and label explicitly, never imported by training.
++
++def train(a,records,targets,cfg):
++    gate=read(RESULT/'cost_gate.json');auth=read(RESULT/'learning_authorization.json')
++    assert gate['passed'] and auth['cost_gate_sha256']==sha(RESULT/'cost_gate.json')
++    assert auth['activation_sha256']==sha(RESULT/'activation.json')
++    folder=a.folder;binding=check_binding();case=records[0]['case'];model,init=make_model(case,cfg,a.seed)
++    optimizer=base.opt(model,cfg);assert not optimizer.state
++    initial_path=folder/'initial.pt';initial_hash=base.atomic_weights(initial_path,model.state_dict())
++    save(folder/'initialization.json',dict(**init,initial_sha256=initial_hash,arm=a.arm,seed=a.seed,
++        paired_source_hash=init['source_sha256'],optimizer_fresh=True,engineering_weights_imported=False))
++    complete=0;counts=Counter();boundary=UpdateBoundary(RESULT,read(RESULT/'activation.json')['deadline_epoch'],reserve=30)
++    last_valid=True
++    try:
++        for u in range(6001):
++            boundary.check()
++            if u in cfg['checkpoint_updates']:checkpoint(folder,model,optimizer,u,binding,f'checkpoint_u{u:06d}')
++            if u in cfg['validation_updates']:
++                progress(folder,'validation',completed_updates=u)
++                validate(model,records,targets,cfg,folder,u)
++            if u==6000:break
++            name,cc,inp,receipt=inputs_for(records,targets,a.arm,a.seed,u,cfg)
++            with boundary.pair():
++                model.set_target(targets[name])
++                result=base.double_update(model,optimizer,cc,inp,64,check=boundary.check)
++                complete=u+1;counts[name]+=1
++                assert int(optimizer.state[model.backbone.lin_out_E.weight]['step'])==complete
++                append(folder/'updates.jsonl',dict(seed=a.seed,arm=a.arm,update=complete,condition=name,
++                    **receipt,**result))
++            if complete%100==0:
++                save(folder/'condition_counts.json',dict(updates=dict(counts),samples={k:2*v for k,v in counts.items()}))
++                progress(folder,'training',completed_updates=complete,last_loss=result['loss'],batch_seconds=result['seconds'],condition_updates=dict(counts))
++        check();final_path=folder/'final6000.pt';h=base.atomic_weights(final_path,model.state_dict())
++        save(folder/'final_weight.json',dict(arm=a.arm,seed=a.seed,completed_updates=complete,path=str(final_path.relative_to(RESULT)),sha256=h,
++             source_initialization=init,selection='final6000 only; validation/test never choose checkpoint'))
++        save(folder/'condition_counts.json',dict(updates=dict(counts),samples={k:2*v for k,v in counts.items()}))
++        assert sum(counts.values())==6000
++        progress(folder,'training_completed',completed_updates=complete)
++    except BaseException:
++        last_valid=all(torch.isfinite(p).all() for p in model.parameters())
++        if last_valid:
++            checkpoint(folder,model,optimizer,complete,binding,f'emergency_u{complete:06d}')
++        else:save(folder/'invalid_state.json',dict(completed_updates=complete,nonfinite_parameters=True,last_milestones_retained=True))
++        raise
++
++def sample(a,records,targets,cfg):
++    folder=a.folder;check_binding();sealed=read(RESULT/'sealed_final_weights.json')
++    assert sealed['all_six_complete'] and len(sealed['weights'])==6
++    for w in sealed['weights']:assert sha(RESULT/w['path'])==w['sha256']
++    own=next(w for w in sealed['weights'] if w['arm']==a.arm and w['seed']==a.seed)
++    # Metadata-only inference case, no training edges/identities.
++    case=metadata_case(base,PANEL,targets)
++    model,_=make_model(case,cfg,a.seed)
++    model.load_state_dict(torch.load(RESULT/own['path'],map_location='cpu',weights_only=True),strict=True)
++    model.eval();gen=folder/'generated';gen.mkdir();done=0
++    for sampling_seed in cfg['sampling_seeds']:
++        for name in read(RESULT/'conditions.json')['final_targets']:
++            check();tick=time.monotonic();stem=f'{name}_{sampling_seed}'
++            def commit(state,steps,rng_state):
++                if len(steps)%8==0:
++                    dummy=np.random.default_rng();dummy.bit_generator.state=rng_state
++                    base.atomic_weights(folder/'sampling_partial.pt',dict(state=state,steps=steps,RNG=base.c.rng_save(dummy,'cpu'),
++                         target=name,sampling_seed=sampling_seed,weight=own,completed_step=steps[-1]['t'],budget=read(RESULT/'activation.json')))
++                    progress(folder,'sampling',completed_chains=done,condition=name,sampling_seed=sampling_seed,completed_steps=len(steps))
++            state,steps,initial=original_chain(model,case,targets[name],sampling_seed,base,check,commit)
++            edges,fam=base.c.state_edges(case,state);path=gen/(stem+'.npz')
++            np.savez_compressed(path,types=case['space'].types,edges=edges.T,relations=fam+1,schema=np.asarray(case['space'].pairs))
++            save(gen/(stem+'_steps.json'),steps)
++            metrics=graph(case,edges,NAMES,check)
++            r=dict(arm=a.arm,seed=a.seed,condition=name,sampling_seed=sampling_seed,checkpoint_update=6000,
++                graph_file=str(path.relative_to(RESULT)),graph_sha256=sha(path),steps_file=str((gen/(stem+'_steps.json')).relative_to(RESULT)),
++                steps_sha256=sha(gen/(stem+'_steps.json')),target_fingerprint=targets[name].fingerprint,
++                weight_sha256=own['sha256'],initial_state_sha256=initial,metrics=metrics,target_errors=error_stats(metrics,targets[name].as_dict()),
++                seconds=time.monotonic()-tick,newly_executed_chain=True)
++            save(gen/(stem+'_result.json'),r);done+=1
++    assert done==88;check();progress(folder,'sampling_completed',completed_chains=done)
++
++def main():
++    p=argparse.ArgumentParser();p.add_argument('mode',choices=('probe','train','sample'))
++    p.add_argument('--arm',choices=('narrow','broad'),required=True);p.add_argument('--seed',type=int,required=True)
++    p.add_argument('--folder',type=Path,required=True);a=p.parse_args();a.folder.mkdir(exist_ok=a.mode=='sample',parents=True)
++    start=time.monotonic();cpu=time.process_time();status='failed';reason=None
++    def stop(sig,frame):(RESULT/'STOP').touch()
++    for s in (signal.SIGINT,signal.SIGTERM,signal.SIGHUP):signal.signal(s,stop)
++    try:
++        check();check_binding();records,targets=load_data();cfg=settings()
++        globals()[a.mode](a,records,targets,cfg);status='completed'
++    except BaseException as exc:
++        reason=repr(exc);traceback.print_exc();status='stopped' if isinstance(exc,(TimeoutError,InterruptedError)) else 'failed'
++    finally:
++        save(a.folder/(a.mode+'_receipt.json'),dict(status=status,reason=reason,mode=a.mode,arm=a.arm,seed=a.seed,
++            wall_seconds=time.monotonic()-start,cpu_seconds=time.process_time()-cpu,
++            peak_rss_mib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024,device='cpu',GPU_used=False))
++    return 0 if status=='completed' else 1
++if __name__=='__main__':sys.exit(main())
