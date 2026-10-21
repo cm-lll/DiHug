@@ -74,15 +74,15 @@ preflight父监督器在Torch导入/数据加载/GPU初始化前计时，总上�
 先获取冻结方案（不会训练）：
 
 ```bash
-bash run.sh plan > /root/private_data/gnn_projects/imdb_role_pair_runs/frozen_plan.json
+bash run.sh plan > /root/private_data/gnn_projects/imdb_role_pair_gpu_v1_1_runs/frozen_plan.json
 ```
 
 以下formal启动与恢复模板均尚未授权执行。只有用户确认方案哈希、总秒数和持久存储之后，才执行。占位符未提供会拒绝启动，包里没有默认无限训练或另一个小时上限：
 
 ```bash
 bash run.sh formal \
-  --preflight /root/private_data/gnn_projects/imdb_role_pair_runs/preflight_01 \
-  --output /root/private_data/gnn_projects/imdb_role_pair_runs/formal_01 \
+  --preflight /root/private_data/gnn_projects/imdb_role_pair_gpu_v1_1_runs/preflight_01 \
+  --output /root/private_data/gnn_projects/imdb_role_pair_gpu_v1_1_runs/formal_01 \
   --confirmed-budget-seconds USER_CONFIRMED_SECONDS \
   --approved-plan-sha256 USER_CONFIRMED_PLAN_HASH \
   --persistent-output-confirmed
@@ -91,14 +91,14 @@ bash run.sh formal \
 安全停止与恢复：
 
 ```bash
-bash run.sh stop --output /root/private_data/gnn_projects/imdb_role_pair_runs/formal_01
-bash run.sh progress --output /root/private_data/gnn_projects/imdb_role_pair_runs/formal_01
+bash run.sh stop --output /root/private_data/gnn_projects/imdb_role_pair_gpu_v1_1_runs/formal_01
+bash run.sh progress --output /root/private_data/gnn_projects/imdb_role_pair_gpu_v1_1_runs/formal_01
 # 确认旧进程已退出后，显式归档本次STOP；不要删除旧证据或重置activation。
-mv /root/private_data/gnn_projects/imdb_role_pair_runs/formal_01/STOP \
-   /root/private_data/gnn_projects/imdb_role_pair_runs/formal_01/STOP.acknowledged
+mv /root/private_data/gnn_projects/imdb_role_pair_gpu_v1_1_runs/formal_01/STOP \
+   /root/private_data/gnn_projects/imdb_role_pair_gpu_v1_1_runs/formal_01/STOP.acknowledged
 bash run.sh formal --resume --persistent-output-confirmed \
-  --preflight /root/private_data/gnn_projects/imdb_role_pair_runs/preflight_01 \
-  --output /root/private_data/gnn_projects/imdb_role_pair_runs/formal_01
+  --preflight /root/private_data/gnn_projects/imdb_role_pair_gpu_v1_1_runs/preflight_01 \
+  --output /root/private_data/gnn_projects/imdb_role_pair_gpu_v1_1_runs/formal_01
 ```
 
 恢复包含模型/优化器/RNG/更新数、原截止时间及源码/配置/数据/backend/实际依赖绑定；停机计入总预算，不重新授时。普通后端不承诺之后逐步轨迹完全复现。
@@ -118,6 +118,6 @@ CPU工程通过不认证BW/CUDA梯度，不认证完整IMDB训练容量或生成
 
 ```bash
 /usr/local/bin/python3.11 export_metrics.py \
-  --run /root/private_data/gnn_projects/imdb_role_pair_runs/formal_01 \
-  --output /root/private_data/gnn_projects/imdb_role_pair_runs/formal_01_csv
+  --run /root/private_data/gnn_projects/imdb_role_pair_gpu_v1_1_runs/formal_01 \
+  --output /root/private_data/gnn_projects/imdb_role_pair_gpu_v1_1_runs/formal_01_csv
 ```

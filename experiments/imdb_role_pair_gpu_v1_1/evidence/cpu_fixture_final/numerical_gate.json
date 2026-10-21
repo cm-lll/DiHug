@@ -1,0 +1,46 @@
+{
+  "checks": [
+    "base_forward_loss_gradients_strict_update_resume",
+    "role_forward_loss_gradients_strict_update_resume"
+  ],
+  "arms": {
+    "base": {
+      "logits_max_abs": 0.0,
+      "p0_max_abs": 0.0,
+      "gradient_max_abs": 0.0,
+      "cross_backend_Adam_parameter_max_abs_descriptive": 0.0,
+      "strict_repeat_exact": true,
+      "strict_save_resume_pass": true,
+      "parameter_changed": true,
+      "participating_gradients": 469,
+      "CPU_GPU_updated_weights_required_identical": false,
+      "temporary_checkpoint_bytes": 80352420,
+      "temporary_checkpoint_save_seconds": 1.5137338200584054,
+      "restore_and_device_load_seconds": 0.9223722275346518
+    },
+    "role": {
+      "logits_max_abs": 0.0,
+      "p0_max_abs": 0.0,
+      "gradient_max_abs": 0.0,
+      "cross_backend_Adam_parameter_max_abs_descriptive": 0.0,
+      "strict_repeat_exact": true,
+      "strict_save_resume_pass": true,
+      "parameter_changed": true,
+      "participating_gradients": 475,
+      "CPU_GPU_updated_weights_required_identical": false,
+      "temporary_checkpoint_bytes": 80380294,
+      "temporary_checkpoint_save_seconds": 1.3893591091036797,
+      "restore_and_device_load_seconds": 0.9305741125717759
+    }
+  },
+  "seconds": 16.447121266275644,
+  "tolerance": {
+    "atol": 2e-06,
+    "rtol": 1e-05
+  },
+  "strict": true,
+  "temporary_optimizer_updates": 10,
+  "CPU_oracle_updates": 2,
+  "target_device_updates": 8,
+  "same_process_fresh_object_resume": true
+}

@@ -1,0 +1,87 @@
+{
+  "status": "passed_engineering_fixture",
+  "error": null,
+  "checks": [
+    "base_forward_loss_gradients_strict_update_resume",
+    "role_forward_loss_gradients_strict_update_resume"
+  ],
+  "target_GPU_gate_passed": false,
+  "full_IMDB_cost_complete": false,
+  "wall_seconds": 16.547035217285156,
+  "scientific_updates": 0,
+  "complete_T1000_chains": 0,
+  "resources": {
+    "process_peak_rss_mib": 1417.66796875
+  },
+  "numerical_gate": {
+    "checks": [
+      "base_forward_loss_gradients_strict_update_resume",
+      "role_forward_loss_gradients_strict_update_resume"
+    ],
+    "arms": {
+      "base": {
+        "logits_max_abs": 0.0,
+        "p0_max_abs": 0.0,
+        "gradient_max_abs": 0.0,
+        "cross_backend_Adam_parameter_max_abs_descriptive": 0.0,
+        "strict_repeat_exact": true,
+        "strict_save_resume_pass": true,
+        "parameter_changed": true,
+        "participating_gradients": 469,
+        "CPU_GPU_updated_weights_required_identical": false,
+        "temporary_checkpoint_bytes": 80352420,
+        "temporary_checkpoint_save_seconds": 1.5137338200584054,
+        "restore_and_device_load_seconds": 0.9223722275346518
+      },
+      "role": {
+        "logits_max_abs": 0.0,
+        "p0_max_abs": 0.0,
+        "gradient_max_abs": 0.0,
+        "cross_backend_Adam_parameter_max_abs_descriptive": 0.0,
+        "strict_repeat_exact": true,
+        "strict_save_resume_pass": true,
+        "parameter_changed": true,
+        "participating_gradients": 475,
+        "CPU_GPU_updated_weights_required_identical": false,
+        "temporary_checkpoint_bytes": 80380294,
+        "temporary_checkpoint_save_seconds": 1.3893591091036797,
+        "restore_and_device_load_seconds": 0.9305741125717759
+      }
+    },
+    "seconds": 16.447121266275644,
+    "tolerance": {
+      "atol": 2e-06,
+      "rtol": 1e-05
+    },
+    "strict": true,
+    "temporary_optimizer_updates": 10,
+    "CPU_oracle_updates": 2,
+    "target_device_updates": 8,
+    "same_process_fresh_object_resume": true
+  },
+  "package_manifest_sha256": "defa3edd03e45803bc3a8d40e563ab1e32413fb158b5098d526a9830d40e2d1c",
+  "config_sha256": "0a2986401bd40bff327e46cf31e6a08544b47efc880bb458431c16b82d77132b",
+  "runtime_binding": {
+    "packages": {
+      "torch": "2.1.0",
+      "torch-geometric": "2.3.1",
+      "numpy": "1.26.4",
+      "scipy": "1.11.0",
+      "pytest": "7.4.4",
+      "networkx": "2.8.7"
+    },
+    "python_version": "3.9.23",
+    "torch_runtime_version": "2.1.0",
+    "hip": null,
+    "cuda": "12.1",
+    "device_name": "CPU engineering test",
+    "visibility": null,
+    "HIP_visibility": {
+      "HIP_VISIBLE_DEVICES": null,
+      "ROCR_VISIBLE_DEVICES": null
+    },
+    "matmul_allow_tf32": false,
+    "torch_threads": 1,
+    "deterministic_algorithms": false
+  }
+}
