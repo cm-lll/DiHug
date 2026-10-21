@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="1" time="2.772" timestamp="2026-10-21T20:34:38.275700" hostname="GPU-Node01"><testcase classname="" name="test_recovery_pointer_second_resume_then_stop_before_milestone" time="0.021"><failure message="ValueError: existing checkpoint pointer/hash conflict">tmp_path = PosixPath('/tmp/pytest-of-lyh/pytest-603/test_recovery_pointer_second_r0')
+
+    def test_recovery_pointer_second_resume_then_stop_before_milestone(tmp_path):
+        p.checkpoint(tmp_path,value(0))
+        p.rolling_recovery(tmp_path,value(123))
+        assert p.load_checkpoint(tmp_path,value(0)['binding'])['updates']==123
+&gt;       assert p.load_checkpoint(tmp_path,value(0)['binding'])['updates']==123
+
+experiments/imdb_role_pair_gpu_v1_1/package/tests/test_resume_storage.py:16: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+folder = PosixPath('/tmp/pytest-of-lyh/pytest-603/test_recovery_pointer_second_r0')
+binding = {'fixture': 'pointer regression'}
+
+    def load_checkpoint(folder,binding):
+        folder=Path(folder);valid=[]
+        for parent in (folder,folder/'recovery'):
+            if (parent/'latest.json').exists():
+                ptr=read(parent/'latest.json');path=parent/ptr['path']
+&gt;               if path.parent!=parent or not path.is_file() or sha(path)!=ptr['sha256']:raise ValueError('existing checkpoint pointer/hash conflict')
+E               ValueError: existing checkpoint pointer/hash conflict
+
+experiments/imdb_role_pair_gpu_v1_1/package/pair_core.py:146: ValueError</failure></testcase></testsuite></testsuites>

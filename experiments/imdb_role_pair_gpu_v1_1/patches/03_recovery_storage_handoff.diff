@@ -1,0 +1,430 @@
+--- a/package/README_zh.md
++++ b/package/README_zh.md
+@@ -1,6 +1,10 @@
+-# IMDB基础模型／匿名角色软读取：准备包
++# IMDB基础模型／匿名角色软读取：v1.1修复与交接包
+ 
+ 本轮只准备和CPU工程验收，未启动正式训练、GPU任务或完整大图链。原始方法来自固定提交f4d410cc37a76b065634eadb27a5421d53f638a0。
++
++本版修复基线bb32bfaa5b63f049cbcba4408e2184a39e5c8b6a；新源码manifest与配置绑定，旧预检不能授权本版。
++恢复latest使用经过路径/哈希/步数/内容检查的相对路径（包括recovery/）；同一更新两位置内容冲突即拒绝，不忽略冲突。
++从滚动点再停止、再次恢复和滚动轮换均保持指针可读；原永久千步文件不删除。
+ 
+ ## 比较对象
+ 
+@@ -30,20 +34,21 @@
+ 默认Python=/usr/local/bin/python3.11，可用PYTHON_BIN指定已有解释器。本地Python3.9与notebook Python3.11可分别预检，但正式恢复严格绑定实际Python/Torch/依赖/设备与普通执行配置。
+ 
+ ```bash
+-cd /root/private_data/gnn_projects/imdb_role_pair_gpu_v1/package
++cd /root/private_data/gnn_projects/imdb_role_pair_gpu_v1_1/package
+ df -h /root/private_data
+ findmnt -T /root/private_data
+-bash run.sh preflight --output /root/private_data/gnn_projects/imdb_role_pair_runs/preflight_01
++bash run.sh preflight --output /root/private_data/gnn_projects/imdb_role_pair_gpu_v1_1_runs/preflight_01
+ ```
+ 
+ 另开终端查看（不启动另一份任务）：
+ 
+ ```bash
+-tail -f /root/private_data/gnn_projects/imdb_role_pair_runs/preflight_01/launcher.log
+-bash run.sh progress --output /root/private_data/gnn_projects/imdb_role_pair_runs/preflight_01
++tail -f /root/private_data/gnn_projects/imdb_role_pair_gpu_v1_1_runs/preflight_01/launcher.log
++bash run.sh progress --output /root/private_data/gnn_projects/imdb_role_pair_gpu_v1_1_runs/preflight_01
+ ```
+ 
+ preflight父监督器在Torch导入/数据加载/GPU初始化前计时，总上限570秒，强制清理额外预算最多10秒并单独记账。支持STOP、Ctrl+C、SIGTERM、SIGHUP；SIGKILL不可捕获。
++预算耗尽或STOP记为incomplete并非算法失败；始终非零退出，不进入formal。最终摘要preflight.json；完整回传清单及环境/导出命令见包根HANDOFF_zh.md。
+ 先在9节点小夹具上严格模式检查CPU/GPU logits、p0、loss、参与梯度、一次更新、同设备重复与保存/恢复续算，ATOL2e-6/RTOL1e-5沿用旧门。
+ 跨CPU/GPU Adam参数差异只描述：原门不要求跨设备第一步参数完全相同；严格同设备第一步重复必须逐位相同，严格保存恢复后按同容差验收，并核对优化器内容。
+ 通过后改回普通模式，在完整IMDB每臂做5次临时normal2更新：1预热、3稳态、1详细trace；每臂同一固定t500状态做两次完整20块采样单步，不串接链。
+@@ -60,7 +65,11 @@
+ 预算必须先依据目标后端preflight.json：训练=36000×(base更新中位+role更新中位)；采样=48000×(base单步中位+role单步中位)；验证另计。加25%与600秒准备/保存/审计余量，仅在估计不超过用户确认预算80%时允许启动。
+ 完整验证成本是5个单步的保守估计，未称实测；单步外推不覆盖自由链变密、CN路径与读取难度变化，运行仍逐次验收并失败停止。
+ 固定更新长度/样本数量与科学设置都在config.json里，不因预算不足缩成单seed。不够时先返回阶段方案供用户决定。
+-初始与千步检查点预计约6.24GB十进制；加滚动恢复、临时预检、日志/图/评价与空间余量，要求输出盘至少16GiB空闲。实际持久性须用平台说明/挂载信息确认，目录名private_data本身不是证明。
++初始与千步检查点预计约6.24GB十进制。首次启动仍至少16GiB空闲；恢复改查实际输出卷上的剩余需求。
++保守单个双臂检查点上界取192MiB与已见最大文件的较大者；剩余39个计划永久位置按已有文件扣减、补足每seed两份滚动位，另预留原子替换空间及每seed一份额外STOP保存。
++这些剩余检查点写入量乘1.25，另留2GiB日志/评价与512MiB图/状态储备；同时要求16GiB初始门减去已留存计划/滚动文件大小的余额，两者取大。
++运行中每次永久/滚动保存前重查。估计不是磁盘配额保证，异常大量日志/反复STOP额外文件仍可消耗余量；不足即停止、不自动清理。storage.json记录公式结果、实际st_dev及/proc挂载信息。
++挂载信息不证明平台持久性，必须由操作者核实；private_data目录名本身不是证明。
+ 
+ 先获取冻结方案（不会训练）：
+ 
+@@ -68,7 +77,7 @@
+ bash run.sh plan > /root/private_data/gnn_projects/imdb_role_pair_runs/frozen_plan.json
+ ```
+ 
+-只有用户确认方案哈希与总秒数之后，才执行以下模板。占位符未提供会拒绝启动，包里没有默认无限训练或另一个小时上限：
++以下formal启动与恢复模板均尚未授权执行。只有用户确认方案哈希、总秒数和持久存储之后，才执行。占位符未提供会拒绝启动，包里没有默认无限训练或另一个小时上限：
+ 
+ ```bash
+ bash run.sh formal \
+--- a/package/config.json
++++ b/package/config.json
+@@ -1,5 +1,5 @@
+ {
+-  "version": "imdb_role_pair_gpu_v1",
++  "version": "imdb_role_pair_gpu_v1_1",
+   "dataset": "IMDB",
+   "base_commit": "dd53b6431303263e740abedf67e01d7dfc13d15b",
+   "backend": "upstream",
+--- a/package/formal.py
++++ b/package/formal.py
+@@ -81,11 +81,8 @@
+         case,target=p.dataset(cfg);binding={'package_manifest_sha256':package_hash,'config_sha256':p.sha(p.ROOT/'config.json'),'data_sha256':cfg['data']['sha256'],
+             'target_sha256':target.fingerprint,'runtime':p.bound_environment(env),'deadline_epoch':x.deadline,'initialization':'fresh, exact common tensor copy; no old checkpoint imports'}
+         if (out/'binding.json').exists() and p.read(out/'binding.json')!=binding:raise ValueError('existing run binding conflict; old provenance preserved')
+-        import shutil
+-        if shutil.disk_usage(out).free<cfg['minimum_free_disk_bytes']:raise OSError('less than16GiB free on actual persistent output volume')
++        p.check_storage(out,cfg,x.resume)
+         p.save(out/'binding.json',binding);p.save(out/'resolved_config.json',cfg);p.save(out/'environment.json',env);p.save(out/'anonymous_target.json',target.as_dict())
+-        p.save(out/'storage.json',{'output_path':str(out.resolve()),'disk_free_bytes':shutil.disk_usage(out).free,'persistent_storage_requires_operator_confirmation':True,
+-            'estimated_permanent_checkpoints_bytes':int(3*13*2*6658481*4*3),'recovery_files_maximum_per_seed':2,'full_state_and_RNG_included':True})
+         p.save(out/'source_hashes.json',p.sources());p.save(out/'preflight_binding.json',{'path':str(x.preflight),'sha256':p.sha(x.preflight/'preflight.json')})
+         reference=p.graph(case,case['clean'],cfg['data']['type_names'],check);p.save(out/'reference_metrics.json',reference)
+         for seed in cfg['train_seeds']:
+@@ -95,7 +92,7 @@
+             for m in models:m.to('cuda');p.condition(m,target)
+             opts=[p.optimizer(m,cfg) for m in models];u=0;reader=Reader(lambda:None,folder/'failed_reads',max_history=8).install(models[1]);safe_pair=True
+             try:
+-                if checkpoints.exists() and list(checkpoints.glob('pair_u*.pt')):
++                if checkpoints.exists() and (list(checkpoints.glob('pair_u*.pt')) or list((checkpoints/'recovery').glob('pair_u*.pt'))):
+                     if not x.resume:raise ValueError('fresh-start refuses existing training checkpoints')
+                     ck=p.load_checkpoint(checkpoints,pair_binding);u=ck['updates']
+                     for m,o in zip(models,opts):m.load_state_dict(ck['models'][m.arm],strict=True);o.load_state_dict(ck['optimizers'][m.arm])
+@@ -123,8 +120,10 @@
+                         'elapsed_seconds':time.time()-activation['activation_epoch'],'memory':p.c.memory('cuda'),'role_reader':reader.summary()})
+                     p.save(out/'progress.json',{'phase':'training','seed':seed,'completed_paired_updates':u,'arm_updates_equal':True})
+                     if u%cfg['checkpoint_every_updates']==0:
++                        p.check_storage(out,cfg,True)
+                         p.checkpoint(checkpoints,payload(pair_binding,u,models,opts,rng,x.deadline));last_save=time.monotonic()
+                     elif time.monotonic()-last_save>=1800:
++                        p.check_storage(out,cfg,True)
+                         p.rolling_recovery(checkpoints,payload(pair_binding,u,models,opts,rng,x.deadline));last_save=time.monotonic()
+                     if u%cfg['validation_every_updates']==0:
+                         p.save(folder/f'validation_{u:08d}.json',{m.arm:p.validate(m,case,target,cfg,check) for m in models})
+--- a/package/pair_core.py
++++ b/package/pair_core.py
+@@ -139,22 +139,38 @@
+     save(folder/'latest.json',{'path':p.name,'sha256':sha(p),'updates':payload['updates'],'payload_digest':payload['payload_digest']})
+     return p
+ def load_checkpoint(folder,binding):
+-    folder=Path(folder);valid=[]
++    folder=Path(folder).resolve();valid=[];pointers=[]
+     for parent in (folder,folder/'recovery'):
+         if (parent/'latest.json').exists():
+-            ptr=read(parent/'latest.json');path=parent/ptr['path']
+-            if path.parent!=parent or not path.is_file() or sha(path)!=ptr['sha256']:raise ValueError('existing checkpoint pointer/hash conflict')
++            ptr=read(parent/'latest.json');rel=Path(ptr['path'])
++            allowed=(len(rel.parts)==1 or (parent==folder and len(rel.parts)==2 and rel.parts[0]=='recovery'))
++            if rel.is_absolute() or '..' in rel.parts or not allowed:raise ValueError('checkpoint pointer path conflict')
++            path=parent/rel
++            if path.is_symlink() or path.resolve()!=path or not path.is_file() or sha(path)!=ptr['sha256']:raise ValueError('existing checkpoint pointer/hash conflict')
++            pointers.append((path,ptr))
+     for p in sorted(list(folder.glob('pair_u*.pt'))+list((folder/'recovery').glob('pair_u*.pt'))):
++        if p.is_symlink() or p.resolve()!=p:raise ValueError('checkpoint path conflict '+str(p))
+         x=torch.load(p,map_location='cpu',weights_only=False);body=dict(x);h=body.pop('payload_digest',None)
+-        if digest(body)!=h or x['binding']!=binding or p.name!=f"pair_u{x['updates']:08d}.pt":raise ValueError('checkpoint binding/content conflict '+str(p))
++        if digest(body)!=h or x['binding']!=binding or not isinstance(x['updates'],int) or x['updates']<0 or p.name!=f"pair_u{x['updates']:08d}.pt":raise ValueError('checkpoint binding/content conflict '+str(p))
++        if x.get('formal_native'):
++            if set(x['models'])!={'base','role'} or set(x['optimizers'])!={'base','role'}:raise ValueError('paired checkpoint arms conflict')
++            for arm in ('base','role'):
++                steps=[int(v['step']) for v in x['optimizers'][arm]['state'].values() if 'step' in v]
++                # Intermittently unused parameters need not have every step.
++                if steps and (max(steps)!=x['updates'] or min(steps)<0):raise ValueError('paired optimizer update count conflict')
++        for path,ptr in pointers:
++            if path==p and (ptr['updates']!=x['updates'] or ptr['payload_digest']!=h):raise ValueError('checkpoint pointer metadata conflict')
++        if any(u==x['updates'] and previous['payload_digest']!=h for u,_,previous in valid):raise ValueError('same-update checkpoint content conflict')
+         valid.append((x['updates'],p,x))
+     if not valid:raise FileNotFoundError('no valid checkpoint')
+-    _,p,x=max(valid,key=lambda y:y[0]);save(folder/'latest.json',{'path':p.name,'sha256':sha(p),'updates':x['updates'],'payload_digest':x['payload_digest']})
++    if any(not any(path==p for _,p,_ in valid) for path,_ in pointers):raise ValueError('pointer does not name a validated checkpoint')
++    _,p,x=max(valid,key=lambda y:y[0]);save(folder/'latest.json',{'path':str(p.relative_to(folder)),'sha256':sha(p),'updates':x['updates'],'payload_digest':x['payload_digest']})
+     return x
+ def rolling_recovery(folder,value):
+     # Permanent initial/1000-update/final checkpoints stay in parent. At most
+     # two extra 30-minute recovery files from THIS run are retained.
+     rec=Path(folder)/'recovery';rec.mkdir(exist_ok=True);result=checkpoint(rec,value)
++    ptr=read(rec/'latest.json');ptr['path']='recovery/'+ptr['path'];save(Path(folder)/'latest.json',ptr)
+     old=sorted(rec.glob('pair_u*.pt'))
+     for item in old[:-2]:item.unlink()
+     return result
+@@ -192,6 +208,54 @@
+                     'family_calibration_bins_count_sumP_sumY':family_cal.tolist(),'coverage_sha256':digest(coverage)})
+     finally:rng_restore(saved,rng,device);model.train(training)
+     return {'rows':rows,'wall_seconds':time.perf_counter()-start,'same_reference_only':True,'RNG_restored':True,'mode':'ordinary' if not torch.are_deterministic_algorithms_enabled() else 'strict'}
++
++def storage_requirement(out,cfg,resume=False):
++    """Conservative remaining writes; never delete files or certify persistence."""
++    out=Path(out).resolve();GiB=1024**3;per_pair=192*1024**2
++    planned=[];rolling=[];all_files=[]
++    for seed in cfg['train_seeds']:
++        folder=out/f'seed{seed}'/'checkpoints'
++        planned.extend(folder/f'pair_u{u:08d}.pt' for u in range(0,cfg['max_updates']+1,cfg['checkpoint_every_updates']))
++        rolling.extend(sorted((folder/'recovery').glob('pair_u*.pt')))
++        all_files.extend(folder.glob('pair_u*.pt'))
++    all_files+=rolling
++    if any(p.is_symlink() for p in all_files):raise ValueError('storage checkpoint symlink rejected')
++    per_pair=max([per_pair]+[p.stat().st_size for p in all_files])
++    retained_planned=[p for p in planned if p.is_file()]
++    credit=sum(p.stat().st_size for p in retained_planned)+sum(p.stat().st_size for p in rolling)
++    missing_permanent=len(planned)-len(retained_planned)
++    missing_rolling=sum(max(0,2-len(list((out/f'seed{seed}'/'checkpoints'/'recovery').glob('pair_u*.pt')))) for seed in cfg['train_seeds'])
++    # Atomic replacement workspace + one possible extra STOP checkpoint/seed.
++    remaining_checkpoint_bytes=(missing_permanent+missing_rolling+2+len(cfg['train_seeds']))*per_pair
++    io_reserve=2*GiB+512*1024**2
++    dynamic=(remaining_checkpoint_bytes*5+3)//4+io_reserve
++    initial_floor=cfg['minimum_free_disk_bytes']
++    required=max(dynamic,initial_floor-min(credit,initial_floor) if resume else initial_floor)
++    stat=os.stat(out);mount=None
++    try:
++        def unescape(v):
++            for a,b in (('\\040',' '),('\\011','\t'),('\\134','\\')):v=v.replace(a,b)
++            return v
++        entries=[]
++        for line in Path('/proc/self/mountinfo').read_text().splitlines():
++            before,after=line.split(' - ',1);fields=before.split();extra=after.split();point=Path(unescape(fields[4]))
++            if point==out or point in out.parents:entries.append((len(point.parts),{'mount_point':str(point),'filesystem':extra[0],'source':unescape(extra[1]),'major_minor':fields[2]}))
++        if entries:mount=max(entries,key=lambda x:x[0])[1]
++    except (OSError,ValueError,IndexError):pass
++    free=shutil.disk_usage(out).free
++    return {'mode':'resume' if resume else 'fresh','output_path':str(out),'filesystem_device_id':stat.st_dev,'mount':mount,
++        'persistence_verified':False,'persistent_storage_requires_operator_confirmation':True,
++        'free_bytes':free,'required_free_bytes':required,'per_pair_conservative_bytes':per_pair,
++        'retained_planned_checkpoint_files':len(retained_planned),'retained_inventory_credit_bytes':credit if resume else 0,
++        'remaining_permanent_checkpoint_files':missing_permanent,'remaining_rolling_slots':missing_rolling,
++        'checkpoint_write_margin_factor':1.25,'IO_and_graph_reserve_bytes':io_reserve,'automatic_cleanup':False,'sufficient':free>=required}
++
++def check_storage(out,cfg,resume=False):
++    report=storage_requirement(out,cfg,resume)
++    save(Path(out)/'storage.json',report)
++    if not report['sufficient']:raise OSError('insufficient free space on actual output filesystem: need '+str(report['required_free_bytes'])+' bytes, have '+str(report['free_bytes']))
++    return report
++
+ def environment(device):
+     x=c.environment(device);x['visibility']=os.environ.get('CUDA_VISIBLE_DEVICES');x['HIP_visibility']={k:os.environ.get(k) for k in ('HIP_VISIBLE_DEVICES','ROCR_VISIBLE_DEVICES')}
+     x['free_disk_bytes']=shutil.disk_usage(ROOT).free
+--- a/package/preflight.py
++++ b/package/preflight.py
+@@ -74,10 +74,10 @@
+             one,_=p.update(gpu,opt,case,inputs,cfg)
+             if p.digest(gpu.state_dict())!=p.digest(y[2]):raise AssertionError('strict same-device first update not exact')
+             payload={'binding':{'fixture':arm},'updates':1,'models':p.cpu(gpu.state_dict()),'optimizer':p.cpu(opt.state_dict()),'rng':p.rng_save(rng,device)}
+-            folder=out/('gate_'+arm);p.checkpoint(folder,payload)
++            folder=out/('gate_'+arm);io_start=time.perf_counter();saved_path=p.checkpoint(folder,payload);save_seconds=time.perf_counter()-io_start
+             cont,_=p.update(gpu,opt,case,inputs,cfg);expected=p.cpu(gpu.state_dict());expected_opt=p.cpu(opt.state_dict())
+             fresh=create(case,cfg,995,arm,device);fresh.set_target(target_for);fo=p.optimizer(fresh,cfg)
+-            ck=p.load_checkpoint(folder,{'fixture':arm});fresh.load_state_dict(ck['models'],strict=True);fo.load_state_dict(ck['optimizer']);p.rng_restore(ck['rng'],rng,device)
++            io_start=time.perf_counter();ck=p.load_checkpoint(folder,{'fixture':arm});fresh.load_state_dict(ck['models'],strict=True);fo.load_state_dict(ck['optimizer']);p.rng_restore(ck['rng'],rng,device);restore_seconds=time.perf_counter()-io_start
+             if p.digest(fresh.state_dict())!=p.digest(ck['models']) or p.digest(fo.state_dict())!=p.digest(ck['optimizer']) or p.digest(p.rng_save(rng,device))!=p.digest(ck['rng']):raise AssertionError('loaded bytes/state differ')
+             # Reader hook must follow the restored model, never the discarded one.
+             reader.close();reader=Reader(check,verify_context=True).install(fresh)
+@@ -86,7 +86,8 @@
+             if p.digest(fo.state_dict())!=p.digest(expected_opt):raise AssertionError('strict optimizer continuation differs')
+             records[arm]={'logits_max_abs':float((outputs[0][0]-outputs[1][0]).abs().max()),'p0_max_abs':float((outputs[0][1]-outputs[1][1]).abs().max()),
+                 'gradient_max_abs':max(float((x[1][k]-y[1][k]).abs().max()) for k in x[1]),'cross_backend_Adam_parameter_max_abs_descriptive':max_parameter,
+-                'strict_repeat_exact':True,'strict_save_resume_pass':True,'parameter_changed':bool(one['parameter_changed']),'participating_gradients':len(x[1]),'CPU_GPU_updated_weights_required_identical':False}
++                'strict_repeat_exact':True,'strict_save_resume_pass':True,'parameter_changed':bool(one['parameter_changed']),'participating_gradients':len(x[1]),'CPU_GPU_updated_weights_required_identical':False,
++                'temporary_checkpoint_bytes':saved_path.stat().st_size,'temporary_checkpoint_save_seconds':save_seconds,'restore_and_device_load_seconds':restore_seconds}
+             if not one['parameter_changed']:raise AssertionError('no optimizer update')
+         finally:reader.close()
+         checks.append(arm+'_forward_loss_gradients_strict_update_resume')
+@@ -154,13 +155,13 @@
+     try:
+         check();manifest=p.verify_package();p.setup(x.device,True);p.acquire_guard(out,x.device);env=p.environment(x.device);p.save(out/'environment.json',env)
+         if x.device=='cpu' and not x.fixture_only:raise ValueError('CPU gate is fixture-only; no GPU certification')
+-        free=__import__('shutil').disk_usage(out).free
+-        if free<cfg['minimum_free_disk_bytes']:raise OSError('persistent output free space below16GiB; do not overwrite existing files')
++        p.check_storage(out,cfg,False)
+         data['numerical_gate']=gate(out,x.device,cfg,check);p.save(out/'numerical_gate.json',data['numerical_gate'])
+         p.setup(x.device,False)
+         if not x.fixture_only:data['cost']=cost(out,x.device,cfg,check)
+         data.update(package_manifest_sha256=manifest,config_sha256=p.sha(p.ROOT/'config.json'),runtime_binding=p.bound_environment(p.environment(x.device)))
+         status='passed_engineering_fixture' if x.fixture_only else 'passed_target_GPU'
++    except (InterruptedError,TimeoutError) as exc:status='incomplete';error=repr(exc);raise
+     except BaseException as exc:error=repr(exc);raise
+     finally:
+         resources=p.c.memory('cpu')
+--- a/package/run.py
++++ b/package/run.py
+@@ -56,6 +56,10 @@
+             except ProcessLookupError:pass
+             child.wait()
+         for sig,fn in old.items():signal.signal(sig,fn)
++        if reason is not None and receipt=='preflight.json':
++            previous=read(out/receipt) if (out/receipt).exists() else {}
++            write(out/receipt,dict(previous,status='incomplete',stop_reason=reason,target_GPU_gate_passed=False,full_IMDB_cost_complete=False,
++                checks=previous.get('checks',[]),not_algorithm_failure=reason in ('timeout','STOP') or reason.startswith('signal_')))
+         write(out/'supervisor.json',{'status':'completed' if exitcode==0 and reason is None else 'failed_or_incomplete','child_exit_code':exitcode,'reason':reason,
+             'wall_seconds':time.time()-began,'deadline_epoch':deadline,'cleanup_extra_seconds':max(0,time.time()-deadline),
+             'stop_cleanup_seconds':time.time()-stop_epoch if stop_epoch is not None else 0,
+@@ -72,7 +76,7 @@
+     a=p.parse_args()
+     if a.mode=='plan':print(json.dumps(plan(),indent=2));return 0
+     if a.mode=='progress':
+-        for n in ('activation.json','process.json','progress.json','preflight.json','summary.json','supervisor.json'):
++        for n in ('activation.json','process.json','progress.json','storage.json','preflight.json','summary.json','supervisor.json'):
+             if (a.output/n).exists():
+                 value=read(a.output/n)
+                 if n=='preflight.json':
+--- /dev/null
++++ b/package/tests/restore_pair_worker.py
+@@ -0,0 +1,37 @@
++"""Fresh-process checkpoint exercise with tiny disposable paired modules."""
++import random,sys
++from pathlib import Path
++import numpy as np
++import torch
++import pair_core as p
++
++def fresh():
++    models={arm:torch.nn.Linear(3,2) for arm in ('base','role')}
++    models['role'].load_state_dict(models['base'].state_dict())
++    opts={arm:torch.optim.AdamW(m.parameters(),lr=2e-4) for arm,m in models.items()}
++    return models,opts
++
++def step(models,opts,rng,u):
++    inp=p.input_pair(p.toy(),p.config(),7,u)
++    x=torch.randn(2,3)+float(rng.random())+random.random()+float(np.random.random())
++    y=torch.tensor([[1.,0.],[0.,1.]])
++    for arm,m in models.items():
++        opts[arm].zero_grad(set_to_none=True)
++        (m(x)-y).square().sum().backward();opts[arm].step()
++    return p.digest([x]+[[v[k] for k in ('edges','query','f','labels','t')] for v in inp])
++
++def pack(models,opts,rng,u):
++    return {'binding':{'fixture':'two-arm fresh-process'},'updates':u,'formal_native':True,
++        'models':{a:p.cpu(m.state_dict()) for a,m in models.items()},
++        'optimizers':{a:p.cpu(o.state_dict()) for a,o in opts.items()},'rng':p.rng_save(rng,'cpu')}
++
++def main():
++    p.setup('cpu',True);folder=Path(sys.argv[1]);dest=Path(sys.argv[2]);models,opts=fresh();rng=np.random.default_rng(999)
++    ck=p.load_checkpoint(folder,{'fixture':'two-arm fresh-process'})
++    for arm in models:models[arm].load_state_dict(ck['models'][arm]);opts[arm].load_state_dict(ck['optimizers'][arm])
++    p.rng_restore(ck['rng'],rng,'cpu')
++    restored=p.digest(pack(models,opts,rng,ck['updates']))
++    inp=step(models,opts,rng,ck['updates']);result=pack(models,opts,rng,ck['updates']+1)
++    torch.save({'restored':restored,'input':inp,'after':result},dest)
++
++if __name__=='__main__':main()
+--- /dev/null
++++ b/package/tests/test_resume_storage.py
+@@ -0,0 +1,117 @@
++"""Temporary engineering checkpoints only; no scientific training."""
++import copy,json,os,random,subprocess,sys
++from pathlib import Path
++import numpy as np
++import pytest
++import torch
++import pair_core as p
++
++def value(u):
++    return {'binding':{'fixture':'pointer regression'},'updates':u,'model':torch.tensor([float(u)])}
++
++def test_recovery_pointer_second_resume_then_stop_before_milestone(tmp_path):
++    p.checkpoint(tmp_path,value(0))
++    p.rolling_recovery(tmp_path,value(123))
++    assert p.load_checkpoint(tmp_path,value(0)['binding'])['updates']==123
++    assert p.load_checkpoint(tmp_path,value(0)['binding'])['updates']==123
++    p.rolling_recovery(tmp_path,value(127))
++    assert p.load_checkpoint(tmp_path,value(0)['binding'])['updates']==127
++    assert p.load_checkpoint(tmp_path,value(0)['binding'])['updates']==127
++    for u in (130,133,136):p.rolling_recovery(tmp_path,value(u))
++    assert p.load_checkpoint(tmp_path,value(0)['binding'])['updates']==136
++    assert len(list((tmp_path/'recovery').glob('*.pt')))==2
++
++def test_permanent_pointer_repeat_restore_and_evaluation_file(tmp_path):
++    for u in (0,1000):p.checkpoint(tmp_path,value(u))
++    for _ in range(2):assert p.load_checkpoint(tmp_path,value(0)['binding'])['updates']==1000
++    assert torch.load(tmp_path/'pair_u00001000.pt',weights_only=False)['updates']==1000
++
++@pytest.mark.parametrize('mutation',['missing','hash','updates','payload','absolute','escape','symlink'])
++def test_checkpoint_pointer_conflicts_fail_closed(tmp_path,mutation):
++    folder=tmp_path/'checkpoints';folder.mkdir();file=p.checkpoint(folder,value(1000));ptr=p.read(folder/'latest.json')
++    if mutation=='missing':file.unlink()
++    elif mutation=='hash':ptr['sha256']='0'*64
++    elif mutation=='updates':ptr['updates']=1001
++    elif mutation=='payload':ptr['payload_digest']='0'*64
++    elif mutation=='absolute':ptr['path']=str(file.resolve())
++    elif mutation=='escape':ptr['path']='../'+file.name
++    else:
++        other=tmp_path/file.name;file.rename(other);file.symlink_to(other)
++    p.save(folder/'latest.json',ptr)
++    with pytest.raises((ValueError,FileNotFoundError)):p.load_checkpoint(folder,value(0)['binding'])
++
++def test_same_update_two_locations_conflict_rejected(tmp_path):
++    p.checkpoint(tmp_path,value(10));v=value(10);v['model']=torch.tensor([999.])
++    p.rolling_recovery(tmp_path,v)
++    with pytest.raises(ValueError,match='conflict'):p.load_checkpoint(tmp_path,v['binding'])
++
++def test_two_arms_optimizers_rng_and_following_input_new_process(tmp_path):
++    from restore_pair_worker import fresh,step,pack
++    p.setup('cpu',True);torch.manual_seed(81);random.seed(82);np.random.seed(83);rng=np.random.default_rng(84)
++    models,opts=fresh();folder=tmp_path/'checkpoints';folder.mkdir()
++    p.checkpoint(folder,pack(models,opts,rng,0))
++    step(models,opts,rng,0);p.rolling_recovery(folder,pack(models,opts,rng,1))
++    ck=p.load_checkpoint(folder,{'fixture':'two-arm fresh-process'});assert ck['updates']==1
++    step(models,opts,rng,1);saved=pack(models,opts,rng,2);p.rolling_recovery(folder,saved)
++    assert p.load_checkpoint(folder,saved['binding'])['updates']==2
++    inp=step(models,opts,rng,2);expected=pack(models,opts,rng,3)
++    dest=tmp_path/'continued.pt';env=dict(os.environ,OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1',PYTHONPATH=str(p.ROOT))
++    worker=Path(__file__).with_name('restore_pair_worker.py')
++    proc=subprocess.run([sys.executable,str(worker),str(folder),str(dest)],env=env,capture_output=True,text=True,timeout=30)
++    assert proc.returncode==0,proc.stdout+proc.stderr
++    got=torch.load(dest,weights_only=False)
++    assert got['restored']==p.digest(saved) and got['input']==inp and p.digest(got['after'])==p.digest(expected)
++    assert all(int(state['step'])==3 for opt in got['after']['optimizers'].values() for state in opt['state'].values())
++
++@pytest.mark.parametrize('bad',['arm','step'])
++def test_paired_content_rejected_even_with_valid_recomputed_digest(tmp_path,bad):
++    from restore_pair_worker import fresh,step,pack
++    models,opts=fresh();rng=np.random.default_rng(84);step(models,opts,rng,0);v=pack(models,opts,rng,1)
++    if bad=='arm':v['optimizers'].pop('role')
++    else:next(iter(v['optimizers']['role']['state'].values()))['step']=torch.tensor(9.)
++    p.checkpoint(tmp_path,v)
++    with pytest.raises(ValueError,match='paired'):p.load_checkpoint(tmp_path,v['binding'])
++
++def test_storage_fresh_and_resume_credit_real_retained_checkpoints(tmp_path):
++    cfg=p.config();initial=p.storage_requirement(tmp_path,cfg,False)
++    assert initial['required_free_bytes']>=16*1024**3 and initial['remaining_permanent_checkpoint_files']==39
++    folder=tmp_path/f"seed{cfg['train_seeds'][0]}"/'checkpoints';folder.mkdir(parents=True)
++    for u in (0,1000,2000):
++        with (folder/f'pair_u{u:08d}.pt').open('wb') as f:f.truncate(160*1024**2)
++    result=p.storage_requirement(tmp_path,cfg,True)
++    assert result['retained_inventory_credit_bytes']==3*160*1024**2
++    assert result['remaining_permanent_checkpoint_files']==36
++    assert result['required_free_bytes']<initial['required_free_bytes']
++    assert result['required_free_bytes']>2*1024**3 and not result['persistence_verified']
++    assert result['filesystem_device_id']==tmp_path.stat().st_dev and result['output_path']==str(tmp_path.resolve())
++    assert result['mount'] is None or Path(result['mount']['mount_point']) in (tmp_path.resolve(),*tmp_path.resolve().parents)
++
++def test_space_gate_checks_output_volume_and_keeps_existing_files(tmp_path,monkeypatch):
++    from types import SimpleNamespace
++    seen=[];existing=tmp_path/'old-result.txt';existing.write_text('preserve')
++    def low(path):seen.append(Path(path));return SimpleNamespace(free=1024)
++    monkeypatch.setattr(p.shutil,'disk_usage',low)
++    with pytest.raises(OSError,match='insufficient free space'):p.check_storage(tmp_path,p.config(),True)
++    assert seen==[tmp_path.resolve()] and existing.read_text()=='preserve'
++    assert not p.read(tmp_path/'storage.json')['sufficient']
++
++def test_space_gate_preserves_safety_margin_after_all_milestones(tmp_path,monkeypatch):
++    from types import SimpleNamespace
++    cfg=p.config()
++    for seed in cfg['train_seeds']:
++        folder=tmp_path/f'seed{seed}'/'checkpoints';folder.mkdir(parents=True)
++        for u in range(0,12001,1000):
++            with (folder/f'pair_u{u:08d}.pt').open('wb') as f:f.truncate(160*1024**2)
++    report=p.storage_requirement(tmp_path,cfg,True)
++    assert report['remaining_permanent_checkpoint_files']==0 and 2*1024**3<report['required_free_bytes']<16*1024**3
++    monkeypatch.setattr(p.shutil,'disk_usage',lambda path:SimpleNamespace(free=report['required_free_bytes']))
++    assert p.check_storage(tmp_path,cfg,True)['sufficient']
++    monkeypatch.setattr(p.shutil,'disk_usage',lambda path:SimpleNamespace(free=report['required_free_bytes']-1))
++    with pytest.raises(OSError):p.check_storage(tmp_path,cfg,True)
++
++def test_preflight_supervisor_timeout_is_incomplete_not_algorithm_failure(tmp_path):
++    from run import supervise
++    code=supervise([sys.executable,'-c','import time;time.sleep(20)'],tmp_path,__import__('time').time()+.1,'preflight.json',grace=.1)
++    result=p.read(tmp_path/'preflight.json')
++    assert code!=0 and result['status']=='incomplete' and result['not_algorithm_failure']
++    assert not result['target_GPU_gate_passed'] and not result['full_IMDB_cost_complete']

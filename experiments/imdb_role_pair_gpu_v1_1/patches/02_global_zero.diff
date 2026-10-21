@@ -1,0 +1,35 @@
+--- a/hsgd/vendor/layers.py
++++ b/hsgd/vendor/layers.py
+@@ -31,7 +31,7 @@
+         super().__init__()
+         self.lin = nn.Linear(4 * d, dy)
+ 
+-    def forward(self, edge_index, edge_attr, batch, top_triu=False):
++    def forward(self, edge_index, edge_attr, batch, top_triu=False, num_graphs=None):
+         """E: M, de
+         Features relative to the diagonal of E could potentially be added.
+         """
+@@ -57,7 +57,11 @@
+             std = pool.global_mean_pool(std, batchE)
+ 
+             len_m = len(m)
+-            z = torch.zeros((batch.max() + 1, 4 * dy)).to(edge_index.device)
++            # Production passes the known global-state row count; no GPU scalar
++            # extraction, CPU allocation, or CPU-to-device zero copy.
++            if num_graphs is None:
++                num_graphs = int(batch.max()) + 1
++            z = edge_attr.new_zeros((num_graphs, 4 * dy))
+             z[:len_m, :dy] = m
+             z[:len_m, dy : 2 * dy] = mi
+             z[:len_m, 2 * dy : 3 * dy] = ma
+--- a/hsgd/vendor/transconv_layer.py
++++ b/hsgd/vendor/transconv_layer.py
+@@ -214,7 +214,7 @@
+ 
+     def predict_graph(self, y, x, edge_index, edge_attr, batch):
+         y = self.y_y(y)
+-        e_y = self.e_y(edge_index, edge_attr, batch, top_triu=True)
++        e_y = self.e_y(edge_index, edge_attr, batch, top_triu=True, num_graphs=y.shape[0])
+         x_y = self.x_y(x, batch)
+         new_y = y + x_y + e_y
+         new_y = self.y_out(new_y)  # bs, dy

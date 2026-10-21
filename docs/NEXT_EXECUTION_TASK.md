@@ -1,5 +1,9 @@
 # Current execution task
 
+2026-10-21 当前票：bb32bfa基线独立imdb_role_pair_gpu_v1_1恢复/空间小修与Notebook交接，累计30分钟到13:02:50Z止。
+92项回归通过，新manifest CPU夹具通过；独立解包和发布后停止，下一步由接手助手核实Notebook环境并手动preflight（570秒）。
+formal、GPU科学训练、完整大图链和PubMed未授权；旧GPU梯度失败保留，不能用CPU证据或旧包预检授权新包。
+
 2026-10-21 IMDB配对运行包交付完成，固定83356d5fb34e90a856f3efc9eb88d088341bb026，远端ZIP字节已核验。
 当前停止。用户下一步仅在notebook手动preflight，回传GPU数值门/完整IMDB临时更新与20块单步成本；未测前不授权正式训练。
 formal默认禁用，三seed/12000/normal2/96链为待确认方案；源/解包75项通过不能代替GPU梯度门或正式预算确认。

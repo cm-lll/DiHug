@@ -1,0 +1,144 @@
+{
+  "version": "imdb_role_pair_gpu_v1_1",
+  "dataset": "IMDB",
+  "base_commit": "dd53b6431303263e740abedf67e01d7dfc13d15b",
+  "backend": "upstream",
+  "T": 1000,
+  "rounds": 20,
+  "schedule_offset": 0.008,
+  "model": {
+    "layers": 8,
+    "width": 256,
+    "edge_width": 64,
+    "global_width": 128,
+    "heads": 8,
+    "ff_node": 256,
+    "ff_edge": 64,
+    "ff_global": 256,
+    "dropout": 0.1,
+    "cn_hidden": 32,
+    "joint_width": 128,
+    "max_wedges": 2000000,
+    "max_query_paths": 2000000
+  },
+  "optimizer": {
+    "type": "AdamW",
+    "lr": 0.0002,
+    "weight_decay": 1e-12,
+    "betas": [
+      0.9,
+      0.999
+    ],
+    "eps": 1e-08,
+    "amsgrad": false
+  },
+  "scheduler": null,
+  "microbatch": 1,
+  "gradient_accumulation": 2,
+  "gradient_clipping": null,
+  "lr_warmup": null,
+  "precision": "FP32 network/stable CE; float64 probability kernel",
+  "train_seed": 2026101901,
+  "validation_seed": 2026102171,
+  "sample_seed": 2026101921,
+  "validation_times": [
+    1,
+    250,
+    500,
+    750,
+    1000
+  ],
+  "validation_every_updates": 1000,
+  "max_updates": 12000,
+  "checkpoint_every_updates": 1000,
+  "evaluation_updates": [
+    6000,
+    12000
+  ],
+  "samples_per_checkpoint": 8,
+  "deterministic_training": false,
+  "tf32": false,
+  "torch_threads": 1,
+  "role_guidance": false,
+  "postprocessing": false,
+  "data": {
+    "file": "data/IMDB.npz",
+    "sha256": "10f1dbbbe55c6a069594b2dcb590d1b8295ca5436320ef4597cd30e6b7f73e42",
+    "nodes": 1653,
+    "edges": 4079,
+    "type_counts": [
+      410,
+      494,
+      726,
+      23
+    ],
+    "type_names": [
+      "Director",
+      "Actor",
+      "Movie",
+      "Genre"
+    ],
+    "family_counts": [
+      0,
+      604,
+      642,
+      0,
+      15,
+      739,
+      0,
+      0,
+      2079,
+      0
+    ],
+    "relation_storage": "one-based in NPZ, zero-based in model; one relation per unordered type pair"
+  },
+  "provenance": {
+    "confirmed": "Baseline model, stable CE, cosine kernel and engineering entry optimizer",
+    "formal_6000_entry_verified": false,
+    "missing": [
+      "old formal 6000-update launcher",
+      "old formal resolved_config and optimizer/seed receipt"
+    ],
+    "optimizer_source": "dd53 hsgd/fusion_preflight.py AdamW; default betas/eps expanded explicitly",
+    "dropout": "configured 0.1; vendor forward contains no active dropout operation",
+    "new_engineering_choices": [
+      "new train/validation/sample seeds",
+      "12000-update schedule and permanent milestones",
+      "full-cover fixed validation panel",
+      "no scheduler or LR warmup, per engineering entry; old formal setup not independently verified"
+    ]
+  },
+  "baseline_commit": "f4d410cc37a76b065634eadb27a5421d53f638a0",
+  "arms": [
+    "base",
+    "role"
+  ],
+  "train_seeds": [
+    2026102151,
+    2026102152,
+    2026102153
+  ],
+  "sampling_seeds": [
+    2026102161,
+    2026102162,
+    2026102163,
+    2026102164,
+    2026102165,
+    2026102166,
+    2026102167,
+    2026102168
+  ],
+  "input_seed": 2026102172,
+  "proposal_only": true,
+  "formal_authorized": false,
+  "training_inputs_per_update": 2,
+  "full_cost_updates": 72000,
+  "full_cost_chains": 96,
+  "preflight_total_seconds": 570,
+  "numerical_atol": 2e-06,
+  "numerical_rtol": 1e-05,
+  "minimum_free_disk_bytes": 17179869184,
+  "selected_device_rng_only": true,
+  "target_statistics": "same training reference anonymous complete joint role multiset; not unseen condition or unseen graph generalization",
+  "training_augmentation": "none; single fixed complete graph; no relabeling called unseen topology"
+}
