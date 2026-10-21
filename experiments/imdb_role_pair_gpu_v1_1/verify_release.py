@@ -14,6 +14,7 @@ def main():
     p=root/'package';env=dict(os.environ,OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1',PYTEST_ADDOPTS='',PYTEST_PLUGINS='',PYTEST_DISABLE_PLUGIN_AUTOLOAD='1',PYTHONPATH=str(p))
     subprocess.run([sys.executable,str(p/'run.py'),'--help'],check=True,capture_output=True,env=env,cwd=p,timeout=10)
     subprocess.run([sys.executable,str(p/'run.py'),'plan'],check=True,capture_output=True,env=env,cwd=p,timeout=10)
+    subprocess.run([sys.executable,'-c','import pair_core; print(pair_core.verify_package())'],check=True,capture_output=True,env=env,cwd=p,timeout=20)
     with (R/'unpacked_tests.log').open('w') as log:
         result=subprocess.run([sys.executable,'-m','pytest','-q','-c','/dev/null','--confcutdir='+str(p),str(p/'tests'),'--junitxml='+str(R/'unpacked_tests.xml')],cwd=p,env=env,stdout=log,stderr=subprocess.STDOUT,timeout=120)
     assert result.returncode==0
@@ -21,7 +22,7 @@ def main():
     names=lambda t:sorted((e.get('classname').split('.')[-1],e.get('name')) for e in t.findall('.//testcase'))
     assert names(x)==names(expected) and not x.findall('.//failure')+x.findall('.//error')+x.findall('.//skipped')
     assert names(x)==[tuple(v) for v in json.loads((R/'evidence/test_collection.json').read_text())['test_names']]
-    record={'status':'passed','checksummed_files':count,'test_count':len(names(x)),'exact_test_collection':True,'zero_skips':True,'entry_help_and_plan':True,
+    record={'status':'passed','checksummed_files':count,'test_count':len(names(x)),'exact_test_collection':True,'zero_skips':True,'entry_help_and_plan':True,'runtime_package_manifest_verified':True,
         'wall_seconds':time.perf_counter()-started,'source':str(root),'notebook_or_GPU_test':False,'formal_training_or_large_chain':False}
     (R/'unpacked_acceptance.json').write_text(json.dumps(record,indent=2)+'\n');print(json.dumps(record))
 if __name__=='__main__':main()

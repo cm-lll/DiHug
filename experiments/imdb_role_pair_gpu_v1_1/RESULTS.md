@@ -28,6 +28,7 @@ preflight的570秒总门不变；超时/STOP记录incomplete、非零退出，�
 
 实际依赖：Python3.9.23、Torch2.1.0、PyG2.3.1、NumPy1.26.4、SciPy1.11.0、NetworkX2.8.7、pytest7.4.4；单线程CPU，本票不调用GPU。
 独立解包结果另见unpacked_acceptance.json，必须同一92项集合零跳过、载荷哈希与入口help/plan均通过，不能以旧75项替代。
+交付闭包检查另发现构建脚本漏打无扩展名LICENSE，已修复并增加manifest载荷闭包断言；独立解包实际调用verify_package()，不只核对ZIP内已有文件。未发布草稿ZIP留存，不作为可用交付。
 
 ## 科学设置未改变
 

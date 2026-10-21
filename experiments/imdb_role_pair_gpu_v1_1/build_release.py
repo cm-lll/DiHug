@@ -8,9 +8,11 @@ def main():
     for p in R.rglob('*'):
         if not p.is_file() or '__pycache__' in p.parts or '.pytest_cache' in p.parts:continue
         if p.suffix in ('.zip','.pt','.pth','.pyc','.pem') or p.name in ('release_receipt.json','SHA256SUMS','unpacked_acceptance.json','unpacked_tests.xml','unpacked_tests.log'):continue
-        if p.suffix not in ('.py','.json','.txt','.md','.sh','.diff','.patch','.xml','.log','.npz'):continue
+        if p.name!='LICENSE' and p.suffix not in ('.py','.json','.txt','.md','.sh','.diff','.patch','.xml','.log','.npz'):continue
         if p.suffix=='.npz' and p!=R/'package/data/IMDB.npz':raise ValueError('unexpected dataset/result array '+str(p))
         files.append(p)
+    required={R/'package'/n for n in json.loads((R/'package/manifest.json').read_text())['files']}
+    if not required<=set(files):raise ValueError('release omits manifest payload: '+str(sorted(map(str,required-set(files)))))
     checks=''.join(f'{sha(p)}  {p.relative_to(R)}\n' for p in sorted(files));archive=R/'dihug_imdb_role_pair_gpu_v1_1.zip'
     with zipfile.ZipFile(archive,'x',zipfile.ZIP_DEFLATED) as z:
         for p in files:z.write(p,'imdb_role_pair_gpu_v1_1/'+str(p.relative_to(R)))
