@@ -9,7 +9,10 @@ sys.path.insert(0,str(EXP/'role_newton_reader_v1'))
 import solver as newton
 c=old.c;np=c.np;torch=c.torch
 OUT=Path('/data2/lyh/gnn_project/DiHug/results/role_newton_generation_20261021_v1')
-read=c.read;save=c.save;sha=c.sha
+read=c.read;sha=c.sha
+def save(p,x):
+    p=Path(p);q=p.with_name(p.name+'.tmp')
+    q.write_text(json.dumps(x,indent=2,allow_nan=False,default=lambda v:v.item() if isinstance(v,np.generic) else (_ for _ in ()).throw(TypeError(type(v).__name__)))+'\n');q.replace(p)
 SEEDS=[2026102011,2026102012,2026102013];ARMS=['DP','Newton']
 def check():
     if (OUT/'STOP').exists():raise InterruptedError('STOP')

@@ -18,3 +18,6 @@ def test_reader_rng_unchanged(tmp_path,monkeypatch):
     monkeypatch.setattr(g,'check',lambda:None);g.np.random.seed(32);before=g.np.random.get_state()
     reader=g.Reader('Newton',tmp_path);reader.begin(1);reader(g.np.array([[0.,1.],[1.,0.]]),g.np.array([1,1]))
     after=g.np.random.get_state();assert g.np.array_equal(before[1],after[1]) and before[2:]==after[2:]
+def test_numpy_receipt_serialization(tmp_path):
+    p=tmp_path/'receipt.json';g.save(p,dict(passed=g.np.bool_(True),steps=g.np.int64(1)))
+    assert g.read(p)==dict(passed=True,steps=1)
