@@ -1,5 +1,9 @@
 # Current execution task
 
+2026-10-21 v1.1本地修复、92源回归、92解包回归、CPU公开夹具与GitHub发布/远端ZIP哈希核验完成；当前停止。
+固定发行850ed46ebff3d49420e07b0ad1e87bff64e13ea9，下一步由接手助手核实Notebook实际环境与持久卷，在新目录执行570秒preflight。
+回传preflight/supervisor/环境/数值门/两臂完整成本与日志后再提正式预算；不自动训练或完整大图生成。
+
 2026-10-21 当前票：bb32bfa基线独立imdb_role_pair_gpu_v1_1恢复/空间小修与Notebook交接，累计30分钟到13:02:50Z止。
 92项回归通过，新manifest CPU夹具通过；独立解包和发布后停止，下一步由接手助手核实Notebook环境并手动preflight（570秒）。
 formal、GPU科学训练、完整大图链和PubMed未授权；旧GPU梯度失败保留，不能用CPU证据或旧包预检授权新包。
