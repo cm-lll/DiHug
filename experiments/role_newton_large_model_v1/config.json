@@ -1,0 +1,15 @@
+{
+  "baseline":"8855b78b8b5b79f0a1671c2c3427647754291f21",
+  "datasets":["IMDB","PubMed"],"times":[20,500,1000],"T":1000,"rounds":20,
+  "model_seed":2026102147,"noise_seed":2026102148,"sample_seed":2026102149,
+  "weight_policy":"fresh fixed-seed initialization from existing CapacityDenoiser and source-bound large width configuration; no transferred weights; not quality evaluation",
+  "device":"cpu","threads":1,"precision":"FP32 network; float64 likelihood,Newton,kernel",
+  "process_RSS_observation_limit_bytes":8589934592,
+  "process_RLIMIT_AS_bytes":17179869184,
+  "memory_estimate_gate_bytes":6442450944,
+  "item_total_seconds":420,"item_compute_seconds":410,"cleanup_reserve_seconds":10,
+  "delivery_audit_reserve_seconds":720,"global_budget_seconds":3600,
+  "repeat":"new full inference,same input/random stream,only same-time likelihood tables reused",
+  "read_support":"unchanged;no DP fallback,no truncation",
+  "trace":"original trace=True adds duplicate diagnostic posterior; report this overhead"
+}
