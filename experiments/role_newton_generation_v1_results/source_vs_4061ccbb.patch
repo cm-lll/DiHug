@@ -1,0 +1,405 @@
+diff --git a/experiments/role_newton_generation_v1/PROTOCOL.md b/experiments/role_newton_generation_v1/PROTOCOL.md
+new file mode 100644
+index 0000000..d067993
+--- /dev/null
++++ b/experiments/role_newton_generation_v1/PROTOCOL.md
+@@ -0,0 +1,21 @@
++# Fixed-weight DP versus Newton generation, 45 cumulative minutes
++
++Baseline4061ccbb, unchanged solver ad562a70, three broad final6000 models from7b45d502.
++Two arms DP/Newton × three original train seeds × same11 frozen targets × eight original sampling seeds2026102031..38 =528 NEW T64/R4 chains.
++No fitting, old-control substitution, rejection sampling, output control, graph repair or proof-graph input.
++The original chain function, kernel, model, logits, degree laws and sampling RNG are reused unchanged.
++Initial/query/uniform/RNG hashes are checked across both arms/targets/seeds. Different states/graphs are expected.
++Every Newton read independently checks row/normalizedcolumn1e-8, full-support KKT2e-10,
++log normalization2e-12, exact mathematical support, perrow1e-280/total1e-276 tail limits and original resource/time gates.
++Actual learned role values are finite and tail-context error bound<=1e-250. No step is accepted on solver.success alone.
++Full ordinary-P original versus bounded-tail-interface success counts reported separately on NEW Newton trajectory states.
++Failure saves matrix/receipt/last complete graph+RNG and stops the panel, no silent DP fallback, altered parameters or new window.
++All raw graphs,64-step states, Newton L/P/logP, per-read receipts, paired random hashes and source/weight/target bindings retained.
++All528 graphs independently checked for schema/degree/joint frequencies/W1/connectivity/triangles/paths/closure;
++8-draw cells compared by exact type/relation-preserving isomorphism after WL prefilter, with edge distances.
++Summaries first average8draws within trainingseed, then weight3trainseeds equally;528 graphs not528 independent trainings.
++Main descriptive differences: Genre W1, MG signed edge error, sorted degree/hubs/lowtail, other types joint/degree errors,
++closure/connectivity and topology duplicates. No retrospective quality pass threshold; improvements/tradeoffs all reported.
++The prior approximate1-W1 is a historical benchmark, not a promise or retrospectively adjustable acceptance gate.
++CPU six independent1-thread processes, no CUDA initialization. One activation from first preparation,2700s total,180s parent cleanup/audit reserve.
++No new large-network, GPU/BW, training, tuning or next experiment automatically follows.
+diff --git a/experiments/role_newton_generation_v1/README.md b/experiments/role_newton_generation_v1/README.md
+new file mode 100644
+index 0000000..a9ee1de
+--- /dev/null
++++ b/experiments/role_newton_generation_v1/README.md
+@@ -0,0 +1,23 @@
++# DP versus Newton: paired full generation
++
++Scientific execution source e6f0cb15 (receipt fix after prechecks), original solver unchanged from4061ccbb.
++One45-minute ledger began at1792562319; preparation and engineering failures count. No restart/reset.
++Only3 broad coverage final6000 models;88 fresh chains per arm/seed,528 total. CPU only, no training.
++11 targets and eight seeds are frozen in results/freeze.json. No old generated graph substitutes a new run.
++Every Newton read independently verifies original capacity tolerance, KKT where support is full,
++logP/P/tail support and learned-context omission bound; failures stop without fallback.
++The six new processes call the original chain, model, query coverage, posterior and uniform draw functions.
++
++Pure CPU regression, no model fitting or chain:
++```
++OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 CUDA_VISIBLE_DEVICES= PYTEST_ADDOPTS= \
++ python -m pytest -q experiments/role_newton_generation_v1/test_integration.py \
++ experiments/role_newton_reader_v1/test_newton.py experiments/role_newton_reader_v1/test_receipt.py \
++ experiments/role_newton_reader_v1/test_imports.py experiments/role_logscale_reader_v1/test_scaling.py \
++ experiments/role_logscale_reader_v1/test_additional.py experiments/role_logscale_reader_v1/test_numeric_guard.py
++```
++Expected39 tests, zero skips. run.py is a one-use execution entry bound to the original ledger;
++launch.json exclusive creation prevents starting it again. Do not recreate activation/output to replay this ticket.
++Original private model files remain local, public delivery contains hashes and bindings only.
++STOP: create results/role_newton_generation_20261021_v1/STOP. Parent cleans its own child groups only.
++Independent evaluation and publication scripts are bound separately before audit, not model changes.
+diff --git a/experiments/role_newton_generation_v1/evaluate.py b/experiments/role_newton_generation_v1/evaluate.py
+new file mode 100644
+index 0000000..0720f6c
+--- /dev/null
++++ b/experiments/role_newton_generation_v1/evaluate.py
+@@ -0,0 +1,124 @@
++"""Independent raw-graph and every new-read audit; descriptive paired comparisons."""
++from collections import defaultdict,Counter
++import itertools,math,resource
++from generation_common import *
++sys.path.insert(0,str(EXP/'role_condition_coverage_v1'))
++import coverage_evaluation as prior
++prior.RESULT=OUT
++
++def complete_features(row):
++    f=c.features(row)
++    for r,(a,b) in enumerate(itertools.combinations_with_replacement(range(4),2)):
++        if r not in (1,2,5,8):continue
++        for typ in set((a,b)):
++            name=c.NAMES[typ];d=row['metrics']['typed_degree'][name]['by_relation'][r]
++            for k in ('max','p90','p99','zero','low_le1'):f[f'{name}_relation{r}_{k}']=d[k]
++    return f
++
++def evaluate():
++    tick=time.perf_counter();cpu=time.process_time();f=frozen();_,targets=c.load_data()
++    rows=[read(p) for p in sorted(OUT.glob('*_202610201*/*_result.json'))]
++    assert len(rows)==528
++    expected=set(itertools.product(ARMS,SEEDS,f['targets'],f['sampling_seeds']))
++    assert {(r['arm'],r['seed'],r['condition'],r['sampling_seed']) for r in rows}==expected
++    groups=defaultdict(list);Gs={};random={};reads=Counter();maxima=defaultdict(float);times=defaultdict(list);first_difference=[]
++    case=c.metadata_case(c.base,c.PANEL,targets);kernel=c.base.MarginalKernel(case['prior'],c.base.c.schedule(64))
++    stepmap={};query_cache={}
++    for i,r in enumerate(rows):
++        check();folder=OUT/f"{r['arm']}_{r['seed']}";bind=read(folder/'binding.json')
++        assert r['weight_sha256']==bind['weight']['sha256'] and r['newly_executed_chain']
++        assert r['target_fingerprint']==targets[r['condition']].fingerprint
++        for kind in ('graph','steps','trajectory','reads'):assert sha(OUT/r[kind+'_file'])==r[kind+'_sha256']
++        G=prior.independent(r,targets);Gs[r['graph_file']]=G
++        steps=read(OUT/r['steps_file']);rr=read(OUT/r['reads_file']);assert len(rr)==64 and [x['t'] for x in steps]==list(range(64,0,-1))
++        assert all(x['exact_coverage'] and x['blocks']==4 and x['covered_slots']==312 for x in steps)
++        rng=np.random.default_rng(r['sampling_seed']);initial=(rng.random(case['space'].total)<case['prior'].repeat(case['space'].counts)).astype(np.uint8)
++        assert c.base.sha(initial.tolist())==r['initial_state_sha256']
++        with np.load(OUT/r['trajectory_file']) as z:
++            states=z['states'];assert states.shape==(64,case['space'].total)
++            arrays={k:z[k] for k in z.files if k!='states'}
++            before=initial
++            for j,(s,recs) in enumerate(zip(steps,rr)):
++                check();assert len(recs)==4 and [x['type'] for x in recs]==list(range(4)) and all(x['t']==s['t'] for x in recs)
++                assert c.base.sha(states[j].tolist())==s['state_sha256'] and int(states[j].sum())==s['edge_count']
++                assert np.all(states[j][case['active'].repeat(case['space'].counts)==0]==0)
++                uniform=rng.random(case['space'].total);assert hashlib.sha256(uniform.tobytes()).hexdigest()==s['uniform_sha256']
++                assert c.base.sha(rng.bit_generator.state)==s['rng_after']
++                qkey=(r['sampling_seed'],s['t'])
++                if qkey not in query_cache:
++                    plan=c.base.c.plan_for(case,[r['sampling_seed'],s['t'],61],4);h=hashlib.sha256()
++                    for b in range(4):
++                        for ar in plan.block(b):h.update(np.ascontiguousarray(ar).tobytes())
++                    query_cache[qkey]=h.hexdigest()
++                assert query_cache[qkey]==s['query_sha256']
++                if r['arm']=='Newton':
++                    for typ,rec in enumerate(recs):
++                        L,P,LP=[arrays[f'type{typ}_{k}'][j] for k in ('L','P','logP')]
++                        counts=np.array([n for v,n in targets[r['condition']].roles[typ]])
++                        independent=verify(P,LP,L,counts,rec)
++                        assert rec['context_tail_bound']<=1e-250
++                        reads[rec['status']]+=1
++                        for key in ('row_residual','column_residual','stationarity_residual','total_omitted_mass_upper','context_tail_bound','iterations','function_evaluations'):
++                            maxima[key]=max(maxima[key],rec[key])
++                        cast=P.astype(np.float32).astype(float);vmax=rec['role_value_max'];k=P.shape[1];u=2**-24
++                        maxima['FP32_context_conversion_bound']=max(maxima['FP32_context_conversion_bound'],float(abs(cast-P).sum(1).max()*vmax))
++                        maxima['FP32_context_dot_bound']=max(maxima['FP32_context_dot_bound'],float(k*u/(1-k*u)*abs(cast).sum(1).max()*vmax+k*np.finfo(np.float32).tiny))
++                        times['Newton_reads'].append(rec['total_checked_seconds'])
++                else:
++                    reads['exact_DP']+=4
++                    times['DP_reads'] +=[x['total_checked_seconds'] for x in recs]
++                before=states[j]
++            edges,fam=c.base.c.state_edges(case,states[-1])
++            with np.load(OUT/r['graph_file']) as graph:np.testing.assert_array_equal(edges.T,graph['edges']);np.testing.assert_array_equal(fam+1,graph['relations'])
++        identity=(r['initial_state_sha256'],[(s['t'],s['uniform_sha256'],s['query_sha256'],s['rng_after']) for s in steps])
++        key=r['sampling_seed']
++        if key in random:assert random[key]==identity
++        else:random[key]=identity
++        stepmap[r['arm'],r['seed'],r['condition'],r['sampling_seed']]=steps
++        groups[r['arm'],r['seed'],r['condition']].append(r);times[r['arm']+'_chains'].append(r['seconds'])
++        if i%50==0:print('raw graph + all-read audit',i,'/528',flush=True)
++    summaries=[];classes=[]
++    import networkx as nx
++    for (arm,seed,name),group in sorted(groups.items()):
++        check();group.sort(key=lambda r:r['sampling_seed']);reps=[];freq=[];assign=[]
++        for row in group:
++            G=Gs[row['graph_file']];h=nx.weisfeiler_lehman_graph_hash(G,node_attr='type',edge_attr='relation');found=None
++            for j,(other,oh) in enumerate(reps):
++                if h==oh and nx.is_isomorphic(G,other,node_match=lambda x,y:x['type']==y['type'],edge_match=lambda x,y:x['relation']==y['relation']):found=j;break
++            if found is None:found=len(reps);reps.append((G,h));freq.append(0)
++            freq[found]+=1;assign.append(dict(sampling_seed=row['sampling_seed'],local_class=found))
++        ff=[complete_features(r) for r in group];edge_diff=[]
++        for a,b in itertools.combinations(group,2):
++            edge_diff.append(len(set(Gs[a['graph_file']].edges())^set(Gs[b['graph_file']].edges())))
++        target=sorted([v[8] for v,n in targets[name].roles[3] for _ in range(n)],reverse=True)
++        summaries.append(dict(arm=arm,seed=seed,condition=name,category=prior.category(name,read(c.RESULT/'conditions.json')),graphs=8,
++            statistics={k:c.stat([v[k] for v in ff]) for k in ff[0]},
++            sorted_G_degree_mean=np.mean([r['target_errors']['Genre']['degrees_descending'] for r in group],axis=0).tolist(),target_G_degrees=target,
++            topology_classes=len(freq),topology_frequencies=freq,mean_pair_edge_difference=float(np.mean(edge_diff)),
++            effective_classes=math.exp(-sum(n/8*math.log(n/8) for n in freq))))
++        classes.append(dict(arm=arm,seed=seed,condition=name,assignments=assign))
++    differences=[]
++    for seed,name in itertools.product(SEEDS,f['targets']):
++        a=next(x for x in summaries if (x['arm'],x['seed'],x['condition'])==('DP',seed,name));b=next(x for x in summaries if (x['arm'],x['seed'],x['condition'])==('Newton',seed,name))
++        differences.append(dict(seed=seed,condition=name,delta_Newton_minus_DP={k:b['statistics'][k]['mean']-a['statistics'][k]['mean'] if b['statistics'][k]['mean'] is not None and a['statistics'][k]['mean'] is not None else None for k in a['statistics']},topology_classes_delta=b['topology_classes']-a['topology_classes'],pair_edge_difference_delta=b['mean_pair_edge_difference']-a['mean_pair_edge_difference']))
++        for ss in f['sampling_seeds']:
++            aa=stepmap['DP',seed,name,ss];bb=stepmap['Newton',seed,name,ss];first=next((a['t'] for a,b in zip(aa,bb) if a['state_sha256']!=b['state_sha256']),None)
++            first_difference.append(dict(seed=seed,condition=name,sampling_seed=ss,first_different_t=first))
++    aggregate=[]
++    for name in f['targets']:
++        metrics={}
++        for arm in ARMS:
++            group=[x for x in summaries if x['arm']==arm and x['condition']==name]
++            metrics[arm]={k:float(np.mean([x['statistics'][k]['mean'] for x in group])) if all(x['statistics'][k]['mean'] is not None for x in group) else None for k in group[0]['statistics']}
++            metrics[arm]['mean_topology_classes']=float(np.mean([x['topology_classes'] for x in group]));metrics[arm]['mean_pair_edge_difference']=float(np.mean([x['mean_pair_edge_difference'] for x in group]))
++        aggregate.append(dict(condition=name,**metrics))
++    save(OUT/'generation.json',rows);save(OUT/'per_seed.json',dict(summaries=summaries,paired_differences=differences));save(OUT/'aggregate.json',aggregate)
++    save(OUT/'topology_classes.json',classes);save(OUT/'trajectory_divergence.json',first_difference)
++    receipts=[read(p) for p in OUT.glob('*_202610201*/receipt.json')];assert len(receipts)==6 and all(r['status']=='completed' and r['completed_chains']==88 for r in receipts)
++    save(OUT/'audit.json',dict(status='passed',graphs=528,steps=33792,network_forwards=135168,read_counts=dict(reads),Newton_maxima=dict(maxima),
++        timings={k:c.stat(v) for k,v in times.items()},receipts=receipts,wall_seconds=time.perf_counter()-tick,cpu_seconds=time.process_time()-cpu,peak_rss_mib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024,
++        checks=['528 new complete chains','every Newton output independently residual/tail/KKT certified','all step states and final graph bound',
++        'all paired prior/query/uniform/RNG hashes','independent degree/joint/W1/connectivity/typed triangles/full MP1/2/3/DMA closure','exact type+relation isomorphism within8draw cells'],
++        not_checked=['network probabilities not independently recomputed','large graph network/GPU compatibility','population diversity from8draws'],training=0,GPU=0))
++    print('AUDIT PASSED528',dict(reads),flush=True)
++if __name__=='__main__':evaluate()
+diff --git a/experiments/role_newton_generation_v1/generation_common.py b/experiments/role_newton_generation_v1/generation_common.py
+new file mode 100644
+index 0000000..78d5161
+--- /dev/null
++++ b/experiments/role_newton_generation_v1/generation_common.py
+@@ -0,0 +1,81 @@
++"""Frozen-weight generation comparison; unique module name avoids old common.py."""
++import os,sys,json,time,hashlib
++from pathlib import Path
++os.environ.update(OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1',CUDA_VISIBLE_DEVICES='')
++HERE=Path(__file__).resolve().parent;EXP=HERE.parent
++sys.path.insert(0,str(EXP/'role_logscale_reader_v1'))
++import diagnose as old
++sys.path.insert(0,str(EXP/'role_newton_reader_v1'))
++import solver as newton
++c=old.c;np=c.np;torch=c.torch
++OUT=Path('/data2/lyh/gnn_project/DiHug/results/role_newton_generation_20261021_v1')
++read=c.read;sha=c.sha
++def save(p,x):
++    p=Path(p);q=p.with_name(p.name+'.tmp')
++    q.write_text(json.dumps(x,indent=2,allow_nan=False,default=lambda v:v.item() if isinstance(v,np.generic) else (_ for _ in ()).throw(TypeError(type(v).__name__)))+'\n');q.replace(p)
++SEEDS=[2026102011,2026102012,2026102013];ARMS=['DP','Newton']
++def check():
++    if (OUT/'STOP').exists():raise InterruptedError('STOP')
++    if time.time()>=read(OUT/'activation.json')['deadline_epoch']-120:raise TimeoutError('unique45min reserve120')
++def sources():
++    x=dict(read(c.RESULT/'freeze.json')['source'])
++    for folder in (HERE,EXP/'role_logscale_reader_v1',EXP/'role_newton_reader_v1'):
++        for p in folder.glob('*'):
++            if p.is_file() and p.suffix in ('.py','.json','.md'):x[str(p.relative_to(EXP))]=sha(p)
++    return x
++def frozen():
++    f=read(OUT/'freeze.json')
++    for n,h in f['source'].items():assert sha(EXP/n)==h,n
++    for n,h in f['inputs'].items():assert sha(c.RESULT/n)==h,n
++    assert f['activation_sha256']==sha(OUT/'activation.json')
++    return f
++def verify(P,LP,L,counts,r):
++    assert r.get('new_contract_pass') and np.isfinite(P).all() and (P>=0).all()
++    row=float(abs(P.sum(1)-1).max());col=float((abs(P.sum(0)-counts)/np.maximum(1,counts)).max())
++    assert row<=1e-8 and col<=1e-8
++    finite=np.isfinite(LP);rounded=finite&(P==0)
++    assert np.all(LP[rounded]<-700) and np.all(P[~finite]==0)
++    np.testing.assert_array_equal(P[finite&~rounded],np.exp(LP[finite&~rounded]))
++    mass=rounded.sum(1)*np.exp(-700.)
++    assert mass.max(initial=0)<=1e-280 and mass.sum()<=1e-276
++    assert int(rounded.sum())==r['rounded_positive_count']
++    from scipy.special import logsumexp
++    assert abs(logsumexp(LP,axis=1)).max()<=2e-12
++    kkt=None
++    if finite.all():
++        D=LP-L;kkt=float(abs(D-D[:,:1]-D[:1,:]+D[0,0]).max());assert kkt<=2e-10
++    return dict(independent_row=row,independent_column=col,independent_KKT=kkt,
++                independent_tail_mass=float(mass.sum()),tail_row_mass=mass.tolist())
++
++class Reader:
++    def __init__(self,arm,folder):self.arm=arm;self.folder=folder;self.rows=[];self.arrays={};self.step=0;self.typ=0;self.original=old.cap.allocation_marginals
++    def begin(self,t):self.step=t;self.typ=0;self.current=[]
++    def __call__(self,L,counts):
++        check();start=time.perf_counter();typ=self.typ;self.typ+=1
++        if self.arm=='Newton':
++            P,LP,r=newton.solve(L,counts,check)
++            if not r.get('new_contract_pass'):
++                np.savez_compressed(self.folder/'failed_read.npz',L=L,counts=counts,t=self.step,type=typ)
++                save(self.folder/'failed_read.json',r);raise newton.ReadoutFailure(str(r))
++            independent=verify(P,LP,L,counts,r)
++            for key,v in [('L',L),('P',P),('logP',LP)]:self.arrays.setdefault(f'type{typ}_{key}',[]).append(v.copy())
++        else:
++            P,r=self.original(L,counts)
++            assert np.max(abs(P.sum(1)-1))<=1e-8 and np.max(abs(P.sum(0)-counts)/np.maximum(1,counts))<=1e-8
++            independent={};r=dict(r,status='exact_DP',row_residual=float(abs(P.sum(1)-1).max()),column_residual=float((abs(P.sum(0)-counts)/np.maximum(1,counts)).max()))
++        rr=dict(t=self.step,type=typ,n=len(L),k=L.shape[1],**r,**independent,total_checked_seconds=time.perf_counter()-start)
++        self.current.append(rr);self.rows.append(rr);return P,r
++    def install(self,m):
++        old.cap.allocation_marginals=self
++        def hook(module,args,value):
++            assert len(self.current)==4
++            for r,v in zip(self.current,self.values):
++                assert np.isfinite(v).all()
++                mass=np.asarray(r.get('tail_row_mass',[0.]*r['n']))
++                r['role_value_max']=float(abs(v).max());r['context_tail_bound']=float((mass*abs(v).max()).max(initial=0))
++                assert r['context_tail_bound']<=1e-250
++        def vh(module,args,value):self.values.append(value.detach().cpu().numpy().copy())
++        self.values=[];self.hooks=[m.branch.value.register_forward_hook(vh),m.branch.register_forward_hook(hook)]
++    def close(self):
++        old.cap.allocation_marginals=self.original
++        for h in self.hooks:h.remove()
+diff --git a/experiments/role_newton_generation_v1/run.py b/experiments/role_newton_generation_v1/run.py
+new file mode 100644
+index 0000000..8c0c8d2
+--- /dev/null
++++ b/experiments/role_newton_generation_v1/run.py
+@@ -0,0 +1,34 @@
++"""Light parent: original2700s ledger includes imports, all jobs and cleanup."""
++import os,sys,json,time,signal,subprocess
++from pathlib import Path
++HERE=Path(__file__).resolve().parent;OUT=Path('/data2/lyh/gnn_project/DiHug/results/role_newton_generation_20261021_v1')
++def main():
++    a=json.loads((OUT/'activation.json').read_text());jobs=[];stopped=[None];status='failed';reason=None
++    def stop(s,f):stopped[0]=signal.Signals(s).name;(OUT/'STOP').touch()
++    for s in (signal.SIGINT,signal.SIGTERM,signal.SIGHUP):signal.signal(s,stop)
++    def kill(p):
++        if p.poll() is None:
++            try:os.killpg(p.pid,signal.SIGTERM)
++            except ProcessLookupError:pass
++            try:p.wait(timeout=4)
++            except subprocess.TimeoutExpired:
++                try:os.killpg(p.pid,signal.SIGKILL)
++                except ProcessLookupError:pass
++        p.wait()
++    try:
++        with (OUT/'launch.json').open('x') as f:json.dump(dict(launch_epoch=time.time(),activation=a),f)
++        for arm in ('DP','Newton'):
++            for seed in (2026102011,2026102012,2026102013):
++                log=(OUT/f'{arm}_{seed}.log').open('w');p=subprocess.Popen([sys.executable,'-u',str(HERE/'worker.py'),'--arm',arm,'--seed',str(seed)],env=dict(os.environ,CUDA_VISIBLE_DEVICES='',OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1'),stdout=log,stderr=subprocess.STDOUT,start_new_session=True);jobs.append((arm,seed,p,log))
++        while any(p.poll() is None for _,_,p,_ in jobs):
++            if time.time()>a['deadline_epoch']-180 or stopped[0] or (OUT/'STOP').exists():raise InterruptedError(stopped[0] or 'deadline/STOP')
++            if any(p.poll() not in (None,0) for _,_,p,_ in jobs):raise RuntimeError('child failed; stop peers, no fallback/retry')
++            time.sleep(.3)
++        if any(p.returncode for _,_,p,_ in jobs):raise RuntimeError('child failed')
++        status='completed'
++    except BaseException as exc:reason=repr(exc)
++    finally:
++        for _,_,p,log in jobs:kill(p);log.close()
++        (OUT/'controller.json').write_text(json.dumps(dict(status=status,reason=reason,jobs=[dict(arm=arm,seed=seed,exit_code=p.returncode) for arm,seed,p,_ in jobs],elapsed_seconds=time.time()-a['activation_epoch'],all_children_reaped=True),indent=2)+'\n')
++    return int(status!='completed')
++if __name__=='__main__':sys.exit(main())
+diff --git a/experiments/role_newton_generation_v1/test_integration.py b/experiments/role_newton_generation_v1/test_integration.py
+new file mode 100644
+index 0000000..fa04088
+--- /dev/null
++++ b/experiments/role_newton_generation_v1/test_integration.py
+@@ -0,0 +1,23 @@
++import sys
++from pathlib import Path
++sys.path.insert(0,str(Path(__file__).resolve().parent))
++import generation_common as g
++import pytest
++def test_verified_read_rejects_invalid_capacity():
++    p,lp,r=g.newton.solve(g.np.zeros((3,2)),g.np.array([1,2]))
++    assert g.verify(p,lp,g.np.zeros((3,2)),g.np.array([1,2]),r)['independent_column']<=1e-8
++    bad=p.copy();bad[0,0]+=.01
++    with pytest.raises(AssertionError):g.verify(bad,lp,g.np.zeros((3,2)),g.np.array([1,2]),r)
++def test_failed_read_saves_and_does_not_fallback(tmp_path,monkeypatch):
++    monkeypatch.setattr(g,'check',lambda:None)
++    reader=g.Reader('Newton',tmp_path);reader.begin(1)
++    monkeypatch.setattr(g.newton,'solve',lambda *args:(None,None,dict(status='iteration_limit',new_contract_pass=False)))
++    with pytest.raises(g.newton.ReadoutFailure):reader(g.np.zeros((2,2)),g.np.array([1,1]))
++    assert (tmp_path/'failed_read.npz').exists() and (tmp_path/'failed_read.json').exists()
++def test_reader_rng_unchanged(tmp_path,monkeypatch):
++    monkeypatch.setattr(g,'check',lambda:None);g.np.random.seed(32);before=g.np.random.get_state()
++    reader=g.Reader('Newton',tmp_path);reader.begin(1);reader(g.np.array([[0.,1.],[1.,0.]]),g.np.array([1,1]))
++    after=g.np.random.get_state();assert g.np.array_equal(before[1],after[1]) and before[2:]==after[2:]
++def test_numpy_receipt_serialization(tmp_path):
++    p=tmp_path/'receipt.json';g.save(p,dict(passed=g.np.bool_(True),steps=g.np.int64(1)))
++    assert g.read(p)==dict(passed=True,steps=1)
+diff --git a/experiments/role_newton_generation_v1/worker.py b/experiments/role_newton_generation_v1/worker.py
+new file mode 100644
+index 0000000..d5ac69f
+--- /dev/null
++++ b/experiments/role_newton_generation_v1/worker.py
+@@ -0,0 +1,57 @@
++import argparse,traceback,resource,signal
++from generation_common import *
++
++def run(arm,seed):
++    tick=time.perf_counter();cpu=time.process_time();folder=OUT/f'{arm}_{seed}';folder.mkdir();status='failed';reason=None;done=0;reader=None
++    def stop(s,f):(OUT/'STOP').touch()
++    for s in (signal.SIGINT,signal.SIGTERM,signal.SIGHUP):signal.signal(s,stop)
++    try:
++        check();f=frozen();records,targets=c.load_data();case=c.metadata_case(c.base,c.PANEL,targets)
++        model,binding=old.get_model(seed,case);save(folder/'binding.json',binding)
++        # Replicate original fixed validation on exact path before changing any reader.
++        v=old.validate_device(model,c.base.fixed_validation(records,c.settings()),c.settings(),targets,check)
++        ref=read(c.RESULT/f'jobs/broad_{seed}/validation_u006000.json');maximum=0.
++        for x,y in zip(v['rows'],ref['rows']):
++            assert (x['id'],x['condition'],x['t'])==(y['id'],y['condition'],y['t'])
++            for k in ('ce','ce_sum_by_family_label','expected_edges'):maximum=max(maximum,float(abs(np.asarray(x[k])-np.asarray(y[k])).max()))
++        assert len(v['rows'])==len(ref['rows']) and maximum<=2e-8
++        save(folder/'validation.json',dict(maximum_difference=maximum,validation=v))
++        reader=Reader(arm,folder);reader.install(model)
++        for sample_seed in f['sampling_seeds']:
++            for name in f['targets']:
++                check();start=time.perf_counter();stem=f'{name}_{sample_seed}'
++                reader.rows=[];reader.arrays={};states=[];diagnostics=[];reader.begin(64);reader.values=[]
++                def commit(state,steps,rng):
++                    assert reader.typ==4 and len(reader.current)==4 and len(reader.values)==4
++                    diagnostics.append(reader.current);states.append(state.copy())
++                    if len(steps)%8==0:
++                        np.savez_compressed(folder/'partial.npz',state=state)
++                        save(folder/'partial.json',dict(condition=name,sampling_seed=sample_seed,steps=steps,rng=rng,readouts=diagnostics))
++                        save(folder/'progress.json',dict(completed_chains=done,condition=name,sampling_seed=sample_seed,steps=len(steps),elapsed_seconds=time.perf_counter()-tick))
++                    reader.begin(steps[-1]['t']-1);reader.values=[]
++                state,steps,initial=c.original_chain(model,case,targets[name],sample_seed,c.base,check,commit)
++                assert len(reader.rows)==256 and len(states)==64
++                edges,fam=c.base.c.state_edges(case,state);graphfile=folder/(stem+'.npz')
++                np.savez_compressed(graphfile,types=case['space'].types,edges=edges.T,relations=fam+1,schema=np.asarray(case['space'].pairs))
++                trajectory=folder/(stem+'_trajectory.npz')
++                np.savez_compressed(trajectory,states=np.asarray(states),**{k:np.asarray(v) for k,v in reader.arrays.items()})
++                save(folder/(stem+'_steps.json'),steps);save(folder/(stem+'_reads.json'),diagnostics)
++                metrics=c.graph(case,edges,c.NAMES,check)
++                result=dict(arm=arm,seed=seed,condition=name,sampling_seed=sample_seed,checkpoint_update=6000,weight_sha256=binding['weight']['sha256'],
++                    target_fingerprint=targets[name].fingerprint,initial_state_sha256=initial,graph_file=str(graphfile.relative_to(OUT)),graph_sha256=sha(graphfile),
++                    steps_file=str((folder/(stem+'_steps.json')).relative_to(OUT)),steps_sha256=sha(folder/(stem+'_steps.json')),
++                    trajectory_file=str(trajectory.relative_to(OUT)),trajectory_sha256=sha(trajectory),reads_file=str((folder/(stem+'_reads.json')).relative_to(OUT)),reads_sha256=sha(folder/(stem+'_reads.json')),
++                    metrics=metrics,target_errors=c.error_stats(metrics,targets[name].as_dict()),seconds=time.perf_counter()-start,newly_executed_chain=True,
++                    solve_seconds=sum(r['total_checked_seconds'] for r in reader.rows),original_contract_reads=sum(r.get('original_contract_pass',False) for r in reader.rows),bounded_tail_reads=sum(r['status']=='converged_bounded_tail' for r in reader.rows))
++                save(folder/(stem+'_result.json'),result);done+=1
++                print(arm,seed,done,'/88',name,sample_seed,'seconds',round(result['seconds'],3),flush=True)
++        assert done==88;status='completed'
++    except BaseException as exc:
++        reason=repr(exc);traceback.print_exc();(OUT/'STOP').touch()
++        if reader is not None:save(folder/'interrupted_reads.json',reader.rows)
++    finally:
++        if reader is not None:reader.close()
++        save(folder/'receipt.json',dict(status=status,reason=reason,arm=arm,seed=seed,completed_chains=done,wall_seconds=time.perf_counter()-tick,cpu_seconds=time.process_time()-cpu,peak_rss_mib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024,training=0,GPU=0))
++    return int(status!='completed')
++if __name__=='__main__':
++    p=argparse.ArgumentParser();p.add_argument('--arm',choices=ARMS,required=True);p.add_argument('--seed',type=int,choices=SEEDS,required=True);a=p.parse_args();sys.exit(run(a.arm,a.seed))

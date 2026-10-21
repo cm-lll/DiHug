@@ -6,6 +6,15 @@ sys.path.insert(0,str(EXP/'role_condition_coverage_v1'))
 import coverage_evaluation as prior
 prior.RESULT=OUT
 
+def complete_features(row):
+    f=c.features(row)
+    for r,(a,b) in enumerate(itertools.combinations_with_replacement(range(4),2)):
+        if r not in (1,2,5,8):continue
+        for typ in set((a,b)):
+            name=c.NAMES[typ];d=row['metrics']['typed_degree'][name]['by_relation'][r]
+            for k in ('max','p90','p99','zero','low_le1'):f[f'{name}_relation{r}_{k}']=d[k]
+    return f
+
 def evaluate():
     tick=time.perf_counter();cpu=time.process_time();f=frozen();_,targets=c.load_data()
     rows=[read(p) for p in sorted(OUT.glob('*_202610201*/*_result.json'))]
@@ -78,7 +87,7 @@ def evaluate():
                 if h==oh and nx.is_isomorphic(G,other,node_match=lambda x,y:x['type']==y['type'],edge_match=lambda x,y:x['relation']==y['relation']):found=j;break
             if found is None:found=len(reps);reps.append((G,h));freq.append(0)
             freq[found]+=1;assign.append(dict(sampling_seed=row['sampling_seed'],local_class=found))
-        ff=[c.features(r) for r in group];edge_diff=[]
+        ff=[complete_features(r) for r in group];edge_diff=[]
         for a,b in itertools.combinations(group,2):
             edge_diff.append(len(set(Gs[a['graph_file']].edges())^set(Gs[b['graph_file']].edges())))
         target=sorted([v[8] for v,n in targets[name].roles[3] for _ in range(n)],reverse=True)
