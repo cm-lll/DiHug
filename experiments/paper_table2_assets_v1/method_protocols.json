@@ -1,0 +1,334 @@
+[
+  {
+    "dataset": "imdb",
+    "method": "DiHug",
+    "raw_graphs": 8,
+    "sampling_indices": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "source_report": "original_reports/results/diffusion_ablation_current_base_0729/extended_structure/imdb_main.json",
+    "historical_graph_binding": "all table columns reproduced; typed file fingerprint matched for non-HGEN",
+    "training_repeats": "one shared retained model, warmup+calibration; not eight independent trainings",
+    "sampling_seeds": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "sampling_steps": 10000,
+    "candidates": 64,
+    "decoder": "map",
+    "family_count_mode": "binomial",
+    "sampling_origin": "copied gate_report.json per sample",
+    "complete_original_argv_authenticated": false
+  },
+  {
+    "dataset": "imdb",
+    "method": "GraphRNN",
+    "raw_graphs": 8,
+    "sampling_indices": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "source_report": "original_reports/results/classic_baseline_real_followup/imdb_graphrnn/report.json",
+    "historical_graph_binding": "all table columns reproduced; typed file fingerprint matched for non-HGEN",
+    "recorded_protocol": {
+      "adaptation": "fixed node types; Binomial family counts; schema-valid edges",
+      "dataset_dir": "/data2/lyh/gnn_project/DiHug/data/IMDB_movie_subgraphs/subgraph_000",
+      "device": "cuda:0",
+      "max_prev_node": 1652,
+      "method": "graphrnn",
+      "num_edges": 4079,
+      "num_nodes": 1653,
+      "seed": 0,
+      "target_free_generation": true,
+      "variant": "GraphRNN-S typed adaptation"
+    },
+    "training_repeats": 1,
+    "train_seed_recorded": 0,
+    "selection_seed_rule_from_retained_source": "seed*100003+sample",
+    "complete_original_argv_authenticated": false
+  },
+  {
+    "dataset": "imdb",
+    "method": "NetGAN",
+    "raw_graphs": 8,
+    "sampling_indices": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "source_report": "original_reports/results/classic_baseline_extension/imdb_netgan/report.json",
+    "historical_graph_binding": "all table columns reproduced; typed file fingerprint matched for non-HGEN",
+    "recorded_protocol": {
+      "adaptation": "fixed node types; Binomial family counts; schema-valid edges",
+      "dataset_dir": "/data2/lyh/gnn_project/DiHug/data/IMDB_movie_subgraphs/subgraph_000",
+      "device": "cuda:0",
+      "implementation": "HG2NP/NetGAN/Code",
+      "method": "netgan",
+      "num_edges": 4079,
+      "num_nodes": 1653,
+      "seed": 0
+    },
+    "training_repeats": 1,
+    "train_seed_recorded": 0,
+    "selection_seed_rule_from_retained_source": "seed*100003+sample",
+    "complete_original_argv_authenticated": false
+  },
+  {
+    "dataset": "imdb",
+    "method": "VGAE",
+    "raw_graphs": 8,
+    "sampling_indices": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "source_report": "original_reports/results/classic_baseline_extension/imdb_vgae/report.json",
+    "historical_graph_binding": "all table columns reproduced; typed file fingerprint matched for non-HGEN",
+    "recorded_protocol": {
+      "adaptation": "fixed node types; Binomial family counts; schema-valid edges",
+      "dataset_dir": "/data2/lyh/gnn_project/DiHug/data/IMDB_movie_subgraphs/subgraph_000",
+      "device": "cuda:0",
+      "method": "vgae",
+      "num_edges": 4079,
+      "num_nodes": 1653,
+      "seed": 0
+    },
+    "training_repeats": 1,
+    "train_seed_recorded": 0,
+    "selection_seed_rule_from_retained_source": "seed*100003+sample",
+    "complete_original_argv_authenticated": false
+  },
+  {
+    "dataset": "imdb",
+    "method": "HGEN",
+    "raw_graphs": 8,
+    "sampling_indices": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "source_report": "original_reports/results/hgen_fullgraph_eo_audit_0729/imdb.json",
+    "historical_graph_binding": "all table columns reproduced; typed file fingerprint matched for non-HGEN",
+    "training_repeats": 8,
+    "run_train_seeds": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "recorded_argv": [
+      "--dataset",
+      "IMDB_movie",
+      "--n-epochs",
+      "5",
+      "--eval-full-graph",
+      "--skip-split-eval"
+    ],
+    "argv_origin": "first line of each archived run.log",
+    "exact_historical_source_bytes_recovered": false
+  },
+  {
+    "dataset": "pubmed",
+    "method": "DiHug",
+    "raw_graphs": 8,
+    "sampling_indices": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "source_report": "original_reports/results/diffusion_ablation_current_base_0729/extended_structure/pubmed_main.json",
+    "historical_graph_binding": "all table columns reproduced; typed file fingerprint matched for non-HGEN",
+    "training_repeats": "one shared retained model, warmup+calibration; not eight independent trainings",
+    "sampling_seeds": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "sampling_steps": 10000,
+    "candidates": 16,
+    "decoder": "map",
+    "family_count_mode": "binomial",
+    "sampling_origin": "copied gate_report.json per sample",
+    "complete_original_argv_authenticated": false
+  },
+  {
+    "dataset": "pubmed",
+    "method": "GraphRNN",
+    "raw_graphs": 8,
+    "sampling_indices": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "source_report": "original_reports/results/classic_baseline_real_followup/pubmed_graphrnn/report.json",
+    "historical_graph_binding": "all table columns reproduced; typed file fingerprint matched for non-HGEN",
+    "recorded_protocol": {
+      "adaptation": "fixed node types; Binomial family counts; schema-valid edges",
+      "dataset_dir": "/data2/lyh/gnn_project/DiHug/data/PubMed_baseline_subgraphs/subgraph_000",
+      "device": "cuda:0",
+      "max_prev_node": 1564,
+      "method": "graphrnn",
+      "num_edges": 12284,
+      "num_nodes": 1565,
+      "seed": 0,
+      "target_free_generation": true,
+      "variant": "GraphRNN-S typed adaptation"
+    },
+    "training_repeats": 1,
+    "train_seed_recorded": 0,
+    "selection_seed_rule_from_retained_source": "seed*100003+sample",
+    "complete_original_argv_authenticated": false
+  },
+  {
+    "dataset": "pubmed",
+    "method": "NetGAN",
+    "raw_graphs": 8,
+    "sampling_indices": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "source_report": "original_reports/results/classic_baseline_extension/pubmed_netgan/report.json",
+    "historical_graph_binding": "all table columns reproduced; typed file fingerprint matched for non-HGEN",
+    "recorded_protocol": {
+      "adaptation": "fixed node types; Binomial family counts; schema-valid edges",
+      "dataset_dir": "/data2/lyh/gnn_project/DiHug/data/PubMed_baseline_subgraphs/subgraph_000",
+      "device": "cuda:0",
+      "implementation": "HG2NP/NetGAN/Code",
+      "method": "netgan",
+      "num_edges": 12284,
+      "num_nodes": 1565,
+      "seed": 0
+    },
+    "training_repeats": 1,
+    "train_seed_recorded": 0,
+    "selection_seed_rule_from_retained_source": "seed*100003+sample",
+    "complete_original_argv_authenticated": false
+  },
+  {
+    "dataset": "pubmed",
+    "method": "VGAE",
+    "raw_graphs": 8,
+    "sampling_indices": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "source_report": "original_reports/results/classic_baseline_extension/pubmed_vgae/report.json",
+    "historical_graph_binding": "all table columns reproduced; typed file fingerprint matched for non-HGEN",
+    "recorded_protocol": {
+      "adaptation": "fixed node types; Binomial family counts; schema-valid edges",
+      "dataset_dir": "/data2/lyh/gnn_project/DiHug/data/PubMed_baseline_subgraphs/subgraph_000",
+      "device": "cuda:0",
+      "method": "vgae",
+      "num_edges": 12284,
+      "num_nodes": 1565,
+      "seed": 0
+    },
+    "training_repeats": 1,
+    "train_seed_recorded": 0,
+    "selection_seed_rule_from_retained_source": "seed*100003+sample",
+    "complete_original_argv_authenticated": false
+  },
+  {
+    "dataset": "pubmed",
+    "method": "HGEN",
+    "raw_graphs": 8,
+    "sampling_indices": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "source_report": "original_reports/results/hgen_fullgraph_eo_audit_0729/pubmed.json",
+    "historical_graph_binding": "all table columns reproduced; typed file fingerprint matched for non-HGEN",
+    "training_repeats": 8,
+    "run_train_seeds": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "recorded_argv": [
+      "--dataset",
+      "PubMed",
+      "--n-epochs",
+      "5",
+      "--eval-full-graph",
+      "--skip-split-eval"
+    ],
+    "argv_origin": "first line of each archived run.log",
+    "exact_historical_source_bytes_recovered": false
+  }
+]

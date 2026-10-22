@@ -1,0 +1,96 @@
+diff --git a/sparse_diffusion/structure_energy/heterogeneous_metrics.py b/sparse_diffusion/structure_energy/heterogeneous_metrics.py
+index f2c3c75..ef1a458 100644
+--- a/sparse_diffusion/structure_energy/heterogeneous_metrics.py
++++ b/sparse_diffusion/structure_energy/heterogeneous_metrics.py
+@@ -122,8 +122,12 @@ def distribution_distances(
+         return {"tv": 0.0, "jsd": 0.0}
+     p = np.asarray([float(reference.get(key, 0.0)) for key in keys], dtype=np.float64)
+     q = np.asarray([float(generated.get(key, 0.0)) for key in keys], dtype=np.float64)
+-    p /= max(float(p.sum()), 1.0)
+-    q /= max(float(q.sum()), 1.0)
++    p_total = float(p.sum())
++    q_total = float(q.sum())
++    if (p_total <= 0.0) != (q_total <= 0.0):
++        return {"tv": 1.0, "jsd": float(np.log(2.0))}
++    p /= max(p_total, 1.0)
++    q /= max(q_total, 1.0)
+     midpoint = 0.5 * (p + q)
+ 
+     def kl(left: np.ndarray, right: np.ndarray) -> float:
+@@ -265,12 +269,25 @@ def compare_heterogeneous_graphs(
+             np.asarray(expected["degree_values"]),
+             np.asarray(observed["degree_values"]),
+         )
++        expected_degrees = np.sort(
++            np.asarray(expected["degree_values"], dtype=np.float64)
++        )
++        observed_degrees = np.sort(
++            np.asarray(observed["degree_values"], dtype=np.float64)
++        )
++        relation_degree_mae = float(
++            np.mean(np.abs(expected_degrees - observed_degrees))
++        )
+         family_rows[family] = {
+             "target_edges": expected["edges"],
+             "generated_edges": observed["edges"],
++            "target_domain_nodes": expected["domain_nodes"],
+             "edge_relative_error": abs(observed["edges"] - expected["edges"])
+             / max(expected["edges"], 1),
+             **family_mmd,
++            "relation_degree_mae": relation_degree_mae,
++            "relation_degree_relative_error": relation_degree_mae
++            / max(float(expected_degrees.mean()), 1.0),
+             "target_total_degree_assortativity": expected[
+                 "total_degree_assortativity"
+             ],
+@@ -349,6 +366,23 @@ def aggregate_comparisons(rows: Sequence[Mapping]) -> dict:
+ 
+     global_keys = sorted(rows[0]["global"]["generated"])
+     families = sorted(rows[0]["families"])
++    def relation_degree_error(row: Mapping) -> float:
++        weights = np.asarray(
++            [
++                row["families"][family]["target_domain_nodes"]
++                for family in families
++            ],
++            dtype=np.float64,
++        )
++        values = np.asarray(
++            [
++                row["families"][family]["relation_degree_relative_error"]
++                for family in families
++            ],
++            dtype=np.float64,
++        )
++        return float(np.average(values, weights=weights))
++
+     report = {
+         "format": "dihug-heterogeneous-structure-aggregate-v2",
+         "samples": len(rows),
+@@ -357,6 +391,9 @@ def aggregate_comparisons(rows: Sequence[Mapping]) -> dict:
+         "degree_mmd_raw": summarize(
+             row["global"]["degree_mmd_raw"] for row in rows
+         ),
++        "relation_degree_error": summarize(
++            relation_degree_error(row) for row in rows
++        ),
+         "powerlaw": {
+             "target": dict(rows[0]["global"]["target_powerlaw"]),
+             "generated_alpha": summarize(
+@@ -410,6 +447,7 @@ def aggregate_comparisons(rows: Sequence[Mapping]) -> dict:
+         target_family = rows[0]["families"][family]
+         family_report = {
+             "target_edges": target_family["target_edges"],
++            "target_domain_nodes": target_family["target_domain_nodes"],
+             "target_total_degree_assortativity": target_family[
+                 "target_total_degree_assortativity"
+             ],
+@@ -424,6 +462,8 @@ def aggregate_comparisons(rows: Sequence[Mapping]) -> dict:
+                 "edge_relative_error",
+                 "degree_mmd",
+                 "degree_mmd_raw",
++                "relation_degree_mae",
++                "relation_degree_relative_error",
+                 "generated_total_degree_assortativity",
+                 "generated_family_degree_assortativity",
+             )
