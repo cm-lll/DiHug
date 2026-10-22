@@ -1,5 +1,9 @@
 # DiHug current research status
 
+2026-10-22 旧表2资产已发布固定6fe67d060cb19bf99d67f40a7f5b3c870a1ee1b5，分支codex/paper-table2-assets-v1。
+远端实际下载9755107字节ZIP核对SHA3ded8462d4eb505c99baa56cd9fd462de90fd8386315f1743a70c8c8a7fb887b一致；当前停止。
+80张投稿样本与96张历史候选分开，0训练/0新图/0模型调用，旧来源文件哈希检查无变更；HGEN历史源码/部分运行权重来源缺口如实保留。
+
 2026-10-22 投稿表2旧资产只读交接：找到IMDB/PubMed五方法各8图，共80张；另归档96张候选历史图，明确排除在投稿集合外。
 原表来源为DiHug_clean_joint/paper/results_20260727与20260729，旧DiHug IMDB均值三角601.75，而非597.75/595快照。
 Git71dedb3历史评测对80图全部表列复现，最大误差1.42e-14，CPU289.319秒/峰425.57MiB；64张TypedGraph指纹与旧逐图报告一致。
