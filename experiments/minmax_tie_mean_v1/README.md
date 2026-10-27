@@ -11,7 +11,7 @@ SparseXtoy/SparseEtoy 的所有实例（八层及 CN 复用路径）共用此函
 导数为 g[b,j]/K[b,j]（极值位置），其他位置为0。min 使用 -max(-x)，两次负号按链式法则处理。
 唯一极值 K=1；不使用 epsilon，也没有节点编号式赢家。复制边表示保留，反向通过 repeat 累加回原始边变量。
 空组沿用原 PyG 零输出，K=0但没有参与输入，不给初始化填充值分配梯度。仅公共模块使用的二维浮点输入/一维同设备 int64 batch 接口。
-前向委托原 PyG global_max_pool，在自定义 Function 的无梯度 forward 内使用原生 scatter_reduce；后向使用布尔精确相等和 int64 计数。
+前向委托原 PyG global_max_pool。所用PyG2.3.1的分派检查WITH_TORCH_SCATTER、src.is_cuda及src.requires_grad，不检查torch.is_grad_enabled()；自定义Function的forward处于no-grad，并不自动清除传入张量的requires_grad。CUDA输入仍requires_grad且扩展可用时，前向可走torch-scatter；CPU或输入不requires_grad等分支走原生scatter_reduce。新反向由自定义Function按精确相等与int64计数平均分配，与前向扩展返回的极值赢家索引无关。此处为静态源码勘误，不是一次新增运行路径追踪，详见DISPATCH_ERRATUM.md。
 输入、输出和上游梯度非有限时显式失败。没有回退。
 这保留前向数学定义，但改变并列点的子梯度选择，不能称为完全无变化的优化。
 
