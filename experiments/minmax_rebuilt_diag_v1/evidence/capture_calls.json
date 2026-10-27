@@ -1,0 +1,96 @@
+{
+  "calls": [
+    {
+      "path": "PyG global_max_pool -> PyG scatter -> torch_scatter.scatter -> scatter_max -> torch.ops.torch_scatter.scatter_max",
+      "dim": 0,
+      "dim_size": 1,
+      "src": {
+        "shape": [
+          192,
+          256
+        ],
+        "dtype": "torch.float32",
+        "device": "cuda:0",
+        "content_sha256": "f5871af869463897842a6787f46f920bc9a4eab8dc5adf76eb19fcb2edbc3705"
+      },
+      "batch": {
+        "shape": [
+          192
+        ],
+        "dtype": "torch.int64",
+        "device": "cuda:0",
+        "content_sha256": "80422bc3d307b4a25bdafcc84ac7fb01cb55a09810e8b0f37bb12e0edb5c48ca"
+      }
+    },
+    {
+      "path": "PyG global_max_pool -> PyG scatter -> torch_scatter.scatter -> scatter_max -> torch.ops.torch_scatter.scatter_max",
+      "dim": 0,
+      "dim_size": 1,
+      "src": {
+        "shape": [
+          192,
+          256
+        ],
+        "dtype": "torch.float32",
+        "device": "cuda:0",
+        "content_sha256": "a6655963ad6e09f633c7d46d9e2f013962305691c56ff9095fe03a9348c38d92"
+      },
+      "batch": {
+        "shape": [
+          192
+        ],
+        "dtype": "torch.int64",
+        "device": "cuda:0",
+        "content_sha256": "80422bc3d307b4a25bdafcc84ac7fb01cb55a09810e8b0f37bb12e0edb5c48ca"
+      }
+    },
+    {
+      "path": "PyG global_max_pool -> PyG scatter -> torch_scatter.scatter -> scatter_max -> torch.ops.torch_scatter.scatter_max",
+      "dim": 0,
+      "dim_size": 1,
+      "src": {
+        "shape": [
+          192,
+          256
+        ],
+        "dtype": "torch.float32",
+        "device": "cuda:0",
+        "content_sha256": "f5871af869463897842a6787f46f920bc9a4eab8dc5adf76eb19fcb2edbc3705"
+      },
+      "batch": {
+        "shape": [
+          192
+        ],
+        "dtype": "torch.int64",
+        "device": "cuda:0",
+        "content_sha256": "80422bc3d307b4a25bdafcc84ac7fb01cb55a09810e8b0f37bb12e0edb5c48ca"
+      }
+    },
+    {
+      "path": "PyG global_max_pool -> PyG scatter -> torch_scatter.scatter -> scatter_max -> torch.ops.torch_scatter.scatter_max",
+      "dim": 0,
+      "dim_size": 1,
+      "src": {
+        "shape": [
+          192,
+          256
+        ],
+        "dtype": "torch.float32",
+        "device": "cuda:0",
+        "content_sha256": "a6655963ad6e09f633c7d46d9e2f013962305691c56ff9095fe03a9348c38d92"
+      },
+      "batch": {
+        "shape": [
+          192
+        ],
+        "dtype": "torch.int64",
+        "device": "cuda:0",
+        "content_sha256": "80422bc3d307b4a25bdafcc84ac7fb01cb55a09810e8b0f37bb12e0edb5c48ca"
+      }
+    }
+  ],
+  "loss": 0.23244275152683258,
+  "seconds": 2.1842134734615684,
+  "captured_min": "internal max U=-X,V=max(U), upstream dL/dV=-dL/dmin; outer input contribution=-dL/dU",
+  "network_src_grad_caveat": "max src participates in other network paths; captured src.grad is not isolated max gradient"
+}
