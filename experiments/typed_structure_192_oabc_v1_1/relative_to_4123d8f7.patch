@@ -1,0 +1,725 @@
+--- a/README_zh.md
++++ b/README_zh.md
+@@ -1,63 +1,67 @@
+-# O/A/B/C 192节点实验准备：字典门阻塞，未放行正式实验
++# O/A/B/C准备修订v1.1：等待独立审查，正式训练/完整生成均0
+ 
+-基线：`0c4ed6b4d2dfa5b67aa6983e7d665fbc49667d96`。本版独立保存，不改变main、旧版本、旧实验或公共min/max实现。PyG分派说明见DISPATCH_ERRATUM.md。
++基线4123d8f7da6dada9513f592aabdcc81b053bc4a9。沿用原北京时间02:06:09起点、02:51:09准备截止、05:06:09总截止；本修订开始02:35:44，不增加预算。旧118次拟合、源码和ZIP保留。没有审批文件；dictionary_bindings_PROPOSAL_NOT_APPROVAL.json仅提供将来审批所需的实际哈希，绝不构成授权。
+ 
+-本票从北京时间2026-10-28 02:06:09开始，准备截止02:51:09，总截止05:06:09。等待审查仍计时。没有新的预算窗口，也没有训练授权文件。正式训练、临时optimizer.step、完整生成链、GPU模型计算均为0。
++## 唯一字典求解变更与结果
+ 
+-## 已实施与实际结果
++所有候选/最终拟合max_iter统一5000→50000。CD/Frobenius/NNDSVDa/tol1e-5/shuffle=False、无正则、原seed、节点折、特征掩码、630列尺度、状态权重、K范围、NNLS/选K规则均不变。
++refit_dictionary.py按旧发行manifest的固定预期哈希2a977f8fc55cae52c93ed697cb6284afa56b6cce13f8f9feb3c8dc7e559232dc核验实际载荷，复制原14份Xt/特征，不重新抽样。旧frozen_splits.json字节不变，内含历史5000元数据；实际统一覆盖仅见refit_config.json的50000设置。叫重新拟合，不叫续算。
+ 
+-新增O组；B/C完全关闭CN，C支持每类型不同K和动态分段。A保持原CN；O保留类型、关系、时间、Xt度分支及联合头，称SparseDiff派生异质适配基础模型。旧角色读取和E07头未接入。公共聚合、630维一轮分关系ReFeX、normal2、原CE、噪声及后验文件与审查基线哈希相同。
++全部118次候选折拟合和8次最终拟合收敛。每次原始W/H、规范化基、输入矩阵内容哈希/形状、实际迭代、重建误差、警告及停止状态均保存。没有删K、换seed、放宽阈值或新增候选。
+ 
+-正式字典选择程序已经按冻结协议实际运行：两图各7个状态、节点两折、30组特征完整祖先/后代绑定、15/15遮蔽、固定NMF和FP64 NNLS。共59个K候选、118次节点折拟合。
++| 数据集 | 按原类型序的K | 列偏移 | 上界命中 | 整个重新拟合墙钟/峰值RSS |
++|---|---|---|---|---|
++| IMDB Director/Actor/Movie/Genre | 5/4/3/2 | 0/5/9/12/14 | 无 | 77.42秒 / 475.37MiB |
++| PubMed Gene/Disease/Chemical/Species | 8/8/8/6 | 0/8/16/24/30 | 全部四类型 | 29.93秒 / 473.16MiB |
+ 
+-| 数据集 | 未收敛的类型/K（括号为节点训练折） | 面板墙钟 | 进程峰值RSS |
+-|---|---|---:|---:|
+-| IMDB | Director 7(0)；Movie 5(0)、6(0/1)、7(0/1)、8(0/1)；Genre 3(1)、5(0/1) | 42.392秒 | 469.398 MiB |
+-| PubMed | Chemical 2(0)、4(0) | 25.422秒 | 469.383 MiB |
++原105次已收敛候选拟合的新旧规范化基和评分最大差均0。IMDB候选最大实际迭代25946，PubMed6585；最终8次分别160/814/58/284、2058/602/1208/570。重新计算全部留出方向评分和原始W/H重建误差见revision_audit.json，不以小误差替代收敛判据。
+ 
+-两个单线程进程并行，不能把两个墙钟或RSS相加当成整票墙钟或同时峰值。13个拟合均达到固定5000次上限，并有ConvergenceWarning；它们影响9个K候选。全部候选尝试及警告保留，未把失败者排除后选K。**没有选择任何类型的K，没有最终基，没有回退K=4或合成字典，没有修改迭代数/容差。**非收敛候选保存完整配置、输入、seed及收敛回执，未发布其基；可重建材料保留，不在本票重拟合。
++## 运行保护与随机流
+ 
+-独立只读审计：14个Xt及其特征重新计算一致；210个已保存方向分数重算最大绝对差0；NNLS最大KKT残差IMDB为1.263e-15、PubMed为9.098e-15，均小于原1e-7。审计2.330秒，RSS466.977MiB。不存在依据生成效果选K的步骤。
++launcher及worker都核对外部审批指定的final_basis.npz、selection.json、panel.json、frozen_splits.json SHA256，以及K、offsets、总维数。仅内部字典自证不够。
++唯一支持的正式入口是launcher：worker要求从当前launcher继承的只读pipe FD，绑定父PID、臂、数据集、设备、输出、审批/成本哈希及新鲜启动时间；还独立重查完整成本/审批/字典门。它防止误用独立worker绕过入口，不是针对能够伪造审批文件的恶意本地用户的安全沙箱。没有自动生成授权或回退路径。
+ 
+-新增CPU小夹具接口回归19项通过、0失败、0跳过；包括O分支隔离、动态分段、零投影、非零投影重编号/端点、normal2不更新梯度、缓存防变更、严格state_dict载入、遮蔽评分及公开拒绝启动入口。一次测试自身映射错误已记录：最初把族内槽号当全局槽号，修正为offset+local后重跑；没有改模型或阈值。原14项首次日志、19项失败日志和最终日志都保留。
++模型构造与copy_common后，按数据集统一重置Python、全局NumPy、显式Generator、TorchCPU及所用CUDA设备随机流，独立记录派生seed和状态哈希。各臂初始化流与训练流分离。八格工程初态在首次前向前已保存；同数据集四臂实际公共张量与重置RNG已独立核对一致。正式初态将来必须另建，不能用工程权重。
+ 
+-这不是八格真实字典GPU验收，也不是原历史测试全部重跑。旧同GPU通过、CPU/GPU未通过的证据仅作为基线引用，不改写。
++预算估计与执行共享admission.assignment的固定每卡FIFO队列，不再使用不同的排程规则。worker不能单独选更新档。正式审批还必须明确确认main_W1_definition_confirmed=type_weighted_incident4；本票未批准此最终指标选择。
+ 
+-## 数学和接口
++## 实际八格工程验收
+ 
+-每类型节点两折固定不随状态变化。每个训练折以630列全部特征拟合：干净行乘sqrt(2)，六份噪声行不变；平方目标是四时间层各1/4加权目标的共同倍数。运行时始终使用未加权ReFeX。
++engineering_real.py读取真实最终字典，遍历两数据集×O/A/B/C，使用原账本绝对截止。实际以GPU0跑IMDB、GPU1跑PubMed，各内部四组串行，CPU线程各1。使用前二卡均空闲；GPU5持续1%使用率，未列作确认空闲设备。未解除设备隔离、安装或升级依赖。
+ 
+-每次验证仅以一侧315列做NNLS，再重建另一侧315列；交换方向。每方向先在留出节点及目标列求MSE，再取clean/4 + 六份noise各/8；最后平均两折两方向。评分标签列不进入当次系数求解。每类型K=1..min(8,两训练折节点数)，完整候选比较后最小误差，1e-12内同分取较小K。未收敛候选使整个选K关口失败，不能当作较差候选丢弃。
++八格同GPU完整normal2前后向重复、实际复制/优化器覆盖、真实字典t=1/500/1000有限非负NNLS、B/C无CN、完整可动槽、模型/优化器/RNG精确载入和后续更新续算均通过。每格3次临时step：连续1、2与恢复后重做2，共24次，原40额度还剩16但未使用。无CPU/GPU等价复验，旧失败不改写。
++首次前向前initial.pt及逐张量哈希/随机绑定见eight_engineering_initials.tar.xz；恢复用after1.pt在本地完整保留，发行清单登记其哈希，未再复制大体积临时优化器文件。恢复比较原始报告完整包含参数/梯度/优化器误差，不能仅凭载入成功声称续算通过。
+ 
+-NMF：Frobenius、CD、NNDSVDa、tol1e-5、max_iter5000、无稀疏正则、shuffle=False、每候选一个固定初始化。单位L2基；非有限或零行失败。NNLS为FP64，max(240,30K)，原KKT门1e-7。系数强度保留，不做行概率归一化。全部随机流派生、节点折、列分组和实际Xt在evidence/dictionary_*中。
++| 数据集 | normal2组件范围 | 全查询前向+原后验+一次工程提交 | 峰值allocated / reserved |
++|---|---:|---:|---:|
++| IMDB四组 | 2.476–2.595秒 | 0.444–0.467秒 | 2393–2398 / 2510–2550MiB |
++| PubMed四组 | 3.352–3.530秒 | 0.605–0.642秒 | 3243–3248 / 3408–3508MiB |
+ 
+-运行时C仅由当前完整Xt的ReFeX计算各类型系数，其他类型列为0，列偏移随K变化。字典为buffer，无CE反传。数据来源为同一训练小图及其原核加噪，是开发材料，不是独立拓扑泛化证据。
++normal2包含工程取证开销，取三个临时更新最大值；不是稳定正式吞吐。采样组件覆盖全查询、q、uniform和一次离散状态提交，仅工程探针，不是T1000链；未给科学末图或质量结论。真实链更密状态可能有不同CN/NNLS开销。
+ 
+-## 参数、入口和未完成项
++## 成本建议与未完成项
+ 
+-两数据集构造器实际计数均为O=6,632,625、A=6,647,441、B=6,793,905。C=6,793,905+256×sum(K)，因未选K不能给出最终整数。计数模型没有前向，不作为正式初始化保存/使用。公共复制与新模块优化器覆盖仅通过小夹具检查，八格实际初态/复制证明尚未生成。
++两卡实测并不等于八卡并发。当前确认空闲7张，固定排程下2000/1000/500更新的保守总剩余成本约329.45/205.18/143.04分钟；含25%未实测并发余量、验证保存组件估算、20分钟评价交付与15分钟故障余量。在计算预算时剩余时间已不足143.04分钟，**目前七卡没有可放行档位**。
++若以后实际确认8卡空闲，对应估计208.60/135.05/98.44分钟；只是条件方案，不能把尚未确认的第八张卡自动占用。等待审查继续减少余量，开训前必须重新核算，不能延长05:06:09或删组/图。实际formal validation/save全流程与八卡CPU/IO竞争未测；具体成分/队列及每格数值在cost_proposal.json。
+ 
+-`worker.py`与`launch.py`为待审查的训练/调度草稿：双重显式审核确认、完整字典门、源码/预算/环境绑定、8格成本门、单GPU单进程、原normal2、初始/中点/最终保存、最终两seed原始T1000采样。只做过导入、语法及未授权拒绝入口测试，**未做端到端科学运行或恢复验收，不能称可正式启动包**。不存在approval文件。历史probe.py/prepare.py及合成基只作为来源材料保留，不能用它们绕过本版字典门。
++本版提供2000/1000/500三个固定档位建议，没有选定正式更新数，没有生成审批文件，不自动启动。训练/调度源码只验证拒绝入口、绑定及排程逻辑，未实际执行正式长流程；断电/强杀等完整监督器故障覆盖尚未完成，不伪称全运行系统验收。
+ 
+-真实字典低中高噪声接口、八格同GPUnormal2/保存恢复、实际显存/耗时、并发CPU/IO竞争、训练和16链预算均未测。没有可靠依据选择2000/1000/500档；不能把旧合成基成本代替本次NNLS成本，也不能据当前缺测断言三小时必然不够。成本准入仍需20分钟交付+15分钟故障余量。
++## 统一评价与W1口径
+ 
+-本版交付全部评分、失败证据和源码供审查。下一决策是审阅固定NMF收敛门及是否另行授权改变拟合设置；未经新授权不改5000、K范围、阈值或材料。当前即使收到一般审查通过，也不能跳过字典阻塞启动正式实验。
++summarize.py独立读取八格及16张原始图，核对seed/最终权重/图哈希/类型/schema，调用同一逐图评价，保留全部绝对指标；给出5种对照的逐seed差和两图均值、结构代价、边差异及有编号重复情况。缺失/失败格保留，任一配对缺图时均值为null；不只平均成功图，返回非零。两样本的边差异不等于充分拓扑多样性，未宣称完成图同构分类。
+ 
+-## 安全复核命令（不拟合、不更新、不生成）
++本版W1按每类型关联4个schema关系列平均，再按类型节点数加权。旧E07按全部10列；在本次同一完整schema且非关联6列都为0的条件下，旧all10值=0.4×本版incident4值。不可直接混用；真实主口径需正式开训前确认，不能看结果挑口径。
+ 
+-默认使用已存在的环境，不安装依赖：
+-
++安全复验（不拟合、不训练、不生成）：
+ ```bash
+-cd typed_structure_192_oabc_v1
+ sha256sum -c SHA256SUMS
++env OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 /data2/lyh/miniconda3/envs/sparse_block/bin/python -m unittest test_revision -v
+ cd package
+-env OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 \
+-  /data2/lyh/miniconda3/envs/sparse_block/bin/python -m unittest test_oabc -v
+-env OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 \
+-  /data2/lyh/miniconda3/envs/sparse_block/bin/python audit_dictionary.py \
+-  --evidence ../evidence --output /tmp/oabc_dictionary_audit_new.json
++env OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 /data2/lyh/miniconda3/envs/sparse_block/bin/python -m unittest test_oabc -v
+ ```
+ 
+-输出JSON已存在会拒绝覆盖。audit重建的是冻结前向噪声来核对已有Xt，不调用神经网络、不拟合基、不产生自由生成图。
+-
+-评价代码冻结了类型节点数加权的关系度W1（类型内平均其关联关系）、类型加权联合度TV、类型三角组成TV，保留绝对图指标与五种配对差。它只通过小夹具恒等性检查；16张图、两图均值、并发时间估计及完整实际评价仍未产生。一个训练seed/两生成seed的探索性限制不变。
++独立汇总入口（仅对将来已存在的结果；缺图输出incomplete）：
++```bash
++python summarize.py --run /调用者明确提供的新实验目录 --output /新的汇总文件.json
++```
++不提供默认执行正式任务的命令。完成本票交付后停止，等待独立审查和明确继续确认。
+--- /dev/null
++++ b/audit_revision.py
+@@ -0,0 +1,50 @@
++"""Audit existing refits/engineering states only; never fit or step."""
++import pathlib,json,sys,hashlib,time
++sys.path.insert(0,str(pathlib.Path(__file__).parent/'package'))
++import numpy as np
++import torch
++from role_dictionary import weighted_rows,masked_score
++from admission import assignment
++from probe import equal
++
++def main(root):
++    root=pathlib.Path(root);report=dict(status='passed',dictionaries={},engineering={},source_scope='GPU source snapshots retained; later additions are launcher/summary/tests, not neural code',formal_updates=0,generated_graphs=0);cost=dict(complete_eight_cells=True,cells={},concurrency_margin=1.25,margin_meaning='UNMEASURED conservative planning factor; not eight-card throughput evidence',schedule='fixed immutable per-device FIFO queues from admission.assignment')
++    for dataset in ['IMDB','PubMed']:
++        d=root/('dictionary_'+dataset);r=json.loads((d/'selection.json').read_text());assert r['status']=='passed';panel=json.loads((d/'panel.json').read_text());splits=json.loads((d/'frozen_splits.json').read_text());arrays=[np.load(d/x['file'])['features'] for x in panel];types=np.load(d/panel[0]['file'])['types'];sides=[np.array(x) for x in splits['sides']];score_error=0.;reconstruction_error=0.;fits=0
++        for t,row in r['types'].items():
++            folds=[np.array(x) for x in splits['node_folds'][t]['folds']]
++            for c in row['candidates']:
++                assert c['valid']
++                for fold,f in enumerate(c['fits']):
++                    assert f['converged'];fits+=1;name='candidate_type%s_K%d_fold%d'%(t,c['K'],fold);z=np.load(d/(name+'_raw.npz'));matrix=weighted_rows(arrays,folds[fold]);assert str(z['input_sha256'])==hashlib.sha256(np.ascontiguousarray(matrix).tobytes()).hexdigest();assert hashlib.sha256((d/(name+'_raw.npz')).read_bytes()).hexdigest()==f['artifact_sha256']
++                    h=z['H']/np.linalg.norm(z['H'],axis=1)[:,None];np.testing.assert_array_equal(h,z['normalized_basis']);np.testing.assert_array_equal(h,np.load(d/(name+'.npz'))['basis']);err=abs(np.linalg.norm(matrix-z['W']@z['H'])-f['reconstruction_error']);assert err<1e-8;reconstruction_error=max(reconstruction_error,err)
++                    scores=masked_score(arrays,folds[1-fold],h,sides)
++                    for a,b in zip(scores,c['scores'][fold]):score_error=max(score_error,abs(a['weighted_mse']-b['weighted_mse']))
++            assert row['final_fit']['converged'];z=np.load(d/('final_type%s_raw.npz'%t));matrix=weighted_rows(arrays,np.flatnonzero(types==int(t)));assert str(z['input_sha256'])==hashlib.sha256(np.ascontiguousarray(matrix).tobytes()).hexdigest()
++        assert score_error<=1e-14
++        report['dictionaries'][dataset]=dict(candidate_fold_fits=fits,K=r['K'],offsets=r['offsets'],boundary_hit=[v['boundary_hit'] for v in r['types'].values()],recomputed_score_max_abs=score_error,reconstruction_error_max_abs=reconstruction_error,old_converged_comparisons=len(r['old_converged_comparison']),old_basis_max_abs=max(v['basis_max_abs'] for v in r['old_converged_comparison']),old_score_max_abs=max(v['score_max_abs'] for v in r['old_converged_comparison']))
++        e=root/('engineering_'+dataset);receipt=json.loads((e/'summary.json').read_text());assert receipt['status']=='engineering_completed_no_formal';rng_proofs=[];models={}
++        for arm in 'OABC':
++            label=dataset+'_'+arm;row=receipt['cells'][label];assert row['passed'] and row['actual_steps']==3;initial=torch.load(e/arm/'initial.pt',map_location='cpu');models[arm]=initial['model'];assert initial['updates']==0;rng_proofs.append(initial['rng']);proof=json.loads((e/arm/'initialization.json').read_text());assert all(proof['copied_exact'].values())
++            same=json.loads((e/arm/'same_gpu.json').read_text());rest=json.loads((e/arm/'restore.json').read_text());assert same['passes'] and rest['passes'] and row['load_exact']
++            report['engineering'][label]=dict(steps=3,load_exact=True,same_gpu_passed=True,same_gpu_gradient_max_abs=max(v['max_abs'] for v in same['gradients'].values()),continuation_passed=True,continuation_parameter_max_abs=max(v['max_abs'] for v in rest['parameters'].values()),optimizer_exact=rest['optimizer_exact'],rng_exact=rest['rng_exact'],parameters=row['parameters'],normal2_seconds=row['normal2_seconds'],sampling_step_seconds=row['sampling_step_seconds'],peak_allocated_mib=row['peak_allocated_mib'],peak_reserved_mib=row['peak_reserved_mib'])
++            # Nine fixed validation forwards + three checkpoint writes + explicit 10s per-cell unmeasured I/O reserve.
++            allowance=3*sum(x['total_seconds'] for x in row['full_step'])+3*row['save_seconds']+10
++            cost['cells'][label]=dict(passed=True,normal2_seconds=row['normal2_seconds'],sampling_step_seconds=row['sampling_step_seconds'],validation_save_seconds=allowance,allowance_meaning='component estimate, includes extra 10s/cell; not an actual formal validation-save measurement')
++        assert all(equal(rng_proofs[0],x) for x in rng_proofs)
++        for arm in 'OBC':
++            for key,value in models[arm].items():
++                if key in models['A'] and models['A'][key].shape==value.shape:assert torch.equal(value,models['A'][key])
++                elif key=='joint_head.0.weight':assert torch.equal(value,models['A'][key][:,:value.shape[1]])
++        report.setdefault('paired_initial_state_and_rng',{})[dataset]=True
++    cost['tiers']=[];remaining=1793135169-time.time()
++    for cards in [7,8]:
++        for updates in [2000,1000,500]:
++            queues,loads=assignment(cost,updates,list(range(cards)));seconds=max(loads)*cost['concurrency_margin']+2100;cost['tiers'].append(dict(cards=cards,updates=updates,queues=queues,loads_seconds=loads,seconds_including_20min_delivery_15min_fault=seconds,remaining_seconds_at_estimate=remaining,fits_at_estimate=seconds<=remaining,actual_card_availability_confirmed=cards==7))
++    cost['selected_updates']=None;cost['authorization']=False;cost['measured_concurrency']='two single-GPU processes, each four sequential cells; no eight-card timing';cost['formal_risk']='independent forward-noise engineering states do not bound all free-generation CN/NNLS costs'
++    return report,cost
++
++if __name__=='__main__':
++    p=pathlib.Path(sys.argv[1]);report,cost=main(p)
++    for name,r in [('revision_audit.json',report),('cost_proposal.json',cost)]:
++        with (p/name).open('x') as f:json.dump(r,f,indent=2)
+--- /dev/null
++++ b/package/admission.py
+@@ -0,0 +1,18 @@
++"""Shared immutable approval inputs and deterministic slot scheduling."""
++import pathlib,json,hashlib
++def sha(p):return hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest()
++def dictionaries(directory,approval):
++    for dataset in ['IMDB','PubMed']:
++        root=pathlib.Path(directory)/('dictionary_'+dataset);e=approval['dictionaries'][dataset]
++        for name in ['final_basis.npz','selection.json','panel.json','frozen_splits.json']:
++            if sha(root/name)!=e['files'][name]:raise ValueError('external approval hash differs '+dataset+'/'+name)
++        r=json.loads((root/'selection.json').read_text())
++        if r['status']!='passed' or r['K']!=e['K'] or r['offsets']!=e['offsets'] or r['offsets'][-1]!=e['dimension']:raise ValueError('dictionary approval dimensions/status')
++def assignment(cost,updates,devices):
++    """One immutable FIFO queue per device, shared by budget and execution."""
++    queues=[[] for _ in devices];loads=[0.]*len(devices)
++    for dataset in ['IMDB','PubMed']:
++        for arm in 'OABC':
++            c=cost['cells'][dataset+'_'+arm];seconds=updates*c['normal2_seconds']+2000*c['sampling_step_seconds']+c['validation_save_seconds']
++            i=min(range(len(devices)),key=lambda i:loads[i]);queues[i].append((dataset,arm));loads[i]+=seconds
++    return queues,loads
+--- a/package/config.json
++++ b/package/config.json
+@@ -30,7 +30,7 @@
+   "rounds": 1,
+   "schedule_offset": 0.008,
+   "tf32": false,
+-  "version": "typed_structure_192_oabc_v1",
++  "version": "typed_structure_192_oabc_v1_1",
+   "arms": [
+     "O",
+     "A",
+@@ -45,7 +45,7 @@
+     "normalization": "log1p(base count)/log1p(schema bound); ONE round: for each relation mean and sum/(N-1) of base features",
+     "rank": "per-type held-out selection K=1..min(8,fold_sizes)",
+     "basis_seed": 2026102861,
+-    "nmf_max_iter": 5000,
++    "nmf_max_iter": 50000,
+     "nmf_tol": 1e-05,
+     "encoding": "per-node NNLS, fixed unit-L2 basis rows; no coefficient normalization",
+     "nnls_max_iter": 240
+@@ -95,4 +95,4 @@
+   },
+   "query_contract": "ALL active slots in ONE forward per input; S=18336, loss=(sum CE input1 + sum CE input2)/(2*S)",
+   "source_note": "normal2 sequential backward; O/A/B/C and held-out rank selection; formal execution requires independent review plus explicit continue confirmation"
+-}
++}--- /dev/null
++++ b/package/engineering_real.py
+@@ -0,0 +1,74 @@
++"""Eight-cell real-dictionary engineering, maximum THREE steps per cell.
++No full chain, no scientific initialization or automatic formal continuation.
++"""
++import argparse,pathlib,json,time,signal,copy,resource,gc,os,traceback
++import numpy as np
++import torch
++from prepare import save,sha
++from experiment_contract import initialization,read_dictionary,reset_training_streams,source_binding
++from normal2 import normal2,pair_inputs,sync
++from probe import rng_get,rng_set,equal,input_hash,compare_diagnostics,metric,flatten
++from hsgd.bw_preflight.common import cpu_tree,environment,schedule
++from hsgd.computational import FrozenTypedContext
++from hsgd.kernel import MarginalKernel
++
++def main():
++    p=argparse.ArgumentParser();p.add_argument('--dataset',choices=['IMDB','PubMed'],required=True);p.add_argument('--dictionaries',required=True);p.add_argument('--output',required=True);p.add_argument('--ledger',required=True);a=p.parse_args()
++    out=pathlib.Path(a.output);out.mkdir(exist_ok=False);ledger=json.loads(pathlib.Path(a.ledger).read_text());deadline=min(ledger['preparation_deadline_epoch']-180,1793126889);result=dict(status='running',cells={},formal_updates=0,complete_chains=0);start=time.time()
++    def check():
++        if time.time()>=deadline:raise TimeoutError('delivery reserve')
++        if (out/'STOP').exists():raise InterruptedError('STOP')
++    def stop(s,f):raise InterruptedError('signal '+str(s))
++    for s in [signal.SIGINT,signal.SIGTERM,signal.SIGHUP,signal.SIGALRM]:signal.signal(s,stop)
++    signal.alarm(max(1,int(deadline-time.time())))
++    try:
++        check();torch.set_num_threads(1);torch.set_num_interop_threads(1);torch.use_deterministic_algorithms(True,warn_only=False);torch.backends.cuda.matmul.allow_tf32=False;torch.backends.cudnn.allow_tf32=False
++        if not torch.cuda.is_available() or torch.cuda.device_count()!=1 or '2080 Ti' not in torch.cuda.get_device_name(0):raise RuntimeError('one RTX2080Ti required')
++        save(out/'environment.json',environment('cuda'));save(out/'source.json',dict(zip(['files','sha256'],source_binding())));basis,receipt=read_dictionary(a.dictionaries,a.dataset)
++        seed={'IMDB':2026102811,'PubMed':2026102812}[a.dataset]
++        for arm in 'OABC':
++            check();folder=out/arm;folder.mkdir();label=a.dataset+'_'+arm;row=dict(passed=False,actual_steps=0);result['cells'][label]=row
++            m,case,cfg,proof=initialization(a.dataset,arm,seed,basis if arm=='C' else None);cfg=dict(cfg,seed=seed);m=m.cuda();rng,rngproof=reset_training_streams(seed,a.dataset,'cuda');initial=cpu_tree(m.state_dict());initial_rng=rng_get(rng,'cuda')
++            binding=dict(source=source_binding()[1],config=cfg,dataset=a.dataset,arm=arm,basis_sha256=receipt['basis_sha256'])
++            save(folder/'initialization.json',proof);save(folder/'rng.json',rngproof);torch.save(dict(model=initial,rng=initial_rng,updates=0,binding=binding,purpose='ENGINEERING ONLY NEVER SCIENTIFIC INITIAL'),folder/'initial.pt');row['initial_sha256']=sha(folder/'initial.pt')
++            opt=torch.optim.AdamW(m.parameters(),**{k:v for k,v in cfg['optimizer'].items() if k!='type'});assert {id(p) for g in opt.param_groups for p in g['params']}=={id(p) for p in m.parameters()}
++            paired=pair_inputs(case,cfg,50,np.random.default_rng(2026102801),500);row['input_sha256']=input_hash(paired);torch.cuda.reset_peak_memory_stats();d1={};d2={}
++            normal2(m,opt,case,paired,1000,'cuda',False,d1);rng_set(initial_rng,rng,'cuda');normal2(m,opt,case,paired,1000,'cuda',False,d2);cmp=compare_diagnostics(d1,d2);save(folder/'same_gpu.json',cmp);row['same_gpu_passed']=cmp['passes'];del d1,d2
++            if not cmp['passes']:raise RuntimeError('same GPU full normal2 gate failed; no updates')
++            # Low/mid/high fresh Xt contexts, frozen dictionary identity and complete query.
++            m.eval();timings=[]
++            for t in [1,500,1000]:
++                check();inp=pair_inputs(case,cfg,100+t,np.random.default_rng(2026102801+t),t)[0];sync('cuda');begin=time.perf_counter();ctx=FrozenTypedContext(m,case['space'].types,inp['edges'],inp['edge_families'],('engineering',t))
++                try:
++                    with torch.no_grad():prob=ctx.predict(inp['query'],inp['f'],t/1000,('engineering',t)).cpu().numpy().astype(np.float64)
++                    enc=getattr(ctx,'encoding_receipt',None);assert len(prob)==int(np.sum(case['space'].counts[case['active']]))
++                    if arm!='A':assert ctx.cn_wedges is None and m.common_neighbor is None
++                    if arm=='C':assert np.isfinite(ctx.structural_roles.cpu().numpy()).all() and (ctx.structural_roles>=0).all()
++                finally:ctx.close()
++                sync('cuda');forward=time.perf_counter()-begin;state=np.zeros(case['space'].total,np.uint8);ff,ll=case['space'].encode(inp['edges']);state[case['space'].offsets[ff]+ll]=1
++                begin=time.perf_counter();q=MarginalKernel(case['prior'],schedule(1000)).reverse(prob,state[inp['ids']],inp['f'],t-1,t);candidate=state.copy();candidate[inp['ids']]=(np.random.default_rng(123).random(len(q))<q);assert np.isin(candidate,[0,1]).all();posterior_commit=time.perf_counter()-begin
++                timings.append(dict(t=t,slots=len(prob),forwards=1,network_seconds=forward,posterior_and_disposable_commit_seconds=posterior_commit,total_seconds=forward+posterior_commit,encoding=enc,engineering_state_not_scientific_graph=True))
++            row['full_step']=timings
++            m.load_state_dict(initial);opt=torch.optim.AdamW(m.parameters(),**{k:v for k,v in cfg['optimizer'].items() if k!='type'});rng_set(initial_rng,rng,'cuda');hist=[];continuous=None;lastdiag=None
++            for i,pos in enumerate([1,2,2]):
++                check()
++                if i==2:
++                    assert sha(folder/'after1.pt')==row['checkpoint_sha256'];ck=torch.load(folder/'after1.pt',map_location='cpu');assert ck['updates']==1 and ck['binding']==binding;del m,opt;gc.collect();m,_,_,_=initialization(a.dataset,arm,seed,basis if arm=='C' else None);m=m.cuda();m.load_state_dict(ck['model']);opt=torch.optim.AdamW(m.parameters(),**{k:v for k,v in cfg['optimizer'].items() if k!='type'});opt.load_state_dict(ck['optimizer']);rng_set(ck['rng'],rng,'cuda')
++                    row['load_exact']=equal(cpu_tree(m.state_dict()),ck['model']) and equal(cpu_tree(opt.state_dict()),ck['optimizer']) and equal(rng_get(rng,'cuda'),ck['rng']);assert row['load_exact']
++                inp=pair_inputs(case,cfg,pos,rng,500);ih=input_hash(inp)
++                if i==2:assert ih==hist[1]['input_sha256']
++                row['actual_steps']+=1;save(out/'summary.json',result) # reserved before step; never retry/replenish
++                dg={};rec=normal2(m,opt,case,inp,1000,'cuda',True,dg);rec.update(input_sha256=ih,restored=i==2);hist.append(rec)
++                if i==0:
++                    begin=time.perf_counter();torch.save(dict(model=cpu_tree(m.state_dict()),optimizer=cpu_tree(opt.state_dict()),rng=rng_get(rng,'cuda'),updates=1,binding=binding),folder/'after1.pt');row['save_seconds']=time.perf_counter()-begin;row['checkpoint_sha256']=sha(folder/'after1.pt')
++                if i==1:continuous=dict(model=cpu_tree(m.state_dict()),optimizer=cpu_tree(opt.state_dict()),rng=rng_get(rng,'cuda'));lastdiag=dg
++                if i==2:
++                    comp=compare_diagnostics(lastdiag,dg);comp['parameters']={k:metric(v,m.state_dict()[k]) for k,v in continuous['model'].items()};current=cpu_tree(opt.state_dict());comp['optimizer_exact']=equal(continuous['optimizer'],current);comp['optimizer']={k:metric(v,flatten(current)[k]) for k,v in flatten(continuous['optimizer']).items()};comp['rng_exact']=equal(continuous['rng'],rng_get(rng,'cuda'));comp['passes']=comp['passes'] and all(v['passes'] for v in comp['parameters'].values()) and all(v['passes'] for v in comp['optimizer'].values()) and comp['rng_exact'];save(folder/'restore.json',comp);assert comp['passes'];row['restore_passed']=True
++            row.update(passed=True,updates=hist,normal2_seconds=max(x['normal2_seconds'] for x in hist),sampling_step_seconds=max(x['total_seconds'] for x in timings),validation_save_seconds=None,peak_allocated_mib=torch.cuda.max_memory_allocated()/2**20,peak_reserved_mib=torch.cuda.max_memory_reserved()/2**20,peak_rss_mib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024,parameters=proof['parameters'])
++            save(out/'summary.json',result);del m,opt,initial,continuous,lastdiag,dg;gc.collect();torch.cuda.empty_cache();print(label,'PASS',row['actual_steps'],flush=True)
++        result['status']='engineering_completed_no_formal'
++    except BaseException as exc:result.update(status='failed_or_incomplete',error=repr(exc),traceback=traceback.format_exc())
++    finally:
++        result.update(seconds=time.time()-start,ended_epoch=time.time());save(out/'summary.json',result)
++    return 0 if result['status']=='engineering_completed_no_formal' else 2
++if __name__=='__main__':raise SystemExit(main())
+--- a/package/experiment_contract.py
++++ b/package/experiment_contract.py
+@@ -4,8 +4,12 @@
+ from prepare import load_case,sha,ROOT
+ from role_dictionary import seed32
+ 
+-def read_dictionary(directory,dataset):
++def read_dictionary(directory,dataset,expected=None):
+     root=pathlib.Path(directory)/('dictionary_'+dataset);receipt=json.loads((root/'selection.json').read_text())
++    if expected is not None:
++        for name in ['final_basis.npz','selection.json','panel.json','frozen_splits.json']:
++            if sha(root/name)!=expected['files'][name]:raise ValueError('approval dictionary hash mismatch: '+name)
++        if receipt.get('K')!=expected['K'] or receipt.get('offsets')!=expected['offsets'] or receipt.get('offsets',[-1])[-1]!=expected['dimension']:raise ValueError('approval dictionary dimensions')
+     if receipt['status']!='passed':raise RuntimeError(dataset+' dictionary gate failed: '+receipt['status'])
+     for typ,row in receipt['types'].items():
+         if len(row['candidates'])!=row['Kmax'] or not all(c['valid'] for c in row['candidates']):raise ValueError('incomplete K comparison')
+@@ -22,7 +26,7 @@
+     if approval.get('independent_review')!='passed' or approval.get('user_continue_confirmed') is not True:raise PermissionError('independent review AND explicit user continuation required')
+     if approval.get('ledger_sha256')!=sha(ledger_path) or approval.get('protocol_sha256')!=sha(protocol_path) or approval.get('source_sha256')!=source_hash:raise ValueError('approval/source/ledger binding mismatch')
+     if approval.get('updates') not in (500,1000,2000):raise ValueError('outside frozen update tiers')
+-    for dataset in ['IMDB','PubMed']:read_dictionary(dictionary_dir,dataset)
++    for dataset in ['IMDB','PubMed']:read_dictionary(dictionary_dir,dataset,approval['dictionaries'][dataset])
+     return ledger,approval
+ 
+ def source_binding():
+@@ -56,7 +60,17 @@
+     for updates in [2000,1000,500]:
+         durations=[values[k]['normal2_seconds']*updates+2*1000*values[k]['sampling_step_seconds']+values[k]['validation_save_seconds'] for k in labels]
+         loads=[0.]*min(parallel_devices,8)
+-        for value in sorted(durations,reverse=True):loads[loads.index(min(loads))]+=value
++        for value in durations:loads[loads.index(min(loads))]+=value
+         total=max(loads)*cost['concurrency_margin']+1200+900
+         result.append(dict(updates=updates,seconds=total,fits=total<=remaining,unmeasured_concurrency_margin=cost['concurrency_margin']))
+     return next((r for r in result if r['fits']),None),result
++
++def reset_training_streams(seed,dataset,device):
++    import random,torch,pickle
++    from probe import rng_get
++    streams={name:seed32(seed,dataset=dataset,purpose='paired_training_'+name) for name in ['python','global_numpy','torch_cpu','torch_cuda','generator']}
++    random.seed(streams['python']);np.random.seed(streams['global_numpy']);torch.random.default_generator.manual_seed(streams['torch_cpu'])
++    if device=='cuda':torch.cuda.manual_seed(streams['torch_cuda'])
++    rng=np.random.default_rng(streams['generator']);state=rng_get(rng,device)
++    hashes={name:hashlib.sha256(value.cpu().contiguous().numpy().tobytes() if torch.is_tensor(value) else pickle.dumps(value,protocol=4)).hexdigest() for name,value in state.items()}
++    return rng,dict(seeds=streams,state_sha256=hashes,after_model_construction_and_copy=True)
+--- a/package/launch.py
++++ b/package/launch.py
+@@ -1,15 +1,18 @@
+ """Lightweight launch gate. No torch import, no fitting, no implicit authorization."""
+ import argparse,pathlib,json,time,hashlib,subprocess,sys,os,signal
++from admission import dictionaries as check_dictionaries,assignment
+ 
+ def sha(p):return hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest()
+ def gate(root,ledger_path,approval_path,protocol_path,dictionaries,cost_path):
+     ledger=json.loads(pathlib.Path(ledger_path).read_text());approval=json.loads(pathlib.Path(approval_path).read_text());protocol=json.loads(pathlib.Path(protocol_path).read_text())
+     if time.time()>=ledger['deadline_epoch']:raise TimeoutError('original budget expired')
+     if approval.get('independent_review')!='passed' or approval.get('user_continue_confirmed') is not True:raise PermissionError('review + user continuation missing')
++    if approval.get('main_W1_definition_confirmed')!='type_weighted_incident4':raise PermissionError('main W1 definition must be explicitly confirmed before formal execution')
+     if approval.get('ledger_sha256')!=sha(ledger_path) or approval.get('protocol_sha256')!=sha(protocol_path):raise ValueError('ledger/protocol differs')
+     files={str(p.relative_to(root)):sha(p) for p in root.rglob('*') if p.is_file() and '__pycache__' not in str(p) and p.suffix in ('.py','.json','.npz')}
+     source=hashlib.sha256(json.dumps(files,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+     if approval.get('source_sha256')!=source:raise ValueError('reviewed source differs')
++    check_dictionaries(dictionaries,approval)
+     for dataset in protocol['datasets']:
+         d=pathlib.Path(dictionaries)/('dictionary_'+dataset);r=json.loads((d/'selection.json').read_text())
+         if r['status']!='passed' or sha(d/'final_basis.npz')!=r['basis_sha256']:raise RuntimeError('dictionary gate not passed: '+dataset)
+@@ -35,22 +38,25 @@
+     for d in devices:
+         if d not in rows or '2080 Ti' not in rows[d][1] or int(rows[d][2])>10 or int(rows[d][3])>0:raise RuntimeError('selected GPU not confirmed idle RTX2080Ti: '+d)
+     # Admission for EXACT reviewed tier; no effect-dependent choice or post-start change.
+-    tasks=[(d,a) for d in ['IMDB','PubMed'] for a in 'OABC'];loads=[0.]*len(devices)
+-    for d,a in tasks:
+-        c=cost['cells'][d+'_'+a];duration=approval['updates']*c['normal2_seconds']+2000*c['sampling_step_seconds']+c['validation_save_seconds'];i=loads.index(min(loads));loads[i]+=duration
++    queues,loads=assignment(cost,approval['updates'],devices)
++    tasks={device:queue for device,queue in zip(devices,queues)}
+     expected=max(loads)*cost['concurrency_margin']+2100
+     if expected>ledger['deadline_epoch']-time.time():raise TimeoutError('reviewed tier no longer fits; require explicit recorded pre-start lower tier')
+     if args.mode=='gate':print(json.dumps(dict(status='gate_passed_no_execution',expected_seconds=expected)));return 0
+     out=pathlib.Path(args.output);out.mkdir(parents=True,exist_ok=False);stop=[False];running={};finished=[];failed=False
+     for sig in [signal.SIGINT,signal.SIGTERM,signal.SIGHUP]:signal.signal(sig,lambda s,f:stop.__setitem__(0,True))
+     try:
+-        while tasks or running:
++        while any(tasks.values()) or running:
+             if stop[0] or (out/'STOP').exists() or time.time()>=ledger['deadline_epoch']-1200:failed=True;break
+             for device in devices:
+-                if device not in running and tasks and not failed:
+-                    dataset,arm=tasks.pop(0);label=dataset+'_'+arm;log=(out/(label+'.log')).open('xb');env=dict(os.environ,CUDA_VISIBLE_DEVICES=device,OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1',MKL_NUM_THREADS='1',CUBLAS_WORKSPACE_CONFIG=':4096:8')
+-                    cmd=[sys.executable,str(root/'worker.py'),'--dataset',dataset,'--arm',arm,'--output',str(out/label),'--dictionary-dir',args.dictionary_dir,'--ledger',args.ledger,'--approval',args.approval,'--protocol',args.protocol]
+-                    process=subprocess.Popen(cmd,env=env,stdout=log,stderr=subprocess.STDOUT,start_new_session=True);running[device]=(process,log,label)
++                if device not in running and tasks[device] and not failed:
++                    dataset,arm=tasks[device].pop(0);label=dataset+'_'+arm;log=(out/(label+'.log')).open('xb');env=dict(os.environ,CUDA_VISIBLE_DEVICES=device,OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1',MKL_NUM_THREADS='1',CUBLAS_WORKSPACE_CONFIG=':4096:8')
++                    read_fd,write_fd=os.pipe();ticket=dict(parent_pid=os.getpid(),dataset=dataset,arm=arm,device=device,approval_sha256=sha(args.approval),cost_sha256=sha(args.cost),output=str((out/label).resolve()),admitted_epoch=time.time())
++                    os.write(write_fd,json.dumps(ticket).encode());os.close(write_fd)
++                    cmd=[sys.executable,str(root/'worker.py'),'--dataset',dataset,'--arm',arm,'--output',str(out/label),'--dictionary-dir',args.dictionary_dir,'--ledger',args.ledger,'--approval',args.approval,'--protocol',args.protocol,'--cost',args.cost,'--launch-fd',str(read_fd)]
++                    try:process=subprocess.Popen(cmd,env=env,stdout=log,stderr=subprocess.STDOUT,start_new_session=True,pass_fds=(read_fd,))
++                    finally:os.close(read_fd)
++                    running[device]=(process,log,label)
+             for device,(process,log,label) in list(running.items()):
+                 rc=process.poll()
+                 if rc is not None:
+@@ -67,6 +73,13 @@
+             except subprocess.TimeoutExpired:os.killpg(process.pid,signal.SIGKILL);process.wait()
+             log.close();finished.append(dict(cell=label,exit_code=process.returncode,terminated=True))
+         complete=not failed and len(finished)==8 and all(r['exit_code']==0 for r in finished)
++        if complete:
++            for row in finished:
++                receipt=json.loads((out/row['cell']/'summary.json').read_text())
++                if receipt.get('status')!='complete' or receipt.get('completed_updates')!=approval['updates'] or receipt.get('completed_chains')!=2:complete=False
++        if complete:
++            evaluation=subprocess.run([sys.executable,str(root.parent/'summarize.py'),'--run',str(out),'--output',str(out/'unified_evaluation.json')],timeout=max(.1,ledger['deadline_epoch']-time.time()))
++            complete=evaluation.returncode==0
+         (out/'launcher_summary.json').write_text(json.dumps(dict(status='complete' if complete else 'incomplete',jobs=finished,unstarted=tasks,elapsed_since_activation=time.time()-ledger['start_epoch']),indent=2))
+     return 0 if complete else 2
+ if __name__=='__main__':raise SystemExit(main())
+--- /dev/null
++++ b/package/refit_dictionary.py
+@@ -0,0 +1,56 @@
++"""Authorized 50000-iteration refit, using exactly the archived matrices/splits."""
++import argparse,pathlib,json,shutil,time,signal,traceback,resource
++import numpy as np
++from prepare import sha,save
++from role_dictionary import fit,weighted_rows,masked_score,choose,seed32,NMF_OPTIONS
++
++def main():
++    p=argparse.ArgumentParser();p.add_argument('--dataset',required=True,choices=['IMDB','PubMed']);p.add_argument('--source',required=True);p.add_argument('--manifest',required=True);p.add_argument('--manifest-sha256',required=True);p.add_argument('--output',required=True);a=p.parse_args()
++    source=pathlib.Path(a.source).resolve();manifest=pathlib.Path(a.manifest).resolve();out=pathlib.Path(a.output);out.mkdir(exist_ok=False);started=time.time()
++    result=dict(status='running',dataset=a.dataset,types={},started_epoch=started,refit_not_resume=True,options=NMF_OPTIONS,original_manifest_sha256=a.manifest_sha256,original_status_sha256=sha(source/'selection.json'))
++    def check():
++        if time.time()>=1793126769:raise TimeoutError('fixed preparation deadline with 5-minute delivery reserve')
++        if (out/'STOP').exists():raise InterruptedError('STOP')
++    def stop(s,f):raise InterruptedError('signal '+str(s))
++    for s in [signal.SIGTERM,signal.SIGINT,signal.SIGHUP]:signal.signal(s,stop)
++    signal.signal(signal.SIGALRM,stop);signal.alarm(max(1,int(1793126769-time.time())))
++    try:
++        check();assert sha(manifest)==a.manifest_sha256;inventory=json.loads(manifest.read_text())['files'];anchor=manifest.parent
++        for file in source.iterdir():
++            if file.is_file():assert sha(file)==inventory[str(file.relative_to(anchor))]['sha256']
++        old=json.loads((source/'selection.json').read_text());splits=json.loads((source/'frozen_splits.json').read_text());panel=json.loads((source/'panel.json').read_text())
++        # Preserve original split/panel bytes, including historical NMF=5000 metadata.
++        # This revision's only fit override is explicit in refit_config.json.
++        for name in ['panel.json','frozen_splits.json']+[s['file'] for s in panel]:shutil.copy2(source/name,out/name)
++        save(out/'refit_config.json',dict(options=NMF_OPTIONS,historical_splits_metadata_not_effective_solver=True,source_files={p.name:sha(p) for p in source.iterdir() if p.is_file()},comparison_atol=1e-14,comparison_rtol=0))
++        arrays=[np.load(source/s['file'],allow_pickle=False)['features'] for s in panel];types=np.load(source/panel[0]['file'],allow_pickle=False)['types'];sides=[np.array(x) for x in splits['sides']];valid=True;comparison=[]
++        for typ_string,split in splits['node_folds'].items():
++            typ=int(typ_string);row=dict(Kmax=split['Kmax'],candidates=[]);result['types'][typ_string]=row;folds=[np.array(x) for x in split['folds']]
++            for k in range(1,split['Kmax']+1):
++                c=dict(K=k,fits=[],scores=[],valid=True);old_c=old['types'][typ_string]['candidates'][k-1];old_score=0
++                for fold in range(2):
++                    check();seed=seed32(2026102861,dataset=a.dataset,type=typ,fold=fold,K=k,purpose='candidate_fit');matrix=weighted_rows(arrays,folds[fold]);name='candidate_type%d_K%d_fold%d'%(typ,k,fold)
++                    h,receipt=fit(matrix,k,seed,out/(name+'_raw.npz'));c['fits'].append(receipt)
++                    if h is None:c['valid']=False;continue
++                    np.savez_compressed(out/(name+'.npz'),basis=h);score=masked_score(arrays,folds[1-fold],h,sides);c['scores'].append(score)
++                    if old_c['fits'][fold]['converged']:
++                        previous=np.load(source/(name+'.npz'),allow_pickle=False)['basis'];basis_error=float(np.max(np.abs(h-previous)));score_error=max(abs(x['weighted_mse']-y['weighted_mse']) for x,y in zip(score,old_c['scores'][old_score]));old_score+=1
++                        comparison.append(dict(type=typ,K=k,fold=fold,basis_max_abs=basis_error,score_max_abs=score_error,basis_exact=bool(np.array_equal(h,previous))))
++                        if basis_error>1e-14 or score_error>1e-14:raise AssertionError('unexpected old/new converged fit mismatch')
++                c['mean_mse']=float(np.mean([s['weighted_mse'] for scores in c['scores'] for s in scores])) if c['valid'] and len(c['scores'])==2 else None
++                row['candidates'].append(c);valid &= c['valid'];result['old_converged_comparison']=comparison;save(out/'selection.json',result);print(a.dataset,typ,k,c['valid'],[f['iterations'] for f in c['fits']],flush=True)
++        if not valid:result.update(status='blocked_incomplete_candidate_comparison',reason='mandatory candidate failed; no selection or final fit')
++        else:
++            matrices=[];offsets=[0];ks=[]
++            for typ_string,split in splits['node_folds'].items():
++                check();typ=int(typ_string);row=result['types'][typ_string];k=choose(row['candidates']);row.update(selected_K=k,boundary_hit=k==row['Kmax']);seed=seed32(2026102861,dataset=a.dataset,type=typ,fold='all',K=k,purpose='final_fit')
++                matrix=weighted_rows(arrays,np.flatnonzero(types==typ));h,rec=fit(matrix,k,seed,out/('final_type%d_raw.npz'%typ));row['final_fit']=rec;save(out/'selection.json',result)
++                if h is None:raise RuntimeError('final fit failed; no final dictionary released')
++                matrices.append(h);ks.append(k);offsets.append(offsets[-1]+k)
++            np.savez_compressed(out/'final_basis.npz',basis=np.concatenate(matrices),offsets=np.array(offsets),K=np.array(ks))
++            result.update(status='passed',K=ks,offsets=offsets,basis_sha256=sha(out/'final_basis.npz'),panel_sha256=sha(out/'panel.json'),splits_sha256=sha(out/'frozen_splits.json'))
++    except BaseException as exc:result.update(status='failed_or_incomplete',error=repr(exc),traceback=traceback.format_exc())
++    finally:
++        result.update(seconds=time.time()-started,finished_epoch=time.time(),peak_rss_mib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024);save(out/'selection.json',result)
++    return 0 if result['status']=='passed' else 2
++if __name__=='__main__':raise SystemExit(main())
+--- a/package/role_dictionary.py
++++ b/package/role_dictionary.py
+@@ -8,7 +8,7 @@
+ from sklearn.exceptions import ConvergenceWarning
+ 
+ NMF_OPTIONS=dict(init='nndsvda',solver='cd',beta_loss='frobenius',tol=1e-5,
+-                 max_iter=5000,shuffle=False,alpha_W=0.,alpha_H=0.,l1_ratio=0.)
++                 max_iter=50000,shuffle=False,alpha_W=0.,alpha_H=0.,l1_ratio=0.)
+ 
+ def seed32(root,**labels):
+     payload=json.dumps(dict(root=int(root),**labels),sort_keys=True,separators=(',',':')).encode()
+@@ -33,15 +33,19 @@
+     if len(features)!=7:raise ValueError('one clean and six noisy states required')
+     return np.concatenate([f[nodes]*(np.sqrt(2.) if i==0 else 1.) for i,f in enumerate(features)],axis=0)
+ 
+-def fit(matrix,k,seed):
++def fit(matrix,k,seed,artifact=None):
+     start=time.perf_counter()
+     with warnings.catch_warnings(record=True) as ws:
+-        warnings.simplefilter('always');model=NMF(n_components=k,random_state=seed,**NMF_OPTIONS);model.fit_transform(matrix)
++        warnings.simplefilter('always');model=NMF(n_components=k,random_state=seed,**NMF_OPTIONS);weights=model.fit_transform(matrix)
+     basis=model.components_.copy();norm=np.linalg.norm(basis,axis=1)
+     finite=bool(np.isfinite(basis).all() and np.isfinite(norm).all() and np.isfinite(model.reconstruction_err_));positive=bool((norm>0).all())
+     converged=model.n_iter_<NMF_OPTIONS['max_iter'] and not any(issubclass(w.category,ConvergenceWarning) for w in ws)
+     receipt=dict(k=k,seed=seed,seconds=time.perf_counter()-start,iterations=int(model.n_iter_),converged=converged,finite=finite,positive_basis_rows=positive,
+                  reconstruction_error=float(model.reconstruction_err_) if finite else None,warnings=[str(w.message) for w in ws],options=NMF_OPTIONS)
++    normalized=basis/norm[:,None] if finite and positive else np.full_like(basis,np.nan)
++    if artifact is not None:
++        np.savez_compressed(artifact,W=weights,H=basis,normalized_basis=normalized,input_sha256=np.array(hashlib.sha256(np.ascontiguousarray(matrix).tobytes()).hexdigest()),input_shape=np.array(matrix.shape),seed=np.array(seed))
++        receipt['artifact_sha256']=hashlib.sha256(__import__('pathlib').Path(artifact).read_bytes()).hexdigest()
+     if not finite or not positive or not converged:return None,receipt
+     return basis/norm[:,None],receipt
+ 
+--- a/package/worker.py
++++ b/package/worker.py
+@@ -5,7 +5,7 @@
+ import numpy as np
+ import torch
+ from prepare import save,sha
+-from experiment_contract import read_dictionary,scientific_gate,source_binding,initialization
++from experiment_contract import read_dictionary,scientific_gate,source_binding,initialization,reset_training_streams
+ from role_dictionary import seed32
+ from normal2 import normal2,pair_inputs,sync
+ from probe import rng_get,rng_set,equal,input_hash
+@@ -44,7 +44,12 @@
+     return dict(seconds=time.perf_counter()-start,rows=rows,rng_unchanged=True,same_reference_only=True)
+ 
+ def main():
+-    ap=argparse.ArgumentParser();ap.add_argument('--dataset',choices=['IMDB','PubMed'],required=True);ap.add_argument('--arm',choices=list('OABC'),required=True);ap.add_argument('--output',required=True);ap.add_argument('--dictionary-dir',required=True);ap.add_argument('--ledger',required=True);ap.add_argument('--approval',required=True);ap.add_argument('--protocol',required=True);args=ap.parse_args()
++    ap=argparse.ArgumentParser();ap.add_argument('--dataset',choices=['IMDB','PubMed'],required=True);ap.add_argument('--arm',choices=list('OABC'),required=True);ap.add_argument('--output',required=True);ap.add_argument('--dictionary-dir',required=True);ap.add_argument('--ledger',required=True);ap.add_argument('--approval',required=True);ap.add_argument('--protocol',required=True);ap.add_argument('--cost',required=True);ap.add_argument('--launch-fd',type=int,required=True);args=ap.parse_args()
++    from launch import gate
++    from prepare import ROOT
++    ticket=json.loads(os.read(args.launch_fd,16384));os.close(args.launch_fd)
++    if ticket['parent_pid']!=os.getppid() or ticket['dataset']!=args.dataset or ticket['arm']!=args.arm or ticket['device']!=os.environ.get('CUDA_VISIBLE_DEVICES') or ticket['output']!=str(pathlib.Path(args.output).resolve()) or ticket['approval_sha256']!=sha(args.approval) or ticket['cost_sha256']!=sha(args.cost) or time.time()-ticket['admitted_epoch']>60:raise PermissionError('valid current launcher admission required')
++    gate(ROOT,args.ledger,args.approval,args.protocol,args.dictionary_dir,args.cost)
+     source,source_hash=source_binding();ledger,approval=scientific_gate(args.ledger,args.approval,args.protocol,args.dictionary_dir,source_hash)
+     # Both datasets must have fully valid dictionaries even for O/A/B.
+     protocol=json.loads(pathlib.Path(args.protocol).read_text());dataset=args.dataset;arm=args.arm;out=pathlib.Path(args.output);out.mkdir(parents=True,exist_ok=False)
+@@ -62,9 +67,9 @@
+         for key in ['python_version','torch_runtime_version','device_name']:
+             if approval['environment'][key]!=env[key]:raise ValueError('environment mismatch '+key)
+         if approval['environment']['packages']!=env['packages']:raise ValueError('dependency versions differ')
+-        basis,receipt=read_dictionary(args.dictionary_dir,dataset);seed=protocol['train_seeds'][dataset]
++        basis,receipt=read_dictionary(args.dictionary_dir,dataset,approval['dictionaries'][dataset]);seed=protocol['train_seeds'][dataset]
+         model,case,cfg,proof=initialization(dataset,arm,seed,basis if arm=='C' else None);cfg=dict(cfg,seed=seed)
+-        rng=np.random.default_rng(seed32(seed,dataset=dataset,purpose='paired_training_noise'))
++        model=model.cuda();rng,rng_proof=reset_training_streams(seed,dataset,'cuda');save(out/'training_rng_reset.json',rng_proof)
+         binding=dict(source_sha256=source_hash,source=source,protocol_sha256=sha(args.protocol),ledger_sha256=sha(args.ledger),dictionary_sha256=receipt['basis_sha256'],dataset=cfg['datasets'][dataset],arm=arm,config=cfg,environment=env,updates=approval['updates'])
+         save(out/'binding.json',binding);save(out/'initialization.json',proof)
+         # Entire initial state and RNG saved before any forward, isolated from engineering.
+--- a/protocol.json
++++ b/protocol.json
+@@ -1,29 +1,87 @@
+ {
+   "baseline_commit": "0c4ed6b4d2dfa5b67aa6983e7d665fbc49667d96",
+   "dispatch_erratum_commit": "12c8b52897f45d1b106c710997cd5543c22ea24d",
+-  "arms": ["O", "A", "B", "C"],
+-  "datasets": ["IMDB", "PubMed"],
++  "arms": [
++    "O",
++    "A",
++    "B",
++    "C"
++  ],
++  "datasets": [
++    "IMDB",
++    "PubMed"
++  ],
+   "normal2_inputs": 2,
+   "S": 18336,
+   "query_rounds": 1,
+   "T": 1000,
+-  "fitting_panel": {"times": [0, 100, 500, 1000], "noisy_roots": [2026102831, 2026102832], "layer_weights": [0.25, 0.25, 0.25, 0.25], "clean_row_multiplier": "sqrt(2)", "noisy_row_multiplier": 1},
++  "fitting_panel": {
++    "times": [
++      0,
++      100,
++      500,
++      1000
++    ],
++    "noisy_roots": [
++      2026102831,
++      2026102832
++    ],
++    "layer_weights": [
++      0.25,
++      0.25,
++      0.25,
++      0.25
++    ],
++    "clean_row_multiplier": "sqrt(2)",
++    "noisy_row_multiplier": 1
++  },
+   "node_fold_root": 2026102851,
+   "feature_group_seed": 2026102853,
+   "feature_group_count": 30,
+-  "feature_sides": [15, 15],
++  "feature_sides": [
++    15,
++    15
++  ],
+   "fit_root": 2026102861,
+   "rank_rule": "1..min(8, number of nodes in each training fold)",
+   "score": "two node folds times two masked directions; clean MSE/4 plus each noisy MSE/8; mean four scores",
+   "tie_tolerance": 1e-12,
+   "rank_choice": "smallest K within 1e-12 of minimum; no incomplete candidate selection",
+-  "NMF": {"solver": "cd", "beta_loss": "frobenius", "init": "nndsvda", "tol": 1e-5, "max_iter": 5000, "shuffle": false, "alpha_W": 0, "alpha_H": 0, "l1_ratio": 0},
+-  "NNLS": {"dtype": "float64", "maxiter": "max(240,30*K)", "KKT_limit": 1e-7},
+-  "engineering_times": [1, 500, 1000],
++  "NMF": {
++    "solver": "cd",
++    "beta_loss": "frobenius",
++    "init": "nndsvda",
++    "tol": 1e-05,
++    "max_iter": 50000,
++    "shuffle": false,
++    "alpha_W": 0,
++    "alpha_H": 0,
++    "l1_ratio": 0
++  },
++  "NNLS": {
++    "dtype": "float64",
++    "maxiter": "max(240,30*K)",
++    "KKT_limit": 1e-07
++  },
++  "engineering_times": [
++    1,
++    500,
++    1000
++  ],
+   "engineering_max_updates_per_cell": 5,
+-  "train_seeds": {"IMDB": 2026102811, "PubMed": 2026102812},
+-  "sample_seeds": [2026102821, 2026102822],
+-  "allowed_update_tiers": [2000, 1000, 500],
++  "train_seeds": {
++    "IMDB": 2026102811,
++    "PubMed": 2026102812
++  },
++  "sample_seeds": [
++    2026102821,
++    2026102822
++  ],
++  "allowed_update_tiers": [
++    2000,
++    1000,
++    500
++  ],
+   "evaluation_reserve_seconds": 1200,
+   "failure_reserve_seconds": 900,
+   "budget_seconds": 10800,
+@@ -32,5 +90,7 @@
+   "review_required": true,
+   "continue_confirmation_required": true,
+   "cpu_gpu_equivalence": "historical failure retained, not claimed; experiment limited to frozen same-GPU-model environment",
+-  "quality_claim_scope": "one training seed per dataset and two samples per model, exploratory only"
+-}
++  "quality_claim_scope": "one training seed per dataset and two samples per model, exploratory only",
++  "revision_base": "4123d8f7da6dada9513f592aabdcc81b053bc4a9",
++  "dictionary_source": "exact original saved states and splits, no resampling"
++}--- /dev/null
++++ b/summarize.py
+@@ -0,0 +1,50 @@
++"""Independent raw-graph evaluation; missing/failed cells remain explicit.
++Does not train, sample, repair, choose checkpoints or silently average successes.
++"""
++import argparse,pathlib,json,sys,hashlib
++import numpy as np
++sys.path.insert(0,str(pathlib.Path(__file__).parent/'package'))
++from prepare import load_case
++from evaluation import evaluate
++
++def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
++def scalars(m):
++    r=dict(m['primary']);r.update({k:m[k] for k in ['edges','triangles','lcc','isolates','maximum_degree','average_clustering']});r['components']=len(m['component_sizes'])
++    r.update({'family_edges_'+str(i):v for i,v in enumerate(m['family_edges'])})
++    if m['imdb_closure']:
++        r.update({'closure_'+k:v for k,v in m['imdb_closure'].items() if v is not None})
++    for i,row in enumerate(m['mp']):r['MP'+str(i+2)+'_total']=row['total']
++    if 'IMDB_focus' in m:r.update(m['IMDB_focus'])
++    return r
++
++def collect(root):
++    root=pathlib.Path(root);rows={};cells={};contrasts=[]
++    for dataset in ['IMDB','PubMed']:
++        case,cfg=load_case(dataset)
++        for arm in 'OABC':
++            label=dataset+'_'+arm;folder=root/label;summary=folder/'summary.json';status=json.loads(summary.read_text()) if summary.exists() else dict(status='not_started');entry=dict(worker_status=status,graphs={},mean=None,diversity=None);cells[label]=entry;sets=[]
++            for seed in [2026102821,2026102822]:
++                sample=folder/('sample_'+str(seed));g=sample/'graph.npz';binding=sample/'binding.json'
++                if not g.exists() or not binding.exists():entry['graphs'][str(seed)]=dict(status='missing_or_incomplete');continue
++                try:
++                    b=json.loads(binding.read_text());assert b['seed']==seed and b['graph_sha256']==sha(g);assert b['checkpoint_sha256']==sha(folder/'final.pt');assert b['binding']['arm']==arm
++                    z=np.load(g,allow_pickle=False);np.testing.assert_array_equal(z['types'],case['space'].types);np.testing.assert_array_equal(z['schema'],case['space'].pairs)
++                    e=z['edges'];np.testing.assert_array_equal(case['space'].encode(e)[0],z['families']);metrics=evaluate(case,e,cfg['datasets'][dataset]['type_names']);entry['graphs'][str(seed)]=dict(status='evaluated',sha256=sha(g),metrics=metrics);rows[(dataset,arm,seed)]=scalars(metrics);sets.append(set(map(tuple,e.T)))
++                except Exception as exc:entry['graphs'][str(seed)]=dict(status='failed_evaluation',error=repr(exc))
++            if len(sets)==2:
++                keys=set.intersection(*(set(rows[(dataset,arm,s)]) for s in [2026102821,2026102822]));entry['mean']={k:sum(rows[(dataset,arm,s)][k] for s in [2026102821,2026102822])/2 for k in keys}
++                union=len(sets[0]|sets[1]);entry['diversity']=dict(labelled_graphs_equal=sets[0]==sets[1],edge_symmetric_difference=len(sets[0]^sets[1]),edge_jaccard=len(sets[0]&sets[1])/union if union else 1.,scope='two labelled samples only; no isomorphism or population-diversity certification')
++        for left,right in [('A','O'),('B','O'),('B','A'),('C','B'),('C','A')]:
++            pairs=[]
++            for seed in [2026102821,2026102822]:
++                a=rows.get((dataset,left,seed));b=rows.get((dataset,right,seed));pairs.append(dict(seed=seed,status='complete' if a is not None and b is not None else 'missing',difference={k:a[k]-b[k] for k in a.keys()&b.keys()} if a is not None and b is not None else None))
++            mean=None
++            if all(x['status']=='complete' for x in pairs):mean={k:sum(x['difference'][k] for x in pairs)/2 for k in pairs[0]['difference'].keys()&pairs[1]['difference'].keys()}
++            contrasts.append(dict(dataset=dataset,contrast=left+'-'+right,pairs=pairs,mean=mean))
++    complete=len(rows)==16 and all(c['worker_status'].get('status')=='complete' for c in cells.values())
++    return dict(status='complete' if complete else 'incomplete',evaluated_graphs=len(rows),expected_graphs=16,cells=cells,contrasts=contrasts,W1_definition='per-type mean of 4 incident schema relations, node-count weighted; old E07 averaged all10. For same schema and zero nonincident dimensions, old_all10 = 0.4 * this_incident4. Main definition requires approval before formal run.',quality_claim='one training seed/dataset, two graphs/model, exploratory only')
++
++if __name__=='__main__':
++    p=argparse.ArgumentParser();p.add_argument('--run',required=True);p.add_argument('--output',required=True);a=p.parse_args();result=collect(a.run)
++    with pathlib.Path(a.output).open('x') as f:json.dump(result,f,indent=2)
++    raise SystemExit(0 if result['status']=='complete' else 2)
+--- /dev/null
++++ b/test_revision.py
+@@ -0,0 +1,36 @@
++import unittest,pathlib,tempfile,json,sys,random,subprocess
++sys.path.insert(0,str(pathlib.Path(__file__).parent/'package'))
++import numpy as np
++import torch
++from admission import dictionaries,assignment,sha
++from experiment_contract import reset_training_streams
++
++class Revision(unittest.TestCase):
++    def test_external_dictionary_receipt_tamper(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            root=pathlib.Path(tmp);approval={'dictionaries':{}}
++            for d in ['IMDB','PubMed']:
++                p=root/('dictionary_'+d);p.mkdir();r=dict(status='passed',K=[1],offsets=[0,1]);(p/'selection.json').write_text(json.dumps(r))
++                for name in ['final_basis.npz','panel.json','frozen_splits.json']:(p/name).write_bytes(b'fixture')
++                approval['dictionaries'][d]=dict(files={x.name:sha(x) for x in p.iterdir()},K=[1],offsets=[0,1],dimension=1)
++            dictionaries(root,approval)
++            for name in ['final_basis.npz','selection.json','panel.json','frozen_splits.json']:
++                p=root/'dictionary_IMDB'/name;before=p.read_bytes();p.write_bytes(before+b' ')
++                with self.assertRaises(ValueError):dictionaries(root,approval)
++                p.write_bytes(before)
++    def test_random_reset_independent_of_construction(self):
++        a,proof=reset_training_streams(9,'IMDB','cpu');sample=(random.random(),np.random.random(),torch.rand(3),a.random(3));torch.nn.Linear(153,71);random.random();np.random.random()
++        b,proof2=reset_training_streams(9,'IMDB','cpu');self.assertEqual(proof,proof2);self.assertEqual(sample[0],random.random());self.assertEqual(sample[1],np.random.random());self.assertTrue(torch.equal(sample[2],torch.rand(3)));np.testing.assert_array_equal(sample[3],b.random(3))
++    def test_assignment_is_execution_queues(self):
++        cost={'cells':{d+'_'+a:dict(normal2_seconds=i+1,sampling_step_seconds=.01,validation_save_seconds=1) for i,(d,a) in enumerate((d,a) for d in ['IMDB','PubMed'] for a in 'OABC')}}
++        for n in [1,2,3,7,8]:
++            queues,loads=assignment(cost,500,list(range(n)));self.assertEqual(sum(map(len,queues)),8)
++            for q,load in zip(queues,loads):self.assertEqual(load,sum(500*cost['cells'][d+'_'+a]['normal2_seconds']+21 for d,a in q))
++    def test_worker_direct_entry_rejected(self):
++        r=subprocess.run([sys.executable,str(pathlib.Path(__file__).parent/'package/worker.py')],capture_output=True,text=True,timeout=15);self.assertNotEqual(r.returncode,0);self.assertIn('--launch-fd',r.stderr)
++    def test_missing_summary_does_not_average_success(self):
++        from summarize import collect
++        with tempfile.TemporaryDirectory() as tmp:r=collect(tmp)
++        self.assertEqual(r['evaluated_graphs'],0);self.assertEqual(r['status'],'incomplete');self.assertEqual(len(r['cells']),8);self.assertTrue(all(x['mean'] is None for x in r['contrasts']))
++
++if __name__=='__main__':unittest.main()

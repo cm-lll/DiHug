@@ -1,0 +1,469 @@
+{
+  "complete_eight_cells": true,
+  "cells": {
+    "IMDB_O": {
+      "passed": true,
+      "normal2_seconds": 2.47591763921082,
+      "sampling_step_seconds": 0.4439346129074693,
+      "validation_save_seconds": 14.756057941354811,
+      "allowance_meaning": "component estimate, includes extra 10s/cell; not an actual formal validation-save measurement"
+    },
+    "IMDB_A": {
+      "passed": true,
+      "normal2_seconds": 2.5949731273576617,
+      "sampling_step_seconds": 0.46199234388768673,
+      "validation_save_seconds": 14.885639912448823,
+      "allowance_meaning": "component estimate, includes extra 10s/cell; not an actual formal validation-save measurement"
+    },
+    "IMDB_B": {
+      "passed": true,
+      "normal2_seconds": 2.4879462802782655,
+      "sampling_step_seconds": 0.45713397301733494,
+      "validation_save_seconds": 15.136663654819131,
+      "allowance_meaning": "component estimate, includes extra 10s/cell; not an actual formal validation-save measurement"
+    },
+    "IMDB_C": {
+      "passed": true,
+      "normal2_seconds": 2.532169656828046,
+      "sampling_step_seconds": 0.46688575111329556,
+      "validation_save_seconds": 15.264063517563045,
+      "allowance_meaning": "component estimate, includes extra 10s/cell; not an actual formal validation-save measurement"
+    },
+    "PubMed_O": {
+      "passed": true,
+      "normal2_seconds": 3.3522168658673763,
+      "sampling_step_seconds": 0.6046116501092911,
+      "validation_save_seconds": 16.16762833762914,
+      "allowance_meaning": "component estimate, includes extra 10s/cell; not an actual formal validation-save measurement"
+    },
+    "PubMed_A": {
+      "passed": true,
+      "normal2_seconds": 3.5302181327715516,
+      "sampling_step_seconds": 0.6279180059209466,
+      "validation_save_seconds": 16.35317110735923,
+      "allowance_meaning": "component estimate, includes extra 10s/cell; not an actual formal validation-save measurement"
+    },
+    "PubMed_B": {
+      "passed": true,
+      "normal2_seconds": 3.3678301824256778,
+      "sampling_step_seconds": 0.6193971568718553,
+      "validation_save_seconds": 16.644853866659105,
+      "allowance_meaning": "component estimate, includes extra 10s/cell; not an actual formal validation-save measurement"
+    },
+    "PubMed_C": {
+      "passed": true,
+      "normal2_seconds": 3.4893751312047243,
+      "sampling_step_seconds": 0.6418722542002797,
+      "validation_save_seconds": 16.812240816652775,
+      "allowance_meaning": "component estimate, includes extra 10s/cell; not an actual formal validation-save measurement"
+    }
+  },
+  "concurrency_margin": 1.25,
+  "margin_meaning": "UNMEASURED conservative planning factor; not eight-card throughput evidence",
+  "schedule": "fixed immutable per-device FIFO queues from admission.assignment",
+  "tiers": [
+    {
+      "cards": 7,
+      "updates": 2000,
+      "queues": [
+        [
+          [
+            "IMDB",
+            "O"
+          ],
+          [
+            "PubMed",
+            "C"
+          ]
+        ],
+        [
+          [
+            "IMDB",
+            "A"
+          ]
+        ],
+        [
+          [
+            "IMDB",
+            "B"
+          ]
+        ],
+        [
+          [
+            "IMDB",
+            "C"
+          ]
+        ],
+        [
+          [
+            "PubMed",
+            "O"
+          ]
+        ],
+        [
+          [
+            "PubMed",
+            "A"
+          ]
+        ],
+        [
+          [
+            "PubMed",
+            "B"
+          ]
+        ]
+      ],
+      "loads_seconds": [
+        14133.767573804595,
+        6128.816582403146,
+        5905.29717024602,
+        6013.374879400246,
+        7929.824660290964,
+        8332.625448492356,
+        7991.099532461725
+      ],
+      "seconds_including_20min_delivery_15min_fault": 19767.209467255743,
+      "remaining_seconds_at_estimate": 8524.197930335999,
+      "fits_at_estimate": false,
+      "actual_card_availability_confirmed": true
+    },
+    {
+      "cards": 7,
+      "updates": 1000,
+      "queues": [
+        [
+          [
+            "IMDB",
+            "O"
+          ],
+          [
+            "PubMed",
+            "C"
+          ]
+        ],
+        [
+          [
+            "IMDB",
+            "A"
+          ]
+        ],
+        [
+          [
+            "IMDB",
+            "B"
+          ]
+        ],
+        [
+          [
+            "IMDB",
+            "C"
+          ]
+        ],
+        [
+          [
+            "PubMed",
+            "O"
+          ]
+        ],
+        [
+          [
+            "PubMed",
+            "A"
+          ]
+        ],
+        [
+          [
+            "PubMed",
+            "B"
+          ]
+        ]
+      ],
+      "loads_seconds": [
+        8168.47480338905,
+        3533.843455045484,
+        3417.3508899677545,
+        3481.2052225722,
+        4577.607794423588,
+        4802.407315720804,
+        4623.269350036047
+      ],
+      "seconds_including_20min_delivery_15min_fault": 12310.593504236313,
+      "remaining_seconds_at_estimate": 8524.197930335999,
+      "fits_at_estimate": false,
+      "actual_card_availability_confirmed": true
+    },
+    {
+      "cards": 7,
+      "updates": 500,
+      "queues": [
+        [
+          [
+            "IMDB",
+            "O"
+          ],
+          [
+            "PubMed",
+            "C"
+          ]
+        ],
+        [
+          [
+            "IMDB",
+            "A"
+          ]
+        ],
+        [
+          [
+            "IMDB",
+            "B"
+          ]
+        ],
+        [
+          [
+            "IMDB",
+            "C"
+          ]
+        ],
+        [
+          [
+            "PubMed",
+            "O"
+          ]
+        ],
+        [
+          [
+            "PubMed",
+            "A"
+          ]
+        ],
+        [
+          [
+            "PubMed",
+            "B"
+          ]
+        ]
+      ],
+      "loads_seconds": [
+        5185.828418181278,
+        2236.356891366653,
+        2173.3777498286217,
+        2215.120394158177,
+        2901.4993614898995,
+        3037.2982493350282,
+        2939.3542588232085
+      ],
+      "seconds_including_20min_delivery_15min_fault": 8582.285522726597,
+      "remaining_seconds_at_estimate": 8524.197930335999,
+      "fits_at_estimate": false,
+      "actual_card_availability_confirmed": true
+    },
+    {
+      "cards": 8,
+      "updates": 2000,
+      "queues": [
+        [
+          [
+            "IMDB",
+            "O"
+          ]
+        ],
+        [
+          [
+            "IMDB",
+            "A"
+          ]
+        ],
+        [
+          [
+            "IMDB",
+            "B"
+          ]
+        ],
+        [
+          [
+            "IMDB",
+            "C"
+          ]
+        ],
+        [
+          [
+            "PubMed",
+            "O"
+          ]
+        ],
+        [
+          [
+            "PubMed",
+            "A"
+          ]
+        ],
+        [
+          [
+            "PubMed",
+            "B"
+          ]
+        ],
+        [
+          [
+            "PubMed",
+            "C"
+          ]
+        ]
+      ],
+      "loads_seconds": [
+        5854.460562177934,
+        6128.816582403146,
+        5905.29717024602,
+        6013.374879400246,
+        7929.824660290964,
+        8332.625448492356,
+        7991.099532461725,
+        8279.30701162666
+      ],
+      "seconds_including_20min_delivery_15min_fault": 12515.781810615445,
+      "remaining_seconds_at_estimate": 8524.197930335999,
+      "fits_at_estimate": false,
+      "actual_card_availability_confirmed": false
+    },
+    {
+      "cards": 8,
+      "updates": 1000,
+      "queues": [
+        [
+          [
+            "IMDB",
+            "O"
+          ]
+        ],
+        [
+          [
+            "IMDB",
+            "A"
+          ]
+        ],
+        [
+          [
+            "IMDB",
+            "B"
+          ]
+        ],
+        [
+          [
+            "IMDB",
+            "C"
+          ]
+        ],
+        [
+          [
+            "PubMed",
+            "O"
+          ]
+        ],
+        [
+          [
+            "PubMed",
+            "A"
+          ]
+        ],
+        [
+          [
+            "PubMed",
+            "B"
+          ]
+        ],
+        [
+          [
+            "PubMed",
+            "C"
+          ]
+        ]
+      ],
+      "loads_seconds": [
+        3378.5429229671136,
+        3533.843455045484,
+        3417.3508899677545,
+        3481.2052225722,
+        4577.607794423588,
+        4802.407315720804,
+        4623.269350036047,
+        4789.9318804219365
+      ],
+      "seconds_including_20min_delivery_15min_fault": 8103.009144651005,
+      "remaining_seconds_at_estimate": 8524.197930335999,
+      "fits_at_estimate": true,
+      "actual_card_availability_confirmed": false
+    },
+    {
+      "cards": 8,
+      "updates": 500,
+      "queues": [
+        [
+          [
+            "IMDB",
+            "O"
+          ]
+        ],
+        [
+          [
+            "IMDB",
+            "A"
+          ]
+        ],
+        [
+          [
+            "IMDB",
+            "B"
+          ]
+        ],
+        [
+          [
+            "IMDB",
+            "C"
+          ]
+        ],
+        [
+          [
+            "PubMed",
+            "O"
+          ]
+        ],
+        [
+          [
+            "PubMed",
+            "A"
+          ]
+        ],
+        [
+          [
+            "PubMed",
+            "B"
+          ]
+        ],
+        [
+          [
+            "PubMed",
+            "C"
+          ]
+        ]
+      ],
+      "loads_seconds": [
+        2140.5841033617035,
+        2236.356891366653,
+        2173.3777498286217,
+        2215.120394158177,
+        2901.4993614898995,
+        3037.2982493350282,
+        2939.3542588232085,
+        3045.2443148195744
+      ],
+      "seconds_including_20min_delivery_15min_fault": 5906.555393524468,
+      "remaining_seconds_at_estimate": 8524.197930335999,
+      "fits_at_estimate": true,
+      "actual_card_availability_confirmed": false
+    }
+  ],
+  "selected_updates": null,
+  "authorization": false,
+  "measured_concurrency": "two single-GPU processes, each four sequential cells; no eight-card timing",
+  "formal_risk": "independent forward-noise engineering states do not bound all free-generation CN/NNLS costs"
+}
