@@ -1,0 +1,35 @@
+GATE IMDB_A
+END_GATE IMDB_A sameGPU True CPU_GPU False
+GATE IMDB_B
+END_GATE IMDB_B sameGPU True CPU_GPU False
+GATE IMDB_C
+END_GATE IMDB_C sameGPU True CPU_GPU False
+GATE PubMed_A
+END_GATE PubMed_A sameGPU True CPU_GPU False
+GATE PubMed_B
+END_GATE PubMed_B sameGPU True CPU_GPU False
+GATE PubMed_C
+END_GATE PubMed_C sameGPU True CPU_GPU False
+RESTORE IMDB_A True True
+RESTORE IMDB_B True True
+RESTORE IMDB_C True True
+RESTORE PubMed_A True True
+RESTORE PubMed_B True True
+RESTORE PubMed_C True True
+{
+  "status": "completed_engineering_checks",
+  "operator": true,
+  "actual_updates": {
+    "IMDB_A": 3,
+    "IMDB_B": 3,
+    "IMDB_C": 3,
+    "PubMed_A": 3,
+    "PubMed_B": 3,
+    "PubMed_C": 3
+  },
+  "formal_training": 0,
+  "generated_graphs": 0,
+  "finished_epoch": 1793121107.4978247,
+  "elapsed_from_ticket_seconds": 688.4978263378143,
+  "optimizer_step_calls": 18
+}

@@ -1,0 +1,101 @@
+{
+  "model": {
+    "layers": 8,
+    "width": 256,
+    "edge_width": 64,
+    "global_width": 128,
+    "heads": 8,
+    "ff_node": 256,
+    "ff_edge": 64,
+    "ff_global": 256,
+    "dropout": 0.1,
+    "cn_hidden": 32,
+    "joint_width": 128,
+    "max_wedges": 2000000,
+    "max_query_paths": 2000000
+  },
+  "optimizer": {
+    "type": "AdamW",
+    "lr": 0.0002,
+    "weight_decay": 1e-12,
+    "betas": [
+      0.9,
+      0.999
+    ],
+    "eps": 1e-08,
+    "amsgrad": false
+  },
+  "precision": "FP32 network/stable CE; float64 probability kernel",
+  "T": 1000,
+  "rounds": 1,
+  "schedule_offset": 0.008,
+  "tf32": false,
+  "version": "typed_refex_rolx_192_v2",
+  "arms": [
+    "A",
+    "B",
+    "C"
+  ],
+  "formal_authorized": false,
+  "feature_spec": {
+    "version": "typed_refex_relation_one_round_v2",
+    "depth": 1,
+    "base": "relation degree, closed-egonet internal and boundary edges",
+    "normalization": "log1p(base count)/log1p(schema bound); ONE round: for each relation mean and sum/(N-1) of base features",
+    "rank": 4,
+    "basis_seed": 2026102708,
+    "nmf_max_iter": 500,
+    "nmf_tol": 1e-05,
+    "encoding": "per-node NNLS, fixed unit-L2 basis rows; no coefficient normalization",
+    "nnls_max_iter": 240
+  },
+  "inputs_per_update": 2,
+  "engineering_only": true,
+  "max_updates_per_dataset_arm": 3,
+  "seed": 2026102709,
+  "noise_times": [
+    1,
+    500,
+    1000
+  ],
+  "threads": 1,
+  "tolerances": {
+    "float64_features": 1e-10,
+    "fp32_atol": 2e-06,
+    "fp32_rtol": 1e-05
+  },
+  "datasets": {
+    "IMDB": {
+      "file": "assets/IMDB.npz",
+      "sha256": "398d59a0602e14dd0c92b8781e69a3234727d674923275864eec558770dffb5c",
+      "received_sha256": "351d066a702df18a188cff28822ea92182b0b1eb64ad0375e7f70e6a587ae466",
+      "reference_sha256": "10f1dbbbe55c6a069594b2dcb590d1b8295ca5436320ef4597cd30e6b7f73e42",
+      "type_names": [
+        "Director",
+        "Actor",
+        "Movie",
+        "Genre"
+      ],
+      "basis_file": "assets/IMDB_synthetic_basis.npz",
+      "basis_sha256": "6458114da8c8f78f682d1c3ef84f7ee1148be48948c21f047aa56c9e5b08efe9",
+      "basis_kind": "synthetic engineering only"
+    },
+    "PubMed": {
+      "file": "assets/PubMed.npz",
+      "sha256": "f6ea8ec461052094dd02c6b07d8ebb69e85fb3e595195007563593b9568914ef",
+      "received_sha256": "42706434557b4b1fa24bdc71dc9d3ebea3a772689002421e77ad3c4b3b827a94",
+      "reference_sha256": "dacff5a392e23fbcfb695076a14a6db5317f4a4382b69af2a7596a1a217163f8",
+      "type_names": [
+        "Gene",
+        "Disease",
+        "Chemical",
+        "Species"
+      ],
+      "basis_file": "assets/PubMed_synthetic_basis.npz",
+      "basis_sha256": "6458114da8c8f78f682d1c3ef84f7ee1148be48948c21f047aa56c9e5b08efe9",
+      "basis_kind": "synthetic engineering only"
+    }
+  },
+  "query_contract": "ALL active slots in ONE forward per input; S=18336, loss=(sum CE input1 + sum CE input2)/(2*S)",
+  "source_note": "normal2 sequential backward; synthetic engineering dictionaries ONLY; no formal initialization"
+}

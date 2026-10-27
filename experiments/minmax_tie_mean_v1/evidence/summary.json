@@ -1,0 +1,1292 @@
+{
+  "status": "completed_engineering_checks",
+  "operator": true,
+  "cells": {
+    "IMDB_A": {
+      "status": "temporary_updates_complete",
+      "updates": 3,
+      "initial_sha256": "636a924f7ef866838349d6a311f6b17cfd2e21df21fb64156feede7db46698ae",
+      "matches_previous_reconstruction": true,
+      "cpu_normal2": {
+        "loss": 0.46468503773212433,
+        "inputs": [
+          {
+            "t": 500,
+            "slots": 13120,
+            "forward_seconds": 2.5890405056998134,
+            "backward_seconds": 1.817836107686162
+          },
+          {
+            "t": 500,
+            "slots": 13120,
+            "forward_seconds": 1.9371664505451918,
+            "backward_seconds": 1.785105699673295
+          }
+        ],
+        "gradient_norm": 4.637598514556885,
+        "optimizer_seconds": 6.895512342453003e-06,
+        "changed": 0.0,
+        "normal2_seconds": 8.211683347821236,
+        "optimizer_steps": 0,
+        "feature_calls": 0
+      },
+      "gpu_normal2": [
+        {
+          "loss": 0.4646858423948288,
+          "inputs": [
+            {
+              "t": 500,
+              "slots": 13120,
+              "forward_seconds": 1.1983555974438787,
+              "backward_seconds": 0.7330987341701984
+            },
+            {
+              "t": 500,
+              "slots": 13120,
+              "forward_seconds": 0.6297873156145215,
+              "backward_seconds": 0.7312012305483222
+            }
+          ],
+          "gradient_norm": 4.637621879577637,
+          "optimizer_seconds": 8.229631930589676e-05,
+          "changed": 0.0,
+          "normal2_seconds": 3.385608154349029,
+          "optimizer_steps": 0,
+          "feature_calls": 0
+        },
+        {
+          "loss": 0.4646858423948288,
+          "inputs": [
+            {
+              "t": 500,
+              "slots": 13120,
+              "forward_seconds": 0.6134740822017193,
+              "backward_seconds": 0.7252438692376018
+            },
+            {
+              "t": 500,
+              "slots": 13120,
+              "forward_seconds": 0.6157993273809552,
+              "backward_seconds": 0.7317890822887421
+            }
+          ],
+          "gradient_norm": 4.637621879577637,
+          "optimizer_seconds": 9.243190288543701e-05,
+          "changed": 0.0,
+          "normal2_seconds": 2.7812779545783997,
+          "optimizer_steps": 0,
+          "feature_calls": 0
+        }
+      ],
+      "same_gpu_passed": true,
+      "cpu_gpu_passed": false,
+      "all_gpu_gradients_bitwise": true,
+      "first_exceeding_gradient": null,
+      "full_query_forward_cost": [
+        {
+          "seconds": 0.3292001821100712,
+          "includes_backward": false,
+          "includes_cpu_hooks": false,
+          "synchronized": true,
+          "slots": 13120,
+          "forward_count": 1,
+          "path": "old",
+          "logits_vs_first": {
+            "passes": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "max_relative_nonzero": 0.0,
+            "reference_max": 0.21757850050926208,
+            "reference_l2": 12.732112634910617,
+            "absolute_at_reference_zero": null,
+            "violations": 0
+          },
+          "p0_vs_first": {
+            "passes": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "max_relative_nonzero": 0.0,
+            "reference_max": 0.49311938881874084,
+            "reference_l2": 54.527298544257796,
+            "absolute_at_reference_zero": null,
+            "violations": 0
+          }
+        },
+        {
+          "seconds": 0.45856755319982767,
+          "includes_backward": false,
+          "includes_cpu_hooks": false,
+          "synchronized": true,
+          "slots": 13120,
+          "forward_count": 1,
+          "path": "equal_tie",
+          "logits_vs_first": {
+            "passes": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "max_relative_nonzero": 0.0,
+            "reference_max": 0.21757850050926208,
+            "reference_l2": 12.732112634910617,
+            "absolute_at_reference_zero": null,
+            "violations": 0
+          },
+          "p0_vs_first": {
+            "passes": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "max_relative_nonzero": 0.0,
+            "reference_max": 0.49311938881874084,
+            "reference_l2": 54.527298544257796,
+            "absolute_at_reference_zero": null,
+            "violations": 0
+          }
+        },
+        {
+          "seconds": 0.32833910919725895,
+          "includes_backward": false,
+          "includes_cpu_hooks": false,
+          "synchronized": true,
+          "slots": 13120,
+          "forward_count": 1,
+          "path": "old",
+          "logits_vs_first": {
+            "passes": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "max_relative_nonzero": 0.0,
+            "reference_max": 0.21757850050926208,
+            "reference_l2": 12.732112634910617,
+            "absolute_at_reference_zero": null,
+            "violations": 0
+          },
+          "p0_vs_first": {
+            "passes": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "max_relative_nonzero": 0.0,
+            "reference_max": 0.49311938881874084,
+            "reference_l2": 54.527298544257796,
+            "absolute_at_reference_zero": null,
+            "violations": 0
+          }
+        },
+        {
+          "seconds": 0.4583531431853771,
+          "includes_backward": false,
+          "includes_cpu_hooks": false,
+          "synchronized": true,
+          "slots": 13120,
+          "forward_count": 1,
+          "path": "equal_tie",
+          "logits_vs_first": {
+            "passes": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "max_relative_nonzero": 0.0,
+            "reference_max": 0.21757850050926208,
+            "reference_l2": 12.732112634910617,
+            "absolute_at_reference_zero": null,
+            "violations": 0
+          },
+          "p0_vs_first": {
+            "passes": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "max_relative_nonzero": 0.0,
+            "reference_max": 0.49311938881874084,
+            "reference_l2": 54.527298544257796,
+            "absolute_at_reference_zero": null,
+            "violations": 0
+          }
+        }
+      ],
+      "peak_allocated_mib": 2292.9912109375,
+      "peak_reserved_mib": 2418.0,
+      "rss_peak_mib": 6059.953125,
+      "save_seconds": 0.22748753428459167,
+      "checkpoint_sha256": "b9d8582983f44258d0316eaff3a3ac4aa48a54b40caab941dc214a8b35b4d132",
+      "load_exact": {
+        "model": true,
+        "optimizer": true,
+        "rng": true,
+        "updates": true,
+        "binding": true
+      },
+      "restore_passed": true,
+      "restore_all_float_bitwise": true
+    },
+    "IMDB_B": {
+      "status": "temporary_updates_complete",
+      "updates": 3,
+      "initial_sha256": "4c7428a8fbf661ea7cbfc2a4d4304cd3ade7fc4c91fa6a24ff9d85ab19ca8b19",
+      "cpu_normal2": {
+        "loss": 0.4646088778972626,
+        "inputs": [
+          {
+            "t": 500,
+            "slots": 13120,
+            "forward_seconds": 2.22385570127517,
+            "backward_seconds": 1.8877857690677047
+          },
+          {
+            "t": 500,
+            "slots": 13120,
+            "forward_seconds": 2.0210820976644754,
+            "backward_seconds": 1.83471058588475
+          }
+        ],
+        "gradient_norm": 4.636926651000977,
+        "optimizer_seconds": 7.210299372673035e-06,
+        "changed": 0.0,
+        "normal2_seconds": 8.055104385130107,
+        "optimizer_steps": 0,
+        "feature_calls": 2
+      },
+      "gpu_normal2": [
+        {
+          "loss": 0.46460971236228943,
+          "inputs": [
+            {
+              "t": 500,
+              "slots": 13120,
+              "forward_seconds": 0.6518524568527937,
+              "backward_seconds": 0.7226064000278711
+            },
+            {
+              "t": 500,
+              "slots": 13120,
+              "forward_seconds": 0.6118525005877018,
+              "backward_seconds": 0.7199901733547449
+            }
+          ],
+          "gradient_norm": 4.6369500160217285,
+          "optimizer_seconds": 8.43200832605362e-05,
+          "changed": 0.0,
+          "normal2_seconds": 2.797579758800566,
+          "optimizer_steps": 0,
+          "feature_calls": 4
+        },
+        {
+          "loss": 0.46460971236228943,
+          "inputs": [
+            {
+              "t": 500,
+              "slots": 13120,
+              "forward_seconds": 0.6083172420039773,
+              "backward_seconds": 0.7215262232348323
+            },
+            {
+              "t": 500,
+              "slots": 13120,
+              "forward_seconds": 0.613581539131701,
+              "backward_seconds": 0.7203273456543684
+            }
+          ],
+          "gradient_norm": 4.6369500160217285,
+          "optimizer_seconds": 9.49464738368988e-05,
+          "changed": 0.0,
+          "normal2_seconds": 2.760035094805062,
+          "optimizer_steps": 0,
+          "feature_calls": 6
+        }
+      ],
+      "same_gpu_passed": true,
+      "cpu_gpu_passed": false,
+      "all_gpu_gradients_bitwise": true,
+      "first_exceeding_gradient": null,
+      "full_query_forward_cost": [
+        {
+          "seconds": 0.3241052571684122,
+          "includes_backward": false,
+          "includes_cpu_hooks": false,
+          "synchronized": true,
+          "slots": 13120,
+          "forward_count": 1,
+          "path": "old",
+          "logits_vs_first": {
+            "passes": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "max_relative_nonzero": 0.0,
+            "reference_max": 0.21757850050926208,
+            "reference_l2": 12.723898627932261,
+            "absolute_at_reference_zero": null,
+            "violations": 0
+          },
+          "p0_vs_first": {
+            "passes": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "max_relative_nonzero": 0.0,
+            "reference_max": 0.49311938881874084,
+            "reference_l2": 54.51979254151087,
+            "absolute_at_reference_zero": null,
+            "violations": 0
+          }
+        },
+        {
+          "seconds": 0.44978435058146715,
+          "includes_backward": false,
+          "includes_cpu_hooks": false,
+          "synchronized": true,
+          "slots": 13120,
+          "forward_count": 1,
+          "path": "equal_tie",
+          "logits_vs_first": {
+            "passes": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "max_relative_nonzero": 0.0,
+            "reference_max": 0.21757850050926208,
+            "reference_l2": 12.723898627932261,
+            "absolute_at_reference_zero": null,
+            "violations": 0
+          },
+          "p0_vs_first": {
+            "passes": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "max_relative_nonzero": 0.0,
+            "reference_max": 0.49311938881874084,
+            "reference_l2": 54.51979254151087,
+            "absolute_at_reference_zero": null,
+            "violations": 0
+          }
+        },
+        {
+          "seconds": 0.3226380040869117,
+          "includes_backward": false,
+          "includes_cpu_hooks": false,
+          "synchronized": true,
+          "slots": 13120,
+          "forward_count": 1,
+          "path": "old",
+          "logits_vs_first": {
+            "passes": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "max_relative_nonzero": 0.0,
+            "reference_max": 0.21757850050926208,
+            "reference_l2": 12.723898627932261,
+            "absolute_at_reference_zero": null,
+            "violations": 0
+          },
+          "p0_vs_first": {
+            "passes": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "max_relative_nonzero": 0.0,
+            "reference_max": 0.49311938881874084,
+            "reference_l2": 54.51979254151087,
+            "absolute_at_reference_zero": null,
+            "violations": 0
+          }
+        },
+        {
+          "seconds": 0.4528613742440939,
+          "includes_backward": false,
+          "includes_cpu_hooks": false,
+          "synchronized": true,
+          "slots": 13120,
+          "forward_count": 1,
+          "path": "equal_tie",
+          "logits_vs_first": {
+            "passes": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "max_relative_nonzero": 0.0,
+            "reference_max": 0.21757850050926208,
+            "reference_l2": 12.723898627932261,
+            "absolute_at_reference_zero": null,
+            "violations": 0
+          },
+          "p0_vs_first": {
+            "passes": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "max_relative_nonzero": 0.0,
+            "reference_max": 0.49311938881874084,
+            "reference_l2": 54.51979254151087,
+            "absolute_at_reference_zero": null,
+            "violations": 0
+          }
+        }
+      ],
+      "peak_allocated_mib": 2293.56787109375,
+      "peak_reserved_mib": 2442.0,
+      "rss_peak_mib": 7721.16015625,
+      "save_seconds": 0.23554578330367804,
+      "checkpoint_sha256": "f8b7490682fa342b5fb7157bc595060cf1566b2d9ba0a2020aaf8b39603e18ae",
+      "load_exact": {
+        "model": true,
+        "optimizer": true,
+        "rng": true,
+        "updates": true,
+        "binding": true
+      },
+      "restore_passed": true,
+      "restore_all_float_bitwise": true
+    },
+    "IMDB_C": {
+      "status": "temporary_updates_complete",
+      "updates": 3,
+      "initial_sha256": "def2915e30d4ad5623ca65d629e3ba0b7ef09e394faa78ede2d84cec4bf7fbac",
+      "cpu_normal2": {
+        "loss": 0.4646088778972626,
+        "inputs": [
+          {
+            "t": 500,
+            "slots": 13120,
+            "forward_seconds": 1.9767028708010912,
+            "backward_seconds": 1.8266374478116632
+          },
+          {
+            "t": 500,
+            "slots": 13120,
+            "forward_seconds": 1.9766139229759574,
+            "backward_seconds": 1.8310605306178331
+          }
+        ],
+        "gradient_norm": 4.636934280395508,
+        "optimizer_seconds": 6.627291440963745e-06,
+        "changed": 0.0,
+        "normal2_seconds": 7.693772116675973,
+        "optimizer_steps": 0,
+        "feature_calls": 2
+      },
+      "gpu_normal2": [
+        {
+          "loss": 0.46460971236228943,
+          "inputs": [
+            {
+              "t": 500,
+              "slots": 13120,
+              "forward_seconds": 0.6648862725123763,
+              "backward_seconds": 0.7264490285888314
+            },
+            {
+              "t": 500,
+              "slots": 13120,
+              "forward_seconds": 0.6269728019833565,
+              "backward_seconds": 0.7218766687437892
+            }
+          ],
+          "gradient_norm": 4.63695764541626,
+          "optimizer_seconds": 9.150989353656769e-05,
+          "changed": 0.0,
+          "normal2_seconds": 2.833636493422091,
+          "optimizer_steps": 0,
+          "feature_calls": 4
+        },
+        {
+          "loss": 0.46460971236228943,
+          "inputs": [
+            {
+              "t": 500,
+              "slots": 13120,
+              "forward_seconds": 0.6185269504785538,
+              "backward_seconds": 0.7174997255206108
+            },
+            {
+              "t": 500,
+              "slots": 13120,
+              "forward_seconds": 0.6235519871115685,
+              "backward_seconds": 0.72067891061306
+            }
+          ],
+          "gradient_norm": 4.63695764541626,
+          "optimizer_seconds": 9.611155837774277e-05,
+          "changed": 0.0,
+          "normal2_seconds": 2.7740849927067757,
+          "optimizer_steps": 0,
+          "feature_calls": 6
+        }
+      ],
+      "same_gpu_passed": true,
+      "cpu_gpu_passed": false,
+      "all_gpu_gradients_bitwise": true,
+      "first_exceeding_gradient": null,
+      "full_query_forward_cost": [
+        {
+          "seconds": 0.33280212339013815,
+          "includes_backward": false,
+          "includes_cpu_hooks": false,
+          "synchronized": true,
+          "slots": 13120,
+          "forward_count": 1,
+          "path": "old",
+          "logits_vs_first": {
+            "passes": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "max_relative_nonzero": 0.0,
+            "reference_max": 0.21757850050926208,
+            "reference_l2": 12.723898627932261,
+            "absolute_at_reference_zero": null,
+            "violations": 0
+          },
+          "p0_vs_first": {
+            "passes": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "max_relative_nonzero": 0.0,
+            "reference_max": 0.49311938881874084,
+            "reference_l2": 54.51979254151087,
+            "absolute_at_reference_zero": null,
+            "violations": 0
+          }
+        },
+        {
+          "seconds": 0.4594957446679473,
+          "includes_backward": false,
+          "includes_cpu_hooks": false,
+          "synchronized": true,
+          "slots": 13120,
+          "forward_count": 1,
+          "path": "equal_tie",
+          "logits_vs_first": {
+            "passes": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "max_relative_nonzero": 0.0,
+            "reference_max": 0.21757850050926208,
+            "reference_l2": 12.723898627932261,
+            "absolute_at_reference_zero": null,
+            "violations": 0
+          },
+          "p0_vs_first": {
+            "passes": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "max_relative_nonzero": 0.0,
+            "reference_max": 0.49311938881874084,
+            "reference_l2": 54.51979254151087,
+            "absolute_at_reference_zero": null,
+            "violations": 0
+          }
+        },
+        {
+          "seconds": 0.3325532414019108,
+          "includes_backward": false,
+          "includes_cpu_hooks": false,
+          "synchronized": true,
+          "slots": 13120,
+          "forward_count": 1,
+          "path": "old",
+          "logits_vs_first": {
+            "passes": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "max_relative_nonzero": 0.0,
+            "reference_max": 0.21757850050926208,
+            "reference_l2": 12.723898627932261,
+            "absolute_at_reference_zero": null,
+            "violations": 0
+          },
+          "p0_vs_first": {
+            "passes": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "max_relative_nonzero": 0.0,
+            "reference_max": 0.49311938881874084,
+            "reference_l2": 54.51979254151087,
+            "absolute_at_reference_zero": null,
+            "violations": 0
+          }
+        },
+        {
+          "seconds": 0.4591584112495184,
+          "includes_backward": false,
+          "includes_cpu_hooks": false,
+          "synchronized": true,
+          "slots": 13120,
+          "forward_count": 1,
+          "path": "equal_tie",
+          "logits_vs_first": {
+            "passes": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "max_relative_nonzero": 0.0,
+            "reference_max": 0.21757850050926208,
+            "reference_l2": 12.723898627932261,
+            "absolute_at_reference_zero": null,
+            "violations": 0
+          },
+          "p0_vs_first": {
+            "passes": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "max_relative_nonzero": 0.0,
+            "reference_max": 0.49311938881874084,
+            "reference_l2": 54.51979254151087,
+            "absolute_at_reference_zero": null,
+            "violations": 0
+          }
+        }
+      ],
+      "peak_allocated_mib": 2293.68798828125,
+      "peak_reserved_mib": 2442.0,
+      "rss_peak_mib": 7721.16015625,
+      "save_seconds": 0.23237243201583624,
+      "checkpoint_sha256": "bc23cae9850759a59e6e93ff352855ec1bd8b4012ea67744c5d5d5d8358fb31a",
+      "load_exact": {
+        "model": true,
+        "optimizer": true,
+        "rng": true,
+        "updates": true,
+        "binding": true
+      },
+      "restore_passed": true,
+      "restore_all_float_bitwise": true
+    },
+    "PubMed_A": {
+      "status": "temporary_updates_complete",
+      "updates": 3,
+      "initial_sha256": "017ae652b3d8543ebe238c44fcd1bfdf1e3b285a77d4b9d4f74a03519d897453",
+      "cpu_normal2": {
+        "loss": 0.6508638858795166,
+        "inputs": [
+          {
+            "t": 500,
+            "slots": 18336,
+            "forward_seconds": 3.1954954927787185,
+            "backward_seconds": 2.833533481694758
+          },
+          {
+            "t": 500,
+            "slots": 18336,
+            "forward_seconds": 3.065403977409005,
+            "backward_seconds": 2.687165112234652
+          }
+        ],
+        "gradient_norm": 5.949893951416016,
+        "optimizer_seconds": 6.7837536334991455e-06,
+        "changed": 0.0,
+        "normal2_seconds": 11.856636407785118,
+        "optimizer_steps": 0,
+        "feature_calls": 0
+      },
+      "gpu_normal2": [
+        {
+          "loss": 0.6508631408214569,
+          "inputs": [
+            {
+              "t": 500,
+              "slots": 18336,
+              "forward_seconds": 0.870726702734828,
+              "backward_seconds": 0.9957537269219756
+            },
+            {
+              "t": 500,
+              "slots": 18336,
+              "forward_seconds": 0.8279224345460534,
+              "backward_seconds": 0.9902816498652101
+            }
+          ],
+          "gradient_norm": 5.94990348815918,
+          "optimizer_seconds": 9.222514927387238e-05,
+          "changed": 0.0,
+          "normal2_seconds": 3.7784595945850015,
+          "optimizer_steps": 0,
+          "feature_calls": 0
+        },
+        {
+          "loss": 0.6508631408214569,
+          "inputs": [
+            {
+              "t": 500,
+              "slots": 18336,
+              "forward_seconds": 0.8291166489943862,
+              "backward_seconds": 0.9859076496213675
+            },
+            {
+              "t": 500,
+              "slots": 18336,
+              "forward_seconds": 0.8285930985584855,
+              "backward_seconds": 0.9898223262280226
+            }
+          ],
+          "gradient_norm": 5.94990348815918,
+          "optimizer_seconds": 8.665025234222412e-05,
+          "changed": 0.0,
+          "normal2_seconds": 3.7251690654084086,
+          "optimizer_steps": 0,
+          "feature_calls": 0
+        }
+      ],
+      "same_gpu_passed": true,
+      "cpu_gpu_passed": false,
+      "all_gpu_gradients_bitwise": true,
+      "first_exceeding_gradient": null,
+      "full_query_forward_cost": [
+        {
+          "seconds": 0.43513053469359875,
+          "includes_backward": false,
+          "includes_cpu_hooks": false,
+          "synchronized": true,
+          "slots": 18336,
+          "forward_count": 1,
+          "path": "old",
+          "logits_vs_first": {
+            "passes": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "max_relative_nonzero": 0.0,
+            "reference_max": 0.28588688373565674,
+            "reference_l2": 17.81723999290749,
+            "absolute_at_reference_zero": null,
+            "violations": 0
+          },
+          "p0_vs_first": {
+            "passes": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "max_relative_nonzero": 0.0,
+            "reference_max": 0.49452266097068787,
+            "reference_l2": 64.46517609716672,
+            "absolute_at_reference_zero": null,
+            "violations": 0
+          }
+        },
+        {
+          "seconds": 0.6116725085303187,
+          "includes_backward": false,
+          "includes_cpu_hooks": false,
+          "synchronized": true,
+          "slots": 18336,
+          "forward_count": 1,
+          "path": "equal_tie",
+          "logits_vs_first": {
+            "passes": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "max_relative_nonzero": 0.0,
+            "reference_max": 0.28588688373565674,
+            "reference_l2": 17.81723999290749,
+            "absolute_at_reference_zero": null,
+            "violations": 0
+          },
+          "p0_vs_first": {
+            "passes": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "max_relative_nonzero": 0.0,
+            "reference_max": 0.49452266097068787,
+            "reference_l2": 64.46517609716672,
+            "absolute_at_reference_zero": null,
+            "violations": 0
+          }
+        },
+        {
+          "seconds": 0.43590671848505735,
+          "includes_backward": false,
+          "includes_cpu_hooks": false,
+          "synchronized": true,
+          "slots": 18336,
+          "forward_count": 1,
+          "path": "old",
+          "logits_vs_first": {
+            "passes": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "max_relative_nonzero": 0.0,
+            "reference_max": 0.28588688373565674,
+            "reference_l2": 17.81723999290749,
+            "absolute_at_reference_zero": null,
+            "violations": 0
+          },
+          "p0_vs_first": {
+            "passes": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "max_relative_nonzero": 0.0,
+            "reference_max": 0.49452266097068787,
+            "reference_l2": 64.46517609716672,
+            "absolute_at_reference_zero": null,
+            "violations": 0
+          }
+        },
+        {
+          "seconds": 0.6145391697064042,
+          "includes_backward": false,
+          "includes_cpu_hooks": false,
+          "synchronized": true,
+          "slots": 18336,
+          "forward_count": 1,
+          "path": "equal_tie",
+          "logits_vs_first": {
+            "passes": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "max_relative_nonzero": 0.0,
+            "reference_max": 0.28588688373565674,
+            "reference_l2": 17.81723999290749,
+            "absolute_at_reference_zero": null,
+            "violations": 0
+          },
+          "p0_vs_first": {
+            "passes": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "max_relative_nonzero": 0.0,
+            "reference_max": 0.49452266097068787,
+            "reference_l2": 64.46517609716672,
+            "absolute_at_reference_zero": null,
+            "violations": 0
+          }
+        }
+      ],
+      "peak_allocated_mib": 3140.8427734375,
+      "peak_reserved_mib": 3350.0,
+      "rss_peak_mib": 8347.32421875,
+      "save_seconds": 0.22811732534319162,
+      "checkpoint_sha256": "eac55ea35cdf427fa131836432c5daa7ca557bca241218f59f4acff05c04589b",
+      "load_exact": {
+        "model": true,
+        "optimizer": true,
+        "rng": true,
+        "updates": true,
+        "binding": true
+      },
+      "restore_passed": true,
+      "restore_all_float_bitwise": true
+    },
+    "PubMed_B": {
+      "status": "temporary_updates_complete",
+      "updates": 3,
+      "initial_sha256": "9315ecb77135fc8e35c23eea2535d3a9a531a3645c19c4fc645989d83486782c",
+      "cpu_normal2": {
+        "loss": 0.6475982069969177,
+        "inputs": [
+          {
+            "t": 500,
+            "slots": 18336,
+            "forward_seconds": 2.938853851519525,
+            "backward_seconds": 3.5330472458153963
+          },
+          {
+            "t": 500,
+            "slots": 18336,
+            "forward_seconds": 3.056323155760765,
+            "backward_seconds": 2.842094604857266
+          }
+        ],
+        "gradient_norm": 5.911505699157715,
+        "optimizer_seconds": 6.411224603652954e-06,
+        "changed": 0.0,
+        "normal2_seconds": 12.438391301780939,
+        "optimizer_steps": 0,
+        "feature_calls": 2
+      },
+      "gpu_normal2": [
+        {
+          "loss": 0.6475974917411804,
+          "inputs": [
+            {
+              "t": 500,
+              "slots": 18336,
+              "forward_seconds": 0.8524833433330059,
+              "backward_seconds": 0.9819187065586448
+            },
+            {
+              "t": 500,
+              "slots": 18336,
+              "forward_seconds": 0.8205709997564554,
+              "backward_seconds": 0.97997388523072
+            }
+          ],
+          "gradient_norm": 5.911513328552246,
+          "optimizer_seconds": 8.434150367975235e-05,
+          "changed": 0.0,
+          "normal2_seconds": 3.7284962916746736,
+          "optimizer_steps": 0,
+          "feature_calls": 4
+        },
+        {
+          "loss": 0.6475974917411804,
+          "inputs": [
+            {
+              "t": 500,
+              "slots": 18336,
+              "forward_seconds": 0.8200122462585568,
+              "backward_seconds": 0.9750650562345982
+            },
+            {
+              "t": 500,
+              "slots": 18336,
+              "forward_seconds": 0.8210815358906984,
+              "backward_seconds": 0.986584342084825
+            }
+          ],
+          "gradient_norm": 5.911513328552246,
+          "optimizer_seconds": 9.06800851225853e-05,
+          "changed": 0.0,
+          "normal2_seconds": 3.6952442843466997,
+          "optimizer_steps": 0,
+          "feature_calls": 6
+        }
+      ],
+      "same_gpu_passed": true,
+      "cpu_gpu_passed": false,
+      "all_gpu_gradients_bitwise": true,
+      "first_exceeding_gradient": null,
+      "full_query_forward_cost": [
+        {
+          "seconds": 0.43075079936534166,
+          "includes_backward": false,
+          "includes_cpu_hooks": false,
+          "synchronized": true,
+          "slots": 18336,
+          "forward_count": 1,
+          "path": "old",
+          "logits_vs_first": {
+            "passes": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "max_relative_nonzero": 0.0,
+            "reference_max": 0.25726714730262756,
+            "reference_l2": 17.19238687814648,
+            "absolute_at_reference_zero": null,
+            "violations": 0
+          },
+          "p0_vs_first": {
+            "passes": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "max_relative_nonzero": 0.0,
+            "reference_max": 0.4890580177307129,
+            "reference_l2": 64.16220702598147,
+            "absolute_at_reference_zero": null,
+            "violations": 0
+          }
+        },
+        {
+          "seconds": 0.6054327357560396,
+          "includes_backward": false,
+          "includes_cpu_hooks": false,
+          "synchronized": true,
+          "slots": 18336,
+          "forward_count": 1,
+          "path": "equal_tie",
+          "logits_vs_first": {
+            "passes": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "max_relative_nonzero": 0.0,
+            "reference_max": 0.25726714730262756,
+            "reference_l2": 17.19238687814648,
+            "absolute_at_reference_zero": null,
+            "violations": 0
+          },
+          "p0_vs_first": {
+            "passes": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "max_relative_nonzero": 0.0,
+            "reference_max": 0.4890580177307129,
+            "reference_l2": 64.16220702598147,
+            "absolute_at_reference_zero": null,
+            "violations": 0
+          }
+        },
+        {
+          "seconds": 0.4316198229789734,
+          "includes_backward": false,
+          "includes_cpu_hooks": false,
+          "synchronized": true,
+          "slots": 18336,
+          "forward_count": 1,
+          "path": "old",
+          "logits_vs_first": {
+            "passes": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "max_relative_nonzero": 0.0,
+            "reference_max": 0.25726714730262756,
+            "reference_l2": 17.19238687814648,
+            "absolute_at_reference_zero": null,
+            "violations": 0
+          },
+          "p0_vs_first": {
+            "passes": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "max_relative_nonzero": 0.0,
+            "reference_max": 0.4890580177307129,
+            "reference_l2": 64.16220702598147,
+            "absolute_at_reference_zero": null,
+            "violations": 0
+          }
+        },
+        {
+          "seconds": 0.6055680178105831,
+          "includes_backward": false,
+          "includes_cpu_hooks": false,
+          "synchronized": true,
+          "slots": 18336,
+          "forward_count": 1,
+          "path": "equal_tie",
+          "logits_vs_first": {
+            "passes": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "max_relative_nonzero": 0.0,
+            "reference_max": 0.25726714730262756,
+            "reference_l2": 17.19238687814648,
+            "absolute_at_reference_zero": null,
+            "violations": 0
+          },
+          "p0_vs_first": {
+            "passes": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "max_relative_nonzero": 0.0,
+            "reference_max": 0.4890580177307129,
+            "reference_l2": 64.16220702598147,
+            "absolute_at_reference_zero": null,
+            "violations": 0
+          }
+        }
+      ],
+      "peak_allocated_mib": 3142.05419921875,
+      "peak_reserved_mib": 3342.0,
+      "rss_peak_mib": 8347.32421875,
+      "save_seconds": 0.22826814558357,
+      "checkpoint_sha256": "85a05914338eabd6218caa1da3c9a5d6fb9f8de722a8424b2e998e89c52d167a",
+      "load_exact": {
+        "model": true,
+        "optimizer": true,
+        "rng": true,
+        "updates": true,
+        "binding": true
+      },
+      "restore_passed": true,
+      "restore_all_float_bitwise": true
+    },
+    "PubMed_C": {
+      "status": "temporary_updates_complete",
+      "updates": 3,
+      "initial_sha256": "21ea2f235d60a19637272a8c6a8b12778e95205394347fb3ca7ab7f9db8a5eea",
+      "cpu_normal2": {
+        "loss": 0.6475982069969177,
+        "inputs": [
+          {
+            "t": 500,
+            "slots": 18336,
+            "forward_seconds": 3.129435719922185,
+            "backward_seconds": 3.53536656498909
+          },
+          {
+            "t": 500,
+            "slots": 18336,
+            "forward_seconds": 3.158998125232756,
+            "backward_seconds": 2.8899209378287196
+          }
+        ],
+        "gradient_norm": 5.911681175231934,
+        "optimizer_seconds": 6.595626473426819e-06,
+        "changed": 0.0,
+        "normal2_seconds": 12.781728370115161,
+        "optimizer_steps": 0,
+        "feature_calls": 2
+      },
+      "gpu_normal2": [
+        {
+          "loss": 0.6475974917411804,
+          "inputs": [
+            {
+              "t": 500,
+              "slots": 18336,
+              "forward_seconds": 0.8621434150263667,
+              "backward_seconds": 0.9832035237923265
+            },
+            {
+              "t": 500,
+              "slots": 18336,
+              "forward_seconds": 0.8293267069384456,
+              "backward_seconds": 0.9782222714275122
+            }
+          ],
+          "gradient_norm": 5.911688804626465,
+          "optimizer_seconds": 8.543580770492554e-05,
+          "changed": 0.0,
+          "normal2_seconds": 3.741300143301487,
+          "optimizer_steps": 0,
+          "feature_calls": 4
+        },
+        {
+          "loss": 0.6475974917411804,
+          "inputs": [
+            {
+              "t": 500,
+              "slots": 18336,
+              "forward_seconds": 0.8312216112390161,
+              "backward_seconds": 0.9742308631539345
+            },
+            {
+              "t": 500,
+              "slots": 18336,
+              "forward_seconds": 0.8282136740162969,
+              "backward_seconds": 0.9831905802711844
+            }
+          ],
+          "gradient_norm": 5.911688804626465,
+          "optimizer_seconds": 7.864832878112793e-05,
+          "changed": 0.0,
+          "normal2_seconds": 3.7053904058411717,
+          "optimizer_steps": 0,
+          "feature_calls": 6
+        }
+      ],
+      "same_gpu_passed": true,
+      "cpu_gpu_passed": false,
+      "all_gpu_gradients_bitwise": true,
+      "first_exceeding_gradient": null,
+      "full_query_forward_cost": [
+        {
+          "seconds": 0.4422559980303049,
+          "includes_backward": false,
+          "includes_cpu_hooks": false,
+          "synchronized": true,
+          "slots": 18336,
+          "forward_count": 1,
+          "path": "old",
+          "logits_vs_first": {
+            "passes": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "max_relative_nonzero": 0.0,
+            "reference_max": 0.25726714730262756,
+            "reference_l2": 17.19238687814648,
+            "absolute_at_reference_zero": null,
+            "violations": 0
+          },
+          "p0_vs_first": {
+            "passes": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "max_relative_nonzero": 0.0,
+            "reference_max": 0.4890580177307129,
+            "reference_l2": 64.16220702598147,
+            "absolute_at_reference_zero": null,
+            "violations": 0
+          }
+        },
+        {
+          "seconds": 0.614297398366034,
+          "includes_backward": false,
+          "includes_cpu_hooks": false,
+          "synchronized": true,
+          "slots": 18336,
+          "forward_count": 1,
+          "path": "equal_tie",
+          "logits_vs_first": {
+            "passes": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "max_relative_nonzero": 0.0,
+            "reference_max": 0.25726714730262756,
+            "reference_l2": 17.19238687814648,
+            "absolute_at_reference_zero": null,
+            "violations": 0
+          },
+          "p0_vs_first": {
+            "passes": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "max_relative_nonzero": 0.0,
+            "reference_max": 0.4890580177307129,
+            "reference_l2": 64.16220702598147,
+            "absolute_at_reference_zero": null,
+            "violations": 0
+          }
+        },
+        {
+          "seconds": 0.4416044391691685,
+          "includes_backward": false,
+          "includes_cpu_hooks": false,
+          "synchronized": true,
+          "slots": 18336,
+          "forward_count": 1,
+          "path": "old",
+          "logits_vs_first": {
+            "passes": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "max_relative_nonzero": 0.0,
+            "reference_max": 0.25726714730262756,
+            "reference_l2": 17.19238687814648,
+            "absolute_at_reference_zero": null,
+            "violations": 0
+          },
+          "p0_vs_first": {
+            "passes": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "max_relative_nonzero": 0.0,
+            "reference_max": 0.4890580177307129,
+            "reference_l2": 64.16220702598147,
+            "absolute_at_reference_zero": null,
+            "violations": 0
+          }
+        },
+        {
+          "seconds": 0.6145830256864429,
+          "includes_backward": false,
+          "includes_cpu_hooks": false,
+          "synchronized": true,
+          "slots": 18336,
+          "forward_count": 1,
+          "path": "equal_tie",
+          "logits_vs_first": {
+            "passes": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "max_relative_nonzero": 0.0,
+            "reference_max": 0.25726714730262756,
+            "reference_l2": 17.19238687814648,
+            "absolute_at_reference_zero": null,
+            "violations": 0
+          },
+          "p0_vs_first": {
+            "passes": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "max_relative_nonzero": 0.0,
+            "reference_max": 0.4890580177307129,
+            "reference_l2": 64.16220702598147,
+            "absolute_at_reference_zero": null,
+            "violations": 0
+          }
+        }
+      ],
+      "peak_allocated_mib": 3142.17431640625,
+      "peak_reserved_mib": 3342.0,
+      "rss_peak_mib": 8347.32421875,
+      "save_seconds": 0.23440364096313715,
+      "checkpoint_sha256": "5cab444ddf0ad469ecacfe7a348a21a7ad3b8608c8aac4950e86fd6dbda5dc22",
+      "load_exact": {
+        "model": true,
+        "optimizer": true,
+        "rng": true,
+        "updates": true,
+        "binding": true
+      },
+      "restore_passed": true,
+      "restore_all_float_bitwise": true
+    }
+  },
+  "actual_updates": {
+    "IMDB_A": 3,
+    "IMDB_B": 3,
+    "IMDB_C": 3,
+    "PubMed_A": 3,
+    "PubMed_B": 3,
+    "PubMed_C": 3
+  },
+  "formal_training": 0,
+  "generated_graphs": 0,
+  "finished_epoch": 1793121107.4978247,
+  "elapsed_from_ticket_seconds": 688.4978263378143,
+  "optimizer_step_calls": 18
+}
