@@ -1,0 +1,43 @@
+192节点 CN / ReFeX / RolX 准备与工程短测结果
+
+结论：实现/数据/CPU回归可审查，正式GPU训练未获数值认证。未训练正式模型，未生成新图。
+首次GPU尝试在0次更新时因缺cuBLAS确定性工作区退出；保留日志。之后未放宽任何数值门。
+IMDB A GPU续算超差后停止GPU更新；其余五组在CPU完成。累计每格5次，六格30次，含恢复重复计算。
+17项CPU回归零失败零跳过；独立数据/原后验/全覆盖/实际更新上限审计通过。
+原BASE当前Xt度分支三组均保留；A实测与旧PairDenoiser在非零度投影下输出和梯度逐位一致。
+A/B比较更换结构输入路径，参数量不同；B/C比较固定ReFeX基础上的额外非负角色表示。
+
+数据：来自用户ZIP的根目录attempt02，未用attempt01/baseline。精确诱导与无改边核验通过。
+IMDB:192节点,323物理边,类型[48, 56, 78, 10],分量[188, 2, 2];槽18336,可动13120;族边[0, 51, 51, 0, 3, 53, 0, 0, 165, 0]
+IMDB prior=[0.0, 0.018973214285714284, 0.013621794871794872, 0.0, 0.001948051948051948, 0.012133699633699634, 0.0, 0.0, 0.21153846153846154, 0.0];NMF迭代498,warning=[];NNLS KKT=1.52e-15
+PubMed:192节点,926物理边,类型[40, 74, 66, 12],分量[192];槽18336,可动18336;族边[39, 137, 159, 17, 83, 267, 27, 161, 33, 3]
+PubMed prior=[0.05, 0.04628378378378378, 0.060227272727272727, 0.035416666666666666, 0.030729359496482783, 0.05466830466830467, 0.030405405405405407, 0.07505827505827506, 0.041666666666666664, 0.045454545454545456];NMF迭代500,warning=['Maximum number of iterations 500 reached. Increase it to improve convergence.'];NNLS KKT=5.29e-15
+
+配置：8层256/64/128,8头,FF256/64/256,联合头128;T1000/20块;稳定sumCE×R/S;AdamW2e-4,wd1e-12,betas.9/.999,eps1e-8,amsgradFalse;无裁剪/调度。
+ReFeX:30基列+60+120递归列=210;RolX式冻结rank8;单参考非负基不是逐节点角色表。
+NMF固定迭代数/角色数不因结果调参；PubMed基只能称冻结工程产物，尚未达到声明收敛。
+
+逐格成本（秒；GPU列仅20块前向+后验，无采样；CPU更新是单输入，并非normal2）：
+IMDB_A:参数6647441;CPU更新=None;CPU20块=None;GPU20块冷/重复=2.8286/1.9152;GPU forward allocated/reserved=109.72/132.00MiB;恢复cuda={'passed': False, 'max_abs': 3.463967004790902e-06, 'optimizer_exact': False, 'rng_exact': True}
+  ReFeX/NNLS/H2D=0.000000/0.000000/0.000000;CPU/GPU={'logits': {'passes': True, 'max_abs': 4.544854164123535e-07, 'violations': 0}, 'p0': {'passes': True, 'max_abs': 1.4901161193847656e-07, 'violations': 0}, 'loss': {'passes': True, 'max_abs': 0.0, 'violations': 0}, 'gradients': {'passes': False, 'max_abs': 2.441415563225746e-05, 'violations': 7556}}
+IMDB_B:参数6686385;CPU更新=0.49043294973671436;CPU20块=2.3218722082674503;GPU20块冷/重复=1.9217/1.9046;GPU forward allocated/reserved=160.56/210.00MiB;恢复cpu={'passed': True, 'max_abs': 0.0, 'optimizer_exact': True, 'rng_exact': True}
+  ReFeX/NNLS/H2D=0.003675/0.000001/0.000174;CPU/GPU={'logits': {'passes': True, 'max_abs': 4.6193599700927734e-07, 'violations': 0}, 'p0': {'passes': True, 'max_abs': 1.4901161193847656e-07, 'violations': 0}, 'loss': {'passes': True, 'max_abs': 0.0, 'violations': 0}, 'gradient': {'passes': False, 'max_abs': 0.0005246864748187363, 'violations': 13020}}
+IMDB_C:参数6688433;CPU更新=0.4664235464297235;CPU20块=2.346514230594039;GPU20块冷/重复=1.9330/1.9212;GPU forward allocated/reserved=160.58/210.00MiB;恢复cpu={'passed': True, 'max_abs': 0.0, 'optimizer_exact': True, 'rng_exact': True}
+  ReFeX/NNLS/H2D=0.003769/0.006726/0.000229;CPU/GPU={'logits': {'passes': True, 'max_abs': 4.6193599700927734e-07, 'violations': 0}, 'p0': {'passes': True, 'max_abs': 1.4901161193847656e-07, 'violations': 0}, 'loss': {'passes': True, 'max_abs': 0.0, 'violations': 0}, 'gradient': {'passes': False, 'max_abs': 0.0007009936962276697, 'violations': 15472}}
+PubMed_A:参数6647441;CPU更新=0.7111224923282862;CPU20块=3.673538233153522;GPU20块冷/重复=2.1250/2.1081;GPU forward allocated/reserved=201.61/266.00MiB;恢复cpu={'passed': True, 'max_abs': 0.0, 'optimizer_exact': True, 'rng_exact': True}
+  ReFeX/NNLS/H2D=0.000000/0.000000/0.000000;CPU/GPU={'logits': {'passes': True, 'max_abs': 6.034970283508301e-07, 'violations': 0}, 'p0': {'passes': True, 'max_abs': 2.086162567138672e-07, 'violations': 0}, 'loss': {'passes': True, 'max_abs': 0.0, 'violations': 0}, 'gradient': {'passes': False, 'max_abs': 0.00014055793872103095, 'violations': 49326}}
+PubMed_B:参数6686385;CPU更新=0.6502099209465086;CPU20块=3.6535976603627205;GPU20块冷/重复=2.0793/2.0689;GPU forward allocated/reserved=201.52/264.00MiB;恢复cpu={'passed': True, 'max_abs': 0.0, 'optimizer_exact': True, 'rng_exact': True}
+  ReFeX/NNLS/H2D=0.005049/0.000001/0.000167;CPU/GPU={'logits': {'passes': True, 'max_abs': 6.221234798431396e-07, 'violations': 0}, 'p0': {'passes': True, 'max_abs': 2.086162567138672e-07, 'violations': 0}, 'loss': {'passes': True, 'max_abs': 0.0, 'violations': 0}, 'gradient': {'passes': False, 'max_abs': 0.0006803099531680346, 'violations': 76220}}
+PubMed_C:参数6688433;CPU更新=0.6411454346962273;CPU20块=3.6503154998645186;GPU20块冷/重复=2.0959/2.0786;GPU forward allocated/reserved=201.55/264.00MiB;恢复cpu={'passed': True, 'max_abs': 0.0, 'optimizer_exact': True, 'rng_exact': True}
+  ReFeX/NNLS/H2D=0.004856/0.006621/0.000219;CPU/GPU={'logits': {'passes': True, 'max_abs': 6.221234798431396e-07, 'violations': 0}, 'p0': {'passes': True, 'max_abs': 2.086162567138672e-07, 'violations': 0}, 'loss': {'passes': True, 'max_abs': 0.0, 'violations': 0}, 'gradient': {'passes': False, 'max_abs': 0.0017174473032355309, 'violations': 78537}}
+
+IMDB A实际GPU单输入更新中位约0.347秒，训练allocated316.40MiB/reserved350MiB；不代表数值门通过。
+GPU其他五格未做优化器更新，因此没有可靠的六组GPU训练吞吐对照。
+GPU前向进程RSS约3.76–4.33GiB；CPU工程进程峰约1.61GiB。设备总占用快照约1.05–1.21GiB，非连续峰值。
+每格前向只有冷/重复两次；更新仅5次调用、3个不同有效位置，样本小且t变化，不宣称稳态充分统计或B/C速度差显著。
+特征+NNLS约0.010–0.012秒/完整Xt，一步20块共享，仅占本次GPU查询扫的一小部分；未作大图复杂度承诺。
+
+预算建议：先处理/审查数值阻塞，再确定正式规模。CPU六格各1000更新单seed的计算规划上界约72分钟，加30%验证/保存余量约94分钟。IMDB_A CPU更新未单测，此数用当前最慢实测作代理，并非保证。
+GPU六格各一条T1000的前向+后验等成本外推约3.33小时；未包含抽样提交、图密度变化、评价与保存，不是已批准/已测完整链预算。
+本票保持T1000/20块作为源合同；不为降低预算擅自缩短科学日程。
+当前没有正式训练/新图/后续自动任务授权，资源已释放，停止等待审阅。

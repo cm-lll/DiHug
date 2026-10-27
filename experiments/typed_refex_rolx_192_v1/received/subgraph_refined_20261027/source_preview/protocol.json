@@ -1,0 +1,75 @@
+{
+  "frozen_at_utc": "2026-10-27T10:31:02.621393+00:00",
+  "target_nodes": 192,
+  "seeds": {
+    "IMDB": [
+      2026102701,
+      2026102703,
+      2026102705
+    ],
+    "PubMed": [
+      2026102702,
+      2026102704,
+      2026102706
+    ]
+  },
+  "inputs": {
+    "IMDB": {
+      "hashes": {
+        "npz": "10f1dbbbe55c6a069594b2dcb590d1b8295ca5436320ef4597cd30e6b7f73e42",
+        "config": "001ef83c7553c350b9327ac4765db70fc26ddc811b0b3548f9f1fa7a04acae05",
+        "binding": "1082a1be5ce3b637144ef6af7584bd67fe7ab67e065b9ad54d304d37200f58db"
+      },
+      "type_names": [
+        "Director",
+        "Actor",
+        "Movie",
+        "Genre"
+      ],
+      "original_counts": [
+        410,
+        494,
+        726,
+        23
+      ],
+      "quotas": [
+        48,
+        56,
+        78,
+        10
+      ]
+    },
+    "PubMed": {
+      "hashes": {
+        "npz": "dacff5a392e23fbcfb695076a14a6db5317f4a4382b69af2a7596a1a217163f8",
+        "config": "475310696a61440bde50a0ffe370da5be63f2d7c2193675f37440497a294cf42",
+        "binding": "c1c95e19170f25be203d57f61cc829814bc4edfb2bbad5827a66b678b879b941"
+      },
+      "type_names": [
+        "Gene",
+        "Disease",
+        "Chemical",
+        "Species"
+      ],
+      "original_counts": [
+        313,
+        643,
+        564,
+        45
+      ],
+      "quotas": [
+        40,
+        74,
+        66,
+        12
+      ]
+    }
+  },
+  "algorithm_file": "code/sample.py",
+  "algorithm_sha256": "6d295a27985f65eaf84826d28a90924db29ca948d32ab1249bd0782123594a93",
+  "numpy_version": "2.3.5",
+  "rng": "numpy.Generator(PCG64), fresh per seed; ordered input rows preserved",
+  "replay": "fresh RNG and complete selection algorithm rerun; identical IDs trace and induced arrays required",
+  "scope": "CPU only data extraction; no models, no training, no sampling generated graphs",
+  "failure": "retain partial, never replace seed, never repair induced edges"
+}

@@ -1,0 +1,32 @@
+Traceback (most recent call last):
+  File "/data2/lyh/gnn_project/DiHug/research_branches/typed_refex_rolx_192_v1/package/benchmark.py", line 158, in <module>
+    if __name__=='__main__':main()
+  File "/data2/lyh/gnn_project/DiHug/research_branches/typed_refex_rolx_192_v1/package/benchmark.py", line 76, in main
+    update(m,opt,c,inp,cfg['T'],'cuda',do_step=False,diagnostics=d_dev)
+  File "/data2/lyh/gnn_project/DiHug/research_branches/typed_refex_rolx_192_v1/package/hsgd/bw_preflight/common.py", line 313, in update
+    result = predict(model, case["space"].types, inp["edges"], inp["edge_families"],
+  File "/data2/lyh/gnn_project/DiHug/research_branches/typed_refex_rolx_192_v1/package/hsgd/runtime.py", line 96, in predict
+    logits,p = timed(device,times,"network_seconds",lambda: context.run_network(graph,time_value,token))
+  File "/data2/lyh/gnn_project/DiHug/research_branches/typed_refex_rolx_192_v1/package/hsgd/runtime.py", line 30, in timed
+    value = fn()
+  File "/data2/lyh/gnn_project/DiHug/research_branches/typed_refex_rolx_192_v1/package/hsgd/runtime.py", line 96, in <lambda>
+    logits,p = timed(device,times,"network_seconds",lambda: context.run_network(graph,time_value,token))
+  File "/data2/lyh/gnn_project/DiHug/research_branches/typed_refex_rolx_192_v1/package/hsgd/computational.py", line 117, in run_network
+    logits = self.model.joint_predict(self,graph,time)
+  File "/data2/lyh/gnn_project/DiHug/research_branches/typed_refex_rolx_192_v1/package/model_variants.py", line 61, in joint_predict
+    return super().joint_predict(ctx,graph,time,mask_cn,return_features)
+  File "/data2/lyh/gnn_project/DiHug/research_branches/typed_refex_rolx_192_v1/package/hsgd/model.py", line 68, in joint_predict
+    result,hidden=self.backbone(ctx.x,graph.attrs,graph.edges,
+  File "/data2/lyh/miniconda3/envs/sparse_block/lib/python3.9/site-packages/torch/nn/modules/module.py", line 1518, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/data2/lyh/miniconda3/envs/sparse_block/lib/python3.9/site-packages/torch/nn/modules/module.py", line 1527, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/data2/lyh/gnn_project/DiHug/research_branches/typed_refex_rolx_192_v1/package/hsgd/vendor/conv_transformer_model.py", line 179, in forward
+    y = self.lin_in_y(y)
+  File "/data2/lyh/miniconda3/envs/sparse_block/lib/python3.9/site-packages/torch/nn/modules/module.py", line 1518, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/data2/lyh/miniconda3/envs/sparse_block/lib/python3.9/site-packages/torch/nn/modules/module.py", line 1527, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/data2/lyh/miniconda3/envs/sparse_block/lib/python3.9/site-packages/torch/nn/modules/linear.py", line 114, in forward
+    return F.linear(input, self.weight, self.bias)
+RuntimeError: Deterministic behavior was enabled with either `torch.use_deterministic_algorithms(True)` or `at::Context::setDeterministicAlgorithms(true)`, but this operation is not deterministic because it uses CuBLAS and you have CUDA >= 10.2. To enable deterministic behavior in this case, you must set an environment variable before running your PyTorch application: CUBLAS_WORKSPACE_CONFIG=:4096:8 or CUBLAS_WORKSPACE_CONFIG=:16:8. For more information, go to https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility

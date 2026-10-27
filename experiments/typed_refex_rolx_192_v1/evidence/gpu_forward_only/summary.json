@@ -1,0 +1,346 @@
+{
+  "status": "completed_forward_evidence_only",
+  "optimizer_steps": 0,
+  "generated_graphs": 0,
+  "cases": {
+    "IMDB_A": {
+      "status": "complete_forward_only",
+      "gate": "previous actual IMDB_A gate retained; not repeated",
+      "timings": [
+        {
+          "repeat": 0,
+          "wall_seconds": 2.828582535497844,
+          "covered": 13120,
+          "blocks": 20,
+          "feature_seconds": 0.0,
+          "encoding_seconds": 0.0,
+          "transfer_seconds": 0.0,
+          "feature_calls": 0,
+          "query_network_including_features_seconds": 2.801045708358288,
+          "posterior_seconds": 0.011056412942707539
+        },
+        {
+          "repeat": 1,
+          "wall_seconds": 1.9152321182191372,
+          "covered": 13120,
+          "blocks": 20,
+          "feature_seconds": 0.0,
+          "encoding_seconds": 0.0,
+          "transfer_seconds": 0.0,
+          "feature_calls": 0,
+          "query_network_including_features_seconds": 1.8920068629086018,
+          "posterior_seconds": 0.00992882251739502
+        }
+      ],
+      "peak_allocated_mib": 109.71630859375,
+      "peak_reserved_mib": 132.0,
+      "peak_rss_mib": 3852.0625,
+      "device_total_occupancy_snapshot": "1075"
+    },
+    "IMDB_B": {
+      "status": "complete_forward_only",
+      "gate": {
+        "logits": {
+          "passes": true,
+          "max_abs": 4.6193599700927734e-07,
+          "violations": 0
+        },
+        "p0": {
+          "passes": true,
+          "max_abs": 1.4901161193847656e-07,
+          "violations": 0
+        },
+        "loss": {
+          "passes": true,
+          "max_abs": 0.0,
+          "violations": 0
+        },
+        "gradient": {
+          "passes": false,
+          "max_abs": 0.0005246864748187363,
+          "violations": 13020
+        }
+      },
+      "timings": [
+        {
+          "repeat": 0,
+          "wall_seconds": 1.9216709583997726,
+          "covered": 13120,
+          "blocks": 20,
+          "feature_seconds": 0.003772234544157982,
+          "encoding_seconds": 7.944181561470032e-07,
+          "transfer_seconds": 0.00018047820776700974,
+          "feature_calls": 1,
+          "query_network_including_features_seconds": 1.8982262583449483,
+          "posterior_seconds": 0.01048492081463337
+        },
+        {
+          "repeat": 1,
+          "wall_seconds": 1.9046024065464735,
+          "covered": 13120,
+          "blocks": 20,
+          "feature_seconds": 0.003675444982945919,
+          "encoding_seconds": 8.344650268554688e-07,
+          "transfer_seconds": 0.00017413683235645294,
+          "feature_calls": 1,
+          "query_network_including_features_seconds": 1.8825894640758634,
+          "posterior_seconds": 0.010056033730506897
+        }
+      ],
+      "peak_allocated_mib": 160.55810546875,
+      "peak_reserved_mib": 210.0,
+      "peak_rss_mib": 4148.578125,
+      "device_total_occupancy_snapshot": "1185"
+    },
+    "IMDB_C": {
+      "status": "complete_forward_only",
+      "gate": {
+        "logits": {
+          "passes": true,
+          "max_abs": 4.6193599700927734e-07,
+          "violations": 0
+        },
+        "p0": {
+          "passes": true,
+          "max_abs": 1.4901161193847656e-07,
+          "violations": 0
+        },
+        "loss": {
+          "passes": true,
+          "max_abs": 0.0,
+          "violations": 0
+        },
+        "gradient": {
+          "passes": false,
+          "max_abs": 0.0007009936962276697,
+          "violations": 15472
+        }
+      },
+      "timings": [
+        {
+          "repeat": 0,
+          "wall_seconds": 1.933040015399456,
+          "covered": 13120,
+          "blocks": 20,
+          "feature_seconds": 0.003748326562345028,
+          "encoding_seconds": 0.006791669875383377,
+          "transfer_seconds": 0.0002371314913034439,
+          "feature_calls": 1,
+          "query_network_including_features_seconds": 1.9100240105763078,
+          "posterior_seconds": 0.010205063037574291
+        },
+        {
+          "repeat": 1,
+          "wall_seconds": 1.9211930446326733,
+          "covered": 13120,
+          "blocks": 20,
+          "feature_seconds": 0.0037691928446292877,
+          "encoding_seconds": 0.006726201623678207,
+          "transfer_seconds": 0.00022945459932088852,
+          "feature_calls": 1,
+          "query_network_including_features_seconds": 1.8990512443706393,
+          "posterior_seconds": 0.009963319636881351
+        }
+      ],
+      "peak_allocated_mib": 160.5849609375,
+      "peak_reserved_mib": 210.0,
+      "peak_rss_mib": 4163.1640625,
+      "device_total_occupancy_snapshot": "1185"
+    },
+    "PubMed_A": {
+      "status": "complete_forward_only",
+      "gate": {
+        "logits": {
+          "passes": true,
+          "max_abs": 6.034970283508301e-07,
+          "violations": 0
+        },
+        "p0": {
+          "passes": true,
+          "max_abs": 2.086162567138672e-07,
+          "violations": 0
+        },
+        "loss": {
+          "passes": true,
+          "max_abs": 0.0,
+          "violations": 0
+        },
+        "gradient": {
+          "passes": false,
+          "max_abs": 0.00014055793872103095,
+          "violations": 49326
+        }
+      },
+      "timings": [
+        {
+          "repeat": 0,
+          "wall_seconds": 2.1249723257496953,
+          "covered": 18336,
+          "blocks": 20,
+          "feature_seconds": 0.0,
+          "encoding_seconds": 0.0,
+          "transfer_seconds": 0.0,
+          "feature_calls": 0,
+          "query_network_including_features_seconds": 2.098678069189191,
+          "posterior_seconds": 0.01151465717703104
+        },
+        {
+          "repeat": 1,
+          "wall_seconds": 2.108131022192538,
+          "covered": 18336,
+          "blocks": 20,
+          "feature_seconds": 0.0,
+          "encoding_seconds": 0.0,
+          "transfer_seconds": 0.0,
+          "feature_calls": 0,
+          "query_network_including_features_seconds": 2.0831189593300223,
+          "posterior_seconds": 0.011468678712844849
+        }
+      ],
+      "peak_allocated_mib": 201.611328125,
+      "peak_reserved_mib": 266.0,
+      "peak_rss_mib": 4356.609375,
+      "device_total_occupancy_snapshot": "1241"
+    },
+    "PubMed_B": {
+      "status": "complete_forward_only",
+      "gate": {
+        "logits": {
+          "passes": true,
+          "max_abs": 6.221234798431396e-07,
+          "violations": 0
+        },
+        "p0": {
+          "passes": true,
+          "max_abs": 2.086162567138672e-07,
+          "violations": 0
+        },
+        "loss": {
+          "passes": true,
+          "max_abs": 0.0,
+          "violations": 0
+        },
+        "gradient": {
+          "passes": false,
+          "max_abs": 0.0006803099531680346,
+          "violations": 76220
+        }
+      },
+      "timings": [
+        {
+          "repeat": 0,
+          "wall_seconds": 2.0793121000751853,
+          "covered": 18336,
+          "blocks": 20,
+          "feature_seconds": 0.005148251540958881,
+          "encoding_seconds": 8.139759302139282e-07,
+          "transfer_seconds": 0.00022538378834724426,
+          "feature_calls": 1,
+          "query_network_including_features_seconds": 2.0540610728785396,
+          "posterior_seconds": 0.011540674604475498
+        },
+        {
+          "repeat": 1,
+          "wall_seconds": 2.0688657499849796,
+          "covered": 18336,
+          "blocks": 20,
+          "feature_seconds": 0.005049390718340874,
+          "encoding_seconds": 7.934868335723877e-07,
+          "transfer_seconds": 0.0001667328178882599,
+          "feature_calls": 1,
+          "query_network_including_features_seconds": 2.04458515252918,
+          "posterior_seconds": 0.011450711637735367
+        }
+      ],
+      "peak_allocated_mib": 201.52392578125,
+      "peak_reserved_mib": 264.0,
+      "peak_rss_mib": 4423.2734375,
+      "device_total_occupancy_snapshot": "1239"
+    },
+    "PubMed_C": {
+      "status": "complete_forward_only",
+      "gate": {
+        "logits": {
+          "passes": true,
+          "max_abs": 6.221234798431396e-07,
+          "violations": 0
+        },
+        "p0": {
+          "passes": true,
+          "max_abs": 2.086162567138672e-07,
+          "violations": 0
+        },
+        "loss": {
+          "passes": true,
+          "max_abs": 0.0,
+          "violations": 0
+        },
+        "gradient": {
+          "passes": false,
+          "max_abs": 0.0017174473032355309,
+          "violations": 78537
+        }
+      },
+      "timings": [
+        {
+          "repeat": 0,
+          "wall_seconds": 2.0958561673760414,
+          "covered": 18336,
+          "blocks": 20,
+          "feature_seconds": 0.00515211746096611,
+          "encoding_seconds": 0.006798896938562393,
+          "transfer_seconds": 0.00024225562810897827,
+          "feature_calls": 1,
+          "query_network_including_features_seconds": 2.0709043042734265,
+          "posterior_seconds": 0.011488612741231918
+        },
+        {
+          "repeat": 1,
+          "wall_seconds": 2.0786316888406873,
+          "covered": 18336,
+          "blocks": 20,
+          "feature_seconds": 0.00485612265765667,
+          "encoding_seconds": 0.006620675325393677,
+          "transfer_seconds": 0.0002193627879023552,
+          "feature_calls": 1,
+          "query_network_including_features_seconds": 2.054817876778543,
+          "posterior_seconds": 0.011432664468884468
+        }
+      ],
+      "peak_allocated_mib": 201.55078125,
+      "peak_reserved_mib": 264.0,
+      "peak_rss_mib": 4429.359375,
+      "device_total_occupancy_snapshot": "1239"
+    }
+  },
+  "environment": {
+    "python": "3.9.23 | packaged by conda-forge | (main, Jun  4 2025, 17:57:12) \n[GCC 13.3.0]",
+    "python_version": "3.9.23",
+    "executable": "/data2/lyh/miniconda3/envs/sparse_block/bin/python",
+    "system": "Linux-5.4.0-216-generic-x86_64-with-glibc2.31",
+    "machine": "x86_64",
+    "packages": {
+      "torch": "2.1.0+cu121",
+      "torch-geometric": "2.3.1",
+      "numpy": "1.23.0",
+      "scipy": "1.11.0",
+      "pytest": "8.4.2",
+      "networkx": "2.8.7"
+    },
+    "hip": null,
+    "cuda": "12.1",
+    "requested_device": "cuda",
+    "torch_runtime_version": "2.1.0+cu121",
+    "float32_matmul_precision": "highest",
+    "matmul_allow_tf32": false,
+    "deterministic_algorithms": true,
+    "deterministic_warn_only": false,
+    "torch_threads": 1,
+    "utc": "2026-10-27T14:38:42Z",
+    "device_name": "NVIDIA GeForce RTX 2080 Ti",
+    "visible_devices": 1,
+    "device_memory_bytes": 11546394624,
+    "device_type": "CUDA"
+  },
+  "seconds": 57.62063717842102
+}

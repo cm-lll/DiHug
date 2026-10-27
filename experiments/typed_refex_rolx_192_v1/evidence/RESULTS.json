@@ -1,0 +1,307 @@
+{
+  "status": "engineering_delivered_with_numerical_blockers",
+  "rows": [
+    {
+      "case": "IMDB_A",
+      "parameter_count": 6647441,
+      "gpu_sweep_cold_seconds": 2.828582535497844,
+      "gpu_sweep_repeat_seconds": 1.9152321182191372,
+      "gpu_forward_peak_allocated_mib": 109.71630859375,
+      "gpu_forward_peak_reserved_mib": 132.0,
+      "gpu_forward_process_peak_rss_mib": 3852.0625,
+      "device_total_occupancy_snapshot_mib": 1075.0,
+      "feature_seconds": 0.0,
+      "nnls_seconds": 0.0,
+      "transfer_seconds": 0.0,
+      "cpu_gpu_gate": {
+        "logits": {
+          "passes": true,
+          "max_abs": 4.544854164123535e-07,
+          "violations": 0
+        },
+        "p0": {
+          "passes": true,
+          "max_abs": 1.4901161193847656e-07,
+          "violations": 0
+        },
+        "loss": {
+          "passes": true,
+          "max_abs": 0.0,
+          "violations": 0
+        },
+        "gradients": {
+          "passes": false,
+          "max_abs": 2.441415563225746e-05,
+          "violations": 7556
+        }
+      },
+      "cpu_update_seconds": null,
+      "cpu_sweep_repeat_seconds": null,
+      "restoration": {
+        "passed": false,
+        "max_abs": 3.463967004790902e-06,
+        "optimizer_exact": false,
+        "rng_exact": true
+      },
+      "restoration_device": "cuda",
+      "updates_executed": 5
+    },
+    {
+      "case": "IMDB_B",
+      "parameter_count": 6686385,
+      "gpu_sweep_cold_seconds": 1.9216709583997726,
+      "gpu_sweep_repeat_seconds": 1.9046024065464735,
+      "gpu_forward_peak_allocated_mib": 160.55810546875,
+      "gpu_forward_peak_reserved_mib": 210.0,
+      "gpu_forward_process_peak_rss_mib": 4148.578125,
+      "device_total_occupancy_snapshot_mib": 1185.0,
+      "feature_seconds": 0.003675444982945919,
+      "nnls_seconds": 8.344650268554688e-07,
+      "transfer_seconds": 0.00017413683235645294,
+      "cpu_gpu_gate": {
+        "logits": {
+          "passes": true,
+          "max_abs": 4.6193599700927734e-07,
+          "violations": 0
+        },
+        "p0": {
+          "passes": true,
+          "max_abs": 1.4901161193847656e-07,
+          "violations": 0
+        },
+        "loss": {
+          "passes": true,
+          "max_abs": 0.0,
+          "violations": 0
+        },
+        "gradient": {
+          "passes": false,
+          "max_abs": 0.0005246864748187363,
+          "violations": 13020
+        }
+      },
+      "cpu_update_seconds": 0.49043294973671436,
+      "cpu_sweep_repeat_seconds": 2.3218722082674503,
+      "restoration": {
+        "passed": true,
+        "max_abs": 0.0,
+        "optimizer_exact": true,
+        "rng_exact": true
+      },
+      "restoration_device": "cpu",
+      "updates_executed": 5
+    },
+    {
+      "case": "IMDB_C",
+      "parameter_count": 6688433,
+      "gpu_sweep_cold_seconds": 1.933040015399456,
+      "gpu_sweep_repeat_seconds": 1.9211930446326733,
+      "gpu_forward_peak_allocated_mib": 160.5849609375,
+      "gpu_forward_peak_reserved_mib": 210.0,
+      "gpu_forward_process_peak_rss_mib": 4163.1640625,
+      "device_total_occupancy_snapshot_mib": 1185.0,
+      "feature_seconds": 0.0037691928446292877,
+      "nnls_seconds": 0.006726201623678207,
+      "transfer_seconds": 0.00022945459932088852,
+      "cpu_gpu_gate": {
+        "logits": {
+          "passes": true,
+          "max_abs": 4.6193599700927734e-07,
+          "violations": 0
+        },
+        "p0": {
+          "passes": true,
+          "max_abs": 1.4901161193847656e-07,
+          "violations": 0
+        },
+        "loss": {
+          "passes": true,
+          "max_abs": 0.0,
+          "violations": 0
+        },
+        "gradient": {
+          "passes": false,
+          "max_abs": 0.0007009936962276697,
+          "violations": 15472
+        }
+      },
+      "cpu_update_seconds": 0.4664235464297235,
+      "cpu_sweep_repeat_seconds": 2.346514230594039,
+      "restoration": {
+        "passed": true,
+        "max_abs": 0.0,
+        "optimizer_exact": true,
+        "rng_exact": true
+      },
+      "restoration_device": "cpu",
+      "updates_executed": 5
+    },
+    {
+      "case": "PubMed_A",
+      "parameter_count": 6647441,
+      "gpu_sweep_cold_seconds": 2.1249723257496953,
+      "gpu_sweep_repeat_seconds": 2.108131022192538,
+      "gpu_forward_peak_allocated_mib": 201.611328125,
+      "gpu_forward_peak_reserved_mib": 266.0,
+      "gpu_forward_process_peak_rss_mib": 4356.609375,
+      "device_total_occupancy_snapshot_mib": 1241.0,
+      "feature_seconds": 0.0,
+      "nnls_seconds": 0.0,
+      "transfer_seconds": 0.0,
+      "cpu_gpu_gate": {
+        "logits": {
+          "passes": true,
+          "max_abs": 6.034970283508301e-07,
+          "violations": 0
+        },
+        "p0": {
+          "passes": true,
+          "max_abs": 2.086162567138672e-07,
+          "violations": 0
+        },
+        "loss": {
+          "passes": true,
+          "max_abs": 0.0,
+          "violations": 0
+        },
+        "gradient": {
+          "passes": false,
+          "max_abs": 0.00014055793872103095,
+          "violations": 49326
+        }
+      },
+      "cpu_update_seconds": 0.7111224923282862,
+      "cpu_sweep_repeat_seconds": 3.673538233153522,
+      "restoration": {
+        "passed": true,
+        "max_abs": 0.0,
+        "optimizer_exact": true,
+        "rng_exact": true
+      },
+      "restoration_device": "cpu",
+      "updates_executed": 5
+    },
+    {
+      "case": "PubMed_B",
+      "parameter_count": 6686385,
+      "gpu_sweep_cold_seconds": 2.0793121000751853,
+      "gpu_sweep_repeat_seconds": 2.0688657499849796,
+      "gpu_forward_peak_allocated_mib": 201.52392578125,
+      "gpu_forward_peak_reserved_mib": 264.0,
+      "gpu_forward_process_peak_rss_mib": 4423.2734375,
+      "device_total_occupancy_snapshot_mib": 1239.0,
+      "feature_seconds": 0.005049390718340874,
+      "nnls_seconds": 7.934868335723877e-07,
+      "transfer_seconds": 0.0001667328178882599,
+      "cpu_gpu_gate": {
+        "logits": {
+          "passes": true,
+          "max_abs": 6.221234798431396e-07,
+          "violations": 0
+        },
+        "p0": {
+          "passes": true,
+          "max_abs": 2.086162567138672e-07,
+          "violations": 0
+        },
+        "loss": {
+          "passes": true,
+          "max_abs": 0.0,
+          "violations": 0
+        },
+        "gradient": {
+          "passes": false,
+          "max_abs": 0.0006803099531680346,
+          "violations": 76220
+        }
+      },
+      "cpu_update_seconds": 0.6502099209465086,
+      "cpu_sweep_repeat_seconds": 3.6535976603627205,
+      "restoration": {
+        "passed": true,
+        "max_abs": 0.0,
+        "optimizer_exact": true,
+        "rng_exact": true
+      },
+      "restoration_device": "cpu",
+      "updates_executed": 5
+    },
+    {
+      "case": "PubMed_C",
+      "parameter_count": 6688433,
+      "gpu_sweep_cold_seconds": 2.0958561673760414,
+      "gpu_sweep_repeat_seconds": 2.0786316888406873,
+      "gpu_forward_peak_allocated_mib": 201.55078125,
+      "gpu_forward_peak_reserved_mib": 264.0,
+      "gpu_forward_process_peak_rss_mib": 4429.359375,
+      "device_total_occupancy_snapshot_mib": 1239.0,
+      "feature_seconds": 0.00485612265765667,
+      "nnls_seconds": 0.006620675325393677,
+      "transfer_seconds": 0.0002193627879023552,
+      "cpu_gpu_gate": {
+        "logits": {
+          "passes": true,
+          "max_abs": 6.221234798431396e-07,
+          "violations": 0
+        },
+        "p0": {
+          "passes": true,
+          "max_abs": 2.086162567138672e-07,
+          "violations": 0
+        },
+        "loss": {
+          "passes": true,
+          "max_abs": 0.0,
+          "violations": 0
+        },
+        "gradient": {
+          "passes": false,
+          "max_abs": 0.0017174473032355309,
+          "violations": 78537
+        }
+      },
+      "cpu_update_seconds": 0.6411454346962273,
+      "cpu_sweep_repeat_seconds": 3.6503154998645186,
+      "restoration": {
+        "passed": true,
+        "max_abs": 0.0,
+        "optimizer_exact": true,
+        "rng_exact": true
+      },
+      "restoration_device": "cpu",
+      "updates_executed": 5
+    }
+  ],
+  "python": "3.9.23 | packaged by conda-forge | (main, Jun  4 2025, 17:57:12) \n[GCC 13.3.0]",
+  "dependencies": {
+    "torch": "2.1.0+cu121",
+    "torch-geometric": "2.3.1",
+    "numpy": "1.23.0",
+    "scipy": "1.11.0",
+    "scikit-learn": "1.6.1",
+    "networkx": "2.8.7"
+  },
+  "cpu_tests": {
+    "passed": 17,
+    "failed": 0,
+    "skipped": 0
+  },
+  "formal_updates": 0,
+  "generated_graphs": 0,
+  "total_engineering_updates": 30,
+  "gpu_optimizer_updates": 5,
+  "cpu_optimizer_updates": 25,
+  "blockers": [
+    "CPU/GPU gradients exceed unchanged tolerance in all six cases",
+    "IMDB A GPU continuation has one parameter element beyond tolerance; load and RNG exact",
+    "PubMed reference NMF reached fixed500 iteration cap; no convergence claim"
+  ],
+  "cost_scope": "strict deterministic; one-input engineering updates; t500 full20 forward+posterior, no sampled state commit",
+  "budget_examples": {
+    "cpu_6_cases_1000_updates_one_seed_upper_seconds": 5616.0,
+    "cpu_update_bound_note": "0.72s includes observed worst0.711; IMDB_A CPU update not measured; 30% planning allowance, not guarantee",
+    "gpu_t1000_six_forward_posterior_only_seconds": 11996.656030416489,
+    "full_generation_not_measured": true
+  },
+  "all_experiments_stopped": true
+}

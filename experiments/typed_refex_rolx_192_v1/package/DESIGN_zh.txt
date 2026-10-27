@@ -1,0 +1,52 @@
+本票：两张 attempt02 的192节点诱导图，准备＋工程短测，不科学训练/生成。
+
+三组均从随机初始化开始，8层256/64/128、8头、FF256/64/256、联合头128，
+原T1000、20块、原稳定两logits CE sum×R/S、AdamW .0002/1e-12/betas(.9,.999)/eps1e-8/amsgradFalse。
+配置dropout .1但沿用vendor当前无实际dropout调用；FP32网络、float64概率核。无LR计划/梯度裁剪。
+工程一次更新只用一份普通加噪输入；不冒称历史normal2双输入成本。正式输入数/训练预算本票不授权。
+
+A使用接收E07历史hsgd的TypedSparseDenoiser、CN32、原联合头，及E07 BASE实际启用的当前Xt度分支。
+三组共同保留该度分支：每族度/容量、log1p度/log1p容量、类型onehot、t，25→32→32→256。
+其公式/参数布局来自PairDenoiser.base，使用真实非零度投影与原PairDenoiser作逐位前向回归。
+无旧角色/P/22摘要/端点小头。audit_reference只用于回归原BASE纯模型，不用于运行组装或载入权重。
+B/C common_neighbor=None，不构造Wedges，不执行CN上下文层/phi/路径查表，联合头删除37个CN输入列。
+B/C从完整冻结Xt计算结构输入，投影为256维，加到主干lin_in_X后的初始节点表示；无末端概率加分。
+C在B基础上另加8维非负系数→256投影。两投影零初始化；可学习投影有梯度，固定特征/基不参与CE反传。
+共同主干张量及联合头非CN列实际复制、逐张量验证；B/C的ReFeX投影完全相同。
+这不是参数量严格一致的单因素CN移除，A/B同时更换了结构信息路径；B/C检验额外角色压缩输入。
+
+固定类型化ReFeX（工程选择，不是原论文自适应剪枝完整复现）：
+每节点30基特征：10族当前度、闭egonet内部物理边数、跨egonet边界物理边数。
+内部/边界均按关系计数，egonet={节点及其Xt邻居}。无查询候选边/干净标签/原编号输入。
+度用log1p(N-1)归一，egonet边用log1p(该族schema容量)归一；零容量输出0。
+两轮递归，每轮对上一轮新特征做邻居平均及邻居和/(N-1)，保留全部层；30+60+120=210维。
+不动态剪特征，避免Xt变化使列语义漂移；不从参考目标度拟定逐节点尺度。
+基特征当前CPU实现O(N*E)，递归O(E*F)，不是全分支O(E)；无逐候选边Python循环/三维大张量。
+
+RolX式冻结基：各数据集只在允许的本张训练参考210维特征上拟合一次NMF，rank8预设，不搜索MDL/角色数。
+非负Frobenius NMF、nndsvda初值、CD求解、seed2026102708、最多500迭代、tol1e-5。
+基每行L2单位化，推理对每个Xt节点用NNLS拟合非负系数，不约束系数和为1；KKT门1e-7。
+只保存8×210基，不给网络提供参考逐节点系数或original_ids。基是训练数据学得公共资产，不声称目标信息完全相同。
+NMF未达收敛会记录警告/迭代，不把工程运行成功说成最优分解或有效角色。
+
+结构原始特征及NNLS系数在一次冻结Xt内跨查询块复用；投影学习输出不跨更新缓存。
+上下文绑定Xt/token/时间/device/参数版本/基版本，改变状态、时间、基或参数后拒绝旧上下文。
+训练/推理由同一个joint_predict接入。候选边参与原Transformer上下文，但不进入ReFeX提取。
+
+验收预先口径：float64特征重编号atol1e-10；FP32 logits/loss/gradient atol2e-6 rtol1e-5。
+不因GPU梯度超差放宽；记录实际门与历史门边界。临时最多每数据集每组5更新，权重标记工程用途。
+保存恢复需匹配数据/源码/配置/基/组别及优化器和RNG；无正式训练入口/自动后续。
+
+本票结果补记（不改变上述目标或容差）：
+实际六组CPU/GPU前向/概率/损失通过，但梯度均不通过；IMDB A在GPU严格模式续算亦一项超差。
+停止GPU优化器更新，IMDB A累计5次不再重做，其余五组各5次在CPU完成，恢复续算逐位一致。
+之后GPU仅前向/梯度读取，无优化器更新；完整20块的p0及后验q均保存，未抽样图。
+当前不能放行正式GPU训练，不能归因ReFeX/RolX已失败或声称不同后端梯度等价。
+所有工程计时严格确定性模式；CUDA还显式设置CUBLAS_WORKSPACE_CONFIG=:4096:8。
+未测普通GPU训练吞吐，不把该成本当作正式普通模式承诺。完整GPU梯度成本探针不等于生成质量实验。
+PubMed NMF达到固定500次迭代上限；冻结该原结果供工程接口检查，未偷偷增加迭代或换rank。
+NNLS固定基编码通过不意味着NMF已达优化收敛。正式C组基的接纳标准仍待审阅。
+
+来源：ReFeX https://research.ibm.com/publications/its-who-you-know-graph-mining-using-recursive-structural-features
+RolX https://sites.cs.ucsb.edu/~lilei/pubs/henderson2012rolx.pdf
+本票固定深度/特征/角色数/冻结NNLS编码均为明确适配；不冒充原MDL自动角色选择。

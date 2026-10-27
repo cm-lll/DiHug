@@ -1,0 +1,56 @@
+{
+  "attempt": 2,
+  "design_correction": "Attempt01 final diagnostics revealed fragmentation and lost MP3 types. Preserve attempt01, amend hard gates before independent new bounded run; not an undisclosed extension. Same baseline ranking/objective; new fixed seeds and2000 proposals each.",
+  "purpose": "Distribution-focused descriptive refinement, not unbiased sampling or globally optimal search; no model or training",
+  "target_nodes": 192,
+  "quotas": {
+    "IMDB": [
+      48,
+      56,
+      78,
+      10
+    ],
+    "PubMed": [
+      40,
+      74,
+      66,
+      12
+    ]
+  },
+  "proposal_budget_per_dataset": 2000,
+  "rng": "numpy.Generator(PCG64)",
+  "random_seeds": {
+    "IMDB": 2026102713,
+    "PubMed": 2026102714
+  },
+  "objective": {
+    "formula": "0.20*(relation_TV + typed_logdegree_CDF + clustering_abs_error + typed_triangle_TV + MP2_TV) + 0.05*missing_positive_triangle_fraction",
+    "relation_TV": "Total variation of the 10 undirected relation family edge proportions.",
+    "typed_logdegree_CDF": "Mean normalized 1D Wasserstein/CDF-L1 distance across all positive-reference type x relation degree cells. Per cell integrate empirical CDF difference over log(1+degree), divide by fixed log(1+maximum reference degree in that cell). Actual raw graph degrees are unchanged. Exact discrete support integration, not histogram binning. Reference max is a fixed integration scale, not a matching target.",
+    "clustering_abs_error": "Absolute difference of mean local clustering (degree<2 gives zero), all nodes equally weighted.",
+    "typed_triangle_TV": "TV of normalized counts of all 20 unordered node-type triples.",
+    "MP2_TV": "TV of exact typed simple undirected length-2 path composition; reversal identified, original audited convention.",
+    "missing_positive_triangle_fraction": "Missing positive-reference triangle types divided by number of positive-reference triangle types. This macro penalty supplements count-weighted triangle TV.",
+    "MP3": "Composition distance not optimized. Preserve all baseline-positive exact MP3 types as hard gate; exact counts/TV remain final diagnostic."
+  },
+  "baseline_selection": "Score all three original candidates uniformly. Choose lowest objective among hard-valid candidates; ties lexicographic seed. IMDB additionally requires both reference-positive triangle types (including AAM).",
+  "hard_gates": [
+    "Exactly192 unique original node IDs and exact fixed type quotas",
+    "Exact induced edges/relations/schema inherited unchanged from original, no edge editing",
+    "Zero isolates",
+    "Every original active relation family remains positive",
+    "No loss of any triangle type represented in selected baseline; once a missing type is acquired it may not be lost",
+    "No loss of any MP2 type represented in selected baseline",
+    "LCC size at least selected baseline and number of components at most selected baseline",
+    "No loss of any MP3 type represented in selected baseline"
+  ],
+  "proposal": "At each of exactly2000 iterations choose node type uniformly; remove uniform selected node of that type; choose replacement uniformly from outside-selected same-type frontier with >=1 current selected neighbor with probability0.9, otherwise uniformly from all outside-selected same-type nodes. If frontier empty use full outside set. Reject invalid swaps, accept strictly improving objective by >1e-12; no extra restarts or budget extension.",
+  "constraints_note": "192-node induced subgraph necessarily truncates external edges. Per-type quotas further bound available neighbor degrees. Absolute degree tails and raw triangle/path counts cannot be expected to match full graph; no degree rescaling in saved graphs.",
+  "original_protocol_sha256": "6ea1efada4cbddb8314815c5c6d6373bde76bd5d68bbdff60fe14255078ff9c3",
+  "source_graph_sha256": {
+    "IMDB": "10f1dbbbe55c6a069594b2dcb590d1b8295ca5436320ef4597cd30e6b7f73e42",
+    "PubMed": "dacff5a392e23fbcfb695076a14a6db5317f4a4382b69af2a7596a1a217163f8"
+  },
+  "frozen_at_utc": "2026-10-27T11:00:42.621828+00:00",
+  "code_sha256": "aedef3b8798178a45f07098d783f04cfa152bc01d7ea80cab8a2a9fd86e0e487"
+}

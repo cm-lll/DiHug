@@ -1,0 +1,687 @@
+diff --git a/data2/lyh/gnn_project/DiHug/research_branches/typed_refex_rolx_192_v1/package/features.py b/data2/lyh/gnn_project/DiHug/research_branches/typed_refex_rolx_192_v1/package/features.py
+new file mode 100644
+index 0000000..2ba4319
+--- /dev/null
++++ b/data2/lyh/gnn_project/DiHug/research_branches/typed_refex_rolx_192_v1/package/features.py
+@@ -0,0 +1,79 @@
++"""Fixed typed ReFeX-inspired features and frozen-basis RolX-style encoding.
++
++Only explicit complete Xt edges enter extraction. No query/labels/node IDs.
++Not an implementation of adaptive ReFeX pruning or RolX MDL rank selection.
++"""
++import hashlib
++import json
++import time
++import warnings
++import numpy as np
++from scipy.optimize import nnls
++from scipy.sparse import csr_matrix
++from sklearn.decomposition import NMF
++
++SPEC = dict(version='typed_refex_2_v1',depth=2,base='relation degree, closed-egonet internal and boundary edges',
++            normalization='log1p(base count)/log1p(schema bound); recursive mean and sum/(N-1)',
++            rank=8,basis_seed=2026102708,nmf_max_iter=500,nmf_tol=1e-5,
++            encoding='per-node NNLS, fixed unit-L2 basis rows; no coefficient normalization',nnls_max_iter=240)
++
++def digest(*arrays):
++    h=hashlib.sha256()
++    for a in arrays:
++        a=np.ascontiguousarray(a);h.update(str(a.dtype).encode());h.update(str(a.shape).encode());h.update(a.tobytes())
++    return h.hexdigest()
++
++def extract(types, edges, families, pairs):
++    types=np.asarray(types,dtype=np.int64);edges=np.asarray(edges,dtype=np.int64);families=np.asarray(families,dtype=np.int64)
++    n=len(types);r=len(pairs)
++    if edges.shape!=(2,len(families)) or n<2:raise ValueError('shape')
++    if ((edges<0)|(edges>=n)).any() or (edges[0]>=edges[1]).any():raise ValueError('canonical endpoints required')
++    if ((families<0)|(families>=r)).any() or len(np.unique(edges[0]*n+edges[1]))!=len(families):raise ValueError('families/duplicates')
++    if not np.array_equal(np.sort(types[edges],axis=0).T,np.asarray(pairs)[families]):raise ValueError('schema')
++    u,v=edges;adj=csr_matrix((np.ones(2*len(u)),(np.r_[u,v],np.r_[v,u])),shape=(n,n))
++    deg=np.zeros((n,r));np.add.at(deg,(u,families),1);np.add.at(deg,(v,families),1)
++    # Independent closed egonets; O(sum_i E + sum_i degree_i), bounded N*E work.
++    # No candidate-edge loop and no N*N*N tensor. Dense boolean membership is N only.
++    inside=np.zeros_like(deg);boundary=np.zeros_like(deg)
++    for i in range(n):
++        member=np.zeros(n,dtype=bool);member[i]=True;member[adj.indices[adj.indptr[i]:adj.indptr[i+1]]]=True
++        a,b=member[u],member[v]
++        inside[i]=np.bincount(families[a&b],minlength=r)
++        boundary[i]=np.bincount(families[a^b],minlength=r)
++    sizes=np.bincount(types,minlength=int(types.max())+1)
++    cap=np.array([sizes[a]*(sizes[a]-1)//2 if a==b else sizes[a]*sizes[b] for a,b in pairs])
++    bounds=np.r_[np.full(r,n-1),cap,cap]
++    base=np.divide(np.log1p(np.c_[deg,inside,boundary]),np.log1p(bounds),
++                   out=np.zeros((n,3*r)),where=bounds>0)
++    all_features=[base];prev=base;d=np.asarray(adj.sum(1))
++    for _ in range(SPEC['depth']):
++        sums=adj@prev;mean=np.divide(sums,d,out=np.zeros_like(sums),where=d>0)
++        prev=np.c_[mean,sums/(n-1)];all_features.append(prev)
++    value=np.concatenate(all_features,axis=1)
++    if not np.isfinite(value).all() or (value<0).any():raise FloatingPointError('ReFeX')
++    return value
++
++def fit_basis(features):
++    start=time.perf_counter()
++    with warnings.catch_warnings(record=True) as ws:
++        warnings.simplefilter('always')
++        model=NMF(n_components=SPEC['rank'],init='nndsvda',solver='cd',beta_loss='frobenius',
++                  tol=SPEC['nmf_tol'],max_iter=SPEC['nmf_max_iter'],random_state=SPEC['basis_seed'])
++        model.fit_transform(features)
++    basis=model.components_.copy();norm=np.linalg.norm(basis,axis=1)
++    if (norm==0).any():raise ValueError('zero basis row; no rank replacement')
++    basis/=norm[:,None]
++    return basis,dict(seconds=time.perf_counter()-start,iterations=int(model.n_iter_),
++                      warnings=[str(w.message) for w in ws],reconstruction_error=float(model.reconstruction_err_),
++                      rank=SPEC['rank'],sha256=digest(basis),source='only this dataset training reference features')
++
++def encode(features,basis):
++    basis=np.asarray(basis,dtype=np.float64)
++    if basis.shape!=(SPEC['rank'],features.shape[1]) or not np.isfinite(basis).all() or (basis<0).any():raise ValueError('basis')
++    # No fitted per-node role table; each new Xt is solved independently.
++    coeff=np.vstack([nnls(basis.T,row,maxiter=SPEC['nnls_max_iter'])[0] for row in features])
++    grad=(coeff@basis-features)@basis.T
++    kkt=max(float(np.maximum(-grad,0).max()),float(np.abs(coeff*grad).max()))
++    if not np.isfinite(coeff).all() or kkt>1e-7:raise FloatingPointError('NNLS KKT failure %g'%kkt)
++    return coeff,dict(kkt_max=kkt,reconstruction_l2=float(np.linalg.norm(coeff@basis-features)),
++                      coefficient_sum_range=[float(coeff.sum(1).min()),float(coeff.sum(1).max())])
+diff --git a/data2/lyh/gnn_project/DiHug/research_branches/typed_refex_rolx_192_v1/package/model_variants.py b/data2/lyh/gnn_project/DiHug/research_branches/typed_refex_rolx_192_v1/package/model_variants.py
+new file mode 100644
+index 0000000..090b869
+--- /dev/null
++++ b/data2/lyh/gnn_project/DiHug/research_branches/typed_refex_rolx_192_v1/package/model_variants.py
+@@ -0,0 +1,111 @@
++"""A: original CN; B: typed ReFeX, no CN; C: B plus frozen-basis coefficients."""
++import time
++import numpy as np
++import torch
++from torch import nn
++from hsgd.model import TypedSparseDenoiser
++from features import extract, encode, digest
++
++class DegreeBranch(nn.Module):
++    """Only E07 BASE's active degree branch; no anonymous-role parameters."""
++    def __init__(self,R,K,width):
++        super().__init__()
++        self.degree_encoder=nn.Sequential(nn.Linear(2*R+K+1,32),nn.SiLU(),nn.Linear(32,32),nn.SiLU())
++        self.degree_out=nn.Linear(32,width)
++        nn.init.zeros_(self.degree_out.weight);nn.init.zeros_(self.degree_out.bias)
++    def input(self,ctx,t):
++        sizes=np.bincount(ctx.types,minlength=ctx.model.n_types);cap=np.zeros((len(sizes),ctx.model.n_families))
++        for r,(a,b) in enumerate(ctx.pairs):cap[a,r]=sizes[b]-int(a==b);cap[b,r]=sizes[a]-int(a==b)
++        d=np.zeros((len(ctx.types),ctx.model.n_families))
++        np.add.at(d,(ctx.old[0],ctx.of),1);np.add.at(d,(ctx.old[1],ctx.of),1)
++        safe=np.maximum(cap[ctx.types],1)
++        normalized=np.c_[d/safe,np.log1p(d)/np.log1p(safe)].astype(np.float32)
++        return torch.as_tensor(np.c_[normalized,np.eye(ctx.model.n_types,dtype=np.float32)[ctx.types],
++                    np.full((len(ctx.types),1),t,dtype=np.float32)],device=ctx.device)
++    def forward(self,x):return self.degree_out(self.degree_encoder(x))
++
++class StructuralDenoiser(TypedSparseDenoiser):
++    architecture_version='typed_refex_rolx_192_v1'
++    def __init__(self,case,cfg,arm,basis=None):
++        if arm not in ('A','B','C'):raise ValueError('arm')
++        args=dict(cfg['model']);args['cn_hidden']=32 if arm=='A' else 0
++        super().__init__(case['n_types'],case['n_families'],family_pairs=case['space'].pairs,prior=case['prior'],**args)
++        self.branch=DegreeBranch(case['n_families'],case['n_types'],cfg['model']['width'])
++        self.arm=arm;self.feature_calls=0;self.feature_seconds=0.;self.encoding_seconds=0.;self.transfer_seconds=0.
++        if arm!='A':
++            # CN is last in the original feature layout: remove every CN input
++            # and its learned readout columns, not merely mask a CN score.
++            start=self.joint_slices['CN'].start
++            first=self.joint_head[0];new=nn.Linear(start,first.out_features)
++            with torch.no_grad():new.weight.copy_(first.weight[:,:start]);new.bias.copy_(first.bias)
++            self.joint_head[0]=new;self.cn_feature_width=0;self.joint_slices['CN']=slice(start,start)
++            self.refex_projection=nn.Linear(21*case['n_families'],cfg['model']['width'],bias=False)
++            nn.init.zeros_(self.refex_projection.weight)
++        if arm=='C':
++            if basis is None:raise ValueError('frozen basis required')
++            self.register_buffer('role_basis',torch.tensor(basis,dtype=torch.float64))
++            self.role_projection=nn.Linear(len(basis),cfg['model']['width'],bias=False)
++            nn.init.zeros_(self.role_projection.weight)
++            self._basis_cpu=np.array(basis,copy=True);self._basis_cpu.flags.writeable=False
++            self._basis_hash=digest(self._basis_cpu)
++            self._basis_tensor_identity=(id(self.role_basis),self.role_basis._version)
++
++    def joint_predict(self,ctx,graph,time,mask_cn=False,return_features=False):
++        if not hasattr(ctx,'degree_input'):ctx.degree_input=self.branch.input(ctx,time)
++        ctx.node_residual=self.branch(ctx.degree_input)
++        if self.arm!='A':
++            key=(ctx.state_version,float(time),self.arm)
++            if hasattr(ctx,'structural_key') and ctx.structural_key!=key:raise ValueError('stale structural cache')
++            if self.arm=='C':
++                # Check both state_dict replacement/in-place writes and private CPU source.
++                identity=(id(self.role_basis),self.role_basis._version)
++                if identity!=self._basis_tensor_identity:raise ValueError('basis replaced; explicit checkpoint reload required')
++                if hasattr(ctx,'basis_identity') and ctx.basis_identity!=identity:raise ValueError('basis changed')
++                if digest(self._basis_cpu)!=self._basis_hash:raise ValueError('basis CPU changed')
++                ctx.basis_identity=identity
++            if not hasattr(ctx,'structural_features'):
++                begin=__import__('time').perf_counter();f=extract(ctx.types,ctx.old,ctx.of,ctx.pairs)
++                self.feature_seconds+=__import__('time').perf_counter()-begin;self.feature_calls+=1
++                begin=__import__('time').perf_counter()
++                g=None
++                if self.arm=='C':g,ctx.encoding_receipt=encode(f,self._basis_cpu)
++                self.encoding_seconds+=__import__('time').perf_counter()-begin
++                begin=__import__('time').perf_counter()
++                ctx.structural_features=torch.tensor(f,dtype=torch.float32,device=ctx.device)
++                ctx.structural_roles=None if g is None else torch.tensor(g,dtype=torch.float32,device=ctx.device)
++                if ctx.device.type=='cuda':torch.cuda.synchronize(ctx.device)
++                self.transfer_seconds+=__import__('time').perf_counter()-begin
++                ctx.structural_key=key
++            # Cache only fixed input arrays, not learned outputs across optimizer steps.
++            ctx.node_residual=ctx.node_residual+self.refex_projection(ctx.structural_features)
++            if self.arm=='C':ctx.node_residual=ctx.node_residual+self.role_projection(ctx.structural_roles)
++        return super().joint_predict(ctx,graph,time,mask_cn,return_features)
++
++    def load_state_dict(self,state_dict,strict=True):
++        result=super().load_state_dict(state_dict,strict=strict)
++        if self.arm=='C':
++            self._basis_cpu=self.role_basis.detach().cpu().numpy().copy();self._basis_cpu.flags.writeable=False
++            self._basis_hash=digest(self._basis_cpu)
++            self._basis_tensor_identity=(id(self.role_basis),self.role_basis._version)
++        return result
++
++    def _apply(self,fn):
++        result=super()._apply(fn)
++        if hasattr(self,'role_basis'):
++            self._basis_tensor_identity=(id(self.role_basis),self.role_basis._version)
++        return result
++
++def copy_common(source,target):
++    """Actually copy tensors; differing CN readout columns explicitly mapped."""
++    src=source.state_dict();dst=target.state_dict();copied=[]
++    for name,value in dst.items():
++        if name in src and src[name].shape==value.shape:
++            value.copy_(src[name]);copied.append(name)
++        elif name=='joint_head.0.weight':
++            value.copy_(src[name][:,:value.shape[1]]);copied.append(name+'[:,:shared]')
++    target.load_state_dict(dst)
++    for name in copied:
++        if name.endswith('[:,:shared]'):
++            assert torch.equal(target.joint_head[0].weight,src['joint_head.0.weight'][:,:target.joint_head[0].in_features])
++        else:assert torch.equal(target.state_dict()[name],src[name])
++    return copied
+diff --git a/data2/lyh/gnn_project/DiHug/research_branches/typed_refex_rolx_192_v1/package/prepare.py b/data2/lyh/gnn_project/DiHug/research_branches/typed_refex_rolx_192_v1/package/prepare.py
+new file mode 100644
+index 0000000..2f4d3d5
+--- /dev/null
++++ b/data2/lyh/gnn_project/DiHug/research_branches/typed_refex_rolx_192_v1/package/prepare.py
+@@ -0,0 +1,72 @@
++"""Static intake and single frozen unsupervised basis fit; no diffusion fitting."""
++import hashlib,itertools,json,pathlib,time
++import numpy as np
++import networkx as nx
++from hsgd.bw_preflight.common import make_case,plan_for,query_inventory
++from features import SPEC,extract,fit_basis,encode
++
++ROOT=pathlib.Path(__file__).resolve().parent
++def sha(p):return hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest()
++def save(p,obj):pathlib.Path(p).write_text(json.dumps(obj,indent=2,allow_nan=False))
++
++def load_case(name):
++    cfg=json.loads((ROOT/'config.json').read_text());entry=cfg['datasets'][name]
++    p=ROOT/entry['file']
++    if sha(p)!=entry['sha256']:raise ValueError('dataset binding mismatch')
++    with np.load(p,allow_pickle=False) as z:
++        c=make_case(z['types'],z['edges'].T,tuple(map(tuple,z['schema'])))
++        if not np.array_equal(c['space'].encode(z['edges'].T)[0],z['relations'].astype(np.int64)-1):raise ValueError('relation convention')
++    return c,cfg
++
++def main():
++    received=ROOT.parent/'received/subgraph_refined_20261027';out=ROOT/'assets';out.mkdir(exist_ok=False)
++    manifest=json.loads((received.parent/'PACKAGE_MANIFEST.json').read_text());verified=0
++    for row in manifest['files']:
++        p=received/row['path']
++        if not p.resolve().is_relative_to(received.resolve()):raise ValueError('manifest traversal')
++        assert p.stat().st_size==row['bytes'] and sha(p)==row['sha256'],str(p)
++        verified+=1
++    original=json.loads((ROOT/'source_config.json').read_text())
++    cfg={k:original[k] for k in ['model','optimizer','precision','T','rounds','schedule_offset','tf32']}
++    cfg.update(version='typed_refex_rolx_192_v1',arms=['A','B','C'],formal_authorized=False,
++               feature_spec=SPEC,inputs_per_update=1,engineering_only=True,max_updates_per_dataset_arm=5,
++               seed=2026102709,noise_times=[1,500,1000],threads=1,
++               tolerances={'float64_features':1e-10,'fp32_atol':2e-6,'fp32_rtol':1e-5},
++               datasets={},query_contract='original family stratified 20 blocks, active reference-positive families; R/S sum CE',
++               source_note='model/optimizer from E07 historical_config; single input engineering update, not old normal2 timing')
++    result={'manifest_files_verified':verified,'datasets':{}}
++    for name,expected in [('IMDB',(323,[48,56,78,10],3,188)),('PubMed',(926,[40,74,66,12],1,192))]:
++        path=received/'samples'/name/'graph.npz';meta=json.loads((path.parent/'metadata.json').read_text())
++        assert sha(path)==meta['graph_sha256']
++        with np.load(path,allow_pickle=False) as z:arr={k:z[k] for k in z.files}
++        types,edges,rel,ids=arr['types'],arr['edges'],arr['relations'],arr['original_ids']
++        refpath=received/'inputs/reference'/(name+'.npz');assert sha(refpath)==meta['original_graph_sha256']
++        with np.load(refpath,allow_pickle=False) as z:ref={k:z[k] for k in z.files}
++        assert types.shape==(192,) and len(np.unique(ids))==192 and np.array_equal(ids,np.load(path.parent/'original_node_ids.npy'))
++        assert np.array_equal(ref['types'][ids],types) and np.array_equal(ref['schema'],arr['schema'])
++        assert edges.shape==(expected[0],2) and np.array_equal(np.bincount(types,minlength=4),expected[1])
++        assert np.array_equal(edges,edges[np.lexsort((edges[:,1],edges[:,0]))])
++        reverse=np.full(len(ref['types']),-1,dtype=np.int64);reverse[ids]=np.arange(192)
++        selected=(reverse[ref['edges']]>=0).all(1);induced=reverse[ref['edges'][selected]]
++        assert np.array_equal(induced,edges) and np.array_equal(ref['relations'][selected],rel),'not exact induced graph'
++        c=make_case(types,edges.T,tuple(map(tuple,arr['schema'])))
++        assert np.array_equal(c['space'].encode(edges.T)[0]+1,rel)
++        g=nx.Graph();g.add_nodes_from(range(192));g.add_edges_from(edges)
++        assert nx.number_of_selfloops(g)==0 and g.number_of_edges()==len(edges) and len(list(nx.isolates(g)))==0
++        comps=sorted(map(len,nx.connected_components(g)),reverse=True);assert (len(comps),comps[0])==expected[2:]
++        # Store only network-safe data. Original IDs stay in read-only intake.
++        final=out/(name+'.npz');np.savez_compressed(final,types=types,edges=edges,relations=rel,schema=arr['schema'])
++        cfg['datasets'][name]={'file':str(final.relative_to(ROOT)),'sha256':sha(final),'received_sha256':sha(path),
++                               'reference_sha256':sha(refpath),'type_names':json.loads((received/'source_preview/inputs/recompute/source_release/configs'/(name+'.json')).read_text())['data']['type_names']}
++        start=time.perf_counter();f=extract(types,edges.T,rel.astype(np.int64)-1,arr['schema']);feature_sec=time.perf_counter()-start
++        basis,receipt=fit_basis(f);coef,kkt=encode(f,basis)
++        bp=out/(name+'_basis.npz');np.savez_compressed(bp,basis=basis)
++        cfg['datasets'][name].update(basis_file=str(bp.relative_to(ROOT)),basis_sha256=sha(bp))
++        result['datasets'][name]=dict(nodes=192,edges=len(edges),type_counts=expected[1],components=comps,
++               source_sha256=sha(path),exact_induced=True,original_ids_network_input=False,
++               query=query_inventory(c,plan_for(c,2026102709,20)),feature_shape=list(f.shape),feature_seconds=feature_sec,
++               basis=receipt,encoding=kkt,wedges=int(sum(d*(d-1)//2 for _,d in g.degree())))
++    save(ROOT/'config.json',cfg);save(ROOT/'data_audit.json',result)
++    print(json.dumps(result,indent=2))
++
++if __name__=='__main__':main()
+diff --git a/data2/lyh/gnn_project/DiHug/research_branches/typed_refex_rolx_192_v1/package/benchmark.py b/data2/lyh/gnn_project/DiHug/research_branches/typed_refex_rolx_192_v1/package/benchmark.py
+new file mode 100644
+index 0000000..2450d2b
+--- /dev/null
++++ b/data2/lyh/gnn_project/DiHug/research_branches/typed_refex_rolx_192_v1/package/benchmark.py
+@@ -0,0 +1,166 @@
++"""Engineering only. <=5 executed optimizer steps per dataset/arm. No graph sampling."""
++import argparse,copy,gc,hashlib,json,os,pathlib,random,resource,signal,sys,time,traceback
++START=time.time()
++import numpy as np
++import torch
++from prepare import ROOT,load_case,sha,save
++from model_variants import StructuralDenoiser,copy_common
++from hsgd.bw_preflight.common import train_input,update,cpu_tree,dimensions,environment,schedule,plan_for
++from hsgd.computational import FrozenTypedContext
++from hsgd.kernel import MarginalKernel
++
++def rng_get(rng,device):
++    return dict(numpy=copy.deepcopy(rng.bit_generator.state),global_numpy=np.random.get_state(),python=random.getstate(),
++                torch=torch.get_rng_state(),device=torch.cuda.get_rng_state(0) if device=='cuda' else None)
++def rng_set(s,rng,device):
++    rng.bit_generator.state=copy.deepcopy(s['numpy']);np.random.set_state(s['global_numpy']);random.setstate(s['python']);torch.set_rng_state(s['torch'])
++    if device=='cuda':torch.cuda.set_rng_state(s['device'],0)
++def sync(device):
++    if device=='cuda':torch.cuda.synchronize(0)
++def compare(a,b,atol=2e-6,rtol=1e-5):
++    if a is None or b is None:return dict(passes=a is b,max_abs=0.,violations=int(a is not b))
++    a=a.detach().cpu().double();b=b.detach().cpu().double();d=(a-b).abs();bad=d>atol+rtol*b.abs()
++    return dict(passes=not bool(bad.any()),max_abs=float(d.max()) if d.numel() else 0.,violations=int(bad.sum()))
++def equal_tree(a,b):
++    if torch.is_tensor(a):return torch.equal(a.cpu(),b.cpu())
++    if isinstance(a,np.ndarray):return np.array_equal(a,b)
++    if isinstance(a,dict):return a.keys()==b.keys() and all(equal_tree(a[k],b[k]) for k in a)
++    if isinstance(a,(list,tuple)):return len(a)==len(b) and all(equal_tree(x,y) for x,y in zip(a,b))
++    return a==b
++
++def main():
++    ap=argparse.ArgumentParser();ap.add_argument('--output',required=True);ap.add_argument('--ledger',required=True);ap.add_argument('--device',choices=['cpu','cuda'],required=True)
++    ap.add_argument('--cases',nargs='+',choices=[d+'_'+g for d in ['IMDB','PubMed'] for g in 'ABC'],default=[d+'_'+g for d in ['IMDB','PubMed'] for g in 'ABC']);a=ap.parse_args()
++    ledger=json.loads(pathlib.Path(a.ledger).read_text());cutoff=min(START+600,ledger['activation_epoch']+ledger['budget_seconds']-180)
++    out=pathlib.Path(a.output).resolve()
++    if out.exists() or out.is_relative_to(ROOT.resolve()) or ROOT.resolve().is_relative_to(out):raise ValueError('new separate output required')
++    if cutoff<=time.time():raise TimeoutError('no remaining budget')
++    out.mkdir(parents=True);status={'status':'running','purpose':'temporary engineering; never scientific initialization','cases':{},'started_epoch':START}
++    account=pathlib.Path(a.ledger).parent/'executed_update_counts.json'
++    if not account.exists():raise ValueError('explicit cumulative engineering update account required')
++    def check():
++        if time.time()>=cutoff:raise TimeoutError('cumulative/subtask deadline')
++        if (out/'STOP').exists():raise InterruptedError('STOP')
++    def stop(signum,frame):raise InterruptedError('signal %d'%signum)
++    for s in [signal.SIGTERM,signal.SIGHUP,signal.SIGINT]:signal.signal(s,stop)
++    signal.signal(signal.SIGALRM,lambda s,f:(_ for _ in ()).throw(TimeoutError('hard subtask alarm')));signal.alarm(max(1,int(cutoff-time.time())))
++    try:
++        check();torch.set_num_threads(1);torch.set_num_interop_threads(1);torch.backends.cuda.matmul.allow_tf32=False;torch.backends.cudnn.allow_tf32=False
++        torch.use_deterministic_algorithms(True,warn_only=False)
++        if a.device=='cuda' and (not torch.cuda.is_available() or torch.cuda.device_count()!=1):raise RuntimeError('exactly one selected visible GPU required')
++        env=environment(a.device);save(out/'environment.json',env)
++        source={str(p.relative_to(ROOT)):sha(p) for p in ROOT.rglob('*') if p.is_file() and p.suffix in ('.py','.json','.npz','.txt') and '__pycache__' not in str(p)}
++        save(out/'freeze.json',dict(files=source,config=json.loads((ROOT/'config.json').read_text()),ledger=ledger,
++            gate='FP32 atol2e-6 rtol1e-5; cross-backend gate is reported separately and never certifies formal training',
++            update_plan='1,2,3 continuous; reload after1 then2,3 =5 actual calls,3 distinct disposable steps'))
++        for dataset in ['IMDB','PubMed']:
++            c,cfg=load_case(dataset);entry=cfg['datasets'][dataset];bp=ROOT/entry['basis_file']
++            if sha(bp)!=entry['basis_sha256']:raise ValueError('basis hash mismatch')
++            basis=np.load(bp,allow_pickle=False)['basis'];check()
++            torch.manual_seed(cfg['seed']);anchor=StructuralDenoiser(c,cfg,'A');anchor_state=cpu_tree(anchor.state_dict())
++            shared_b=None
++            for arm in ['A','B','C']:
++                if dataset+'_'+arm not in a.cases:continue
++                check();label=dataset+'_'+arm;folder=out/label;folder.mkdir();row={'status':'running','actual_updates':0};status['cases'][label]=row;save(out/'summary.json',status)
++                torch.manual_seed(cfg['seed']);m=StructuralDenoiser(c,cfg,arm,basis)
++                copied=copy_common(anchor,m)
++                if arm=='B':shared_b=m.refex_projection.weight.detach().clone()
++                if arm=='C':
++                    if shared_b is None:shared_b=StructuralDenoiser(c,cfg,'B').refex_projection.weight.detach().clone()
++                    with torch.no_grad():m.refex_projection.weight.copy_(shared_b)
++                    assert torch.equal(m.refex_projection.weight,shared_b)
++                save(folder/'dimensions.json',dimensions(m));row['copied_common_tensor_names']=copied
++                initial=cpu_tree(m.state_dict());torch.save(dict(model=initial,purpose='engineering only'),folder/'initial.pt')
++                # Same real training input through original noising and query entry.
++                inp=train_input(c,cfg['T'],cfg['rounds'],cfg['seed'],0,np.random.default_rng(2026102710),force_t=500)
++                d_cpu={};opt_args={k:v for k,v in cfg['optimizer'].items() if k!='type'}
++                opt=torch.optim.AdamW(m.parameters(),**opt_args)
++                update(m,opt,c,inp,cfg['T'],'cpu',do_step=False,diagnostics=d_cpu)
++                if a.device=='cuda':
++                    m=m.to('cuda');opt=torch.optim.AdamW(m.parameters(),**opt_args);d_dev={}
++                    update(m,opt,c,inp,cfg['T'],'cuda',do_step=False,diagnostics=d_dev)
++                    checks={k:compare(d_cpu[k],d_dev[k]) for k in ['logits','p0','loss']}
++                    grads={k:compare(v,d_dev['gradients'][k]) for k,v in d_cpu['gradients'].items()}
++                    checks['gradients']={'passes':all(v['passes'] for v in grads.values()),'max_abs':max(v['max_abs'] for v in grads.values()),
++                                         'violations':sum(v['violations'] for v in grads.values()),'per_parameter':grads}
++                    save(folder/'cpu_gpu_gate.json',checks);row['cpu_gpu_gate_passed']=all(v['passes'] for v in checks.values())
++                    del d_dev
++                else:row['cpu_gpu_gate_passed']=None
++                del d_cpu;gc.collect();m.load_state_dict(initial);opt=torch.optim.AdamW(m.parameters(),**opt_args)
++                rng=np.random.default_rng(2026102711);random.seed(2026102711);np.random.seed(2026102711);torch.manual_seed(2026102711)
++                if a.device=='cuda':torch.cuda.manual_seed(2026102711);torch.cuda.reset_peak_memory_stats(0)
++                binding=dict(dataset=entry,arm=arm,source=source,config_sha256=sha(ROOT/'config.json'),environment=env)
++                history=[];snap=None;continuous=None;continuation=[]
++                for position in [1,2,3,2,3]:
++                    check()
++                    if len(history)==3:
++                        start=time.perf_counter();ck=torch.load(folder/'after1.pt',map_location='cpu',weights_only=False)
++                        if sha(folder/'after1.pt')!=row['checkpoint_sha256'] or ck['binding']!=binding:raise ValueError('checkpoint binding')
++                        m.load_state_dict(ck['model']);opt.load_state_dict(copy.deepcopy(ck['optimizer']));rng_set(ck['rng'],rng,a.device)
++                        assert equal_tree(cpu_tree(m.state_dict()),ck['model']) and equal_tree(cpu_tree(opt.state_dict()),ck['optimizer'])
++                        assert equal_tree(rng_get(rng,a.device),ck['rng']) and ck['updates']==1
++                        row['load_exact']=True;row['load_seconds']=time.perf_counter()-start
++                    inp=train_input(c,cfg['T'],cfg['rounds'],cfg['seed'],position,rng,force_t={1:1,2:500,3:1000}[position])
++                    inp_hash=hashlib.sha256(b''.join(np.ascontiguousarray(inp[k]).tobytes() for k in ['ids','f','query','labels','edges','edge_families'])).hexdigest()
++                    if len(history)>=3:assert inp_hash==history[position-1]['input_sha256']
++                    counts=json.loads(account.read_text());used=counts.get(label,0)
++                    if used>=5:raise RuntimeError('cumulative five-update cap reached for '+label)
++                    counts[label]=used+1;save(account,counts)
++                    sync(a.device);start=time.perf_counter();record=update(m,opt,c,inp,cfg['T'],a.device);sync(a.device)
++                    record.update(input_sha256=inp_hash,position=position,restored=len(history)>=3,wall_seconds=time.perf_counter()-start)
++                    record['projection_gradients']={n:float(p.grad.abs().max()) for n,p in m.named_parameters() if 'projection' in n and p.grad is not None}
++                    history.append(record);row['actual_updates']+=1
++                    with (folder/'updates.jsonl').open('a') as f:f.write(json.dumps(record,allow_nan=False)+'\n')
++                    if len(history)==1:
++                        start=time.perf_counter();snap=dict(model=cpu_tree(m.state_dict()),optimizer=cpu_tree(opt.state_dict()),rng=rng_get(rng,a.device),updates=1,binding=binding,purpose='engineering only')
++                        temp=folder/'after1.tmp';torch.save(snap,temp);temp.replace(folder/'after1.pt');row['save_seconds']=time.perf_counter()-start;row['checkpoint_sha256']=sha(folder/'after1.pt')
++                    if len(history)==3:continuous=dict(model=cpu_tree(m.state_dict()),optimizer=cpu_tree(opt.state_dict()),rng=rng_get(rng,a.device))
++                recovery={k:compare(v,m.state_dict()[k]) for k,v in continuous['model'].items()}
++                row['restore_continuation']=dict(passed=all(v['passes'] for v in recovery.values()),max_abs=max(v['max_abs'] for v in recovery.values()),
++                    optimizer_exact=equal_tree(continuous['optimizer'],cpu_tree(opt.state_dict())),rng_exact=equal_tree(continuous['rng'],rng_get(rng,a.device)))
++                save(folder/'restore_comparison.json',recovery)
++                if not row['restore_continuation']['passed'] or not row['restore_continuation']['rng_exact']:raise AssertionError('continuation failed; no tolerance adjustment')
++                # Read all20 blocks twice, with original posterior, NEVER sample/commit.
++                sweep_inp=train_input(c,cfg['T'],20,cfg['seed'],50,np.random.default_rng(2026102712),force_t=500)
++                plan=plan_for(c,[2026102712,500,61],20);kernel=MarginalKernel(c['prior'],schedule(cfg['T']))
++                state=np.zeros(c['space'].total,dtype=np.uint8);f,loc=c['space'].encode(sweep_inp['edges']);state[c['space'].offsets[f]+loc]=1
++                m.eval();sweeps=[];first=None
++                for repeat in range(2):
++                    check();sync(a.device);start=time.perf_counter();fc=m.feature_calls;feature=m.feature_seconds;encoding=m.encoding_seconds;transfer=m.transfer_seconds
++                    token=('engineering_full_query',repeat);ctx=FrozenTypedContext(m,c['space'].types,sweep_inp['edges'],sweep_inp['edge_families'],token)
++                    p0=np.full(len(state),np.nan);q=p0.copy();seen=np.zeros(len(state),np.uint8);network=0.;posterior=0.
++                    try:
++                        with torch.no_grad():
++                            for r in range(20):
++                                check();ids,ff,qe=plan.block(r);sync(a.device);beg=time.perf_counter()
++                                pp=ctx.predict(qe,ff,.5,token).detach().cpu().numpy().astype(np.float64);sync(a.device);network+=time.perf_counter()-beg
++                                beg=time.perf_counter();q[ids]=kernel.reverse(pp,state[ids],ff,499,500);posterior+=time.perf_counter()-beg;p0[ids]=pp;seen[ids]+=1
++                    finally:ctx.close()
++                    expected=np.repeat(c['active'].astype(np.uint8),c['space'].counts);assert np.array_equal(seen,expected)
++                    if first is not None:np.testing.assert_allclose(p0,first,atol=2e-6,rtol=1e-5,equal_nan=True)
++                    first=p0.copy();sync(a.device)
++                    sweeps.append(dict(repeat=repeat,wall_seconds=time.perf_counter()-start,all20_blocks=True,covered=int(seen.sum()),
++                         feature_calls=m.feature_calls-fc,feature_seconds=m.feature_seconds-feature,encoding_seconds=m.encoding_seconds-encoding,
++                         feature_transfer_seconds=m.transfer_seconds-transfer,query_network_including_feature_seconds=network,posterior_seconds=posterior,
++                         cache='within Xt only; new context, no predictions reused on repeat',generated_graph=False))
++                np.savez_compressed(folder/'query_probe.npz',state=state,p0=p0,q=q,coverage=seen)
++                row.update(status='completed',sweeps=sweeps,parameter_count=sum(p.numel() for p in m.parameters()),
++                    stable_update_median_seconds=float(np.median([v['synchronized_update_seconds'] for v in history[1:]])),
++                    peak_rss_mib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024,
++                    peak_allocated_mib=torch.cuda.max_memory_allocated(0)/2**20 if a.device=='cuda' else None,
++                    peak_reserved_mib=torch.cuda.max_memory_reserved(0)/2**20 if a.device=='cuda' else None)
++                save(out/'summary.json',status);print(label,json.dumps(row['restore_continuation']),row['stable_update_median_seconds'],flush=True)
++                del m,opt,snap,continuous,initial;gc.collect()
++                if a.device=='cuda':torch.cuda.empty_cache()
++            del anchor,anchor_state;gc.collect()
++        for name,h in source.items():
++            check()
++            if sha(ROOT/name)!=h:raise RuntimeError('source drift')
++        status['status']='completed_engineering_only';status['formal_training_authorized']=False
++    except BaseException as exc:
++        status.update(status='incomplete' if isinstance(exc,(TimeoutError,InterruptedError)) else 'failed',error=repr(exc),traceback=traceback.format_exc());raise
++    finally:
++        signal.alarm(0);status['ended_epoch']=time.time();status['total_seconds']=time.time()-START
++        save(out/'summary.json',status)
++
++if __name__=='__main__':main()
+diff --git a/data2/lyh/gnn_project/DiHug/research_branches/typed_refex_rolx_192_v1/package/forward_probe.py b/data2/lyh/gnn_project/DiHug/research_branches/typed_refex_rolx_192_v1/package/forward_probe.py
+new file mode 100644
+index 0000000..79bc8d8
+--- /dev/null
++++ b/data2/lyh/gnn_project/DiHug/research_branches/typed_refex_rolx_192_v1/package/forward_probe.py
+@@ -0,0 +1,84 @@
++"""Single-GPU engineering diagnostics, zero optimizer steps, zero graph draws."""
++import argparse,gc,json,os,pathlib,resource,signal,subprocess,time,traceback
++START=time.time()
++import numpy as np
++import torch
++from prepare import ROOT,load_case,sha,save
++from benchmark import compare
++from model_variants import StructuralDenoiser,copy_common
++from hsgd.bw_preflight.common import train_input,update,plan_for,schedule,environment
++from hsgd.computational import FrozenTypedContext
++from hsgd.kernel import MarginalKernel
++
++def main():
++    p=argparse.ArgumentParser();p.add_argument('--output',required=True);p.add_argument('--ledger',required=True);args=p.parse_args()
++    ledger=json.loads(pathlib.Path(args.ledger).read_text());cutoff=min(START+300,ledger['activation_epoch']+2700-180)
++    out=pathlib.Path(args.output).resolve()
++    if out.exists() or out.is_relative_to(ROOT.resolve()) or ROOT.resolve().is_relative_to(out):raise ValueError('new separate output required')
++    out.mkdir(parents=True);summary={'status':'running','optimizer_steps':0,'generated_graphs':0,'cases':{}}
++    def check():
++        if time.time()>cutoff:raise TimeoutError('forward budget')
++        if (out/'STOP').exists():raise InterruptedError('STOP')
++    def stop(s,f):raise InterruptedError(str(s))
++    for s in [signal.SIGTERM,signal.SIGINT,signal.SIGHUP]:signal.signal(s,stop)
++    signal.signal(signal.SIGALRM,lambda s,f:(_ for _ in ()).throw(TimeoutError('alarm')));signal.alarm(max(1,int(cutoff-time.time())))
++    try:
++        torch.set_num_threads(1);torch.set_num_interop_threads(1);torch.backends.cuda.matmul.allow_tf32=False;torch.backends.cudnn.allow_tf32=False
++        torch.use_deterministic_algorithms(True,warn_only=False)
++        if not torch.cuda.is_available() or torch.cuda.device_count()!=1:raise RuntimeError('one selected GPU required')
++        summary['environment']=environment('cuda');save(out/'freeze.json',{str(x.relative_to(ROOT)):sha(x) for x in ROOT.rglob('*') if x.is_file() and '__pycache__' not in str(x)})
++        for dataset in ['IMDB','PubMed']:
++            c,cfg=load_case(dataset);entry=cfg['datasets'][dataset]
++            if sha(ROOT/entry['basis_file'])!=entry['basis_sha256']:raise ValueError('basis')
++            basis=np.load(ROOT/entry['basis_file'],allow_pickle=False)['basis'];torch.manual_seed(cfg['seed']);anchor=StructuralDenoiser(c,cfg,'A')
++            inp=train_input(c,1000,20,cfg['seed'],50,np.random.default_rng(2026102712),force_t=500)
++            plan=plan_for(c,[2026102712,500,61],20);state=np.zeros(c['space'].total,dtype=np.uint8)
++            f,loc=c['space'].encode(inp['edges']);state[c['space'].offsets[f]+loc]=1;kernel=MarginalKernel(c['prior'],schedule(1000))
++            for arm in 'ABC':
++                check();name=dataset+'_'+arm;folder=out/name;folder.mkdir();row={'status':'running'};summary['cases'][name]=row
++                torch.manual_seed(cfg['seed']);model=StructuralDenoiser(c,cfg,arm,basis);copy_common(anchor,model)
++                if name!='IMDB_A':
++                    # Evidence only; failure is retained, no optimizer updates or permission escalation follows.
++                    kw={k:v for k,v in cfg['optimizer'].items() if k!='type'};opt=torch.optim.AdamW(model.parameters(),**kw);cpu={}
++                    update(model,opt,c,inp,1000,'cpu',do_step=False,diagnostics=cpu)
++                    model.to('cuda');opt=torch.optim.AdamW(model.parameters(),**kw);gpu={}
++                    update(model,opt,c,inp,1000,'cuda',do_step=False,diagnostics=gpu)
++                    gate={k:compare(cpu[k],gpu[k]) for k in ['logits','p0','loss']}
++                    gradients={k:compare(v,gpu['gradients'][k]) for k,v in cpu['gradients'].items()}
++                    gate['gradient']={'passes':all(v['passes'] for v in gradients.values()),'max_abs':max(v['max_abs'] for v in gradients.values()),
++                                      'violations':sum(v['violations'] for v in gradients.values())}
++                    row['gate']=gate;save(folder/'gradients_gate.json',gradients);del opt,cpu,gpu
++                else:
++                    model.to('cuda');row['gate']='previous actual IMDB_A gate retained; not repeated'
++                model.zero_grad(set_to_none=True);gc.collect();torch.cuda.empty_cache();torch.cuda.reset_peak_memory_stats(0);model.eval()
++                rows=[];first=None
++                for repeat in range(2):
++                    check();torch.cuda.synchronize();start=time.perf_counter();feature=model.feature_seconds;encode=model.encoding_seconds;transfer=model.transfer_seconds;calls=model.feature_calls
++                    token=('read_only',repeat);ctx=FrozenTypedContext(model,c['space'].types,inp['edges'],inp['edge_families'],token)
++                    vals=np.full(len(state),np.nan);q=vals.copy();seen=np.zeros(len(state),np.uint8);network=0.;posterior=0.
++                    try:
++                        with torch.no_grad():
++                            for block in range(20):
++                                check();ids,ff,qe=plan.block(block);tick=time.perf_counter()
++                                pp=ctx.predict(qe,ff,.5,token).cpu().numpy().astype(np.float64);torch.cuda.synchronize();network+=time.perf_counter()-tick
++                                tick=time.perf_counter();q[ids]=kernel.reverse(pp,state[ids],ff,499,500);posterior+=time.perf_counter()-tick;vals[ids]=pp;seen[ids]+=1
++                    finally:ctx.close()
++                    assert np.array_equal(seen,np.repeat(c['active'].astype(np.uint8),c['space'].counts))
++                    if first is not None:np.testing.assert_allclose(vals,first,atol=2e-6,rtol=1e-5,equal_nan=True)
++                    first=vals.copy();torch.cuda.synchronize()
++                    rows.append(dict(repeat=repeat,wall_seconds=time.perf_counter()-start,covered=int(seen.sum()),blocks=20,
++                         feature_seconds=model.feature_seconds-feature,encoding_seconds=model.encoding_seconds-encode,
++                         transfer_seconds=model.transfer_seconds-transfer,feature_calls=model.feature_calls-calls,
++                         query_network_including_features_seconds=network,posterior_seconds=posterior))
++                np.savez_compressed(folder/'full_query.npz',state=state,p0=vals,q=q,coverage=seen)
++                row.update(status='complete_forward_only',timings=rows,peak_allocated_mib=torch.cuda.max_memory_allocated()/2**20,
++                    peak_reserved_mib=torch.cuda.max_memory_reserved()/2**20,peak_rss_mib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024,
++                    device_total_occupancy_snapshot=subprocess.check_output(['nvidia-smi','--id='+os.environ['CUDA_VISIBLE_DEVICES'],'--query-gpu=memory.used','--format=csv,noheader,nounits'],text=True).strip())
++                save(out/'summary.json',summary);print(name,rows[-1]['wall_seconds'],flush=True)
++                del model;gc.collect();torch.cuda.empty_cache()
++        summary['status']='completed_forward_evidence_only'
++    except BaseException as exc:
++        summary.update(status='incomplete' if isinstance(exc,(TimeoutError,InterruptedError)) else 'failed',error=repr(exc),traceback=traceback.format_exc());raise
++    finally:
++        signal.alarm(0);summary['seconds']=time.time()-START;save(out/'summary.json',summary)
++if __name__=='__main__':main()
+diff --git a/data2/lyh/gnn_project/DiHug/research_branches/typed_refex_rolx_192_v1/package/test_engineering.py b/data2/lyh/gnn_project/DiHug/research_branches/typed_refex_rolx_192_v1/package/test_engineering.py
+new file mode 100644
+index 0000000..05ca795
+--- /dev/null
++++ b/data2/lyh/gnn_project/DiHug/research_branches/typed_refex_rolx_192_v1/package/test_engineering.py
+@@ -0,0 +1,139 @@
++import copy,json,unittest,sys
++import numpy as np
++import torch
++from features import extract,encode,fit_basis,SPEC
++from model_variants import StructuralDenoiser,copy_common
++from prepare import load_case,ROOT
++from hsgd.bw_preflight.common import make_case,plan_for
++from hsgd.computational import FrozenTypedContext
++from hsgd.model import TypedSparseDenoiser
++from hsgd.losses import supported_binary_ce
++
++torch.set_num_threads(1)
++
++def toy():
++    return make_case(np.array([0,0,0,1,1,1]),np.array([[0,0,1,1,2,3],[1,3,2,4,5,4]]),((0,0),(0,1),(1,1)))
++
++def config():
++    # tiny engineering tests only; real probes use unmodified 8-layer config.
++    return {'model':dict(layers=2,width=16,edge_width=8,global_width=8,heads=2,ff_node=16,ff_edge=8,ff_global=8,dropout=.1,cn_hidden=32,joint_width=16)}
++
++def model(arm):
++    c=toy();f=extract(c['space'].types,c['clean'],c['space'].encode(c['clean'])[0],c['space'].pairs)
++    rng=np.random.default_rng(41);basis=rng.uniform(.01,1,(8,f.shape[1]));basis/=np.linalg.norm(basis,axis=1)[:,None]
++    return c,StructuralDenoiser(c,config(),arm,basis)
++
++def context(c,m,token=1):return FrozenTypedContext(m,c['space'].types,c['clean'],c['space'].encode(c['clean'])[0],token)
++def query(c):return plan_for(c,42,2).block(0)[1:]
++def pred(c,m,ctx=None):
++    f,q=query(c);own=ctx is None;ctx=context(c,m) if own else ctx
++    try:return ctx.predict(q,f,.5,1,details=True)
++    finally:
++        if own:ctx.close()
++
++class Features(unittest.TestCase):
++    def test_independent_base_counts(self):
++        c=toy();ty=c['space'].types;e=c['clean'];f=c['space'].encode(e)[0];x=extract(ty,e,f,c['space'].pairs)
++        for node in range(len(ty)):
++            neighbors={int(v) for u,v in e.T if u==node}|{int(u) for u,v in e.T if v==node};eg=neighbors|{node}
++            deg=np.array([sum(node in (u,v) and ff==r for (u,v),ff in zip(e.T,f)) for r in range(3)])
++            ins=np.array([sum(u in eg and v in eg and ff==r for (u,v),ff in zip(e.T,f)) for r in range(3)])
++            out=np.array([sum(((u in eg)!=(v in eg)) and ff==r for (u,v),ff in zip(e.T,f)) for r in range(3)])
++            base=np.r_[np.log1p(deg)/np.log1p(5),np.log1p(ins)/np.log1p(c['space'].counts),np.log1p(out)/np.log1p(c['space'].counts)]
++            np.testing.assert_allclose(x[node,:9],base,atol=1e-10,rtol=0)
++    def test_empty(self):
++        c=toy();x=extract(c['space'].types,np.empty((2,0),int),np.array([],int),c['space'].pairs)
++        self.assertEqual(x.shape,(6,63));self.assertTrue((x==0).all())
++    def test_permutation(self):
++        c=toy();p=np.array([2,0,1,5,3,4]);ty=c['space'].types;e=c['clean'];f=c['space'].encode(e)[0]
++        ty2=np.empty_like(ty);ty2[p]=ty;e2=np.sort(p[e],axis=0)
++        a=extract(ty,e,f,c['space'].pairs);b=extract(ty2,e2,f,c['space'].pairs)
++        np.testing.assert_allclose(a,b[p],atol=1e-10,rtol=0)
++    def test_edge_order(self):
++        c=toy();e=c['clean'];f=c['space'].encode(e)[0];a=extract(c['space'].types,e,f,c['space'].pairs)
++        b=extract(c['space'].types,e[:,::-1],f[::-1],c['space'].pairs);np.testing.assert_array_equal(a,b)
++    def test_reject(self):
++        c=toy();e=c['clean'];f=c['space'].encode(e)[0]
++        for ee,ff in [(e[::-1],f),(np.c_[e,e[:,0]],np.r_[f,f[0]]),(e,1-f)]:
++            with self.assertRaises(ValueError):extract(c['space'].types,ee,ff,c['space'].pairs)
++    def test_nnls_strength_and_permutation(self):
++        f=np.eye(8);basis=np.eye(8);a,_=encode(f,basis);b,_=encode(3*f,basis)
++        np.testing.assert_allclose(b,3*a);self.assertTrue((b.sum(1)==3).all())
++        np.testing.assert_allclose(encode(f[::-1],basis)[0],a[::-1])
++
++class Integration(unittest.TestCase):
++    def test_A_original_exact(self):
++        sys.path.insert(0,str(ROOT/'audit_reference'))
++        from pair_model import PairDenoiser
++        c,a=model('A');old=PairDenoiser(c['n_types'],c['n_families'],family_pairs=c['space'].pairs,prior=c['prior'],T=1000,arm='base',**config()['model'])
++        with torch.no_grad():a.branch.degree_out.weight.normal_(0,.02)
++        state=old.state_dict()
++        for k,v in a.state_dict().items():state[k]=v.clone()
++        old.load_state_dict(state);old.set_target(None)
++        la=pred(c,a)[1];lb=pred(c,old)[1]
++        torch.testing.assert_close(la,lb,atol=0,rtol=0)
++        la.square().sum().backward();lb.square().sum().backward()
++        other=dict(old.named_parameters())
++        for name,param in a.named_parameters():
++            if param.grad is None:self.assertIsNone(other[name].grad)
++            else:torch.testing.assert_close(param.grad,other[name].grad,atol=0,rtol=0)
++    def test_B_C_initial_equal_and_no_CN(self):
++        c,b=model('B');_,d=model('C');copy_common(b,d)
++        self.assertIsNone(b.common_neighbor);self.assertIsNone(d.common_neighbor)
++        self.assertEqual(d.cn_feature_width,0);self.assertFalse(any('common_neighbor' in k for k in d.state_dict()))
++        torch.testing.assert_close(pred(c,b)[1],pred(c,d)[1],atol=0,rtol=0)
++        ctx=context(c,d);self.assertIsNone(ctx.cn_wedges);ctx.close()
++    def test_CN_constructor_unreachable_in_B_C(self):
++        from unittest.mock import patch
++        with patch('hsgd.common_neighbor.Wedges',side_effect=AssertionError('CN path reached')):
++            for arm in ['B','C']:
++                c,m=model(arm);pred(c,m)
++    def test_nonzero_projection_response_gradient(self):
++        c,m=model('C');base=pred(c,m)[1].detach();
++        with torch.no_grad():m.role_projection.weight.normal_(0,.02)
++        result=pred(c,m);self.assertGreater(float((result[1]-base).abs().max()),1e-6)
++        result[1].square().sum().backward()
++        for name in ['refex_projection','role_projection']:
++            g=getattr(m,name).weight.grad;self.assertTrue(torch.isfinite(g).all());self.assertGreater(float(g.abs().max()),0)
++    def test_query_exclusion_and_reuse(self):
++        c,m=model('C');ctx=context(c,m);pred(c,m,ctx);before=ctx.structural_features.clone()
++        f,q=plan_for(c,77,2).block(1)[1:];ctx.predict(q,f,.5,1)
++        self.assertEqual(m.feature_calls,1);torch.testing.assert_close(before,ctx.structural_features,atol=0,rtol=0)
++        independent=extract(ctx.types,ctx.old,ctx.of,ctx.pairs);np.testing.assert_allclose(before.numpy(),independent,atol=1e-7)
++        ctx.close()
++        with self.assertRaises(ValueError):ctx.predict(q,f,.5,1)
++    def test_cache_time_update_basis_guards(self):
++        for what in ['time','param','basis']:
++            c,m=model('C');ctx=context(c,m);pred(c,m,ctx);f,q=query(c)
++            with torch.no_grad():
++                if what=='param':m.refex_projection.weight.add_(.01)
++                if what=='basis':m.role_basis.add_(.01)
++            with self.assertRaises(ValueError):ctx.predict(q,f,.6 if what=='time' else .5,1)
++            ctx.close()
++    def test_basis_reload_and_new_state(self):
++        c,m=model('C');pred(c,m);state=copy.deepcopy(m.state_dict());state['role_basis']=state['role_basis']*.9
++        m.load_state_dict(state);pred(c,m)
++        changed=copy.deepcopy(c);changed['clean']=c['clean'][:,:-1]
++        ctx=context(changed,m);pred(changed,m,ctx);self.assertEqual(ctx.old.shape[1],c['clean'].shape[1]-1);ctx.close()
++    def test_nonzero_full_equivariance(self):
++        c,m=model('C')
++        with torch.no_grad():m.refex_projection.weight.normal_(0,.01);m.role_projection.weight.normal_(0,.01)
++        p=np.array([2,0,1,5,3,4]);f,q=query(c);e=c['clean'];ty=np.empty_like(c['space'].types);ty[p]=c['space'].types
++        with torch.no_grad():
++            a=m(c['space'].types,e,c['space'].encode(e)[0],q,f,.5)
++            b=m(ty,np.sort(p[e],axis=0),c['space'].encode(e)[0],np.sort(p[q],axis=0),f,.5)
++        torch.testing.assert_close(a,b,atol=2e-6,rtol=1e-5)
++    def test_train_eval_same_input(self):
++        c,m=model('C');m.train();a=pred(c,m)[1];m.eval();b=pred(c,m)[1]
++        torch.testing.assert_close(a,b,atol=0,rtol=0)
++    def test_support_and_ce(self):
++        c,m=model('B');graph,logits,p=pred(c,m);labels=torch.zeros(len(p));prior=m.prior[graph.query_families]
++        loss=supported_binary_ce(logits,labels,prior).sum();self.assertTrue(torch.isfinite(loss))
++    def test_received_datasets(self):
++        for name in ['IMDB','PubMed']:
++            c,cfg=load_case(name);self.assertEqual(len(c['space'].types),192)
++            plan=plan_for(c,45,20);seen=[]
++            for r in range(20):seen.extend(plan.block(r)[0].tolist())
++            self.assertEqual(len(seen),len(set(seen)));self.assertEqual(len(seen),int(c['space'].counts[c['active']].sum()))
++
++if __name__=='__main__':unittest.main(verbosity=2)
