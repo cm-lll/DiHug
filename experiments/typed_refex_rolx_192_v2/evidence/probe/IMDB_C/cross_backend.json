@@ -1,0 +1,4793 @@
+{
+  "loss": {
+    "passes": true,
+    "exact": false,
+    "max_abs": 8.344650268554688e-07,
+    "max_relative_nonzero": 1.7960559253328235e-06,
+    "reference_max": 0.46460971236228943,
+    "reference_l2": 0.46460971236228943,
+    "absolute_at_reference_zero": null,
+    "violations": 0
+  },
+  "inputs": [
+    {
+      "logits": {
+        "passes": false,
+        "exact": false,
+        "max_abs": 4.075467586517334e-06,
+        "max_relative_nonzero": 2.4375,
+        "reference_max": 0.21757850050926208,
+        "reference_l2": 12.723898627932261,
+        "absolute_at_reference_zero": null,
+        "violations": 3743
+      },
+      "p0": {
+        "passes": true,
+        "exact": false,
+        "max_abs": 1.1324882507324219e-06,
+        "max_relative_nonzero": 2.3833641184531965e-06,
+        "reference_max": 0.49311938881874084,
+        "reference_l2": 54.51979254151087,
+        "absolute_at_reference_zero": null,
+        "violations": 0
+      },
+      "loss": {
+        "passes": true,
+        "exact": false,
+        "max_abs": 4.023313522338867e-07,
+        "max_relative_nonzero": 1.7310590721984988e-06,
+        "reference_max": 0.2324191927909851,
+        "reference_l2": 0.2324191927909851,
+        "absolute_at_reference_zero": null,
+        "violations": 0
+      }
+    },
+    {
+      "logits": {
+        "passes": false,
+        "exact": false,
+        "max_abs": 3.5017728805541992e-06,
+        "max_relative_nonzero": 3.6027397260273974,
+        "reference_max": 0.21846303343772888,
+        "reference_l2": 12.649545077798265,
+        "absolute_at_reference_zero": null,
+        "violations": 3137
+      },
+      "p0": {
+        "passes": true,
+        "exact": false,
+        "max_abs": 1.1324882507324219e-06,
+        "max_relative_nonzero": 2.3504706353538616e-06,
+        "reference_max": 0.4925747215747833,
+        "reference_l2": 54.480278639830026,
+        "absolute_at_reference_zero": null,
+        "violations": 0
+      },
+      "loss": {
+        "passes": true,
+        "exact": false,
+        "max_abs": 4.3213367462158203e-07,
+        "max_relative_nonzero": 1.8611167907261448e-06,
+        "reference_max": 0.23219051957130432,
+        "reference_l2": 0.23219051957130432,
+        "absolute_at_reference_zero": null,
+        "violations": 0
+      }
+    }
+  ],
+  "gradients": {
+    "backbone.lin_in_X.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.514563336968422e-06,
+      "max_relative_nonzero": 0.6725919795395197,
+      "reference_max": 0.00957944244146347,
+      "reference_l2": 0.0759874123283588,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.lin_in_X.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.9799917936325073e-06,
+      "max_relative_nonzero": 0.022363480933387428,
+      "reference_max": 0.0177720095962286,
+      "reference_l2": 0.09041568346193933,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.lin_in_E.weight": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 1.3875775039196014e-05,
+      "max_relative_nonzero": 2.2276730097032087,
+      "reference_max": 0.02429576963186264,
+      "reference_l2": 0.1366953560744106,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 209
+    },
+    "backbone.lin_in_E.bias": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 2.407468855381012e-06,
+      "max_relative_nonzero": 0.20587280676632874,
+      "reference_max": 0.016226397827267647,
+      "reference_l2": 0.0439752717080994,
+      "absolute_at_reference_zero": null,
+      "violations": 6
+    },
+    "backbone.lin_in_y.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.0558869689702988e-06,
+      "max_relative_nonzero": 0.10003811183100125,
+      "reference_max": 0.009287828579545021,
+      "reference_l2": 0.04305753804128634,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.lin_in_y.bias": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 2.1117739379405975e-06,
+      "max_relative_nonzero": 0.10003811183100125,
+      "reference_max": 0.018575657159090042,
+      "reference_l2": 0.08611507608257268,
+      "absolute_at_reference_zero": null,
+      "violations": 1
+    },
+    "backbone.tf_layers.0.self_attn.lin_key.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.754677552729845e-07,
+      "max_relative_nonzero": 66.11191021030838,
+      "reference_max": 0.0005026725702919066,
+      "reference_l2": 0.012857855768937056,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.0.self_attn.lin_key.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 6.60456862533465e-08,
+      "max_relative_nonzero": 6.678131322420453,
+      "reference_max": 0.0001439536572434008,
+      "reference_l2": 0.0007318884813575121,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.0.self_attn.lin_query.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 3.02301486954093e-07,
+      "max_relative_nonzero": 5.904915774976163,
+      "reference_max": 0.0005010360036976635,
+      "reference_l2": 0.012113349645348465,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.0.self_attn.lin_query.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 3.2225216273218393e-07,
+      "max_relative_nonzero": 0.1041474820338899,
+      "reference_max": 0.0005610211519524455,
+      "reference_l2": 0.0017739373695517778,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.0.self_attn.lin_value.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.5147961676120758e-06,
+      "max_relative_nonzero": 7.124021425628348,
+      "reference_max": 0.009490113705396652,
+      "reference_l2": 0.2828633314680138,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.0.self_attn.lin_value.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.2451782822608948e-06,
+      "max_relative_nonzero": 0.007973843897054144,
+      "reference_max": 0.010382243432104588,
+      "reference_l2": 0.04845945350527058,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.0.self_attn.lin_skip.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.0891817510128021e-06,
+      "max_relative_nonzero": 6.973817897616256,
+      "reference_max": 0.009725376963615417,
+      "reference_l2": 0.3002543319809617,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.0.self_attn.lin_skip.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.2391246855258942e-06,
+      "max_relative_nonzero": 0.007945589321935264,
+      "reference_max": 0.010382245294749737,
+      "reference_l2": 0.04845945790034226,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.0.self_attn.e_add.weight": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 1.259148120880127e-05,
+      "max_relative_nonzero": 0.84681103646941,
+      "reference_max": 0.019872013479471207,
+      "reference_l2": 0.10743798197213918,
+      "absolute_at_reference_zero": null,
+      "violations": 201
+    },
+    "backbone.tf_layers.0.self_attn.e_add.bias": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 3.553926944732666e-06,
+      "max_relative_nonzero": 0.0009737548203430301,
+      "reference_max": 0.018762368708848953,
+      "reference_l2": 0.026952413154023844,
+      "absolute_at_reference_zero": null,
+      "violations": 2
+    },
+    "backbone.tf_layers.0.self_attn.e_mul.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 6.360642146319151e-08,
+      "max_relative_nonzero": 0.06731674793179454,
+      "reference_max": 0.0001797691802494228,
+      "reference_l2": 0.0009502487094947327,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.0.self_attn.e_mul.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.3918906915932894e-07,
+      "max_relative_nonzero": 0.006310062801346897,
+      "reference_max": 0.0003092339902650565,
+      "reference_l2": 0.00047831169162264775,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.0.self_attn.y_e_mul.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.8722348613664508e-06,
+      "max_relative_nonzero": 0.0860513546274538,
+      "reference_max": 0.0026876763440668583,
+      "reference_l2": 0.036636648219981915,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.0.self_attn.y_e_mul.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.408181560691446e-06,
+      "max_relative_nonzero": 0.08605078704112232,
+      "reference_max": 0.0020215255208313465,
+      "reference_l2": 0.005081926841805893,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.0.self_attn.y_e_add.weight": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 3.187160473316908e-06,
+      "max_relative_nonzero": 0.01774958575865609,
+      "reference_max": 0.019130386412143707,
+      "reference_l2": 0.2714821076031075,
+      "absolute_at_reference_zero": null,
+      "violations": 130
+    },
+    "backbone.tf_layers.0.self_attn.y_e_add.bias": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 2.3972243070602417e-06,
+      "max_relative_nonzero": 0.01774889169176947,
+      "reference_max": 0.01438884623348713,
+      "reference_l2": 0.03765770814014689,
+      "absolute_at_reference_zero": null,
+      "violations": 4
+    },
+    "backbone.tf_layers.0.self_attn.y_x_mul.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 5.86675014346838e-07,
+      "max_relative_nonzero": 0.07057936233339354,
+      "reference_max": 0.005202463828027248,
+      "reference_l2": 0.09519826941068828,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.0.self_attn.y_x_mul.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 4.412722773849964e-07,
+      "max_relative_nonzero": 0.07057930422020621,
+      "reference_max": 0.003913013264536858,
+      "reference_l2": 0.013205100930126884,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.0.self_attn.y_x_add.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.2088567018508911e-06,
+      "max_relative_nonzero": 0.007941332523671426,
+      "reference_max": 0.01094062626361847,
+      "reference_l2": 0.32256544819179667,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.0.self_attn.y_x_add.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 9.08970832824707e-07,
+      "max_relative_nonzero": 0.007941205269816573,
+      "reference_max": 0.008228950202465057,
+      "reference_l2": 0.04474355804478062,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.0.self_attn.y_y.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 6.540503818541765e-07,
+      "max_relative_nonzero": 0.0060221562075032575,
+      "reference_max": 0.007789010182023048,
+      "reference_l2": 0.15391670334109483,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.0.self_attn.y_y.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 4.919420462101698e-07,
+      "max_relative_nonzero": 0.00602202697165113,
+      "reference_max": 0.005858473479747772,
+      "reference_l2": 0.02135002670564242,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.0.self_attn.x_y.lin.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 4.7580397222191095e-07,
+      "max_relative_nonzero": 0.00613056305525933,
+      "reference_max": 0.005666310898959637,
+      "reference_l2": 0.24529281342419312,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.0.self_attn.x_y.lin.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 4.919420462101698e-07,
+      "max_relative_nonzero": 0.00602202697165113,
+      "reference_max": 0.005858473479747772,
+      "reference_l2": 0.02135002670564242,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.0.self_attn.e_y.lin.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.0977964848279953e-06,
+      "max_relative_nonzero": 0.007139672215629495,
+      "reference_max": 0.0033757202327251434,
+      "reference_l2": 0.07711943383663376,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.0.self_attn.e_y.lin.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 4.919420462101698e-07,
+      "max_relative_nonzero": 0.00602202697165113,
+      "reference_max": 0.005858473479747772,
+      "reference_l2": 0.02135002670564242,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.0.self_attn.y_out.0.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.3293465599417686e-06,
+      "max_relative_nonzero": 0.00232870760170445,
+      "reference_max": 0.023293549194931984,
+      "reference_l2": 0.20586865703256196,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.0.self_attn.y_out.0.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 9.029172360897064e-07,
+      "max_relative_nonzero": 0.0017718265883871884,
+      "reference_max": 0.015724467113614082,
+      "reference_l2": 0.03769786854946442,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.0.self_attn.y_out.2.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.7993152141571045e-06,
+      "max_relative_nonzero": 0.01745800785739864,
+      "reference_max": 0.01519035268574953,
+      "reference_l2": 0.20730060074339382,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.0.self_attn.y_out.2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.8454156816005707e-06,
+      "max_relative_nonzero": 0.016149725619401926,
+      "reference_max": 0.015908604487776756,
+      "reference_l2": 0.08166953442487764,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.0.self_attn.x_out.weight": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 5.174471880309284e-06,
+      "max_relative_nonzero": 14.816251154201293,
+      "reference_max": 0.022633623331785202,
+      "reference_l2": 0.6007457771657538,
+      "absolute_at_reference_zero": null,
+      "violations": 24
+    },
+    "backbone.tf_layers.0.self_attn.x_out.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.7030397430062294e-06,
+      "max_relative_nonzero": 0.06218434161651645,
+      "reference_max": 0.015884261578321457,
+      "reference_l2": 0.07728328957667342,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.0.self_attn.e_out.weight": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 4.287809133529663e-06,
+      "max_relative_nonzero": 9.224935862813934,
+      "reference_max": 0.00574879813939333,
+      "reference_l2": 0.1598387195658619,
+      "absolute_at_reference_zero": null,
+      "violations": 756
+    },
+    "backbone.tf_layers.0.self_attn.e_out.bias": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 2.7990899980068207e-06,
+      "max_relative_nonzero": 0.019086875675019606,
+      "reference_max": 0.0173118207603693,
+      "reference_l2": 0.03657970182254899,
+      "absolute_at_reference_zero": null,
+      "violations": 8
+    },
+    "backbone.tf_layers.0.linX1.weight": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 8.531613275408745e-06,
+      "max_relative_nonzero": 2.0545958795562598,
+      "reference_max": 0.0084284208714962,
+      "reference_l2": 0.21475941083539693,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 134
+    },
+    "backbone.tf_layers.0.linX1.bias": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 3.21993138641119e-06,
+      "max_relative_nonzero": 0.11938272645413697,
+      "reference_max": 0.0033709078561514616,
+      "reference_l2": 0.014192998600763743,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 1
+    },
+    "backbone.tf_layers.0.linX2.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 9.580107871443033e-07,
+      "max_relative_nonzero": 3.150083963056255,
+      "reference_max": 0.008156340569257736,
+      "reference_l2": 0.21018423471445996,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.0.linX2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 5.997717380523682e-07,
+      "max_relative_nonzero": 0.0822579026080861,
+      "reference_max": 0.007604572921991348,
+      "reference_l2": 0.03575425568674258,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.0.normX1.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.2200325727462769e-06,
+      "max_relative_nonzero": 0.02005114560780721,
+      "reference_max": 0.008930018171668053,
+      "reference_l2": 0.034016119932437645,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.0.normX1.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 7.865019142627716e-07,
+      "max_relative_nonzero": 0.034804585643073045,
+      "reference_max": 0.007441937457770109,
+      "reference_l2": 0.036128682761069536,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.0.normX2.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.2668315321207047e-06,
+      "max_relative_nonzero": 0.4690278699402787,
+      "reference_max": 0.010421402752399445,
+      "reference_l2": 0.035173329550951475,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.0.normX2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 6.252666935324669e-07,
+      "max_relative_nonzero": 0.09574201894114648,
+      "reference_max": 0.007781840395182371,
+      "reference_l2": 0.036887158879501614,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.0.linE1.weight": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 9.738461812958121e-06,
+      "max_relative_nonzero": 0.32032441504893433,
+      "reference_max": 0.013084715232253075,
+      "reference_l2": 0.08057616715380647,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 167
+    },
+    "backbone.tf_layers.0.linE1.bias": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 3.284549165982753e-06,
+      "max_relative_nonzero": 0.03018867545995223,
+      "reference_max": 0.004362508188933134,
+      "reference_l2": 0.009041882013751135,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 3
+    },
+    "backbone.tf_layers.0.linE2.weight": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 4.0335580706596375e-06,
+      "max_relative_nonzero": 3.5785685388712833,
+      "reference_max": 0.00774124963209033,
+      "reference_l2": 0.06592143110340612,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 32
+    },
+    "backbone.tf_layers.0.linE2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.1443626135587692e-06,
+      "max_relative_nonzero": 0.03873005716032109,
+      "reference_max": 0.005656597204506397,
+      "reference_l2": 0.01574253859064751,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.0.normE1.weight": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 2.9001384973526e-06,
+      "max_relative_nonzero": 0.18630133686057698,
+      "reference_max": 0.006297600455582142,
+      "reference_l2": 0.01924274479310429,
+      "absolute_at_reference_zero": null,
+      "violations": 9
+    },
+    "backbone.tf_layers.0.normE1.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.3115350157022476e-06,
+      "max_relative_nonzero": 0.0165148741811012,
+      "reference_max": 0.0064326804131269455,
+      "reference_l2": 0.016936950578491632,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.0.normE2.weight": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 2.9355287551879883e-06,
+      "max_relative_nonzero": 0.15682478072141987,
+      "reference_max": 0.008723188191652298,
+      "reference_l2": 0.01863197544482108,
+      "absolute_at_reference_zero": null,
+      "violations": 6
+    },
+    "backbone.tf_layers.0.normE2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.055304892361164e-06,
+      "max_relative_nonzero": 0.00996527298125657,
+      "reference_max": 0.005811119917780161,
+      "reference_l2": 0.01650597323440445,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.0.lin_y1.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.0197763913311064e-06,
+      "max_relative_nonzero": 0.08593065771494851,
+      "reference_max": 0.011407526209950447,
+      "reference_l2": 0.1987083210274879,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.0.lin_y1.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 4.462617653189227e-07,
+      "max_relative_nonzero": 0.08396638538118655,
+      "reference_max": 0.004992048256099224,
+      "reference_l2": 0.017563733473154715,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.0.lin_y2.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.6253907233476639e-06,
+      "max_relative_nonzero": 0.002984790367403148,
+      "reference_max": 0.016506962478160858,
+      "reference_l2": 0.3344134401321861,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.0.lin_y2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.0086223483085632e-06,
+      "max_relative_nonzero": 0.002947057361890039,
+      "reference_max": 0.010214056819677353,
+      "reference_l2": 0.049203679548107115,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.0.norm_y1.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.3910757843405008e-06,
+      "max_relative_nonzero": 0.05116224853565427,
+      "reference_max": 0.021174274384975433,
+      "reference_l2": 0.04693855680161189,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.0.norm_y1.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.130509190261364e-06,
+      "max_relative_nonzero": 0.05133975809471097,
+      "reference_max": 0.00985594280064106,
+      "reference_l2": 0.050204670247230555,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.0.norm_y2.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.2748641893267632e-06,
+      "max_relative_nonzero": 0.0029707851984996287,
+      "reference_max": 0.020362183451652527,
+      "reference_l2": 0.046389845640448714,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.0.norm_y2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.0095536708831787e-06,
+      "max_relative_nonzero": 0.0029577475885973186,
+      "reference_max": 0.010432061739265919,
+      "reference_l2": 0.05096865203876887,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.1.self_attn.lin_key.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 4.915054887533188e-07,
+      "max_relative_nonzero": 78.06709088795908,
+      "reference_max": 0.0008484696154482663,
+      "reference_l2": 0.023272066537639455,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.1.self_attn.lin_key.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.3216777006164193e-07,
+      "max_relative_nonzero": 0.015783246883539572,
+      "reference_max": 0.00021738729265052825,
+      "reference_l2": 0.0007309939567928719,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.1.self_attn.lin_query.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 9.477371349930763e-07,
+      "max_relative_nonzero": 16.949481666557084,
+      "reference_max": 0.0011762450449168682,
+      "reference_l2": 0.02663938632802912,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.1.self_attn.lin_query.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 3.2997922971844673e-07,
+      "max_relative_nonzero": 0.2919425051965866,
+      "reference_max": 0.000413102243328467,
+      "reference_l2": 0.0017063468917998125,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.1.self_attn.lin_value.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.4553079381585121e-06,
+      "max_relative_nonzero": 6.649769848213946,
+      "reference_max": 0.014562800526618958,
+      "reference_l2": 0.3098438934960313,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.1.self_attn.lin_value.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 5.807960405945778e-07,
+      "max_relative_nonzero": 0.054798524289163986,
+      "reference_max": 0.006322682835161686,
+      "reference_l2": 0.020468694800370134,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.1.self_attn.lin_skip.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.575099304318428e-06,
+      "max_relative_nonzero": 11.264460751007837,
+      "reference_max": 0.016228867694735527,
+      "reference_l2": 0.31709569953142663,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.1.self_attn.lin_skip.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 5.809124559164047e-07,
+      "max_relative_nonzero": 0.054832432601232335,
+      "reference_max": 0.006322682835161686,
+      "reference_l2": 0.020468694255073482,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.1.self_attn.e_add.weight": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 8.761882781982422e-06,
+      "max_relative_nonzero": 0.18870123330482533,
+      "reference_max": 0.023198001086711884,
+      "reference_l2": 0.15603442652428232,
+      "absolute_at_reference_zero": null,
+      "violations": 187
+    },
+    "backbone.tf_layers.1.self_attn.e_add.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 9.816139936447144e-07,
+      "max_relative_nonzero": 0.00020842911877394637,
+      "reference_max": 0.007308897562325001,
+      "reference_l2": 0.013317605405122713,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.1.self_attn.e_mul.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 7.193157216534019e-07,
+      "max_relative_nonzero": 0.23132850723286205,
+      "reference_max": 0.0015104477060958743,
+      "reference_l2": 0.006313757177628784,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.1.self_attn.e_mul.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.2299718693830073e-07,
+      "max_relative_nonzero": 0.007017048599389224,
+      "reference_max": 0.000498672598041594,
+      "reference_l2": 0.0007049857728494965,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.1.self_attn.y_e_mul.weight": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 3.689667209982872e-06,
+      "max_relative_nonzero": 0.03808153416372286,
+      "reference_max": 0.0052179633639752865,
+      "reference_l2": 0.061282696439266676,
+      "absolute_at_reference_zero": null,
+      "violations": 40
+    },
+    "backbone.tf_layers.1.self_attn.y_e_mul.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.6864287317730486e-06,
+      "max_relative_nonzero": 0.037936302205643646,
+      "reference_max": 0.00238491827622056,
+      "reference_l2": 0.005416701599502377,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.1.self_attn.y_e_add.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.8989667296409607e-06,
+      "max_relative_nonzero": 0.011674347350129502,
+      "reference_max": 0.011200528591871262,
+      "reference_l2": 0.13902360692181326,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.1.self_attn.y_e_add.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 8.677016012370586e-07,
+      "max_relative_nonzero": 0.011531335729757938,
+      "reference_max": 0.005119305104017258,
+      "reference_l2": 0.012288124584532574,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.1.self_attn.y_x_mul.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 8.146744221448898e-07,
+      "max_relative_nonzero": 0.06308529550998739,
+      "reference_max": 0.00710420124232769,
+      "reference_l2": 0.1506474501924221,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.1.self_attn.y_x_mul.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 3.7264544516801834e-07,
+      "max_relative_nonzero": 0.062246304786944116,
+      "reference_max": 0.003247041255235672,
+      "reference_l2": 0.013315541733763848,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.1.self_attn.y_x_add.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 7.887720130383968e-07,
+      "max_relative_nonzero": 0.055168446274419455,
+      "reference_max": 0.00804964266717434,
+      "reference_l2": 0.1915939836065043,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.1.self_attn.y_x_add.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 3.603636287152767e-07,
+      "max_relative_nonzero": 0.05484994914001227,
+      "reference_max": 0.003679164219647646,
+      "reference_l2": 0.01693475508509039,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.1.self_attn.y_y.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 4.0442682802677155e-07,
+      "max_relative_nonzero": 0.014337682719213722,
+      "reference_max": 0.006034655962139368,
+      "reference_l2": 0.12112936292702522,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.1.self_attn.y_y.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.852167770266533e-07,
+      "max_relative_nonzero": 0.014062234327792092,
+      "reference_max": 0.002758195623755455,
+      "reference_l2": 0.010706474436608106,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.1.self_attn.x_y.lin.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 6.118789315223694e-07,
+      "max_relative_nonzero": 0.15627501764057952,
+      "reference_max": 0.009115191176533699,
+      "reference_l2": 0.3145380106072146,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.1.self_attn.x_y.lin.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.852167770266533e-07,
+      "max_relative_nonzero": 0.014062234327792092,
+      "reference_max": 0.002758195623755455,
+      "reference_l2": 0.010706474436608106,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.1.self_attn.e_y.lin.weight": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 2.652406692504883e-06,
+      "max_relative_nonzero": 0.014523926085644696,
+      "reference_max": 0.009974148124456406,
+      "reference_l2": 0.1571575814161699,
+      "absolute_at_reference_zero": null,
+      "violations": 6
+    },
+    "backbone.tf_layers.1.self_attn.e_y.lin.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.852167770266533e-07,
+      "max_relative_nonzero": 0.014062234327792092,
+      "reference_max": 0.002758195623755455,
+      "reference_l2": 0.010706474436608106,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.1.self_attn.y_out.0.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.4258548617362976e-06,
+      "max_relative_nonzero": 0.019020249481420642,
+      "reference_max": 0.017499234527349472,
+      "reference_l2": 0.16286089073669602,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.1.self_attn.y_out.0.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 4.724133759737015e-07,
+      "max_relative_nonzero": 0.0014344474361950843,
+      "reference_max": 0.006238584406673908,
+      "reference_l2": 0.017351370962124676,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.1.self_attn.y_out.2.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.1508818715810776e-06,
+      "max_relative_nonzero": 0.03655181280801028,
+      "reference_max": 0.013490434736013412,
+      "reference_l2": 0.14835778787924322,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.1.self_attn.y_out.2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 8.740462362766266e-07,
+      "max_relative_nonzero": 0.006986985885685637,
+      "reference_max": 0.011019664816558361,
+      "reference_l2": 0.04844857189505142,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.1.self_attn.x_out.weight": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 6.354064680635929e-06,
+      "max_relative_nonzero": 4.493249707664505,
+      "reference_max": 0.023787040263414383,
+      "reference_l2": 0.5386066977291594,
+      "absolute_at_reference_zero": null,
+      "violations": 31
+    },
+    "backbone.tf_layers.1.self_attn.x_out.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 5.834735929965973e-07,
+      "max_relative_nonzero": 0.014236483974783842,
+      "reference_max": 0.005282453261315823,
+      "reference_l2": 0.030480847878957232,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.1.self_attn.e_out.weight": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 5.1765237003564835e-06,
+      "max_relative_nonzero": 6.180729902735057,
+      "reference_max": 0.010592474602162838,
+      "reference_l2": 0.16961173113827768,
+      "absolute_at_reference_zero": null,
+      "violations": 274
+    },
+    "backbone.tf_layers.1.self_attn.e_out.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.4454126358032227e-06,
+      "max_relative_nonzero": 0.010912662256076391,
+      "reference_max": 0.008342256769537926,
+      "reference_l2": 0.014597500939632977,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.1.linX1.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.0842923074960709e-06,
+      "max_relative_nonzero": 5.673312190422602,
+      "reference_max": 0.011321394704282284,
+      "reference_l2": 0.2200520890071383,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.1.linX1.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 4.494795575737953e-07,
+      "max_relative_nonzero": 0.026173850044006703,
+      "reference_max": 0.00448561878874898,
+      "reference_l2": 0.014280654822542234,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.1.linX2.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.2791715562343597e-06,
+      "max_relative_nonzero": 6.594035985729797,
+      "reference_max": 0.008616648614406586,
+      "reference_l2": 0.21887559454211794,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.1.linX2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 7.320195436477661e-07,
+      "max_relative_nonzero": 0.03972388616809,
+      "reference_max": 0.005747091956436634,
+      "reference_l2": 0.0348546614945009,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.1.normX1.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.2793461792171001e-06,
+      "max_relative_nonzero": 0.2061281387905489,
+      "reference_max": 0.00863522756844759,
+      "reference_l2": 0.03585658431458602,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.1.normX1.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 7.040798664093018e-07,
+      "max_relative_nonzero": 0.01598288444080383,
+      "reference_max": 0.006323744542896748,
+      "reference_l2": 0.03647345154371218,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.1.normX2.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.465261448174715e-06,
+      "max_relative_nonzero": 0.02810368079540403,
+      "reference_max": 0.008364599198102951,
+      "reference_l2": 0.03721279808263823,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.1.normX2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 7.548369467258453e-07,
+      "max_relative_nonzero": 0.026095194522352802,
+      "reference_max": 0.0060809459537267685,
+      "reference_l2": 0.03694405528311915,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.1.linE1.weight": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 5.969777703285217e-06,
+      "max_relative_nonzero": 24.627932154456875,
+      "reference_max": 0.014959460124373436,
+      "reference_l2": 0.07775817850977597,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 51
+    },
+    "backbone.tf_layers.1.linE1.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.5594996511936188e-06,
+      "max_relative_nonzero": 0.9189465904134154,
+      "reference_max": 0.0038558878004550934,
+      "reference_l2": 0.008140486457655348,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.1.linE2.weight": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 4.809233359992504e-06,
+      "max_relative_nonzero": 1.540511891243725,
+      "reference_max": 0.005953897722065449,
+      "reference_l2": 0.05826820757937733,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 45
+    },
+    "backbone.tf_layers.1.linE2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 8.140923455357552e-07,
+      "max_relative_nonzero": 0.03508741039158306,
+      "reference_max": 0.005218876525759697,
+      "reference_l2": 0.013757057021409294,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.1.normE1.weight": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 3.4410040825605392e-06,
+      "max_relative_nonzero": 0.04314135885884464,
+      "reference_max": 0.005738340318202972,
+      "reference_l2": 0.016795545334863535,
+      "absolute_at_reference_zero": null,
+      "violations": 5
+    },
+    "backbone.tf_layers.1.normE1.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.033884473145008e-06,
+      "max_relative_nonzero": 0.014260160985789526,
+      "reference_max": 0.006189570762217045,
+      "reference_l2": 0.014773675873244978,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.1.normE2.weight": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 3.4333206713199615e-06,
+      "max_relative_nonzero": 0.06763895775625797,
+      "reference_max": 0.00672233197838068,
+      "reference_l2": 0.017637072381618022,
+      "absolute_at_reference_zero": null,
+      "violations": 3
+    },
+    "backbone.tf_layers.1.normE2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 8.050119504332542e-07,
+      "max_relative_nonzero": 0.022451039702237652,
+      "reference_max": 0.005547902546823025,
+      "reference_l2": 0.014278393486846609,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.1.lin_y1.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 9.741634130477905e-07,
+      "max_relative_nonzero": 0.62554200520325,
+      "reference_max": 0.013437175191938877,
+      "reference_l2": 0.2249865228960763,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.1.lin_y1.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 4.0140002965927124e-07,
+      "max_relative_nonzero": 0.004709690708205894,
+      "reference_max": 0.005139520391821861,
+      "reference_l2": 0.019886286818038473,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.1.lin_y2.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.2861564755439758e-06,
+      "max_relative_nonzero": 0.0031372877508364858,
+      "reference_max": 0.015011743642389774,
+      "reference_l2": 0.30071904354637546,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.1.lin_y2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 8.414499461650848e-07,
+      "max_relative_nonzero": 0.001097529541735152,
+      "reference_max": 0.009830724447965622,
+      "reference_l2": 0.04757674676311637,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.1.norm_y1.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.189298927783966e-06,
+      "max_relative_nonzero": 0.04308656249897905,
+      "reference_max": 0.016261298209428787,
+      "reference_l2": 0.04261720028545224,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.1.norm_y1.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 8.66129994392395e-07,
+      "max_relative_nonzero": 0.021630544710475562,
+      "reference_max": 0.01095765084028244,
+      "reference_l2": 0.04824170292727552,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.1.norm_y2.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.2700911611318588e-06,
+      "max_relative_nonzero": 0.012212439332870896,
+      "reference_max": 0.023509616032242775,
+      "reference_l2": 0.04847953052085518,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.1.norm_y2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 8.866190910339355e-07,
+      "max_relative_nonzero": 0.012242921785333033,
+      "reference_max": 0.010471309535205364,
+      "reference_l2": 0.04939808098133266,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.2.self_attn.lin_key.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 8.736969903111458e-07,
+      "max_relative_nonzero": 33.43819374369324,
+      "reference_max": 0.001482553780078888,
+      "reference_l2": 0.023114631741227354,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.2.self_attn.lin_key.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 6.437767297029495e-08,
+      "max_relative_nonzero": 0.04641386815900267,
+      "reference_max": 0.00023242057068273425,
+      "reference_l2": 0.0007482410854739409,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.2.self_attn.lin_query.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 6.213958840817213e-07,
+      "max_relative_nonzero": 12.672312233876124,
+      "reference_max": 0.0015572241973131895,
+      "reference_l2": 0.02505334193188872,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.2.self_attn.lin_query.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.499082256690599e-07,
+      "max_relative_nonzero": 0.12728277613800726,
+      "reference_max": 0.0004972952883690596,
+      "reference_l2": 0.0015822956708232212,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.2.self_attn.lin_value.weight": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 2.3399479687213898e-06,
+      "max_relative_nonzero": 4.046438857165636,
+      "reference_max": 0.015874318778514862,
+      "reference_l2": 0.3025666091392086,
+      "absolute_at_reference_zero": null,
+      "violations": 3
+    },
+    "backbone.tf_layers.2.self_attn.lin_value.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 8.800998330116272e-07,
+      "max_relative_nonzero": 0.01200318075267008,
+      "reference_max": 0.0057271867990493774,
+      "reference_l2": 0.01963287928164454,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.2.self_attn.lin_skip.weight": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 2.423301339149475e-06,
+      "max_relative_nonzero": 10.929940268790443,
+      "reference_max": 0.016412965953350067,
+      "reference_l2": 0.30359391875273195,
+      "absolute_at_reference_zero": null,
+      "violations": 3
+    },
+    "backbone.tf_layers.2.self_attn.lin_skip.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 8.807983249425888e-07,
+      "max_relative_nonzero": 0.01200309620414228,
+      "reference_max": 0.0057271867990493774,
+      "reference_l2": 0.019632879410488472,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.2.self_attn.e_add.weight": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 2.3892149329185486e-05,
+      "max_relative_nonzero": 0.06042293539424467,
+      "reference_max": 0.02354404143989086,
+      "reference_l2": 0.14076107078641198,
+      "absolute_at_reference_zero": null,
+      "violations": 182
+    },
+    "backbone.tf_layers.2.self_attn.e_add.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.2228265404701233e-06,
+      "max_relative_nonzero": 0.00026708347691019606,
+      "reference_max": 0.005465948022902012,
+      "reference_l2": 0.011481546145665333,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.2.self_attn.e_mul.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.2182863429188728e-06,
+      "max_relative_nonzero": 0.6593071992110454,
+      "reference_max": 0.0028584259562194347,
+      "reference_l2": 0.009613337043542019,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.2.self_attn.e_mul.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 3.756140358746052e-07,
+      "max_relative_nonzero": 0.010521505645183817,
+      "reference_max": 0.0007964588585309684,
+      "reference_l2": 0.001172795086155322,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.2.self_attn.y_e_mul.weight": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 2.6561319828033447e-06,
+      "max_relative_nonzero": 0.00896605626426844,
+      "reference_max": 0.005488816648721695,
+      "reference_l2": 0.059278190600917595,
+      "absolute_at_reference_zero": null,
+      "violations": 9
+    },
+    "backbone.tf_layers.2.self_attn.y_e_mul.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.1855736374855042e-06,
+      "max_relative_nonzero": 0.007074055758985986,
+      "reference_max": 0.0024447469040751457,
+      "reference_l2": 0.00523952598949229,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.2.self_attn.y_e_add.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.8478604033589363e-06,
+      "max_relative_nonzero": 0.005391092288029808,
+      "reference_max": 0.01142457127571106,
+      "reference_l2": 0.14569001776921006,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.2.self_attn.y_e_add.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 8.209608495235443e-07,
+      "max_relative_nonzero": 0.004383314776934828,
+      "reference_max": 0.005088566802442074,
+      "reference_l2": 0.012877360552751044,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.2.self_attn.y_x_mul.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.3001554179936647e-06,
+      "max_relative_nonzero": 0.01300621851667,
+      "reference_max": 0.009314808994531631,
+      "reference_l2": 0.14830592807827037,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.2.self_attn.y_x_mul.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 5.793990567326546e-07,
+      "max_relative_nonzero": 0.012011188543121816,
+      "reference_max": 0.004148866981267929,
+      "reference_l2": 0.013108577525053877,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.2.self_attn.y_x_add.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.048436388373375e-06,
+      "max_relative_nonzero": 0.012988545911459705,
+      "reference_max": 0.008016984909772873,
+      "reference_l2": 0.20024295881314674,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.2.self_attn.y_x_add.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 4.6868808567523956e-07,
+      "max_relative_nonzero": 0.011992933098001047,
+      "reference_max": 0.0035708071663975716,
+      "reference_l2": 0.017699227249138628,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.2.self_attn.y_y.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 4.313187673687935e-07,
+      "max_relative_nonzero": 0.018665179517216454,
+      "reference_max": 0.006611073389649391,
+      "reference_l2": 0.10134181289200761,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.2.self_attn.y_y.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.9028084352612495e-07,
+      "max_relative_nonzero": 0.010006314742052354,
+      "reference_max": 0.002944601932540536,
+      "reference_l2": 0.008957477448048536,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.2.self_attn.x_y.lin.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 6.831251084804535e-07,
+      "max_relative_nonzero": 50.84615384615385,
+      "reference_max": 0.010577232576906681,
+      "reference_l2": 0.26220540489624083,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.2.self_attn.x_y.lin.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.9028084352612495e-07,
+      "max_relative_nonzero": 0.010006314742052354,
+      "reference_max": 0.002944601932540536,
+      "reference_l2": 0.008957477448048536,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.2.self_attn.e_y.lin.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 7.099006325006485e-07,
+      "max_relative_nonzero": 0.013456614457546699,
+      "reference_max": 0.010987350717186928,
+      "reference_l2": 0.12975991843155676,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.2.self_attn.e_y.lin.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.9028084352612495e-07,
+      "max_relative_nonzero": 0.010006314742052354,
+      "reference_max": 0.002944601932540536,
+      "reference_l2": 0.008957477448048536,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.2.self_attn.y_out.0.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.019681803882122e-06,
+      "max_relative_nonzero": 0.052345401468069604,
+      "reference_max": 0.011488137766718864,
+      "reference_l2": 0.17155733095579728,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.2.self_attn.y_out.0.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 4.2791361920535564e-07,
+      "max_relative_nonzero": 0.0010908295312326462,
+      "reference_max": 0.004862618632614613,
+      "reference_l2": 0.016721911162118176,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.2.self_attn.y_out.2.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.0151416063308716e-06,
+      "max_relative_nonzero": 0.03404208502040531,
+      "reference_max": 0.018075257539749146,
+      "reference_l2": 0.1993697072216633,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.2.self_attn.y_out.2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 5.80446794629097e-07,
+      "max_relative_nonzero": 0.01197945378269035,
+      "reference_max": 0.01023341529071331,
+      "reference_l2": 0.0476076145413648,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.2.self_attn.x_out.weight": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 6.019021384418011e-06,
+      "max_relative_nonzero": 97.53443176386233,
+      "reference_max": 0.02748573198914528,
+      "reference_l2": 0.5809380722871279,
+      "absolute_at_reference_zero": null,
+      "violations": 64
+    },
+    "backbone.tf_layers.2.self_attn.x_out.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 7.986091077327728e-07,
+      "max_relative_nonzero": 0.07738664781994128,
+      "reference_max": 0.0061434246599674225,
+      "reference_l2": 0.03276146156103526,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.2.self_attn.e_out.weight": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 3.495544660836458e-06,
+      "max_relative_nonzero": 126.76659604519774,
+      "reference_max": 0.009105783887207508,
+      "reference_l2": 0.17506041779476228,
+      "absolute_at_reference_zero": null,
+      "violations": 35
+    },
+    "backbone.tf_layers.2.self_attn.e_out.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.3561511877924204e-06,
+      "max_relative_nonzero": 0.004427400821054523,
+      "reference_max": 0.008104570209980011,
+      "reference_l2": 0.016462366654078613,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.2.linX1.weight": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 8.833943866193295e-06,
+      "max_relative_nonzero": 37.525291828793776,
+      "reference_max": 0.011334262788295746,
+      "reference_l2": 0.2128621812156094,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 170
+    },
+    "backbone.tf_layers.2.linX1.bias": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 3.500579623505473e-06,
+      "max_relative_nonzero": 0.04574521031110365,
+      "reference_max": 0.004418868105858564,
+      "reference_l2": 0.013853407952788648,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 1
+    },
+    "backbone.tf_layers.2.linX2.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.6335397958755493e-06,
+      "max_relative_nonzero": 13.914405923107322,
+      "reference_max": 0.011373087763786316,
+      "reference_l2": 0.22845351587308474,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.2.linX2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 7.431954145431519e-07,
+      "max_relative_nonzero": 0.02566376161298675,
+      "reference_max": 0.00651612039655447,
+      "reference_l2": 0.037469599983852346,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.2.normX1.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.3113021850585938e-06,
+      "max_relative_nonzero": 0.012034686880361252,
+      "reference_max": 0.0069426363334059715,
+      "reference_l2": 0.03608117224808219,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.2.normX1.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 9.424984455108643e-07,
+      "max_relative_nonzero": 0.026315156809489138,
+      "reference_max": 0.007002664729952812,
+      "reference_l2": 0.03762448667561076,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.2.normX2.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.3541430234909058e-06,
+      "max_relative_nonzero": 0.06538172855639343,
+      "reference_max": 0.006793198175728321,
+      "reference_l2": 0.03506404910843794,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.2.normX2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 7.66245648264885e-07,
+      "max_relative_nonzero": 0.07480497899508043,
+      "reference_max": 0.006469735875725746,
+      "reference_l2": 0.03796729337256395,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.2.linE1.weight": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 8.333823643624783e-06,
+      "max_relative_nonzero": 1.623565238534462,
+      "reference_max": 0.008764946833252907,
+      "reference_l2": 0.07249050434397865,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 86
+    },
+    "backbone.tf_layers.2.linE1.bias": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 2.6941706892102957e-06,
+      "max_relative_nonzero": 0.012346470751476369,
+      "reference_max": 0.0029886390548199415,
+      "reference_l2": 0.008416346144287535,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 2
+    },
+    "backbone.tf_layers.2.linE2.weight": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 2.598157152533531e-06,
+      "max_relative_nonzero": 2.7515386307845215,
+      "reference_max": 0.006763458251953125,
+      "reference_l2": 0.057709623983682116,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 8
+    },
+    "backbone.tf_layers.2.linE2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 5.746260285377502e-07,
+      "max_relative_nonzero": 0.047096800334958604,
+      "reference_max": 0.005919376853853464,
+      "reference_l2": 0.014210671689274455,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.2.normE1.weight": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 3.3355318009853363e-06,
+      "max_relative_nonzero": 0.010335913820469222,
+      "reference_max": 0.007414919789880514,
+      "reference_l2": 0.019260735436559005,
+      "absolute_at_reference_zero": null,
+      "violations": 4
+    },
+    "backbone.tf_layers.2.normE1.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 8.819042704999447e-07,
+      "max_relative_nonzero": 0.1291865716912636,
+      "reference_max": 0.005628160201013088,
+      "reference_l2": 0.014537892148693062,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.2.normE2.weight": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 3.7276186048984528e-06,
+      "max_relative_nonzero": 0.0706671120153038,
+      "reference_max": 0.00758855976164341,
+      "reference_l2": 0.01842273057586856,
+      "absolute_at_reference_zero": null,
+      "violations": 3
+    },
+    "backbone.tf_layers.2.normE2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 6.719492375850677e-07,
+      "max_relative_nonzero": 0.03791158279367185,
+      "reference_max": 0.006339150480926037,
+      "reference_l2": 0.015197351217844646,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.2.lin_y1.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 5.343463271856308e-07,
+      "max_relative_nonzero": 0.0027772878858032504,
+      "reference_max": 0.01007839571684599,
+      "reference_l2": 0.20610724172453546,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.2.lin_y1.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.2258609533309937e-07,
+      "max_relative_nonzero": 0.0019885083370887787,
+      "reference_max": 0.004341065883636475,
+      "reference_l2": 0.018217572586906452,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.2.lin_y2.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 9.262766980100423e-07,
+      "max_relative_nonzero": 0.07829910960475239,
+      "reference_max": 0.016639143228530884,
+      "reference_l2": 0.28319754902456934,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.2.lin_y2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 6.258615030674264e-07,
+      "max_relative_nonzero": 0.07462700163516532,
+      "reference_max": 0.011241627857089043,
+      "reference_l2": 0.04562584542559284,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.2.norm_y1.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.0239891707897186e-06,
+      "max_relative_nonzero": 0.011505582806485715,
+      "reference_max": 0.0221625454723835,
+      "reference_l2": 0.04943966215373902,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.2.norm_y1.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 5.883630365133286e-07,
+      "max_relative_nonzero": 0.011499425883234651,
+      "reference_max": 0.010289270430803299,
+      "reference_l2": 0.047869765804507705,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.2.norm_y2.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.2452946975827217e-06,
+      "max_relative_nonzero": 0.10136842122565089,
+      "reference_max": 0.025488391518592834,
+      "reference_l2": 0.048595284088675465,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.2.norm_y2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 7.177586667239666e-07,
+      "max_relative_nonzero": 0.12862290104013233,
+      "reference_max": 0.011389883235096931,
+      "reference_l2": 0.047313410410155465,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.3.self_attn.lin_key.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 4.590983735397458e-07,
+      "max_relative_nonzero": 21.788530465949822,
+      "reference_max": 0.0014715366996824741,
+      "reference_l2": 0.027110331166280727,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.3.self_attn.lin_key.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 6.51489244773984e-08,
+      "max_relative_nonzero": 0.025226475791350973,
+      "reference_max": 0.0003712727047968656,
+      "reference_l2": 0.0010266824353602957,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.3.self_attn.lin_query.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 4.158646333962679e-07,
+      "max_relative_nonzero": 22.422500668866494,
+      "reference_max": 0.0012482209131121635,
+      "reference_l2": 0.025969033404504367,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.3.self_attn.lin_query.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.4819670468568802e-07,
+      "max_relative_nonzero": 0.11009207631750073,
+      "reference_max": 0.0003940653405152261,
+      "reference_l2": 0.0016723890784295374,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.3.self_attn.lin_value.weight": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 2.2137537598609924e-06,
+      "max_relative_nonzero": 28.674825174825173,
+      "reference_max": 0.01170651987195015,
+      "reference_l2": 0.32640484637497075,
+      "absolute_at_reference_zero": null,
+      "violations": 1
+    },
+    "backbone.tf_layers.3.self_attn.lin_value.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 6.174668669700623e-07,
+      "max_relative_nonzero": 0.005798651002220083,
+      "reference_max": 0.004565780982375145,
+      "reference_l2": 0.02164094133868831,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.3.self_attn.lin_skip.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.3345852494239807e-06,
+      "max_relative_nonzero": 1.6016367684114077,
+      "reference_max": 0.012271281331777573,
+      "reference_l2": 0.3317264480798488,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.3.self_attn.lin_skip.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 6.165355443954468e-07,
+      "max_relative_nonzero": 0.00579966170667331,
+      "reference_max": 0.004565780982375145,
+      "reference_l2": 0.02164094116725073,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.3.self_attn.e_add.weight": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 1.0832503903657198e-05,
+      "max_relative_nonzero": 0.21405210344898817,
+      "reference_max": 0.016609909012913704,
+      "reference_l2": 0.1124735180750019,
+      "absolute_at_reference_zero": null,
+      "violations": 164
+    },
+    "backbone.tf_layers.3.self_attn.e_add.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.0221265256404877e-06,
+      "max_relative_nonzero": 0.0014392484646262198,
+      "reference_max": 0.0064515299163758755,
+      "reference_l2": 0.00895107764209599,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.3.self_attn.e_mul.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 5.350448191165924e-07,
+      "max_relative_nonzero": 0.195373227096407,
+      "reference_max": 0.001520779449492693,
+      "reference_l2": 0.008142156328106241,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.3.self_attn.e_mul.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.9013532437384129e-07,
+      "max_relative_nonzero": 0.004586870128139936,
+      "reference_max": 0.0005329611012712121,
+      "reference_l2": 0.0009905625293948799,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.3.self_attn.y_e_mul.weight": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 2.7206260710954666e-06,
+      "max_relative_nonzero": 0.19445233498892261,
+      "reference_max": 0.008235101588070393,
+      "reference_l2": 0.07632156271788115,
+      "absolute_at_reference_zero": null,
+      "violations": 11
+    },
+    "backbone.tf_layers.3.self_attn.y_e_mul.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.0844087228178978e-06,
+      "max_relative_nonzero": 0.01719415193917749,
+      "reference_max": 0.0032431790605187416,
+      "reference_l2": 0.006745969301289954,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.3.self_attn.y_e_add.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.562759280204773e-06,
+      "max_relative_nonzero": 0.18800700035058793,
+      "reference_max": 0.013481127098202705,
+      "reference_l2": 0.16097607295954244,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.3.self_attn.y_e_add.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 5.830079317092896e-07,
+      "max_relative_nonzero": 0.009771594758927336,
+      "reference_max": 0.005309188738465309,
+      "reference_l2": 0.014228477796478399,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.3.self_attn.y_x_mul.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.7601996660232544e-06,
+      "max_relative_nonzero": 0.9550123160773923,
+      "reference_max": 0.009616956114768982,
+      "reference_l2": 0.1737119722311337,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.3.self_attn.y_x_mul.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 7.259659469127655e-07,
+      "max_relative_nonzero": 0.32216542416573074,
+      "reference_max": 0.003787382273003459,
+      "reference_l2": 0.015354188201047728,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.3.self_attn.y_x_add.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 9.462237358093262e-07,
+      "max_relative_nonzero": 33.86595394736842,
+      "reference_max": 0.008361682295799255,
+      "reference_l2": 0.21848232804073323,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.3.self_attn.y_x_add.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 3.62517312169075e-07,
+      "max_relative_nonzero": 0.005801134908676697,
+      "reference_max": 0.003293026704341173,
+      "reference_l2": 0.01931138508398526,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.3.self_attn.y_y.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.99128407984972e-07,
+      "max_relative_nonzero": 4.4501546656475055,
+      "reference_max": 0.006128991022706032,
+      "reference_l2": 0.10407132685172213,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.3.self_attn.y_y.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 8.166534826159477e-08,
+      "max_relative_nonzero": 0.08790021088957055,
+      "reference_max": 0.0024137417785823345,
+      "reference_l2": 0.009198737021717642,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.3.self_attn.x_y.lin.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.582091838121414e-07,
+      "max_relative_nonzero": 2.5818402629944233,
+      "reference_max": 0.007561895996332169,
+      "reference_l2": 0.27129386876137834,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.3.self_attn.x_y.lin.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 8.166534826159477e-08,
+      "max_relative_nonzero": 0.08790021088957055,
+      "reference_max": 0.0024137417785823345,
+      "reference_l2": 0.009198737021717642,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.3.self_attn.e_y.lin.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.0062940418720245e-06,
+      "max_relative_nonzero": 0.09316411212343771,
+      "reference_max": 0.00715305982157588,
+      "reference_l2": 0.13198325860294324,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.3.self_attn.e_y.lin.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 8.166534826159477e-08,
+      "max_relative_nonzero": 0.08790021088957055,
+      "reference_max": 0.0024137417785823345,
+      "reference_l2": 0.009198737021717642,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.3.self_attn.y_out.0.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 4.6659260988235474e-07,
+      "max_relative_nonzero": 0.12822028624766646,
+      "reference_max": 0.01315656304359436,
+      "reference_l2": 0.16190788207959872,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.3.self_attn.y_out.0.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.7927959561347961e-07,
+      "max_relative_nonzero": 0.0026195972887728255,
+      "reference_max": 0.005709133576601744,
+      "reference_l2": 0.016688201986707375,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.3.self_attn.y_out.2.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 6.575137376785278e-07,
+      "max_relative_nonzero": 0.02730628665264289,
+      "reference_max": 0.019378481432795525,
+      "reference_l2": 0.17239590129025933,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.3.self_attn.y_out.2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 3.7497375160455704e-07,
+      "max_relative_nonzero": 0.007447817361414485,
+      "reference_max": 0.012059628963470459,
+      "reference_l2": 0.04451901236779445,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.3.self_attn.x_out.weight": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 8.604372851550579e-06,
+      "max_relative_nonzero": 6.528560626890294,
+      "reference_max": 0.025901339948177338,
+      "reference_l2": 0.5895177072813472,
+      "absolute_at_reference_zero": null,
+      "violations": 59
+    },
+    "backbone.tf_layers.3.self_attn.x_out.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 6.596092134714127e-07,
+      "max_relative_nonzero": 0.07964402234255163,
+      "reference_max": 0.006469813175499439,
+      "reference_l2": 0.03419940957937842,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.3.self_attn.e_out.weight": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 2.8900685720145702e-06,
+      "max_relative_nonzero": 23.006194554909758,
+      "reference_max": 0.012928596697747707,
+      "reference_l2": 0.22406293787848114,
+      "absolute_at_reference_zero": null,
+      "violations": 291
+    },
+    "backbone.tf_layers.3.self_attn.e_out.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.1185184121131897e-06,
+      "max_relative_nonzero": 0.00991902059554932,
+      "reference_max": 0.011276796460151672,
+      "reference_l2": 0.020773516352034678,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.3.linX1.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.0887160897254944e-06,
+      "max_relative_nonzero": 3.6380459568496755,
+      "reference_max": 0.009495647624135017,
+      "reference_l2": 0.2500660353534493,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.3.linX1.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 3.4854747354984283e-07,
+      "max_relative_nonzero": 0.031898683944522506,
+      "reference_max": 0.0033994042314589024,
+      "reference_l2": 0.01629346497162759,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.3.linX2.weight": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 2.9705697670578957e-06,
+      "max_relative_nonzero": 57.31298374613003,
+      "reference_max": 0.010375702753663063,
+      "reference_l2": 0.24253462238498527,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 4
+    },
+    "backbone.tf_layers.3.linX2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 7.150520104914904e-07,
+      "max_relative_nonzero": 0.021597276992077474,
+      "reference_max": 0.007629413157701492,
+      "reference_l2": 0.03949973759660961,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.3.normX1.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.0225921869277954e-06,
+      "max_relative_nonzero": 0.07985623879324853,
+      "reference_max": 0.014898296445608139,
+      "reference_l2": 0.03922429718952597,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.3.normX1.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 7.731141522526741e-07,
+      "max_relative_nonzero": 0.02115336754170695,
+      "reference_max": 0.0076622311025857925,
+      "reference_l2": 0.04051220810572345,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.3.normX2.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 8.512288331985474e-07,
+      "max_relative_nonzero": 0.07387978328926173,
+      "reference_max": 0.014112918637692928,
+      "reference_l2": 0.04103894823973802,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.3.normX2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 7.264025043696165e-07,
+      "max_relative_nonzero": 0.037678613193152834,
+      "reference_max": 0.007932722568511963,
+      "reference_l2": 0.04057779271944524,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.3.linE1.weight": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 7.210299372673035e-06,
+      "max_relative_nonzero": 0.8601582827406765,
+      "reference_max": 0.020670942962169647,
+      "reference_l2": 0.09729882135391861,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 35
+    },
+    "backbone.tf_layers.3.linE1.bias": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 2.2328458726406097e-06,
+      "max_relative_nonzero": 0.005382191329515536,
+      "reference_max": 0.0064231641590595245,
+      "reference_l2": 0.011683061190794349,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 1
+    },
+    "backbone.tf_layers.3.linE2.weight": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 3.34298238158226e-06,
+      "max_relative_nonzero": 0.32538545547989206,
+      "reference_max": 0.008028268814086914,
+      "reference_l2": 0.06189451792610186,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 26
+    },
+    "backbone.tf_layers.3.linE2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 3.152526915073395e-07,
+      "max_relative_nonzero": 0.0015764256814230597,
+      "reference_max": 0.004938194993883371,
+      "reference_l2": 0.014735530232305394,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.3.normE1.weight": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 2.9765069484710693e-06,
+      "max_relative_nonzero": 0.014458376451938777,
+      "reference_max": 0.0071488977409899235,
+      "reference_l2": 0.020086963801520818,
+      "absolute_at_reference_zero": null,
+      "violations": 2
+    },
+    "backbone.tf_layers.3.normE1.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 6.654299795627594e-07,
+      "max_relative_nonzero": 0.027874581167244568,
+      "reference_max": 0.006061384454369545,
+      "reference_l2": 0.016385923091387037,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.3.normE2.weight": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 2.735760062932968e-06,
+      "max_relative_nonzero": 0.004018432793155915,
+      "reference_max": 0.006554785184562206,
+      "reference_l2": 0.01964985153892068,
+      "absolute_at_reference_zero": null,
+      "violations": 2
+    },
+    "backbone.tf_layers.3.normE2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 3.175809979438782e-07,
+      "max_relative_nonzero": 0.0014904481246923837,
+      "reference_max": 0.005395853891968727,
+      "reference_l2": 0.01571260917548901,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.3.lin_y1.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 4.0745362639427185e-07,
+      "max_relative_nonzero": 0.07857228102885816,
+      "reference_max": 0.010386748239398003,
+      "reference_l2": 0.18650900514316593,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.3.lin_y1.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.407461240887642e-07,
+      "max_relative_nonzero": 0.0011148866103882762,
+      "reference_max": 0.0038176155649125576,
+      "reference_l2": 0.01648530764056105,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.3.lin_y2.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 6.378395482897758e-07,
+      "max_relative_nonzero": 0.002462612961292882,
+      "reference_max": 0.019681544974446297,
+      "reference_l2": 0.28281040091594456,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.3.lin_y2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 3.62517312169075e-07,
+      "max_relative_nonzero": 0.0020563548304359442,
+      "reference_max": 0.011199523694813251,
+      "reference_l2": 0.04369026162446131,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.3.norm_y1.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 8.195638656616211e-07,
+      "max_relative_nonzero": 0.04313380910475352,
+      "reference_max": 0.024530168622732162,
+      "reference_l2": 0.04750085153635993,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.3.norm_y1.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 3.855675458908081e-07,
+      "max_relative_nonzero": 0.002531689084878303,
+      "reference_max": 0.01226034015417099,
+      "reference_l2": 0.04580325085848369,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.3.norm_y2.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 8.028000593185425e-07,
+      "max_relative_nonzero": 0.007116143571812111,
+      "reference_max": 0.02488817647099495,
+      "reference_l2": 0.04783835400566555,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.3.norm_y2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 3.8906000554561615e-07,
+      "max_relative_nonzero": 0.006910643768941133,
+      "reference_max": 0.011455916799604893,
+      "reference_l2": 0.04546790510183551,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.4.self_attn.lin_key.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 7.60774128139019e-07,
+      "max_relative_nonzero": 8.587191867153926,
+      "reference_max": 0.002200690098106861,
+      "reference_l2": 0.03231462232820166,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.4.self_attn.lin_key.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.930755726993084e-08,
+      "max_relative_nonzero": 0.013619726261399321,
+      "reference_max": 0.00036819506203755736,
+      "reference_l2": 0.0012013537771867627,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.4.self_attn.lin_query.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 6.329792086035013e-07,
+      "max_relative_nonzero": 64.82969649977846,
+      "reference_max": 0.0016449561808258295,
+      "reference_l2": 0.02950858237516568,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.4.self_attn.lin_query.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.1466257749125361e-07,
+      "max_relative_nonzero": 0.0163836655589512,
+      "reference_max": 0.000585815985687077,
+      "reference_l2": 0.0019182726788234453,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.4.self_attn.lin_value.weight": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 3.098830347880721e-06,
+      "max_relative_nonzero": 30.541101516638953,
+      "reference_max": 0.014906467869877815,
+      "reference_l2": 0.36175826791092336,
+      "absolute_at_reference_zero": null,
+      "violations": 14
+    },
+    "backbone.tf_layers.4.self_attn.lin_value.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 7.725320756435394e-07,
+      "max_relative_nonzero": 1.9198205168984663,
+      "reference_max": 0.00527043454349041,
+      "reference_l2": 0.023938444530688486,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.4.self_attn.lin_skip.weight": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 2.294778823852539e-06,
+      "max_relative_nonzero": 29.289097293593695,
+      "reference_max": 0.01434779167175293,
+      "reference_l2": 0.3668171726708985,
+      "absolute_at_reference_zero": null,
+      "violations": 1
+    },
+    "backbone.tf_layers.4.self_attn.lin_skip.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 7.727649062871933e-07,
+      "max_relative_nonzero": 1.9196792315279385,
+      "reference_max": 0.00527043454349041,
+      "reference_l2": 0.02393844428724714,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.4.self_attn.e_add.weight": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 3.02859116345644e-05,
+      "max_relative_nonzero": 0.19002867064171977,
+      "reference_max": 0.024930329993367195,
+      "reference_l2": 0.13752487482092982,
+      "absolute_at_reference_zero": null,
+      "violations": 98
+    },
+    "backbone.tf_layers.4.self_attn.e_add.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 4.7497451305389404e-07,
+      "max_relative_nonzero": 0.0001369840555003422,
+      "reference_max": 0.00901162251830101,
+      "reference_l2": 0.013406959229983372,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.4.self_attn.e_mul.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 7.736962288618088e-07,
+      "max_relative_nonzero": 0.058933523825531554,
+      "reference_max": 0.0019359651487320662,
+      "reference_l2": 0.009234416068958695,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.4.self_attn.e_mul.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.610613591969013e-07,
+      "max_relative_nonzero": 0.0007800445008993956,
+      "reference_max": 0.0007825283100828528,
+      "reference_l2": 0.0011349477761290552,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.4.self_attn.y_e_mul.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 3.282912075519562e-07,
+      "max_relative_nonzero": 0.008464778955133659,
+      "reference_max": 0.004468913655728102,
+      "reference_l2": 0.0533865810194582,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.4.self_attn.y_e_mul.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.2712553143501282e-07,
+      "max_relative_nonzero": 0.0012361919974578093,
+      "reference_max": 0.0017110214103013277,
+      "reference_l2": 0.004718775169142258,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.4.self_attn.y_e_add.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 7.217749953269958e-07,
+      "max_relative_nonzero": 0.009008389857918325,
+      "reference_max": 0.011015525087714195,
+      "reference_l2": 0.1497735751889977,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.4.self_attn.y_e_add.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.5192275643348694e-07,
+      "max_relative_nonzero": 0.00264957650463239,
+      "reference_max": 0.004217494744807482,
+      "reference_l2": 0.013238304832922869,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.4.self_attn.y_x_mul.weight": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 2.2604508558288217e-06,
+      "max_relative_nonzero": 0.025861159443418748,
+      "reference_max": 0.015688970685005188,
+      "reference_l2": 0.21248963019171266,
+      "absolute_at_reference_zero": null,
+      "violations": 3
+    },
+    "backbone.tf_layers.4.self_attn.y_x_mul.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 8.643255569040775e-07,
+      "max_relative_nonzero": 0.023196019916108125,
+      "reference_max": 0.006006848067045212,
+      "reference_l2": 0.018781700818249245,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.4.self_attn.y_x_add.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 9.676441550254822e-07,
+      "max_relative_nonzero": 65.22759158222915,
+      "reference_max": 0.010228144004940987,
+      "reference_l2": 0.23358156543704167,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.4.self_attn.y_x_add.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 3.6100391298532486e-07,
+      "max_relative_nonzero": 1.8786216833688145,
+      "reference_max": 0.0039160531014204025,
+      "reference_l2": 0.020645991187525286,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.4.self_attn.y_y.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 9.220093488693237e-08,
+      "max_relative_nonzero": 0.0074406181218947985,
+      "reference_max": 0.005235206801444292,
+      "reference_l2": 0.11160816537055009,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.4.self_attn.y_y.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.7939677238464355e-08,
+      "max_relative_nonzero": 0.00493597189873714,
+      "reference_max": 0.002004410605877638,
+      "reference_l2": 0.009864910426335485,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.4.self_attn.x_y.lin.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 9.592622518539429e-08,
+      "max_relative_nonzero": 3.3071371291098637,
+      "reference_max": 0.006110793445259333,
+      "reference_l2": 0.2894839141529223,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.4.self_attn.x_y.lin.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.7939677238464355e-08,
+      "max_relative_nonzero": 0.00493597189873714,
+      "reference_max": 0.002004410605877638,
+      "reference_l2": 0.009864910426335485,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.4.self_attn.e_y.lin.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 3.487803041934967e-07,
+      "max_relative_nonzero": 0.006256737669855919,
+      "reference_max": 0.00565335713326931,
+      "reference_l2": 0.13975221388580203,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.4.self_attn.e_y.lin.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.7939677238464355e-08,
+      "max_relative_nonzero": 0.00493597189873714,
+      "reference_max": 0.002004410605877638,
+      "reference_l2": 0.009864910426335485,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.4.self_attn.y_out.0.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.4586915969848633e-07,
+      "max_relative_nonzero": 0.007339558383861904,
+      "reference_max": 0.014454960823059082,
+      "reference_l2": 0.17834174458883992,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.4.self_attn.y_out.0.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 7.89295881986618e-08,
+      "max_relative_nonzero": 0.0046293321338302705,
+      "reference_max": 0.005142498761415482,
+      "reference_l2": 0.01623424936767224,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.4.self_attn.y_out.2.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.2095628082752228e-07,
+      "max_relative_nonzero": 0.0009517606513468809,
+      "reference_max": 0.014796431176364422,
+      "reference_l2": 0.17332088219865938,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.4.self_attn.y_out.2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.5308614820241928e-07,
+      "max_relative_nonzero": 0.0005556169055742322,
+      "reference_max": 0.010398071259260178,
+      "reference_l2": 0.04240751099752277,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.4.self_attn.x_out.weight": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 7.762806490063667e-06,
+      "max_relative_nonzero": 24.52766393442623,
+      "reference_max": 0.024126427248120308,
+      "reference_l2": 0.6307790414070993,
+      "absolute_at_reference_zero": null,
+      "violations": 43
+    },
+    "backbone.tf_layers.4.self_attn.x_out.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 4.859830369241536e-07,
+      "max_relative_nonzero": 0.008648854288695086,
+      "reference_max": 0.006856150925159454,
+      "reference_l2": 0.035142119076006104,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.4.self_attn.e_out.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.0114163160324097e-06,
+      "max_relative_nonzero": 2.922244094488189,
+      "reference_max": 0.013325984589755535,
+      "reference_l2": 0.21179714985122577,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.4.self_attn.e_out.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 6.137415766716003e-07,
+      "max_relative_nonzero": 0.002635418762953044,
+      "reference_max": 0.008124388754367828,
+      "reference_l2": 0.01853356864477778,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.4.linX1.weight": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 1.828465610742569e-05,
+      "max_relative_nonzero": 5.774437968507745,
+      "reference_max": 0.01531984843313694,
+      "reference_l2": 0.26697814964297956,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 309
+    },
+    "backbone.tf_layers.4.linX1.bias": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 5.998648703098297e-06,
+      "max_relative_nonzero": 0.020778109188942673,
+      "reference_max": 0.004986979532986879,
+      "reference_l2": 0.017021595870088127,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 2
+    },
+    "backbone.tf_layers.4.linX2.weight": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 3.0368828447535634e-06,
+      "max_relative_nonzero": 1.135976060052604,
+      "reference_max": 0.014945641160011292,
+      "reference_l2": 0.2705970072292072,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 9
+    },
+    "backbone.tf_layers.4.linX2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 7.427297532558441e-08,
+      "max_relative_nonzero": 0.005066574913916419,
+      "reference_max": 0.009052994661033154,
+      "reference_l2": 0.042723459532319194,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.4.normX1.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.0617077350616455e-06,
+      "max_relative_nonzero": 0.017381845373818185,
+      "reference_max": 0.01554282195866108,
+      "reference_l2": 0.04685149447888857,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.4.normX1.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 5.66840753890574e-07,
+      "max_relative_nonzero": 0.017647665984345733,
+      "reference_max": 0.00825495459139347,
+      "reference_l2": 0.04241671293874427,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.4.normX2.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.6605918062850833e-07,
+      "max_relative_nonzero": 0.03879396892143581,
+      "reference_max": 0.0165230892598629,
+      "reference_l2": 0.049787759231816685,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.4.normX2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 7.310882210731506e-08,
+      "max_relative_nonzero": 0.0008571523754234562,
+      "reference_max": 0.009368452243506908,
+      "reference_l2": 0.044960237308665205,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.4.linE1.weight": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 2.741115167737007e-06,
+      "max_relative_nonzero": 0.026676709615872287,
+      "reference_max": 0.014657880179584026,
+      "reference_l2": 0.08016821890355574,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 6
+    },
+    "backbone.tf_layers.4.linE1.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.1142110452055931e-06,
+      "max_relative_nonzero": 0.003229250575745642,
+      "reference_max": 0.005775792989879847,
+      "reference_l2": 0.009729893080321156,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.4.linE2.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.3399479687213898e-07,
+      "max_relative_nonzero": 0.06079360328870468,
+      "reference_max": 0.006820854730904102,
+      "reference_l2": 0.06382125799869585,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.4.linE2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.825392246246338e-07,
+      "max_relative_nonzero": 0.0021213369424502764,
+      "reference_max": 0.0052209412679076195,
+      "reference_l2": 0.016614524153554862,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.4.normE1.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 3.330642357468605e-07,
+      "max_relative_nonzero": 0.0035690526907473947,
+      "reference_max": 0.005845034494996071,
+      "reference_l2": 0.017016003296617437,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.4.normE1.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 3.096647560596466e-07,
+      "max_relative_nonzero": 0.002093187381381239,
+      "reference_max": 0.005144896451383829,
+      "reference_l2": 0.01627793672005992,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.4.normE2.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.9848888516426086e-07,
+      "max_relative_nonzero": 0.0023778315389881136,
+      "reference_max": 0.006312369368970394,
+      "reference_l2": 0.017314473444281293,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.4.normE2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.9790604710578918e-07,
+      "max_relative_nonzero": 0.0017369494195251948,
+      "reference_max": 0.005776007194072008,
+      "reference_l2": 0.01795543878386914,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.4.lin_y1.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.4924444258213043e-07,
+      "max_relative_nonzero": 0.22484914069807965,
+      "reference_max": 0.0128172030672431,
+      "reference_l2": 0.1994702924942597,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.4.lin_y1.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 5.3551048040390015e-08,
+      "max_relative_nonzero": 0.012552563582936467,
+      "reference_max": 0.004929115064442158,
+      "reference_l2": 0.01763094156260426,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.4.lin_y2.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 3.2188836485147476e-07,
+      "max_relative_nonzero": 0.02401039732471355,
+      "reference_max": 0.01843535155057907,
+      "reference_l2": 0.30171028549355655,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.4.lin_y2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.698499545454979e-07,
+      "max_relative_nonzero": 0.009516784699280082,
+      "reference_max": 0.00988757610321045,
+      "reference_l2": 0.04390158211843018,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.4.norm_y1.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 3.334134817123413e-07,
+      "max_relative_nonzero": 0.0007971351938507111,
+      "reference_max": 0.023636847734451294,
+      "reference_l2": 0.04890905893106323,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.4.norm_y1.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.6496051102876663e-07,
+      "max_relative_nonzero": 0.00017910390680596494,
+      "reference_max": 0.011255864053964615,
+      "reference_l2": 0.045349997703772495,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.4.norm_y2.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 3.6763958632946014e-07,
+      "max_relative_nonzero": 0.0008093374947111053,
+      "reference_max": 0.023051224648952484,
+      "reference_l2": 0.04934004087107927,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.4.norm_y2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.7712591215968132e-07,
+      "max_relative_nonzero": 0.0006596522023815743,
+      "reference_max": 0.009790395386517048,
+      "reference_l2": 0.04418776052797397,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.self_attn.lin_key.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 9.848736226558685e-08,
+      "max_relative_nonzero": 6.455856465809072,
+      "reference_max": 0.0016275381203740835,
+      "reference_l2": 0.03663685462834554,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.self_attn.lin_key.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.7561327442526817e-08,
+      "max_relative_nonzero": 0.09777826111760847,
+      "reference_max": 0.00041353286360390484,
+      "reference_l2": 0.0015854571045118946,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.self_attn.lin_query.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.461012288928032e-07,
+      "max_relative_nonzero": 23.55176689398636,
+      "reference_max": 0.001437696861103177,
+      "reference_l2": 0.03176473534588781,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.self_attn.lin_query.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 4.484900273382664e-08,
+      "max_relative_nonzero": 0.13859808681314367,
+      "reference_max": 0.0004430321278050542,
+      "reference_l2": 0.0020235040045054518,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.self_attn.lin_value.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.7194619178771973e-07,
+      "max_relative_nonzero": 2.315402223675605,
+      "reference_max": 0.029278084635734558,
+      "reference_l2": 0.425146535438776,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.self_attn.lin_value.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 6.938353180885315e-08,
+      "max_relative_nonzero": 0.0009505807406454104,
+      "reference_max": 0.009270047768950462,
+      "reference_l2": 0.027777477906458913,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.self_attn.lin_skip.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 3.003515303134918e-07,
+      "max_relative_nonzero": 0.560309131447922,
+      "reference_max": 0.029007047414779663,
+      "reference_l2": 0.43075501957430407,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.self_attn.lin_skip.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 6.984919309616089e-08,
+      "max_relative_nonzero": 0.000949456178141273,
+      "reference_max": 0.009270047768950462,
+      "reference_l2": 0.027777478028595756,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.self_attn.e_add.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 7.702037692070007e-07,
+      "max_relative_nonzero": 0.014777398350324206,
+      "reference_max": 0.02365240827202797,
+      "reference_l2": 0.11468722271728507,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.self_attn.e_add.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.952292561531067e-07,
+      "max_relative_nonzero": 0.00011240045165262187,
+      "reference_max": 0.006972928531467915,
+      "reference_l2": 0.010734606889246838,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.self_attn.e_mul.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 5.661422619596124e-08,
+      "max_relative_nonzero": 0.023781459583526888,
+      "reference_max": 0.0016208556480705738,
+      "reference_l2": 0.007215580302172436,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.self_attn.e_mul.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.9703293219208717e-08,
+      "max_relative_nonzero": 0.0007022215145839325,
+      "reference_max": 0.0006124550709500909,
+      "reference_l2": 0.0008958629689583835,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.self_attn.y_e_mul.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 3.1315721571445465e-07,
+      "max_relative_nonzero": 0.008120966377546905,
+      "reference_max": 0.007647151127457619,
+      "reference_l2": 0.08209169573609132,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.self_attn.y_e_mul.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.0302755981683731e-07,
+      "max_relative_nonzero": 0.006118331024862571,
+      "reference_max": 0.002558588981628418,
+      "reference_l2": 0.00725599179963019,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.self_attn.y_e_add.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 5.029141902923584e-07,
+      "max_relative_nonzero": 0.020320464809233198,
+      "reference_max": 0.015998534858226776,
+      "reference_l2": 0.20389982781178362,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.self_attn.y_e_add.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.62515789270401e-07,
+      "max_relative_nonzero": 0.018868064048082313,
+      "reference_max": 0.005352816544473171,
+      "reference_l2": 0.018022474387120017,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.self_attn.y_x_mul.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.169981598854065e-07,
+      "max_relative_nonzero": 0.007278683085166518,
+      "reference_max": 0.0172116756439209,
+      "reference_l2": 0.20541185154857095,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.self_attn.y_x_mul.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 6.033224053680897e-08,
+      "max_relative_nonzero": 0.0060071752017608684,
+      "reference_max": 0.00575872790068388,
+      "reference_l2": 0.018156120345461484,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.self_attn.y_x_add.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.310836523771286e-07,
+      "max_relative_nonzero": 0.0015474205279314547,
+      "reference_max": 0.013698523864150047,
+      "reference_l2": 0.260709319625606,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.self_attn.y_x_add.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 3.14321368932724e-08,
+      "max_relative_nonzero": 0.0009590498422969906,
+      "reference_max": 0.004583279136568308,
+      "reference_l2": 0.02304380087755523,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.self_attn.y_y.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 8.544884622097015e-08,
+      "max_relative_nonzero": 0.0012569368163617514,
+      "reference_max": 0.008945055305957794,
+      "reference_l2": 0.11543641310309359,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.self_attn.y_y.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.223532646894455e-08,
+      "max_relative_nonzero": 0.0009563182676319741,
+      "reference_max": 0.00299285352230072,
+      "reference_l2": 0.0102032935571242,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.self_attn.x_y.lin.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 8.312053978443146e-08,
+      "max_relative_nonzero": 0.005560316992515094,
+      "reference_max": 0.011369725689291954,
+      "reference_l2": 0.29564183678589895,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.self_attn.x_y.lin.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.223532646894455e-08,
+      "max_relative_nonzero": 0.0009563182676319741,
+      "reference_max": 0.00299285352230072,
+      "reference_l2": 0.0102032935571242,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.self_attn.e_y.lin.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.384185791015625e-07,
+      "max_relative_nonzero": 0.0017084614191483236,
+      "reference_max": 0.009137085638940334,
+      "reference_l2": 0.14456739305115363,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.self_attn.e_y.lin.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.223532646894455e-08,
+      "max_relative_nonzero": 0.0009563182676319741,
+      "reference_max": 0.00299285352230072,
+      "reference_l2": 0.0102032935571242,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.self_attn.y_out.0.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.207234501838684e-07,
+      "max_relative_nonzero": 0.0020252694500676894,
+      "reference_max": 0.01153083611279726,
+      "reference_l2": 0.19529227915459454,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.self_attn.y_out.0.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 4.156026989221573e-08,
+      "max_relative_nonzero": 0.0019037365753748392,
+      "reference_max": 0.004656183999031782,
+      "reference_l2": 0.01734937898602585,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.self_attn.y_out.2.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.1047890186309814e-07,
+      "max_relative_nonzero": 0.022231438730886757,
+      "reference_max": 0.019759109243750572,
+      "reference_l2": 0.21311426187776256,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.self_attn.y_out.2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 7.82310962677002e-08,
+      "max_relative_nonzero": 0.0011308251621169217,
+      "reference_max": 0.011600714176893234,
+      "reference_l2": 0.04090989317095883,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.self_attn.x_out.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.0812655091285706e-06,
+      "max_relative_nonzero": 1.9965784671532847,
+      "reference_max": 0.03328297287225723,
+      "reference_l2": 0.7082952033421446,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.self_attn.x_out.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 5.4249539971351624e-08,
+      "max_relative_nonzero": 0.0021812306983907716,
+      "reference_max": 0.008494792506098747,
+      "reference_l2": 0.04077950037490961,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.self_attn.e_out.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 5.08967787027359e-07,
+      "max_relative_nonzero": 0.4034129260884239,
+      "reference_max": 0.007439481094479561,
+      "reference_l2": 0.19351813433558768,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.self_attn.e_out.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.314336597919464e-07,
+      "max_relative_nonzero": 0.016932924616441847,
+      "reference_max": 0.005678796675056219,
+      "reference_l2": 0.01753038749395227,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.linX1.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.8230639398097992e-07,
+      "max_relative_nonzero": 0.8421052631578947,
+      "reference_max": 0.015357326716184616,
+      "reference_l2": 0.294463570023693,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.linX1.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 5.427864380180836e-08,
+      "max_relative_nonzero": 0.0016633590548952792,
+      "reference_max": 0.00468423729762435,
+      "reference_l2": 0.0188061034930749,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.linX2.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 5.89730916544795e-07,
+      "max_relative_nonzero": 0.3325749901973598,
+      "reference_max": 0.01900734007358551,
+      "reference_l2": 0.3175085580389628,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.linX2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 5.960464477539063e-08,
+      "max_relative_nonzero": 0.001194317004813026,
+      "reference_max": 0.010553300380706787,
+      "reference_l2": 0.04857064551881406,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.normX1.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 4.035246092826128e-07,
+      "max_relative_nonzero": 0.0013525022949457,
+      "reference_max": 0.018662244081497192,
+      "reference_l2": 0.05412292804722177,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.normX1.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 6.309710443019867e-08,
+      "max_relative_nonzero": 0.0005640424428144854,
+      "reference_max": 0.010236888192594051,
+      "reference_l2": 0.04889417051009173,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.normX2.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.9898365028202534e-07,
+      "max_relative_nonzero": 0.0015544315358390949,
+      "reference_max": 0.01781853288412094,
+      "reference_l2": 0.05399430195796427,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.normX2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 6.239861249923706e-08,
+      "max_relative_nonzero": 0.0009170959253445499,
+      "reference_max": 0.010941173881292343,
+      "reference_l2": 0.04964075649476711,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.linE1.weight": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 4.45009209215641e-06,
+      "max_relative_nonzero": 0.19658777312936315,
+      "reference_max": 0.01328320149332285,
+      "reference_l2": 0.07747866147853444,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 10
+    },
+    "backbone.tf_layers.5.linE1.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.6260892152786255e-06,
+      "max_relative_nonzero": 0.0017174643301544833,
+      "reference_max": 0.005248500034213066,
+      "reference_l2": 0.009624727611329643,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.linE2.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.5564728528261185e-07,
+      "max_relative_nonzero": 0.5341230909274806,
+      "reference_max": 0.009518742561340332,
+      "reference_l2": 0.06735759471592577,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.linE2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 4.4441549107432365e-08,
+      "max_relative_nonzero": 0.00016227578817100177,
+      "reference_max": 0.006971446331590414,
+      "reference_l2": 0.022716107314815288,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.normE1.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 3.012828528881073e-07,
+      "max_relative_nonzero": 0.0022356247816757704,
+      "reference_max": 0.006933080032467842,
+      "reference_l2": 0.019577500894446025,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.normE1.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.3283064365386963e-07,
+      "max_relative_nonzero": 0.01426100820126194,
+      "reference_max": 0.006990858353674412,
+      "reference_l2": 0.023220068369166635,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.normE2.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.4458782970905304e-07,
+      "max_relative_nonzero": 0.0002311461892845794,
+      "reference_max": 0.008362230844795704,
+      "reference_l2": 0.021988088635766463,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.normE2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 4.7264620661735535e-08,
+      "max_relative_nonzero": 0.00013219976905987245,
+      "reference_max": 0.007128552068024874,
+      "reference_l2": 0.023119977757082657,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.lin_y1.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.1132578947581351e-07,
+      "max_relative_nonzero": 0.011621525951461547,
+      "reference_max": 0.012695146724581718,
+      "reference_l2": 0.18546973792489616,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.lin_y1.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 3.119930624961853e-08,
+      "max_relative_nonzero": 0.0042665299991497645,
+      "reference_max": 0.004040613304823637,
+      "reference_l2": 0.01639345577936922,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.lin_y2.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.7194619178771973e-07,
+      "max_relative_nonzero": 0.0030701982712647725,
+      "reference_max": 0.0200129933655262,
+      "reference_l2": 0.27891335603312145,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.lin_y2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 8.195638656616211e-08,
+      "max_relative_nonzero": 0.0006890869645639345,
+      "reference_max": 0.01246135588735342,
+      "reference_l2": 0.042806815872977855,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.norm_y1.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.3655593395233154e-07,
+      "max_relative_nonzero": 0.006490335896930539,
+      "reference_max": 0.017537780106067657,
+      "reference_l2": 0.04394254600208848,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.norm_y1.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 8.12578946352005e-08,
+      "max_relative_nonzero": 0.0019888996947372206,
+      "reference_max": 0.012377509847283363,
+      "reference_l2": 0.043591577207646545,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.norm_y2.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.682209014892578e-07,
+      "max_relative_nonzero": 0.0005872121880514129,
+      "reference_max": 0.015216907486319542,
+      "reference_l2": 0.044307279994124434,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.5.norm_y2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 8.754432201385498e-08,
+      "max_relative_nonzero": 0.00031803980970864594,
+      "reference_max": 0.01246713474392891,
+      "reference_l2": 0.04268182876037851,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.self_attn.lin_key.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 3.66999302059412e-08,
+      "max_relative_nonzero": 72.93832599118943,
+      "reference_max": 0.0014244860503822565,
+      "reference_l2": 0.02497269696368098,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.self_attn.lin_key.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 5.704350769519806e-09,
+      "max_relative_nonzero": 0.003684672015882207,
+      "reference_max": 0.0004539140500128269,
+      "reference_l2": 0.001375273213750572,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.self_attn.lin_query.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 3.232707967981696e-08,
+      "max_relative_nonzero": 131.21425922874093,
+      "reference_max": 0.0024801145773380995,
+      "reference_l2": 0.02673282136268196,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.self_attn.lin_query.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.0466465028002858e-08,
+      "max_relative_nonzero": 0.027922341196253978,
+      "reference_max": 0.0007799553568474948,
+      "reference_l2": 0.0017512201847428598,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.self_attn.lin_value.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.872839104384184e-07,
+      "max_relative_nonzero": 4.605658567774936,
+      "reference_max": 0.025948092341423035,
+      "reference_l2": 0.43310153532856993,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.self_attn.lin_value.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 5.3783878684043884e-08,
+      "max_relative_nonzero": 0.0018381027047062318,
+      "reference_max": 0.008221063762903214,
+      "reference_l2": 0.0279801321645965,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.self_attn.lin_skip.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 3.152526915073395e-07,
+      "max_relative_nonzero": 1.0600545950864422,
+      "reference_max": 0.026228593662381172,
+      "reference_l2": 0.4391096582927807,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.self_attn.lin_skip.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 5.3551048040390015e-08,
+      "max_relative_nonzero": 0.0018411825490986919,
+      "reference_max": 0.008221063762903214,
+      "reference_l2": 0.027980132145070426,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.self_attn.e_add.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 8.819624781608582e-07,
+      "max_relative_nonzero": 0.009810657060364696,
+      "reference_max": 0.023992985486984253,
+      "reference_l2": 0.11950460680145865,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.self_attn.e_add.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 4.249159246683121e-08,
+      "max_relative_nonzero": 2.491604657566826e-05,
+      "reference_max": 0.008091546595096588,
+      "reference_l2": 0.014093638692864266,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.self_attn.e_mul.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.468004822731018e-08,
+      "max_relative_nonzero": 0.028466764247303274,
+      "reference_max": 0.0012936274288222194,
+      "reference_l2": 0.007013501702375393,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.self_attn.e_mul.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 8.32369551062584e-09,
+      "max_relative_nonzero": 0.0001212170971782316,
+      "reference_max": 0.00048429431626573205,
+      "reference_l2": 0.0008665940972273717,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.self_attn.y_e_mul.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 9.825453162193298e-08,
+      "max_relative_nonzero": 0.0007816828055716768,
+      "reference_max": 0.01075497642159462,
+      "reference_l2": 0.08690480373409043,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.self_attn.y_e_mul.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.444721758365631e-08,
+      "max_relative_nonzero": 0.00020983433782751176,
+      "reference_max": 0.0034279348328709602,
+      "reference_l2": 0.007681419761174463,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.self_attn.y_e_add.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.3189932107925415e-07,
+      "max_relative_nonzero": 0.0007190798898191031,
+      "reference_max": 0.023229513317346573,
+      "reference_l2": 0.2567295694487565,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.self_attn.y_e_add.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 3.457535058259964e-08,
+      "max_relative_nonzero": 0.0001657102762191382,
+      "reference_max": 0.00740394601598382,
+      "reference_l2": 0.022692043808683938,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.self_attn.y_x_mul.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 3.764871507883072e-07,
+      "max_relative_nonzero": 0.004837635176127129,
+      "reference_max": 0.018341269344091415,
+      "reference_l2": 0.21796564629745682,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.self_attn.y_x_mul.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.227017492055893e-07,
+      "max_relative_nonzero": 0.004436166630661596,
+      "reference_max": 0.0058459145948290825,
+      "reference_l2": 0.019265743115402845,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.self_attn.y_x_add.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.3597309589385986e-07,
+      "max_relative_nonzero": 0.0025592822501715896,
+      "reference_max": 0.01504598744213581,
+      "reference_l2": 0.26739703108532525,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.self_attn.y_x_add.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.7706846594810486e-08,
+      "max_relative_nonzero": 0.0018898864967825545,
+      "reference_max": 0.004795609973371029,
+      "reference_l2": 0.02363492871163774,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.self_attn.y_y.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 6.495974957942963e-08,
+      "max_relative_nonzero": 0.0009347453344373955,
+      "reference_max": 0.006603202782571316,
+      "reference_l2": 0.0965902796525605,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.self_attn.y_y.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.4784745872020721e-08,
+      "max_relative_nonzero": 0.000358410181149103,
+      "reference_max": 0.0021046376787126064,
+      "reference_l2": 0.008537508299342125,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.self_attn.x_y.lin.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 6.472691893577576e-08,
+      "max_relative_nonzero": 0.1343771455864354,
+      "reference_max": 0.007545558735728264,
+      "reference_l2": 0.24757111771514428,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.self_attn.x_y.lin.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.4784745872020721e-08,
+      "max_relative_nonzero": 0.000358410181149103,
+      "reference_max": 0.0021046376787126064,
+      "reference_l2": 0.008537508299342125,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.self_attn.e_y.lin.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.9383227229118347e-07,
+      "max_relative_nonzero": 0.0019431683485503764,
+      "reference_max": 0.006010562181472778,
+      "reference_l2": 0.12062381779331219,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.self_attn.e_y.lin.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.4784745872020721e-08,
+      "max_relative_nonzero": 0.000358410181149103,
+      "reference_max": 0.0021046376787126064,
+      "reference_l2": 0.008537508299342125,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.self_attn.y_out.0.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.4808028936386108e-07,
+      "max_relative_nonzero": 0.004970691432052011,
+      "reference_max": 0.018890835344791412,
+      "reference_l2": 0.1578468437131313,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.self_attn.y_out.0.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.7474015951156616e-08,
+      "max_relative_nonzero": 0.00014276289703839484,
+      "reference_max": 0.005139164626598358,
+      "reference_l2": 0.015074557672486137,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.self_attn.y_out.2.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.9883736968040466e-07,
+      "max_relative_nonzero": 0.0014976965489251282,
+      "reference_max": 0.015365848317742348,
+      "reference_l2": 0.18506162482592065,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.self_attn.y_out.2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 7.636845111846924e-08,
+      "max_relative_nonzero": 0.0003574939311598475,
+      "reference_max": 0.0104546919465065,
+      "reference_l2": 0.03620595037599243,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.self_attn.x_out.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.4174438547343016e-06,
+      "max_relative_nonzero": 0.6759394354454502,
+      "reference_max": 0.029817625880241394,
+      "reference_l2": 0.7217259869733946,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.self_attn.x_out.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 5.2852556109428406e-08,
+      "max_relative_nonzero": 0.0009676740550346268,
+      "reference_max": 0.008632523007690907,
+      "reference_l2": 0.04143124562793028,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.self_attn.e_out.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.6391277313232422e-07,
+      "max_relative_nonzero": 0.06393059726393059,
+      "reference_max": 0.014235338196158409,
+      "reference_l2": 0.24917532503866796,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.self_attn.e_out.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 7.497146725654602e-08,
+      "max_relative_nonzero": 0.0007968324615161564,
+      "reference_max": 0.010092878714203835,
+      "reference_l2": 0.024739950019033032,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.linX1.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.3795291781425476e-07,
+      "max_relative_nonzero": 0.739013617705791,
+      "reference_max": 0.01199862640351057,
+      "reference_l2": 0.2914885101589803,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.linX1.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 7.648486644029617e-08,
+      "max_relative_nonzero": 0.023636750581822425,
+      "reference_max": 0.004565882496535778,
+      "reference_l2": 0.018555242525430365,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.linX2.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 5.702604539692402e-07,
+      "max_relative_nonzero": 3.7965894702813374,
+      "reference_max": 0.011479717679321766,
+      "reference_l2": 0.2752447935845696,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.linX2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 4.6100467443466187e-08,
+      "max_relative_nonzero": 0.0022673545034525506,
+      "reference_max": 0.009431108832359314,
+      "reference_l2": 0.04505682612522197,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.normX1.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.5890767574310303e-07,
+      "max_relative_nonzero": 0.0014263010883873246,
+      "reference_max": 0.014397375285625458,
+      "reference_l2": 0.04984253943870265,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.normX1.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 6.332993507385254e-08,
+      "max_relative_nonzero": 0.0003026072641882459,
+      "reference_max": 0.009800776839256287,
+      "reference_l2": 0.04730438029594462,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.normX2.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.3329630494117737e-07,
+      "max_relative_nonzero": 0.00229415737770386,
+      "reference_max": 0.014420867897570133,
+      "reference_l2": 0.047148123488492025,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.normX2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 4.6333298087120056e-08,
+      "max_relative_nonzero": 0.0004346128599070709,
+      "reference_max": 0.009774629957973957,
+      "reference_l2": 0.0463593963736159,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.linE1.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 4.7101639211177826e-07,
+      "max_relative_nonzero": 0.036023462656213714,
+      "reference_max": 0.012036148458719254,
+      "reference_l2": 0.09591277886868323,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.linE1.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.5797559171915054e-07,
+      "max_relative_nonzero": 0.00015583221291847897,
+      "reference_max": 0.00438037421554327,
+      "reference_l2": 0.01188771460962843,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.linE2.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.0477378964424133e-07,
+      "max_relative_nonzero": 0.04317472510191491,
+      "reference_max": 0.01070456113666296,
+      "reference_l2": 0.09045201789107084,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.linE2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 3.073364496231079e-08,
+      "max_relative_nonzero": 0.004334888735467914,
+      "reference_max": 0.00869850255548954,
+      "reference_l2": 0.02676400606419021,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.normE1.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.457519829273224e-07,
+      "max_relative_nonzero": 0.01398988212582879,
+      "reference_max": 0.009987849742174149,
+      "reference_l2": 0.025974946874685087,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.normE1.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 5.8673322200775146e-08,
+      "max_relative_nonzero": 0.00021154085221123013,
+      "reference_max": 0.009008368477225304,
+      "reference_l2": 0.027903766272098816,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.normE2.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.1594966053962708e-07,
+      "max_relative_nonzero": 0.004522368404802486,
+      "reference_max": 0.009388560429215431,
+      "reference_l2": 0.025826056045174593,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.normE2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 4.6100467443466187e-08,
+      "max_relative_nonzero": 0.00026398478563078415,
+      "reference_max": 0.008859722875058651,
+      "reference_l2": 0.027699789341492604,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.lin_y1.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.0617077350616455e-07,
+      "max_relative_nonzero": 0.004588728744394242,
+      "reference_max": 0.009975843131542206,
+      "reference_l2": 0.15408053638812597,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.lin_y1.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.6047928258776665e-08,
+      "max_relative_nonzero": 0.0006950974668425556,
+      "reference_max": 0.0034928738605231047,
+      "reference_l2": 0.013619005752303171,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.lin_y2.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.6577541828155518e-07,
+      "max_relative_nonzero": 0.007296636533379393,
+      "reference_max": 0.01516115665435791,
+      "reference_l2": 0.23834966935381793,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.lin_y2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 7.217749953269958e-08,
+      "max_relative_nonzero": 0.0011279977623886064,
+      "reference_max": 0.009991828352212906,
+      "reference_l2": 0.03729536512133748,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.norm_y1.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.6298145055770874e-07,
+      "max_relative_nonzero": 0.0020638921781059257,
+      "reference_max": 0.014491548761725426,
+      "reference_l2": 0.03822340780427175,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.norm_y1.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 7.869675755500793e-08,
+      "max_relative_nonzero": 0.0003859718516443569,
+      "reference_max": 0.011045446619391441,
+      "reference_l2": 0.03836912303104908,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.norm_y2.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.7508864402770996e-07,
+      "max_relative_nonzero": 0.008273109833800018,
+      "reference_max": 0.01217554323375225,
+      "reference_l2": 0.036475751279746976,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.6.norm_y2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 6.705522537231445e-08,
+      "max_relative_nonzero": 0.0004755595704558203,
+      "reference_max": 0.01031515933573246,
+      "reference_l2": 0.03769782288483618,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.7.self_attn.lin_key.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.7750502340495586e-08,
+      "max_relative_nonzero": 0.3880900180551973,
+      "reference_max": 0.002652685157954693,
+      "reference_l2": 0.03478482702852626,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.7.self_attn.lin_key.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 4.889443516731262e-09,
+      "max_relative_nonzero": 0.0033403383456543922,
+      "reference_max": 0.0009808375034481287,
+      "reference_l2": 0.0022525352349718015,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.7.self_attn.lin_query.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.066371962428093e-08,
+      "max_relative_nonzero": 1.6370254810192408,
+      "reference_max": 0.0015449143247678876,
+      "reference_l2": 0.02978317626650792,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.7.self_attn.lin_query.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 7.62520357966423e-09,
+      "max_relative_nonzero": 0.0029986514184280823,
+      "reference_max": 0.0005626133643090725,
+      "reference_l2": 0.001957217793572892,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.7.self_attn.lin_value.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.454034984111786e-07,
+      "max_relative_nonzero": 0.5231346202517083,
+      "reference_max": 0.016978265717625618,
+      "reference_l2": 0.4163872759624879,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.7.self_attn.lin_value.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 4.109460860490799e-08,
+      "max_relative_nonzero": 0.009476050899930548,
+      "reference_max": 0.0058131227269768715,
+      "reference_l2": 0.026731786699428006,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.7.self_attn.lin_skip.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.3166649043560028e-07,
+      "max_relative_nonzero": 0.2747462387886971,
+      "reference_max": 0.015697425231337547,
+      "reference_l2": 0.4209814948574664,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.7.self_attn.lin_skip.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 4.109460860490799e-08,
+      "max_relative_nonzero": 0.009452507916328236,
+      "reference_max": 0.0058131227269768715,
+      "reference_l2": 0.02673178664893292,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.7.self_attn.e_add.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 6.183981895446777e-07,
+      "max_relative_nonzero": 0.0026823687229876035,
+      "reference_max": 0.03891861438751221,
+      "reference_l2": 0.1423615192897424,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.7.self_attn.e_add.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.0104849934577942e-07,
+      "max_relative_nonzero": 0.00028933904312819774,
+      "reference_max": 0.012087639421224594,
+      "reference_l2": 0.015762743993909242,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.7.self_attn.e_mul.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 3.64379957318306e-08,
+      "max_relative_nonzero": 0.020133596003961588,
+      "reference_max": 0.001970655284821987,
+      "reference_l2": 0.008201045500706067,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.7.self_attn.e_mul.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.1626980267465115e-08,
+      "max_relative_nonzero": 0.00011239637799506807,
+      "reference_max": 0.0006104448111727834,
+      "reference_l2": 0.001026889034889868,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.7.self_attn.y_e_mul.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.2212043404579163e-07,
+      "max_relative_nonzero": 0.008408651461635646,
+      "reference_max": 0.009245749562978745,
+      "reference_l2": 0.0893397685376399,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.7.self_attn.y_e_mul.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 7.159542292356491e-08,
+      "max_relative_nonzero": 0.00024287350302299186,
+      "reference_max": 0.0031882866751402617,
+      "reference_l2": 0.007896645314223726,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.7.self_attn.y_e_add.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.7730129659175873e-07,
+      "max_relative_nonzero": 0.008370533915103088,
+      "reference_max": 0.023641405627131462,
+      "reference_l2": 0.281861317118024,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.7.self_attn.y_e_add.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.6309862732887268e-08,
+      "max_relative_nonzero": 8.878668284895181e-05,
+      "reference_max": 0.008152458816766739,
+      "reference_l2": 0.024913416481727502,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.7.self_attn.y_x_mul.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.7567148208618164e-07,
+      "max_relative_nonzero": 0.009622701566018094,
+      "reference_max": 0.015196487307548523,
+      "reference_l2": 0.21372208440174623,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.7.self_attn.y_x_mul.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 8.521601557731628e-08,
+      "max_relative_nonzero": 0.003307837478717316,
+      "reference_max": 0.005240331403911114,
+      "reference_l2": 0.01889066337461047,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.7.self_attn.y_x_add.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.327134668827057e-07,
+      "max_relative_nonzero": 0.018525377781356524,
+      "reference_max": 0.011078980751335621,
+      "reference_l2": 0.26856646623995467,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.7.self_attn.y_x_add.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.3923348635435104e-08,
+      "max_relative_nonzero": 0.009183578826346427,
+      "reference_max": 0.003820455865934491,
+      "reference_l2": 0.023738298886231763,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.7.self_attn.x_out.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.521548256278038e-06,
+      "max_relative_nonzero": 1.9071997105643994,
+      "reference_max": 0.0210708174854517,
+      "reference_l2": 0.680822767171912,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.7.self_attn.x_out.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 4.330649971961975e-08,
+      "max_relative_nonzero": 0.0030456019226657036,
+      "reference_max": 0.0071390364319086075,
+      "reference_l2": 0.040580478271915695,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.7.self_attn.e_out.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.1047890186309814e-07,
+      "max_relative_nonzero": 0.002503957058162976,
+      "reference_max": 0.012333939783275127,
+      "reference_l2": 0.3322228738821137,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.7.self_attn.e_out.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.3690441846847534e-07,
+      "max_relative_nonzero": 0.00015484442880671454,
+      "reference_max": 0.011390229687094688,
+      "reference_l2": 0.028109685734532246,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.7.linX1.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.551823854446411e-07,
+      "max_relative_nonzero": 0.4589360769448957,
+      "reference_max": 0.00884815864264965,
+      "reference_l2": 0.2557040060680607,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.7.linX1.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 7.718335837125778e-08,
+      "max_relative_nonzero": 0.002864073634653024,
+      "reference_max": 0.0031982732471078634,
+      "reference_l2": 0.016010713328778937,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.7.linX2.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 7.145645213313401e-07,
+      "max_relative_nonzero": 4.1043788187372705,
+      "reference_max": 0.010538004338741302,
+      "reference_l2": 0.2720156809572993,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.7.linX2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 3.771856427192688e-08,
+      "max_relative_nonzero": 0.005059125733825069,
+      "reference_max": 0.008380522951483727,
+      "reference_l2": 0.04599544458137746,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.7.normX1.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.8754508346319199e-07,
+      "max_relative_nonzero": 0.01949226337999866,
+      "reference_max": 0.011006656102836132,
+      "reference_l2": 0.04774612103263144,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.7.normX1.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 5.122274160385132e-08,
+      "max_relative_nonzero": 0.003123521099815064,
+      "reference_max": 0.008313735015690327,
+      "reference_l2": 0.047076246217416524,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.7.normX2.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.3562384992837906e-07,
+      "max_relative_nonzero": 0.007614165407860301,
+      "reference_max": 0.01000496931374073,
+      "reference_l2": 0.046243963176873334,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.7.normX2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 3.818422555923462e-08,
+      "max_relative_nonzero": 0.0005575321343029738,
+      "reference_max": 0.008436677977442741,
+      "reference_l2": 0.046249389451606164,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.7.linE1.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.7183629097416997e-07,
+      "max_relative_nonzero": 0.025517907276059227,
+      "reference_max": 0.011746397241950035,
+      "reference_l2": 0.07091474930832818,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.7.linE1.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 5.308902473188937e-08,
+      "max_relative_nonzero": 0.002736816796812217,
+      "reference_max": 0.0034659001976251602,
+      "reference_l2": 0.008916575616161807,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.7.linE2.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.9604340195655823e-07,
+      "max_relative_nonzero": 0.008928381159217527,
+      "reference_max": 0.009793310426175594,
+      "reference_l2": 0.08565589748264212,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.tf_layers.7.linE2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 3.166496753692627e-08,
+      "max_relative_nonzero": 0.0001720390060487208,
+      "reference_max": 0.008495025336742401,
+      "reference_l2": 0.02569505229499878,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.7.normE1.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 9.150244295597076e-08,
+      "max_relative_nonzero": 0.0008030041496618324,
+      "reference_max": 0.007282252423465252,
+      "reference_l2": 0.02194463148169696,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.7.normE1.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 5.3318217396736145e-08,
+      "max_relative_nonzero": 0.00013322556336867975,
+      "reference_max": 0.008431997150182724,
+      "reference_l2": 0.025972167595076374,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.7.normE2.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.2433156371116638e-07,
+      "max_relative_nonzero": 0.000904546285386258,
+      "reference_max": 0.00979324709624052,
+      "reference_l2": 0.022959653029467147,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.tf_layers.7.normE2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 3.748573362827301e-08,
+      "max_relative_nonzero": 0.00017384874239320954,
+      "reference_max": 0.008810014463961124,
+      "reference_l2": 0.026646387423751774,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.out_ln_X.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.387670636177063e-07,
+      "max_relative_nonzero": 0.0018366642990326396,
+      "reference_max": 0.01011511031538248,
+      "reference_l2": 0.04640578577831858,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.out_ln_X.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 3.4458935260772705e-08,
+      "max_relative_nonzero": 0.0015479041799841267,
+      "reference_max": 0.008530099876224995,
+      "reference_l2": 0.04640182541073798,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.out_ln_E.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 9.383074939250946e-08,
+      "max_relative_nonzero": 0.0008382763947169685,
+      "reference_max": 0.010534392669796944,
+      "reference_l2": 0.023176784709221642,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.out_ln_E.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 5.8673322200775146e-08,
+      "max_relative_nonzero": 0.0009172453184813867,
+      "reference_max": 0.009197557345032692,
+      "reference_l2": 0.026773508145802177,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "backbone.lin_out_X.weight": {
+      "passes": true,
+      "max_abs": 0.0,
+      "violations": 0,
+      "exact": true
+    },
+    "backbone.lin_out_X.bias": {
+      "passes": true,
+      "max_abs": 0.0,
+      "violations": 0,
+      "exact": true
+    },
+    "backbone.lin_out_E.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.8300488591194153e-07,
+      "max_relative_nonzero": 0.008995094946390727,
+      "reference_max": 0.018514171242713928,
+      "reference_l2": 0.04926278655696711,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "backbone.lin_out_E.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 3.725290298461914e-08,
+      "max_relative_nonzero": 6.619493946307299e-06,
+      "reference_max": 0.00562775693833828,
+      "reference_l2": 0.006188234767950422,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "joint_head.0.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.1548399925231934e-06,
+      "max_relative_nonzero": 1.1017343874486731,
+      "reference_max": 0.11404985189437866,
+      "reference_l2": 3.0403031454955105,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "joint_head.0.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.1792948246002197e-07,
+      "max_relative_nonzero": 2.1943837654612624e-05,
+      "reference_max": 0.03466750681400299,
+      "reference_l2": 0.13900914539238593,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "joint_head.2.weight": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 2.86102294921875e-06,
+      "max_relative_nonzero": 0.0011587628986115238,
+      "reference_max": 0.34699100255966187,
+      "reference_l2": 1.2236597108142322,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "joint_head.2.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 4.470348358154297e-07,
+      "max_relative_nonzero": 1.3848672600115056e-06,
+      "reference_max": 0.32279977202415466,
+      "reference_l2": 0.45650779445407896,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "branch.degree_encoder.0.weight": {
+      "passes": true,
+      "exact": true,
+      "max_abs": 0.0,
+      "max_relative_nonzero": null,
+      "reference_max": 0.0,
+      "reference_l2": 0.0,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "branch.degree_encoder.0.bias": {
+      "passes": true,
+      "exact": true,
+      "max_abs": 0.0,
+      "max_relative_nonzero": null,
+      "reference_max": 0.0,
+      "reference_l2": 0.0,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "branch.degree_encoder.2.weight": {
+      "passes": true,
+      "exact": true,
+      "max_abs": 0.0,
+      "max_relative_nonzero": null,
+      "reference_max": 0.0,
+      "reference_l2": 0.0,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "branch.degree_encoder.2.bias": {
+      "passes": true,
+      "exact": true,
+      "max_abs": 0.0,
+      "max_relative_nonzero": null,
+      "reference_max": 0.0,
+      "reference_l2": 0.0,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 0
+    },
+    "branch.degree_out.weight": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 2.2805354092270136e-05,
+      "max_relative_nonzero": 67.09146907054024,
+      "reference_max": 0.0016959772910922766,
+      "reference_l2": 0.029620179218470044,
+      "absolute_at_reference_zero": null,
+      "violations": 1238
+    },
+    "branch.degree_out.bias": {
+      "passes": true,
+      "exact": false,
+      "max_abs": 1.9799917936325073e-06,
+      "max_relative_nonzero": 0.022363480933387428,
+      "reference_max": 0.0177720095962286,
+      "reference_l2": 0.09041568346193933,
+      "absolute_at_reference_zero": null,
+      "violations": 0
+    },
+    "refex_projection.weight": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 0.00029019347857683897,
+      "max_relative_nonzero": 421.27107221886945,
+      "reference_max": 0.006425175815820694,
+      "reference_l2": 0.06508603051823718,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 13721
+    },
+    "role_projection.weight": {
+      "passes": false,
+      "exact": false,
+      "max_abs": 5.418255022959784e-05,
+      "max_relative_nonzero": 1893.8739101274311,
+      "reference_max": 0.0014057537773624063,
+      "reference_l2": 0.008402272725669985,
+      "absolute_at_reference_zero": 0.0,
+      "violations": 1022
+    }
+  },
+  "passes": false
+}

@@ -1,0 +1,59 @@
+.................F....                                                   [100%]
+=================================== FAILURES ===================================
+____________ Revision.test_normal2_sequential_gradient_equivalence _____________
+
+self = <test_engineering.Revision testMethod=test_normal2_sequential_gradient_equivalence>
+
+    def test_normal2_sequential_gradient_equivalence(self):
+        from normal2 import normal2,pair_inputs
+        from hsgd.bw_preflight.common import update
+        c,m=model('C');cfg=dict(T=1000,seed=41);inputs=pair_inputs(c,cfg,0,np.random.default_rng(51),500)
+        m2=copy.deepcopy(m);o=torch.optim.AdamW(m.parameters());o2=torch.optim.AdamW(m2.parameters())
+        diag={};normal2(m,o,c,inputs,1000,'cpu',step=False,diagnostics=diag)
+        ds=[]
+        for inp in inputs:
+>           d={};update(m2,o2,c,inp,1000,'cpu',do_step=False,diagnostics=d);ds.append(d)
+
+research_branches/typed_refex_rolx_192_v2/package/test_engineering.py:163: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+research_branches/typed_refex_rolx_192_v2/package/hsgd/bw_preflight/common.py:313: in update
+    result = predict(model, case["space"].types, inp["edges"], inp["edge_families"],
+research_branches/typed_refex_rolx_192_v2/package/hsgd/runtime.py:96: in predict
+    logits,p = timed(device,times,"network_seconds",lambda: context.run_network(graph,time_value,token))
+research_branches/typed_refex_rolx_192_v2/package/hsgd/runtime.py:30: in timed
+    value = fn()
+research_branches/typed_refex_rolx_192_v2/package/hsgd/runtime.py:96: in <lambda>
+    logits,p = timed(device,times,"network_seconds",lambda: context.run_network(graph,time_value,token))
+research_branches/typed_refex_rolx_192_v2/package/hsgd/computational.py:117: in run_network
+    logits = self.model.joint_predict(self,graph,time)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = StructuralDenoiser(
+  (backbone): GraphTransformerConv(
+    (lin_in_X): Linear(in_features=2, out_features=16, bias=Tr...(in_features=63, out_features=16, bias=False)
+  (role_projection): Linear(in_features=8, out_features=16, bias=False)
+)
+ctx = <hsgd.computational.FrozenTypedContext object at 0x7f2725338550>
+graph = GraphInputs(edges=tensor([[0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 4, 4, 4, 4,
+         4, 5, 5, 5....],
+        [0., 0., 1., 0., 0., 1., 0.],
+        [0., 0., 0., 1., 0., 0., 1.],
+        [1., 0., 0., 0., 0., 0., 1.]]))
+time = 0.5, mask_cn = False, return_features = False
+
+    def joint_predict(self,ctx,graph,time,mask_cn=False,return_features=False):
+        if not hasattr(ctx,'degree_input'):ctx.degree_input=self.branch.input(ctx,time)
+        ctx.node_residual=self.branch(ctx.degree_input)
+        if self.arm!='A':
+            key=(ctx.state_version,float(time),self.arm)
+            if hasattr(ctx,'structural_key') and ctx.structural_key!=key:raise ValueError('stale structural cache')
+            if self.arm=='C':
+                # Check both state_dict replacement/in-place writes and private CPU source.
+                identity=(id(self.role_basis),self.role_basis._version)
+>               if identity!=self._basis_tensor_identity:raise ValueError('basis replaced; explicit checkpoint reload required')
+E               ValueError: basis replaced; explicit checkpoint reload required
+
+research_branches/typed_refex_rolx_192_v2/package/model_variants.py:63: ValueError
+=========================== short test summary info ============================
+FAILED research_branches/typed_refex_rolx_192_v2/package/test_engineering.py::Revision::test_normal2_sequential_gradient_equivalence
+1 failed, 21 passed in 4.79s
