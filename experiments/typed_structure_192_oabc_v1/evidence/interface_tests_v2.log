@@ -1,0 +1,38 @@
+test_cost_requires_eight_cells (test_oabc.DictionaryProtocol) ... ok
+test_dictionary_failure_and_review_gate (test_oabc.DictionaryProtocol) ... ok
+test_dynamic_segments_and_permutation (test_oabc.DictionaryProtocol) ... ok
+test_feature_ancestry_complete_disjoint (test_oabc.DictionaryProtocol) ... ok
+test_folds_stable_all_states_and_caps (test_oabc.DictionaryProtocol) ... ok
+test_masked_encoding_never_observes_target (test_oabc.DictionaryProtocol) ... ok
+test_rank_tie_and_failure_cannot_be_dropped (test_oabc.DictionaryProtocol) ... ok
+test_seed_streams_distinct (test_oabc.DictionaryProtocol) ... ok
+test_weighted_objective_equivalence (test_oabc.DictionaryProtocol) ... ok
+test_O_and_BC_have_no_hidden_CN (test_oabc.Models) ... ok
+test_actual_copy_zero_projection_and_optimizer_membership (test_oabc.Models) ... ok
+test_cache_mutation_refused_and_independent_Xt (test_oabc.Models) ... ok
+test_edge_order_and_endpoint_canonicalization (test_oabc.Models) ... ok
+test_node_permutation_nonzero_projection (test_oabc.Models) ... FAIL
+test_normal2_gradient_without_update_and_basis_frozen (test_oabc.Models) ... ok
+test_variable_dictionary_state_load (test_oabc.Models) ... ok
+test_entry_imports_do_not_launch (test_oabc.PublicGates) ... ok
+test_evaluation_identity_and_contrasts (test_oabc.PublicGates) ... ok
+test_public_launcher_refuses_before_devices_or_output (test_oabc.PublicGates) ... ok
+
+======================================================================
+FAIL: test_node_permutation_nonzero_projection (test_oabc.Models)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/data2/lyh/gnn_project/DiHug/research_branches/typed_structure_192_oabc_v1/package/test_oabc.py", line 85, in test_node_permutation_nonzero_projection
+    torch.testing.assert_close(p,p2[order],atol=2e-6,rtol=1e-5)
+  File "/data2/lyh/miniconda3/envs/sparse_block/lib/python3.9/site-packages/torch/testing/_comparison.py", line 1520, in assert_close
+    raise error_metas[0].to_error(msg)
+AssertionError: Tensor-likes are not close!
+
+Mismatched elements: 12 / 15 (80.0%)
+Greatest absolute difference: 0.1945713758468628 at index (14,) (up to 2e-06 allowed)
+Greatest relative difference: 0.2906961441040039 at index (14,) (up to 1e-05 allowed)
+
+----------------------------------------------------------------------
+Ran 19 tests in 1.280s
+
+FAILED (failures=1)

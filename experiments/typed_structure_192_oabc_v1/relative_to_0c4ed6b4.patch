@@ -1,0 +1,814 @@
+--- /dev/null
++++ b/package/audit_dictionary.py
+@@ -0,0 +1,54 @@
++"""Read-only audit of the actual offline evidence; no NMF fitting or model calls."""
++import argparse,json,pathlib,time,hashlib,resource
++import numpy as np
++from prepare import load_case,sha
++from features import extract,digest
++from role_dictionary import feature_groups,node_folds,masked_score,seed32
++from hsgd.bw_preflight.common import schedule
++from hsgd.noising import global_noisy_edges
++
++def audit(directory):
++    start=time.perf_counter();directory=pathlib.Path(directory);rows={}
++    for dataset in ['IMDB','PubMed']:
++        root=directory/('dictionary_'+dataset);selection=json.loads((root/'selection.json').read_text());panel=json.loads((root/'panel.json').read_text());splits=json.loads((root/'frozen_splits.json').read_text())
++        case,cfg=load_case(dataset);types=case['space'].types;groups,sides,perm=feature_groups();folds=node_folds(types,dataset)
++        assert splits['groups']==groups and splits['sides']==[x.tolist() for x in sides]
++        assert splits['permutation']==perm.tolist()
++        values=[]
++        for state in panel:
++            file=root/state['file'];assert sha(file)==state['sha256'];z=np.load(file,allow_pickle=False)
++            np.testing.assert_array_equal(z['types'],types);assert int(z['t'])==state['t']
++            if state['t']==0:edges=case['clean'];families=case['space'].encode(edges)[0]
++            else:
++                seed=seed32(state['root_seed'],dataset=dataset,time=state['t'],purpose='dictionary_forward_noise');assert seed==state['derived_seed']
++                edges,families,_=global_noisy_edges(case['space'],case['clean'],case['prior'],schedule(1000)[state['t']],np.random.default_rng(seed))
++            np.testing.assert_array_equal(edges,z['edges']);np.testing.assert_array_equal(families,z['families'])
++            computed=extract(types,z['edges'],z['families'],case['space'].pairs)
++            np.testing.assert_array_equal(computed,z['features']);assert digest(computed)==state['feature_sha256'];values.append(computed)
++        failures=[];fits=valid=score_count=0;max_error=0.;max_kkt=0.
++        for typ,v in folds.items():
++            saved=splits['node_folds'][str(typ)];assert saved['folds']==[x.tolist() for x in v['folds']] and saved['Kmax']==v['Kmax']
++            row=selection['types'][str(typ)];assert len(row['candidates'])==v['Kmax'];assert 'selected_K' not in row
++            for c in row['candidates']:
++                valid+=int(c['valid']);score_index=0;all_scores=[]
++                assert len(c['fits'])==2
++                for fold,fit in enumerate(c['fits']):
++                    fits+=1;assert fit['seed']==seed32(2026102861,dataset=dataset,type=typ,fold=fold,K=c['K'],purpose='candidate_fit')
++                    if not fit['converged']:
++                        failures.append(dict(type=typ,K=c['K'],fold=fold,iterations=fit['iterations'],warnings=fit['warnings']));assert not c['valid'];continue
++                    z=np.load(root/('candidate_type%d_K%d_fold%d.npz'%(typ,c['K'],fold)),allow_pickle=False);h=z['basis']
++                    np.testing.assert_allclose(np.linalg.norm(h,axis=1),1,atol=1e-12,rtol=1e-12)
++                    scores=masked_score(values,v['folds'][1-fold],h,sides);old=c['scores'][score_index];score_index+=1
++                    for a,b in zip(scores,old):
++                        error=max(abs(a['weighted_mse']-b['weighted_mse']),max(abs(x-y) for x,y in zip(a['state_mse'],b['state_mse'])))
++                        assert error<=1e-14;max_error=max(max_error,error);max_kkt=max(max_kkt,a['kkt_max']);score_count+=1
++                    all_scores+=scores
++                if c['valid']:assert abs(np.mean([s['weighted_mse'] for s in all_scores])-c['mean_mse'])<=1e-14
++        assert selection['status']=='blocked_incomplete_candidate_comparison' and failures and not (root/'final_basis.npz').exists()
++        rows[dataset]=dict(status='audit_passed_selection_blocked',nodes=len(types),edges=case['clean'].shape[1],type_counts=np.bincount(types).tolist(),S=case['space'].total,active_slots=int(np.sum(case['space'].counts[case['active']])),candidate_count=sum(v['Kmax'] for v in folds.values()),fold_fits=fits,valid_candidates=valid,nonconverged=failures,recomputed_direction_scores=score_count,score_max_abs_error=max_error,NNLS_max_KKT=max_kkt,panel_states_exact=7,selected_K=None,final_basis_exists=False,original_seconds=selection['seconds'],original_peak_rss_mib=selection['peak_rss_mib'])
++    return dict(status='passed',datasets=rows,seconds=time.perf_counter()-start,peak_rss_mib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024,model_calls=0,optimizer_steps=0,NMF_refits=0)
++
++if __name__=='__main__':
++    p=argparse.ArgumentParser();p.add_argument('--evidence',required=True);p.add_argument('--output',required=True);a=p.parse_args();result=audit(a.evidence)
++    with pathlib.Path(a.output).open('x') as f:json.dump(result,f,indent=2)
++    print(json.dumps(result,indent=2))
+--- a/package/config.json
++++ b/package/config.json
+@@ -30,8 +30,9 @@
+   "rounds": 1,
+   "schedule_offset": 0.008,
+   "tf32": false,
+-  "version": "typed_refex_rolx_192_v2",
++  "version": "typed_structure_192_oabc_v1",
+   "arms": [
++    "O",
+     "A",
+     "B",
+     "C"
+@@ -42,16 +43,16 @@
+     "depth": 1,
+     "base": "relation degree, closed-egonet internal and boundary edges",
+     "normalization": "log1p(base count)/log1p(schema bound); ONE round: for each relation mean and sum/(N-1) of base features",
+-    "rank": 4,
+-    "basis_seed": 2026102708,
+-    "nmf_max_iter": 500,
++    "rank": "per-type held-out selection K=1..min(8,fold_sizes)",
++    "basis_seed": 2026102861,
++    "nmf_max_iter": 5000,
+     "nmf_tol": 1e-05,
+     "encoding": "per-node NNLS, fixed unit-L2 basis rows; no coefficient normalization",
+     "nnls_max_iter": 240
+   },
+   "inputs_per_update": 2,
+   "engineering_only": true,
+-  "max_updates_per_dataset_arm": 3,
++  "max_updates_per_dataset_arm": 5,
+   "seed": 2026102709,
+   "noise_times": [
+     1,
+@@ -76,9 +77,7 @@
+         "Movie",
+         "Genre"
+       ],
+-      "basis_file": "assets/IMDB_synthetic_basis.npz",
+-      "basis_sha256": "6458114da8c8f78f682d1c3ef84f7ee1148be48948c21f047aa56c9e5b08efe9",
+-      "basis_kind": "synthetic engineering only"
++      "basis_kind": "pending complete held-out rank selection; no synthetic fallback"
+     },
+     "PubMed": {
+       "file": "assets/PubMed.npz",
+@@ -91,11 +90,9 @@
+         "Chemical",
+         "Species"
+       ],
+-      "basis_file": "assets/PubMed_synthetic_basis.npz",
+-      "basis_sha256": "6458114da8c8f78f682d1c3ef84f7ee1148be48948c21f047aa56c9e5b08efe9",
+-      "basis_kind": "synthetic engineering only"
++      "basis_kind": "pending complete held-out rank selection; no synthetic fallback"
+     }
+   },
+   "query_contract": "ALL active slots in ONE forward per input; S=18336, loss=(sum CE input1 + sum CE input2)/(2*S)",
+-  "source_note": "normal2 sequential backward; synthetic engineering dictionaries ONLY; no formal initialization"
+-}+  "source_note": "normal2 sequential backward; O/A/B/C and held-out rank selection; formal execution requires independent review plus explicit continue confirmation"
++}
+--- /dev/null
++++ b/package/evaluation.py
+@@ -0,0 +1,28 @@
++"""Frozen raw-graph evaluation, no graph repair or model selection."""
++from collections import Counter
++import numpy as np
++from audit_reference.role_condition.metrics import graph,compare,tv
++
++def evaluate(case,edges,type_names,check=lambda:None):
++    result=graph(case,edges,type_names,check);reference=graph(case,case['clean'],type_names,check);comparison=compare(result,reference)
++    types=case['space'].types;w1=joint=0.;per_type={}
++    for typ,name in enumerate(type_names):
++        rel=[r for r,pair in enumerate(case['space'].pairs) if typ in pair]
++        weight=float(np.mean(types==typ));value=float(np.mean(np.array(comparison['typed_relation_degree_W1'][name])[rel]))
++        w1+=weight*value;joint+=weight*comparison['joint_relation_degree_TV'][name]
++        per_type[name]=dict(weight=weight,incident_relations=rel,mean_incident_relation_W1=value)
++    tri_tv=tv(Counter(result['typed_triangles']),Counter(reference['typed_triangles']))
++    result.update(comparison=comparison,primary=dict(type_weighted_relation_degree_W1=w1,type_weighted_joint_degree_TV=joint,typed_triangle_composition_TV=tri_tv),weight_definition=per_type)
++    if type_names==['Director','Actor','Movie','Genre']:
++        aa=case['space'].pairs.index((1,1));result['IMDB_focus']=dict(AA=result['family_edges'][aa],DAA=result['typed_triangles'].get(str((0,1,1)),0),AAM=result['typed_triangles'].get(str((1,1,2)),0))
++    return result
++
++def paired_table(rows):
++    """Each row key=(dataset,arm,sample_seed); retain all rows and signs."""
++    diffs=[]
++    for dataset in ['IMDB','PubMed']:
++        for seed in [2026102821,2026102822]:
++            for left,right in [('A','O'),('B','O'),('B','A'),('C','B'),('C','A')]:
++                a=rows[(dataset,left,seed)]['primary'];b=rows[(dataset,right,seed)]['primary']
++                diffs.append(dict(dataset=dataset,seed=seed,contrast=left+'-'+right,primary={k:a[k]-b[k] for k in a}))
++    return diffs
+--- /dev/null
++++ b/package/experiment_contract.py
+@@ -0,0 +1,62 @@
++"""Immutable experiment inputs and fail-closed authorization checks."""
++import json,pathlib,hashlib,time,copy
++import numpy as np
++from prepare import load_case,sha,ROOT
++from role_dictionary import seed32
++
++def read_dictionary(directory,dataset):
++    root=pathlib.Path(directory)/('dictionary_'+dataset);receipt=json.loads((root/'selection.json').read_text())
++    if receipt['status']!='passed':raise RuntimeError(dataset+' dictionary gate failed: '+receipt['status'])
++    for typ,row in receipt['types'].items():
++        if len(row['candidates'])!=row['Kmax'] or not all(c['valid'] for c in row['candidates']):raise ValueError('incomplete K comparison')
++        if not row['final_fit']['converged']:raise ValueError('final fit not converged')
++    if sha(root/'final_basis.npz')!=receipt['basis_sha256'] or sha(root/'panel.json')!=receipt['panel_sha256'] or sha(root/'frozen_splits.json')!=receipt['splits_sha256']:raise ValueError('dictionary binding')
++    z=np.load(root/'final_basis.npz',allow_pickle=False)
++    if z['offsets'].tolist()!=receipt['offsets'] or z['K'].tolist()!=receipt['K']:raise ValueError('dictionary dimensions')
++    return dict(basis=z['basis'],offsets=z['offsets']),receipt
++
++def scientific_gate(ledger_path,approval_path,protocol_path,dictionary_dir,source_hash):
++    ledger=json.loads(pathlib.Path(ledger_path).read_text());approval=json.loads(pathlib.Path(approval_path).read_text())
++    if time.time()>=ledger['deadline_epoch']:raise TimeoutError('original cumulative budget expired')
++    # File is only written after explicit reviewed-user continuation, never by this package.
++    if approval.get('independent_review')!='passed' or approval.get('user_continue_confirmed') is not True:raise PermissionError('independent review AND explicit user continuation required')
++    if approval.get('ledger_sha256')!=sha(ledger_path) or approval.get('protocol_sha256')!=sha(protocol_path) or approval.get('source_sha256')!=source_hash:raise ValueError('approval/source/ledger binding mismatch')
++    if approval.get('updates') not in (500,1000,2000):raise ValueError('outside frozen update tiers')
++    for dataset in ['IMDB','PubMed']:read_dictionary(dictionary_dir,dataset)
++    return ledger,approval
++
++def source_binding():
++    files={str(p.relative_to(ROOT)):sha(p) for p in ROOT.rglob('*') if p.is_file() and '__pycache__' not in str(p) and p.suffix in ('.py','.json','.npz')}
++    return files,hashlib.sha256(json.dumps(files,sort_keys=True,separators=(',',':')).encode()).hexdigest()
++
++def initialization(dataset,arm,seed,basis):
++    import torch
++    from model_variants import StructuralDenoiser,copy_common
++    from hsgd.bw_preflight.common import cpu_tree
++    case,cfg=load_case(dataset);torch.manual_seed(seed);anchor=StructuralDenoiser(case,cfg,'A')
++    # Separate module creation stream; all shared tensors are subsequently copied.
++    module_seed=seed32(seed,dataset=dataset,arm=arm,purpose='new_module_initialization')
++    torch.manual_seed(module_seed);model=StructuralDenoiser(case,cfg,arm,basis);copied=copy_common(anchor,model)
++    hashes={k:hashlib.sha256(v.detach().cpu().contiguous().numpy().tobytes()).hexdigest() for k,v in model.state_dict().items()}
++    proof={}
++    for name in copied:
++        if name.endswith('[:,:shared]'):
++            a=anchor.joint_head[0].weight[:,:model.joint_head[0].in_features];b=model.joint_head[0].weight
++        else:a=anchor.state_dict()[name];b=model.state_dict()[name]
++        proof[name]=a.detach().cpu().contiguous().numpy().tobytes()==b.detach().cpu().contiguous().numpy().tobytes()
++    if not all(proof.values()):raise AssertionError('common initialization bytes differ')
++    return model,case,cfg,dict(seed=seed,module_seed=module_seed,copied_exact=proof,tensor_sha256=hashes,parameters=sum(p.numel() for p in model.parameters()))
++
++def recommend_tier(cost,remaining,parallel_devices):
++    """Measured per-cell cost; conservative dataset/arm-independent wave ordering."""
++    if not cost.get('complete_eight_cells') or parallel_devices<1:raise ValueError('no complete engineering cost gate')
++    values=cost['cells'];labels=[d+'_'+a for d in ['IMDB','PubMed'] for a in 'OABC']
++    if set(values)!=set(labels):raise ValueError('missing cells')
++    result=[]
++    for updates in [2000,1000,500]:
++        durations=[values[k]['normal2_seconds']*updates+2*1000*values[k]['sampling_step_seconds']+values[k]['validation_save_seconds'] for k in labels]
++        loads=[0.]*min(parallel_devices,8)
++        for value in sorted(durations,reverse=True):loads[loads.index(min(loads))]+=value
++        total=max(loads)*cost['concurrency_margin']+1200+900
++        result.append(dict(updates=updates,seconds=total,fits=total<=remaining,unmeasured_concurrency_margin=cost['concurrency_margin']))
++    return next((r for r in result if r['fits']),None),result
+--- /dev/null
++++ b/package/launch.py
+@@ -0,0 +1,72 @@
++"""Lightweight launch gate. No torch import, no fitting, no implicit authorization."""
++import argparse,pathlib,json,time,hashlib,subprocess,sys,os,signal
++
++def sha(p):return hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest()
++def gate(root,ledger_path,approval_path,protocol_path,dictionaries,cost_path):
++    ledger=json.loads(pathlib.Path(ledger_path).read_text());approval=json.loads(pathlib.Path(approval_path).read_text());protocol=json.loads(pathlib.Path(protocol_path).read_text())
++    if time.time()>=ledger['deadline_epoch']:raise TimeoutError('original budget expired')
++    if approval.get('independent_review')!='passed' or approval.get('user_continue_confirmed') is not True:raise PermissionError('review + user continuation missing')
++    if approval.get('ledger_sha256')!=sha(ledger_path) or approval.get('protocol_sha256')!=sha(protocol_path):raise ValueError('ledger/protocol differs')
++    files={str(p.relative_to(root)):sha(p) for p in root.rglob('*') if p.is_file() and '__pycache__' not in str(p) and p.suffix in ('.py','.json','.npz')}
++    source=hashlib.sha256(json.dumps(files,sort_keys=True,separators=(',',':')).encode()).hexdigest()
++    if approval.get('source_sha256')!=source:raise ValueError('reviewed source differs')
++    for dataset in protocol['datasets']:
++        d=pathlib.Path(dictionaries)/('dictionary_'+dataset);r=json.loads((d/'selection.json').read_text())
++        if r['status']!='passed' or sha(d/'final_basis.npz')!=r['basis_sha256']:raise RuntimeError('dictionary gate not passed: '+dataset)
++    cost=json.loads(pathlib.Path(cost_path).read_text())
++    if approval.get('cost_sha256')!=sha(cost_path) or cost.get('complete_eight_cells') is not True:raise RuntimeError('complete eight-cell engineering cost evidence missing')
++    if approval.get('updates') not in protocol['allowed_update_tiers']:raise ValueError('update tier')
++    if any(not c.get('passed') for c in cost['cells'].values()) or len(cost['cells'])!=8:raise RuntimeError('engineering checks not all passed')
++    return ledger,approval,cost
++
++def main():
++    p=argparse.ArgumentParser();p.add_argument('mode',choices=['formal','gate']);p.add_argument('--ledger',required=True);p.add_argument('--approval',required=True);p.add_argument('--protocol',required=True);p.add_argument('--dictionary-dir',required=True);p.add_argument('--cost',required=True);p.add_argument('--output',required=True);p.add_argument('--gpu-uuids',nargs='+',required=True);args=p.parse_args()
++    root=pathlib.Path(__file__).resolve().parent
++    ledger,approval,cost=gate(root,args.ledger,args.approval,args.protocol,args.dictionary_dir,args.cost)
++    devices=args.gpu_uuids
++    if len(devices)!=len(set(devices)) or not 1<=len(devices)<=8:raise ValueError('1..8 distinct allocated GPU UUIDs')
++    # Respect scheduler/platform visibility instead of discovering outside allocations.
++    visibility=os.environ.get('CUDA_VISIBLE_DEVICES')
++    if visibility:
++        allowed=visibility.split(',')
++        if not all(v.startswith('GPU-') for v in allowed) or not set(devices)<=set(allowed):raise PermissionError('ambiguous/restricted platform visibility; no override')
++    visible=subprocess.check_output(['nvidia-smi','--query-gpu=uuid,name,memory.used,utilization.gpu','--format=csv,noheader,nounits'],text=True)
++    rows={row.split(',')[0].strip():[x.strip() for x in row.split(',')] for row in visible.splitlines()}
++    for d in devices:
++        if d not in rows or '2080 Ti' not in rows[d][1] or int(rows[d][2])>10 or int(rows[d][3])>0:raise RuntimeError('selected GPU not confirmed idle RTX2080Ti: '+d)
++    # Admission for EXACT reviewed tier; no effect-dependent choice or post-start change.
++    tasks=[(d,a) for d in ['IMDB','PubMed'] for a in 'OABC'];loads=[0.]*len(devices)
++    for d,a in tasks:
++        c=cost['cells'][d+'_'+a];duration=approval['updates']*c['normal2_seconds']+2000*c['sampling_step_seconds']+c['validation_save_seconds'];i=loads.index(min(loads));loads[i]+=duration
++    expected=max(loads)*cost['concurrency_margin']+2100
++    if expected>ledger['deadline_epoch']-time.time():raise TimeoutError('reviewed tier no longer fits; require explicit recorded pre-start lower tier')
++    if args.mode=='gate':print(json.dumps(dict(status='gate_passed_no_execution',expected_seconds=expected)));return 0
++    out=pathlib.Path(args.output);out.mkdir(parents=True,exist_ok=False);stop=[False];running={};finished=[];failed=False
++    for sig in [signal.SIGINT,signal.SIGTERM,signal.SIGHUP]:signal.signal(sig,lambda s,f:stop.__setitem__(0,True))
++    try:
++        while tasks or running:
++            if stop[0] or (out/'STOP').exists() or time.time()>=ledger['deadline_epoch']-1200:failed=True;break
++            for device in devices:
++                if device not in running and tasks and not failed:
++                    dataset,arm=tasks.pop(0);label=dataset+'_'+arm;log=(out/(label+'.log')).open('xb');env=dict(os.environ,CUDA_VISIBLE_DEVICES=device,OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1',MKL_NUM_THREADS='1',CUBLAS_WORKSPACE_CONFIG=':4096:8')
++                    cmd=[sys.executable,str(root/'worker.py'),'--dataset',dataset,'--arm',arm,'--output',str(out/label),'--dictionary-dir',args.dictionary_dir,'--ledger',args.ledger,'--approval',args.approval,'--protocol',args.protocol]
++                    process=subprocess.Popen(cmd,env=env,stdout=log,stderr=subprocess.STDOUT,start_new_session=True);running[device]=(process,log,label)
++            for device,(process,log,label) in list(running.items()):
++                rc=process.poll()
++                if rc is not None:
++                    log.close();finished.append(dict(cell=label,exit_code=rc));del running[device]
++                    if rc!=0:failed=True
++            if failed:break
++            time.sleep(.25)
++    finally:
++        for process,log,label in running.values():
++            if process.poll() is None:os.killpg(process.pid,signal.SIGTERM)
++        cleanup_deadline=min(time.time()+30,ledger['deadline_epoch'])
++        for process,log,label in running.values():
++            try:process.wait(timeout=max(.1,cleanup_deadline-time.time()))
++            except subprocess.TimeoutExpired:os.killpg(process.pid,signal.SIGKILL);process.wait()
++            log.close();finished.append(dict(cell=label,exit_code=process.returncode,terminated=True))
++        complete=not failed and len(finished)==8 and all(r['exit_code']==0 for r in finished)
++        (out/'launcher_summary.json').write_text(json.dumps(dict(status='complete' if complete else 'incomplete',jobs=finished,unstarted=tasks,elapsed_since_activation=time.time()-ledger['start_epoch']),indent=2))
++    return 0 if complete else 2
++if __name__=='__main__':raise SystemExit(main())
+--- a/package/model_variants.py
++++ b/package/model_variants.py
+@@ -1,10 +1,11 @@
+-"""A: original CN; B: typed ReFeX, no CN; C: B plus frozen-basis coefficients."""
++"""O: typed base; A: CN; B: ReFeX; C: ReFeX plus frozen variable-rank roles."""
+ import time
+ import numpy as np
+ import torch
+ from torch import nn
+ from hsgd.model import TypedSparseDenoiser
+ from features import extract, encode, digest, feature_width
++from role_dictionary import encode_typed
+ 
+ class DegreeBranch(nn.Module):
+     """Only E07 BASE's active degree branch; no anonymous-role parameters."""
+@@ -25,9 +26,9 @@
+     def forward(self,x):return self.degree_out(self.degree_encoder(x))
+ 
+ class StructuralDenoiser(TypedSparseDenoiser):
+-    architecture_version='typed_refex_rolx_192_v2_engineering'
++    architecture_version='typed_structure_192_oabc_v1'
+     def __init__(self,case,cfg,arm,basis=None):
+-        if arm not in ('A','B','C'):raise ValueError('arm')
++        if arm not in ('O','A','B','C'):raise ValueError('arm')
+         args=dict(cfg['model']);args['cn_hidden']=32 if arm=='A' else 0
+         super().__init__(case['n_types'],case['n_families'],family_pairs=case['space'].pairs,prior=case['prior'],**args)
+         self.branch=DegreeBranch(case['n_families'],case['n_types'],cfg['model']['width'])
+@@ -39,37 +40,50 @@
+             first=self.joint_head[0];new=nn.Linear(start,first.out_features)
+             with torch.no_grad():new.weight.copy_(first.weight[:,:start]);new.bias.copy_(first.bias)
+             self.joint_head[0]=new;self.cn_feature_width=0;self.joint_slices['CN']=slice(start,start)
++        if arm in ('B','C'):
+             self.refex_projection=nn.Linear(feature_width(case['n_families']),cfg['model']['width'],bias=False)
+             nn.init.zeros_(self.refex_projection.weight)
+         if arm=='C':
+             if basis is None:raise ValueError('frozen basis required')
+-            self.register_buffer('role_basis',torch.tensor(basis,dtype=torch.float64))
+-            if basis.shape!=(case['n_types'],4,feature_width(case['n_families'])):raise ValueError('per-type four-role basis required')
+-            self.role_projection=nn.Linear(4*case['n_types'],cfg['model']['width'],bias=False)
++            if isinstance(basis,dict):matrix=np.asarray(basis['basis'],dtype=np.float64);offsets=np.asarray(basis['offsets'],dtype=np.int64)
++            else:
++                # Historical small engineering fixtures only; no formal loader uses this.
++                value=np.asarray(basis,dtype=np.float64)
++                if value.ndim!=3 or value.shape[0]!=case['n_types']:raise ValueError('typed basis required')
++                offsets=np.arange(case['n_types']+1,dtype=np.int64)*value.shape[1];matrix=value.reshape(-1,value.shape[-1])
++            if matrix.ndim!=2 or matrix.shape[1]!=feature_width(case['n_families']) or offsets.shape!=(case['n_types']+1,) or offsets[0]!=0 or offsets[-1]!=len(matrix) or (np.diff(offsets)<=0).any():raise ValueError('dynamic typed basis shape')
++            if not np.isfinite(matrix).all() or (matrix<0).any() or not np.allclose(np.linalg.norm(matrix,axis=1),1.,atol=1e-12,rtol=1e-12):raise ValueError('finite nonnegative unit-L2 basis required')
++            self.register_buffer('role_basis',torch.tensor(matrix,dtype=torch.float64))
++            self.register_buffer('role_offsets',torch.tensor(offsets,dtype=torch.long))
++            self.role_projection=nn.Linear(len(matrix),cfg['model']['width'],bias=False)
+             nn.init.zeros_(self.role_projection.weight)
+-            self._basis_cpu=np.array(basis,copy=True);self._basis_cpu.flags.writeable=False
+-            self._basis_hash=digest(self._basis_cpu)
+-            self._basis_tensor_identity=(id(self.role_basis),self.role_basis._version)
++            self._basis_cpu=matrix.copy();self._basis_cpu.flags.writeable=False
++            self._offsets_cpu=offsets.copy();self._offsets_cpu.flags.writeable=False
++            self._basis_hash=digest(self._basis_cpu,self._offsets_cpu)
++            self._basis_tensor_identity=self._role_identity()
++
++    def _role_identity(self):
++        return (id(self.role_basis),self.role_basis._version,id(self.role_offsets),self.role_offsets._version)
+ 
+     def joint_predict(self,ctx,graph,time,mask_cn=False,return_features=False):
+         if not hasattr(ctx,'degree_input'):ctx.degree_input=self.branch.input(ctx,time)
+         ctx.node_residual=self.branch(ctx.degree_input)
+-        if self.arm!='A':
++        if self.arm in ('B','C'):
+             key=(ctx.state_version,float(time),self.arm)
+             if hasattr(ctx,'structural_key') and ctx.structural_key!=key:raise ValueError('stale structural cache')
+             if self.arm=='C':
+                 # Check both state_dict replacement/in-place writes and private CPU source.
+-                identity=(id(self.role_basis),self.role_basis._version)
++                identity=self._role_identity()
+                 if identity!=self._basis_tensor_identity:raise ValueError('basis replaced; explicit checkpoint reload required')
+                 if hasattr(ctx,'basis_identity') and ctx.basis_identity!=identity:raise ValueError('basis changed')
+-                if digest(self._basis_cpu)!=self._basis_hash:raise ValueError('basis CPU changed')
++                if digest(self._basis_cpu,self._offsets_cpu)!=self._basis_hash:raise ValueError('basis CPU changed')
+                 ctx.basis_identity=identity
+             if not hasattr(ctx,'structural_features'):
+                 begin=__import__('time').perf_counter();f=extract(ctx.types,ctx.old,ctx.of,ctx.pairs)
+                 self.feature_seconds+=__import__('time').perf_counter()-begin;self.feature_calls+=1
+                 begin=__import__('time').perf_counter()
+                 g=None
+-                if self.arm=='C':g,ctx.encoding_receipt=encode(f,self._basis_cpu,ctx.types)
++                if self.arm=='C':g,ctx.encoding_receipt=encode_typed(f,self._basis_cpu,self._offsets_cpu,ctx.types)
+                 self.encoding_seconds+=__import__('time').perf_counter()-begin
+                 begin=__import__('time').perf_counter()
+                 ctx.structural_features=torch.tensor(f,dtype=torch.float32,device=ctx.device)
+@@ -86,14 +100,15 @@
+         result=super().load_state_dict(state_dict,strict=strict)
+         if self.arm=='C':
+             self._basis_cpu=self.role_basis.detach().cpu().numpy().copy();self._basis_cpu.flags.writeable=False
+-            self._basis_hash=digest(self._basis_cpu)
+-            self._basis_tensor_identity=(id(self.role_basis),self.role_basis._version)
++            self._offsets_cpu=self.role_offsets.detach().cpu().numpy().copy();self._offsets_cpu.flags.writeable=False
++            self._basis_hash=digest(self._basis_cpu,self._offsets_cpu)
++            self._basis_tensor_identity=self._role_identity()
+         return result
+ 
+     def _apply(self,fn):
+         result=super()._apply(fn)
+         if hasattr(self,'role_basis'):
+-            self._basis_tensor_identity=(id(self.role_basis),self.role_basis._version)
++            self._basis_tensor_identity=self._role_identity()
+         return result
+ 
+ def copy_common(source,target):
+--- /dev/null
++++ b/package/role_dictionary.py
+@@ -0,0 +1,82 @@
++"""Frozen protocol: node-held-out, feature-group-held-out rank selection.
++No neural prediction, generation output or role labels enter this module.
++"""
++import hashlib,json,time,warnings
++import numpy as np
++from scipy.optimize import nnls
++from sklearn.decomposition import NMF
++from sklearn.exceptions import ConvergenceWarning
++
++NMF_OPTIONS=dict(init='nndsvda',solver='cd',beta_loss='frobenius',tol=1e-5,
++                 max_iter=5000,shuffle=False,alpha_W=0.,alpha_H=0.,l1_ratio=0.)
++
++def seed32(root,**labels):
++    payload=json.dumps(dict(root=int(root),**labels),sort_keys=True,separators=(',',':')).encode()
++    return int.from_bytes(hashlib.sha256(payload).digest()[:4],'little')
++
++def feature_groups(relations=10):
++    base=3*relations
++    groups=[[j]+[base+r*2*base+op*base+j for r in range(relations) for op in range(2)] for j in range(base)]
++    assert sorted(sum(groups,[]))==list(range(base*(1+2*relations)))
++    perm=np.random.default_rng(2026102853).permutation(base)
++    sides=[np.array(sorted(sum([groups[j] for j in part],[])),dtype=np.int64) for part in [perm[:base//2],perm[base//2:]]]
++    return groups,sides,perm
++
++def node_folds(types,dataset):
++    result={}
++    for typ in range(int(types.max())+1):
++        ids=np.flatnonzero(types==typ);seed=seed32(2026102851,dataset=dataset,type=typ,purpose='node_folds');p=np.random.default_rng(seed).permutation(ids)
++        result[typ]=dict(seed=seed,folds=[p[:len(ids)//2],p[len(ids)//2:]],Kmax=min(8,len(ids)//2,len(ids)-len(ids)//2))
++    return result
++
++def weighted_rows(features,nodes):
++    if len(features)!=7:raise ValueError('one clean and six noisy states required')
++    return np.concatenate([f[nodes]*(np.sqrt(2.) if i==0 else 1.) for i,f in enumerate(features)],axis=0)
++
++def fit(matrix,k,seed):
++    start=time.perf_counter()
++    with warnings.catch_warnings(record=True) as ws:
++        warnings.simplefilter('always');model=NMF(n_components=k,random_state=seed,**NMF_OPTIONS);model.fit_transform(matrix)
++    basis=model.components_.copy();norm=np.linalg.norm(basis,axis=1)
++    finite=bool(np.isfinite(basis).all() and np.isfinite(norm).all() and np.isfinite(model.reconstruction_err_));positive=bool((norm>0).all())
++    converged=model.n_iter_<NMF_OPTIONS['max_iter'] and not any(issubclass(w.category,ConvergenceWarning) for w in ws)
++    receipt=dict(k=k,seed=seed,seconds=time.perf_counter()-start,iterations=int(model.n_iter_),converged=converged,finite=finite,positive_basis_rows=positive,
++                 reconstruction_error=float(model.reconstruction_err_) if finite else None,warnings=[str(w.message) for w in ws],options=NMF_OPTIONS)
++    if not finite or not positive or not converged:return None,receipt
++    return basis/norm[:,None],receipt
++
++def nnls_encode(features,basis):
++    f=np.asarray(features,dtype=np.float64);h=np.asarray(basis,dtype=np.float64)
++    if f.ndim!=2 or h.ndim!=2 or f.shape[1]!=h.shape[1] or h.shape[0]<1:raise ValueError('NNLS dimensions')
++    if not np.isfinite(f).all() or not np.isfinite(h).all() or (f<0).any() or (h<0).any():raise FloatingPointError('invalid NNLS inputs')
++    if not len(f):return np.zeros((0,len(h))),dict(kkt_max=0.,maxiter=max(240,30*len(h)))
++    c=np.vstack([nnls(h.T,row,maxiter=max(240,30*len(h)))[0] for row in f]);grad=(c@h-f)@h.T
++    kkt=max(float(np.maximum(-grad,0).max()),float(np.abs(c*grad).max()))
++    if not np.isfinite(c).all() or kkt>1e-7:raise FloatingPointError('NNLS KKT failure: '+str(kkt))
++    return c,dict(kkt_max=kkt,maxiter=max(240,30*len(h)),coefficient_sum_range=[float(c.sum(1).min()),float(c.sum(1).max())])
++
++def masked_score(features,nodes,basis,sides):
++    rows=[]
++    for observed,target in [sides,sides[::-1]]:
++        errors=[];max_kkt=0.
++        for f in features:
++            # Target columns NEVER enter coefficient fitting.
++            c,receipt=nnls_encode(f[nodes][:,observed],basis[:,observed]);max_kkt=max(max_kkt,receipt['kkt_max'])
++            errors.append(float(np.mean((c@basis[:,target]-f[nodes][:,target])**2)))
++        weighted=.25*errors[0]+.125*sum(errors[1:])
++        rows.append(dict(state_mse=errors,weighted_mse=weighted,kkt_max=max_kkt))
++    return rows
++
++def choose(scores):
++    if not scores or any(not r['valid'] for r in scores):raise ValueError('incomplete candidates: no K selection permitted')
++    minimum=min(r['mean_mse'] for r in scores)
++    return min(r['K'] for r in scores if r['mean_mse']-minimum<=1e-12)
++
++def encode_typed(features,matrix,offsets,types):
++    matrix=np.asarray(matrix,dtype=np.float64);offsets=np.asarray(offsets,dtype=np.int64);types=np.asarray(types,dtype=np.int64)
++    if offsets.ndim!=1 or offsets[0]!=0 or offsets[-1]!=len(matrix) or (np.diff(offsets)<=0).any():raise ValueError('role offsets')
++    if types.shape!=(len(features),) or (types<0).any() or (types>=len(offsets)-1).any():raise ValueError('types')
++    out=np.zeros((len(features),len(matrix)),dtype=np.float64);receipts={}
++    for typ,(lo,hi) in enumerate(zip(offsets[:-1],offsets[1:])):
++        ids=np.flatnonzero(types==typ);c,rec=nnls_encode(features[ids],matrix[lo:hi]);out[ids,lo:hi]=c;receipts[str(typ)]=rec
++    return out,dict(per_type=receipts,kkt_max=max(r['kkt_max'] for r in receipts.values()),offsets=offsets.tolist(),layout='type-major variable K, other type columns zero; no row normalization')
+--- /dev/null
++++ b/package/select_dictionary.py
+@@ -0,0 +1,71 @@
++"""Bounded offline preparation; failure never drops a candidate or changes K."""
++import argparse,json,pathlib,time,signal,traceback,resource
++import numpy as np
++from prepare import load_case,save,sha,ROOT
++from features import extract,digest
++from role_dictionary import seed32,feature_groups,node_folds,weighted_rows,fit,masked_score,choose,NMF_OPTIONS
++from hsgd.bw_preflight.common import schedule
++from hsgd.noising import global_noisy_edges
++
++def main():
++    ap=argparse.ArgumentParser();ap.add_argument('--dataset',choices=['IMDB','PubMed'],required=True);ap.add_argument('--output',required=True);ap.add_argument('--ledger',required=True);a=ap.parse_args()
++    out=pathlib.Path(a.output);out.mkdir(exist_ok=False);ledger=json.loads(pathlib.Path(a.ledger).read_text());deadline=ledger['preparation_deadline_epoch']-300
++    def check():
++        if time.time()>=deadline:raise TimeoutError('preparation delivery reserve')
++        if (out/'STOP').exists():raise InterruptedError('STOP')
++    def interrupted(s,f):raise InterruptedError('signal '+str(s))
++    for sig in [signal.SIGTERM,signal.SIGINT,signal.SIGHUP]:signal.signal(sig,interrupted)
++    signal.signal(signal.SIGALRM,lambda s,f:(_ for _ in ()).throw(TimeoutError('preparation limit')));signal.alarm(max(1,int(deadline-time.time())))
++    result=dict(status='running',dataset=a.dataset,types={},formal_authorized=False,started_epoch=time.time(),model_calls=0)
++    try:
++        check();case,cfg=load_case(a.dataset);types=case['space'].types;groups,sides,perm=feature_groups();folds=node_folds(types,a.dataset)
++        split={str(t):dict(seed=v['seed'],folds=[x.tolist() for x in v['folds']],Kmax=v['Kmax']) for t,v in folds.items()}
++        save(out/'frozen_splits.json',dict(groups=groups,group_names=[kind+'_family_'+str(r) for kind in ['degree','egonet_internal','egonet_boundary'] for r in range(10)],permutation=perm.tolist(),sides=[x.tolist() for x in sides],node_folds=split,NMF=NMF_OPTIONS,seed_derivation='SHA256 sorted compact JSON of root and labels; first 4 bytes little-endian uint32',score='mean of 2 folds x 2 feature directions; clean .25 and each noisy state .125',data=cfg['datasets'][a.dataset],S=case['space'].total,prior=case['prior'].tolist()))
++        features=[];states=[]
++        for t,root in [(0,None)]+[(t,root) for t in [100,500,1000] for root in [2026102831,2026102832]]:
++            check();seed=None if root is None else seed32(root,dataset=a.dataset,time=t,purpose='dictionary_forward_noise')
++            if t==0:e=case['clean'];f=case['space'].encode(e)[0]
++            else:e,f,_=global_noisy_edges(case['space'],case['clean'],case['prior'],schedule(1000)[t],np.random.default_rng(seed))
++            begin=time.perf_counter();value=extract(types,e,f,case['space'].pairs);elapsed=time.perf_counter()-begin
++            name='state_'+str(t)+'_'+str(root);np.savez_compressed(out/(name+'.npz'),types=types,edges=e,families=f,t=np.array(t),features=value)
++            states.append(dict(file=name+'.npz',sha256=sha(out/(name+'.npz')),t=t,root_seed=root,derived_seed=seed,feature_sha256=digest(value),feature_seconds=elapsed,edges=len(f)))
++            features.append(value)
++        save(out/'panel.json',states)
++        # Freeze splits and actual Xt before ANY candidate fit.
++        for typ,v in folds.items():
++            ids=np.flatnonzero(types==typ)
++            for side in sides:
++                if not any(np.any(f[ids][:,side]>0) for f in features):raise ValueError('empty effective feature side for type '+str(typ))
++        all_valid=True
++        for typ,v in folds.items():
++            row=dict(Kmax=v['Kmax'],candidates=[]);result['types'][str(typ)]=row
++            for k in range(1,v['Kmax']+1):
++                candidate=dict(K=k,fits=[],scores=[],valid=True)
++                for fold in range(2):
++                    check();seed=seed32(2026102861,dataset=a.dataset,type=typ,fold=fold,K=k,purpose='candidate_fit')
++                    matrix=weighted_rows(features,v['folds'][fold]);basis,rec=fit(matrix,k,seed);candidate['fits'].append(rec)
++                    if basis is None:candidate['valid']=False;continue
++                    np.savez_compressed(out/('candidate_type%d_K%d_fold%d.npz'%(typ,k,fold)),basis=basis)
++                    try:candidate['scores'].append(masked_score(features,v['folds'][1-fold],basis,sides))
++                    except Exception as exc:candidate['valid']=False;candidate.setdefault('errors',[]).append(repr(exc))
++                candidate['mean_mse']=float(np.mean([direction['weighted_mse'] for fold in candidate['scores'] for direction in fold])) if candidate['valid'] and len(candidate['scores'])==2 else None
++                row['candidates'].append(candidate);all_valid &= candidate['valid'];save(out/'selection.json',result)
++                print(a.dataset,'type',typ,'K',k,'valid',candidate['valid'],'iterations',[r['iterations'] for r in candidate['fits']],flush=True)
++        if not all_valid:
++            result['status']='blocked_incomplete_candidate_comparison';result['reason']='At least one nonconverged/invalid candidate. No candidate discarded; no K selected; no final basis; no downstream release.'
++        else:
++            matrices=[];offsets=[0];ks=[];final_ok=True
++            for typ,v in folds.items():
++                check();row=result['types'][str(typ)];k=choose(row['candidates']);row.update(selected_K=k,boundary_hit=k==v['Kmax']);ks.append(k)
++                seed=seed32(2026102861,dataset=a.dataset,type=typ,fold='all',K=k,purpose='final_fit');basis,rec=fit(weighted_rows(features,np.flatnonzero(types==typ)),k,seed);row['final_fit']=rec;final_ok &= basis is not None
++                if basis is not None:matrices.append(basis);offsets.append(offsets[-1]+k)
++                save(out/'selection.json',result)
++            if final_ok:
++                np.savez_compressed(out/'final_basis.npz',basis=np.concatenate(matrices),offsets=np.array(offsets,dtype=np.int64),K=np.array(ks,dtype=np.int64))
++                result.update(status='passed',basis_sha256=sha(out/'final_basis.npz'),K=ks,offsets=offsets,panel_sha256=sha(out/'panel.json'),splits_sha256=sha(out/'frozen_splits.json'))
++            else:result.update(status='blocked_final_fit',reason='No release of partial final dictionary')
++    except BaseException as exc:result.update(status='failed_or_incomplete',error=repr(exc),traceback=traceback.format_exc())
++    finally:
++        result.update(finished_epoch=time.time(),seconds=time.time()-result['started_epoch'],peak_rss_mib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024);save(out/'selection.json',result);print(result['status'],flush=True)
++    return 0 if result['status']=='passed' else 2
++if __name__=='__main__':raise SystemExit(main())
+--- /dev/null
++++ b/package/test_oabc.py
+@@ -0,0 +1,141 @@
++"""Small interface fixtures only; no real dictionary substitution or updates."""
++import unittest,copy,tempfile,json,pathlib,time
++from unittest.mock import patch
++import numpy as np
++import torch
++from test_engineering import toy,config
++from features import extract
++from model_variants import StructuralDenoiser,copy_common
++from role_dictionary import feature_groups,node_folds,weighted_rows,masked_score,choose,encode_typed,seed32
++from normal2 import normal2,pair_inputs
++from hsgd.computational import FrozenTypedContext
++from hsgd.bw_preflight.common import plan_for
++from experiment_contract import read_dictionary,scientific_gate,recommend_tier
++
++torch.set_num_threads(1)
++def fixture():
++    c=toy();width=9*(1+6);rng=np.random.default_rng(173);h=rng.uniform(.1,1,(3,width));h/=np.linalg.norm(h,axis=1)[:,None]
++    return c,dict(basis=h,offsets=np.array([0,1,3]))
++def prediction(c,m,edges=None):
++    edges=c['clean'] if edges is None else edges;f=c['space'].encode(edges)[0];ctx=FrozenTypedContext(m,c['space'].types,edges,f,('test',0))
++    try:
++        ids,qf,q=plan_for(c,13,1).block(0);return ids,ctx.predict(q,qf,.5,('test',0),details=True)
++    finally:ctx.close()
++
++class DictionaryProtocol(unittest.TestCase):
++    def test_feature_ancestry_complete_disjoint(self):
++        groups,sides,perm=feature_groups();self.assertEqual(len(groups),30);self.assertEqual([len(x) for x in groups],[21]*30)
++        self.assertEqual(sorted(sum(groups,[])),list(range(630)));self.assertFalse(set(sides[0])&set(sides[1]));self.assertEqual([len(x) for x in sides],[315,315])
++        for g in groups:self.assertTrue(set(g)<=set(sides[0]) or set(g)<=set(sides[1]))
++    def test_folds_stable_all_states_and_caps(self):
++        for name,counts,want in [('IMDB',[48,56,78,10],[8,8,8,5]),('PubMed',[40,74,66,12],[8,8,8,6])]:
++            types=np.repeat(np.arange(4),counts);folds=node_folds(types,name)
++            self.assertEqual([folds[i]['Kmax'] for i in range(4)],want)
++            for typ,row in folds.items():
++                a,b=row['folds'];self.assertFalse(set(a)&set(b));self.assertEqual(set(a)|set(b),set(np.flatnonzero(types==typ)))
++                self.assertTrue(np.array_equal(a,node_folds(types,name)[typ]['folds'][0]))
++    def test_weighted_objective_equivalence(self):
++        f=[np.ones((3,4))*(i+1) for i in range(7)];m=weighted_rows(f,np.arange(3));loss=float((m*m).sum())/(8*3*4)
++        target=.25*np.mean(f[0]**2)+.125*sum(np.mean(x*x) for x in f[1:]);self.assertAlmostEqual(loss,target)
++    def test_masked_encoding_never_observes_target(self):
++        from role_dictionary import nnls_encode
++        h=np.array([[1.,0.,.5,0.],[0.,1.,0.,.5]]);f=[np.array([[.3,.8,.1,.2]]) for _ in range(7)];sides=[np.array([0,1]),np.array([2,3])];seen=[]
++        def observed(x,b):seen.append(x.copy());return nnls_encode(x,b)
++        with patch('role_dictionary.nnls_encode',observed):a=masked_score(f,np.array([0]),h,sides)
++        f2=[x.copy() for x in f]
++        for x in f2:x[:,2:]+=7
++        with patch('role_dictionary.nnls_encode',observed):b=masked_score(f2,np.array([0]),h,sides)
++        for i in range(7):np.testing.assert_array_equal(seen[i],seen[14+i])
++        self.assertNotEqual(a[0]['weighted_mse'],b[0]['weighted_mse'])
++    def test_rank_tie_and_failure_cannot_be_dropped(self):
++        self.assertEqual(choose([dict(K=1,valid=True,mean_mse=.1+5e-13),dict(K=2,valid=True,mean_mse=.1)]),1)
++        with self.assertRaises(ValueError):choose([dict(K=1,valid=True,mean_mse=.1),dict(K=2,valid=False,mean_mse=None)])
++    def test_dynamic_segments_and_permutation(self):
++        h=np.eye(4);offsets=np.array([0,1,4]);types=np.array([0,1,1]);f=np.array([[2.,0.,0.,0.],[0.,3.,4.,1.],[0.,1.,2.,3.]])
++        c,_=encode_typed(f,h,offsets,types);np.testing.assert_array_equal(c,f);self.assertEqual(c.sum(1)[1],8)
++        p=np.array([2,0,1]);cp,_=encode_typed(f[p],h,offsets,types[p]);np.testing.assert_array_equal(cp,c[p])
++    def test_seed_streams_distinct(self):
++        a=seed32(2026102831,dataset='IMDB',time=100,purpose='dictionary_forward_noise');b=seed32(2026102831,dataset='PubMed',time=100,purpose='dictionary_forward_noise');self.assertNotEqual(a,b)
++    def test_dictionary_failure_and_review_gate(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            p=pathlib.Path(tmp);d=p/'dictionary_IMDB';d.mkdir();(d/'selection.json').write_text(json.dumps(dict(status='blocked_incomplete_candidate_comparison')))
++            with self.assertRaises(RuntimeError):read_dictionary(p,'IMDB')
++            (p/'ledger.json').write_text(json.dumps(dict(deadline_epoch=time.time()+60)));(p/'approval.json').write_text('{}')
++            with self.assertRaises(PermissionError):scientific_gate(p/'ledger.json',p/'approval.json',p/'absent',p,'hash')
++    def test_cost_requires_eight_cells(self):
++        with self.assertRaises(ValueError):recommend_tier(dict(complete_eight_cells=False),10000,8)
++
++class Models(unittest.TestCase):
++    def test_variable_dictionary_state_load(self):
++        c,basis=fixture();left=StructuralDenoiser(c,config(),'C',basis)
++        with torch.no_grad():left.role_projection.weight.fill_(.03)
++        right=StructuralDenoiser(c,config(),'C',basis);right.load_state_dict(copy.deepcopy(left.state_dict()),strict=True)
++        for k,v in left.state_dict().items():self.assertTrue(torch.equal(v,right.state_dict()[k]))
++        torch.testing.assert_close(prediction(c,left)[1][1],prediction(c,right)[1][1],atol=0,rtol=0)
++
++    def test_node_permutation_nonzero_projection(self):
++        from hsgd.bw_preflight.common import make_case
++        c,basis=fixture();m=StructuralDenoiser(c,config(),'C',basis)
++        with torch.no_grad():m.refex_projection.weight.fill_(.01);m.role_projection.weight.fill_(.02)
++        perm=np.array([2,0,1,5,3,4]);types=np.empty_like(c['space'].types);types[perm]=c['space'].types
++        other=make_case(types,np.sort(perm[c['clean']],axis=0),c['space'].pairs)
++        ids,(_,_,p)=prediction(c,m);ids2,(_,_,p2)=prediction(other,m)
++        _,_,q=plan_for(c,13,1).block(0);mapped=np.sort(perm[q],axis=0);family,local=other['space'].encode(mapped);mapped_ids=other['space'].offsets[family]+local
++        lookup={int(i):j for j,i in enumerate(ids2)};order=[lookup[int(i)] for i in mapped_ids]
++        torch.testing.assert_close(p,p2[order],atol=2e-6,rtol=1e-5)
++    def test_O_and_BC_have_no_hidden_CN(self):
++        c,basis=fixture()
++        for arm in 'OABC':
++            m=StructuralDenoiser(c,config(),arm,basis)
++            self.assertEqual(m.common_neighbor is not None,arm=='A')
++            self.assertEqual(hasattr(m,'refex_projection'),arm in 'BC');self.assertEqual(hasattr(m,'role_projection'),arm=='C')
++            if arm!='A':self.assertEqual(m.cn_feature_width,0)
++            if arm=='O':
++                with patch('model_variants.extract',side_effect=AssertionError('O used ReFeX')):prediction(c,m)
++    def test_actual_copy_zero_projection_and_optimizer_membership(self):
++        c,basis=fixture();torch.manual_seed(42);a=StructuralDenoiser(c,config(),'A');models={}
++        for arm in 'OBC':
++            m=StructuralDenoiser(c,config(),arm,basis);copy_common(a,m);models[arm]=m
++            opt=torch.optim.AdamW(m.parameters());self.assertEqual({id(p) for g in opt.param_groups for p in g['params']},{id(p) for p in m.parameters()})
++        _,(_,lo,po)=prediction(c,models['O'])
++        for arm in 'BC':
++            _,(_,l,p)=prediction(c,models[arm]);self.assertTrue(torch.equal(lo,l));self.assertTrue(torch.equal(po,p))
++        self.assertEqual(models['C'].role_projection.in_features,3)
++    def test_normal2_gradient_without_update_and_basis_frozen(self):
++        c,basis=fixture();m=StructuralDenoiser(c,config(),'C',basis);inputs=pair_inputs(c,dict(seed=9,T=1000),1,np.random.default_rng(11),500);opt=torch.optim.AdamW(m.parameters());before={k:v.clone() for k,v in m.state_dict().items()}
++        with patch.object(opt,'step',side_effect=AssertionError('no engineering updates authorized by this unit test')):rec=normal2(m,opt,c,inputs,1000,'cpu',False,{})
++        self.assertEqual(rec['optimizer_steps'],0);self.assertIsNone(m.role_basis.grad)
++        for k,v in m.state_dict().items():self.assertTrue(torch.equal(v,before[k]))
++        self.assertIsNotNone(m.role_projection.weight.grad);self.assertTrue(torch.isfinite(m.role_projection.weight.grad).all())
++    def test_cache_mutation_refused_and_independent_Xt(self):
++        c,basis=fixture();m=StructuralDenoiser(c,config(),'C',basis);prediction(c,m);self.assertEqual(m.feature_calls,1);prediction(c,m);self.assertEqual(m.feature_calls,2)
++        with torch.no_grad():m.role_offsets[1]+=1
++        with self.assertRaises(ValueError):prediction(c,m)
++    def test_edge_order_and_endpoint_canonicalization(self):
++        c,basis=fixture();m=StructuralDenoiser(c,config(),'C',basis)
++        with torch.no_grad():m.refex_projection.weight.fill_(.01);m.role_projection.weight.fill_(.02)
++        _,(_,l,p)=prediction(c,m);reversed_edges=np.sort(c['clean'][::-1,::-1],axis=0);_,(_,l2,p2)=prediction(c,m,reversed_edges)
++        torch.testing.assert_close(l,l2,atol=2e-6,rtol=1e-5);torch.testing.assert_close(p,p2,atol=2e-6,rtol=1e-5)
++
++class PublicGates(unittest.TestCase):
++    def test_public_launcher_refuses_before_devices_or_output(self):
++        import subprocess,sys
++        with tempfile.TemporaryDirectory() as tmp:
++            root=pathlib.Path(tmp);(root/'ledger.json').write_text(json.dumps(dict(deadline_epoch=time.time()+60)));(root/'approval.json').write_text('{}');(root/'protocol.json').write_text('{}')
++            cmd=[sys.executable,str(pathlib.Path(__file__).parent/'launch.py'),'formal','--ledger',str(root/'ledger.json'),'--approval',str(root/'approval.json'),'--protocol',str(root/'protocol.json'),'--dictionary-dir',str(root/'absent'),'--cost',str(root/'missing'),'--output',str(root/'output'),'--gpu-uuids','GPU-not-used']
++            r=subprocess.run(cmd,capture_output=True,text=True,timeout=15)
++            self.assertNotEqual(r.returncode,0);self.assertIn('review + user continuation missing',r.stderr);self.assertFalse((root/'output').exists())
++
++    def test_evaluation_identity_and_contrasts(self):
++        from evaluation import evaluate,paired_table
++        c=toy();r=evaluate(c,c['clean'],['type0','type1'])
++        self.assertEqual(list(r['primary'].values()),[0.,0.,0.])
++        rows={(d,a,s):r for d in ['IMDB','PubMed'] for a in 'OABC' for s in [2026102821,2026102822]}
++        differences=paired_table(rows);self.assertEqual(len(differences),20)
++        self.assertTrue(all(not any(row['primary'].values()) for row in differences))
++
++    def test_entry_imports_do_not_launch(self):
++        import worker,launch
++        self.assertTrue(callable(worker.main));self.assertTrue(callable(launch.main))
++
++if __name__=='__main__':unittest.main()
+--- /dev/null
++++ b/package/worker.py
+@@ -0,0 +1,114 @@
++"""Review-gated single-GPU worker; not executed on scientific models in this ticket.
++Initial/mid/final saves, paired normal2 inputs, final-only original full sampling.
++"""
++import argparse,pathlib,json,time,os,copy,signal,traceback,resource
++import numpy as np
++import torch
++from prepare import save,sha
++from experiment_contract import read_dictionary,scientific_gate,source_binding,initialization
++from role_dictionary import seed32
++from normal2 import normal2,pair_inputs,sync
++from probe import rng_get,rng_set,equal,input_hash
++from hsgd.bw_preflight.common import cpu_tree,environment,schedule,check_prob_device,state_edges
++from hsgd.computational import FrozenTypedContext
++from hsgd.losses import supported_binary_ce
++from hsgd.kernel import MarginalKernel
++from hsgd.runtime import reverse_step
++from evaluation import evaluate
++
++def atomic_checkpoint(path,payload):
++    path=pathlib.Path(path)
++    if path.exists():raise FileExistsError('checkpoint conflict '+str(path))
++    temp=path.with_suffix('.tmp');torch.save(payload,temp)
++    with temp.open('rb') as f:os.fsync(f.fileno())
++    temp.replace(path);save(path.with_suffix('.sha256.json'),dict(sha256=sha(path),updates=payload.get('updates')))
++
++def validation(model,case,cfg,seed,rng):
++    before=rng_get(rng,'cuda');rows=[];start=time.perf_counter();mode=model.training;model.eval()
++    try:
++        for t in [1,500,1000]:
++            private=np.random.default_rng(seed32(seed,purpose='fixed_validation_noise',time=t));inp=pair_inputs(case,cfg,10000+t,private,t)[0]
++            ctx=FrozenTypedContext(model,case['space'].types,inp['edges'],inp['edge_families'],('validation',t))
++            try:
++                with torch.no_grad():
++                    graph,logits,p=ctx.predict(inp['query'],inp['f'],t/cfg['T'],('validation',t),details=True)
++                    check_prob_device(p,inp['f'],case,model.prior);labels=torch.as_tensor(inp['labels'],device='cuda');ce=supported_binary_ce(logits,labels,model.prior[graph.query_families]).cpu().numpy();prob=p.cpu().numpy()
++                family=[]
++                for f in range(case['n_families']):
++                    ix=inp['f']==f;pos=ix&(inp['labels']==1);neg=ix&(inp['labels']==0)
++                    family.append(dict(family=f,positive_count=int(pos.sum()),negative_count=int(neg.sum()),positive_ce=float(ce[pos].mean()) if pos.any() else None,negative_ce=float(ce[neg].mean()) if neg.any() else None,expected_edges=float(prob[ix].sum()),true_edges=int(pos.sum())))
++                rows.append(dict(t=t,input_sha256=input_hash([inp]),ce_sum_over_S=float(ce.sum()/case['space'].total),family=family))
++            finally:ctx.close()
++    finally:model.train(mode);rng_set(before,rng,'cuda')
++    if not equal(before,rng_get(rng,'cuda')):raise AssertionError('validation changed training RNG')
++    return dict(seconds=time.perf_counter()-start,rows=rows,rng_unchanged=True,same_reference_only=True)
++
++def main():
++    ap=argparse.ArgumentParser();ap.add_argument('--dataset',choices=['IMDB','PubMed'],required=True);ap.add_argument('--arm',choices=list('OABC'),required=True);ap.add_argument('--output',required=True);ap.add_argument('--dictionary-dir',required=True);ap.add_argument('--ledger',required=True);ap.add_argument('--approval',required=True);ap.add_argument('--protocol',required=True);args=ap.parse_args()
++    source,source_hash=source_binding();ledger,approval=scientific_gate(args.ledger,args.approval,args.protocol,args.dictionary_dir,source_hash)
++    # Both datasets must have fully valid dictionaries even for O/A/B.
++    protocol=json.loads(pathlib.Path(args.protocol).read_text());dataset=args.dataset;arm=args.arm;out=pathlib.Path(args.output);out.mkdir(parents=True,exist_ok=False)
++    stop=[False];in_update=False;completed=0;status=dict(status='initializing',formal_training_authorized=True,completed_updates=0,completed_chains=0)
++    def requested(s,f):stop[0]=True
++    for sig in [signal.SIGINT,signal.SIGTERM,signal.SIGHUP]:signal.signal(sig,requested)
++    def check():
++        if stop[0] or (out/'STOP').exists():raise InterruptedError('safe stop')
++        if time.time()>=ledger['deadline_epoch']-1200:raise TimeoutError('evaluation/delivery reserve reached')
++    try:
++        check();torch.set_num_threads(1);torch.set_num_interop_threads(1);torch.use_deterministic_algorithms(True,warn_only=False);torch.backends.cuda.matmul.allow_tf32=False;torch.backends.cudnn.allow_tf32=False
++        if not torch.cuda.is_available() or torch.cuda.device_count()!=1 or '2080 Ti' not in torch.cuda.get_device_name(0):raise RuntimeError('one frozen RTX2080Ti required')
++        env=environment('cuda');save(out/'environment.json',env)
++        # Numerical dependency and GPU-model equality is a required approval binding.
++        for key in ['python_version','torch_runtime_version','device_name']:
++            if approval['environment'][key]!=env[key]:raise ValueError('environment mismatch '+key)
++        if approval['environment']['packages']!=env['packages']:raise ValueError('dependency versions differ')
++        basis,receipt=read_dictionary(args.dictionary_dir,dataset);seed=protocol['train_seeds'][dataset]
++        model,case,cfg,proof=initialization(dataset,arm,seed,basis if arm=='C' else None);cfg=dict(cfg,seed=seed)
++        rng=np.random.default_rng(seed32(seed,dataset=dataset,purpose='paired_training_noise'))
++        binding=dict(source_sha256=source_hash,source=source,protocol_sha256=sha(args.protocol),ledger_sha256=sha(args.ledger),dictionary_sha256=receipt['basis_sha256'],dataset=cfg['datasets'][dataset],arm=arm,config=cfg,environment=env,updates=approval['updates'])
++        save(out/'binding.json',binding);save(out/'initialization.json',proof)
++        # Entire initial state and RNG saved before any forward, isolated from engineering.
++        initial=dict(model=cpu_tree(model.state_dict()),rng=rng_get(rng,'cuda'),updates=0,binding=binding,purpose='fresh scientific initial, never engineering weights')
++        atomic_checkpoint(out/'initial.pt',initial);model=model.cuda();opt=torch.optim.AdamW(model.parameters(),**{k:v for k,v in cfg['optimizer'].items() if k!='type'})
++        if {id(p) for g in opt.param_groups for p in g['params']}!={id(p) for p in model.parameters() if p.requires_grad}:raise AssertionError('optimizer membership')
++        validation_rows=[dict(updates=0,**validation(model,case,cfg,seed,rng))];save(out/'validation.json',validation_rows)
++        def snapshot(name):
++            if in_update:raise RuntimeError('not an update boundary')
++            atomic_checkpoint(out/name,dict(model=cpu_tree(model.state_dict()),optimizer=cpu_tree(opt.state_dict()),rng=rng_get(rng,'cuda'),updates=completed,binding=binding,elapsed_since_activation=time.time()-ledger['start_epoch']))
++        target=approval['updates'];save(out/'progress.json',status)
++        for position in range(1,target+1):
++            check();inputs=pair_inputs(case,cfg,position,rng);in_update=True;rec=normal2(model,opt,case,inputs,1000,'cuda',True);in_update=False;completed=position
++            rec.update(update=position,input_sha256=input_hash(inputs),t=[x['t'] for x in inputs],slots=[len(x['ids']) for x in inputs],utc=time.time(),warmup=position<=5)
++            with (out/'training.jsonl').open('a') as f:f.write(json.dumps(rec)+'\n')
++            status.update(status='training',completed_updates=completed,peak_allocated_mib=torch.cuda.max_memory_allocated()/2**20,peak_reserved_mib=torch.cuda.max_memory_reserved()/2**20);save(out/'progress.json',status)
++            if position in [target//2,target]:
++                snapshot('midpoint.pt' if position==target//2 else 'final.pt');validation_rows.append(dict(updates=position,**validation(model,case,cfg,seed,rng)));save(out/'validation.json',validation_rows)
++        # Only the final weights are evaluated. Original runtime performs atomic full sweeps.
++        model.eval();kernel=MarginalKernel(case['prior'],schedule(1000));families=np.repeat(np.arange(case['n_families']),case['space'].counts)
++        next_t=None
++        for sample_seed in protocol['sample_seeds']:
++            check();folder=out/('sample_'+str(sample_seed));folder.mkdir();sample_rng=np.random.default_rng(sample_seed)
++            state=(sample_rng.random(case['space'].total)<case['prior'][families]).astype(np.uint8);initial_rng=copy.deepcopy(sample_rng.bit_generator.state);begin=time.perf_counter();next_t=1000
++            for t in range(1000,0,-1):
++                check();candidate,rec=reverse_step(model,case,state,kernel,t,1,sample_seed,sample_rng,'cuda',check_time=check,trace=False)
++                state=candidate;next_t=t-1 # commit only after exact full query coverage
++                with (folder/'steps.jsonl').open('a') as f:f.write(json.dumps(rec)+'\n')
++                if t%100==0 or t==1:
++                    atomic_checkpoint(folder/('complete_t%04d.pt'%next_t),dict(state=state,next_t=next_t,rng=rng_get(sample_rng,'cuda'),binding=binding,sample_seed=sample_seed,model_sha256=sha(out/'final.pt')))
++            edges,fam=state_edges(case,state);np.savez_compressed(folder/'graph.npz',types=case['space'].types,edges=edges,families=fam,schema=np.array(case['space'].pairs))
++            save(folder/'metrics.json',evaluate(case,edges,cfg['datasets'][dataset]['type_names'],check));save(folder/'binding.json',dict(checkpoint_sha256=sha(out/'final.pt'),graph_sha256=sha(folder/'graph.npz'),seed=sample_seed,initial_rng=initial_rng,seconds=time.perf_counter()-begin,binding=binding))
++            status['completed_chains']+=1
++        status['status']='complete'
++    except BaseException as exc:
++        status.update(status='failed_or_incomplete',error=repr(exc),traceback=traceback.format_exc(),incomplete_update_not_saved=in_update)
++        if 'next_t' in locals() and next_t is not None:
++            try:atomic_checkpoint(folder/'stopped_chain.pt',dict(state=state,next_t=next_t,rng=rng_get(sample_rng,'cuda'),binding=binding,sample_seed=sample_seed,model_sha256=sha(out/'final.pt')))
++            except BaseException as save_error:status['chain_save_error']=repr(save_error)
++        # No partial optimizer state is presented as a completed update.
++        if 'opt' in locals() and not in_update:
++            try:snapshot('stopped_u%d.pt'%completed)
++            except BaseException as save_error:status['stop_save_error']=repr(save_error)
++    finally:
++        status.update(completed_updates=completed,finished_epoch=time.time(),elapsed_since_activation=time.time()-ledger['start_epoch'],peak_rss_mib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024);save(out/'summary.json',status)
++    return 0 if status['status']=='complete' else 2
++if __name__=='__main__':raise SystemExit(main())
