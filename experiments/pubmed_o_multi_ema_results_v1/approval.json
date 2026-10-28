@@ -1,0 +1,95 @@
+{
+  "user_formal_authorized": true,
+  "independent_review": "passed",
+  "authorization_reference": "/data2/lyh/gnn_project/DiHug/results/pubmed_o_multi_ema_formal_v1_20261028T222745/user_authorization.json",
+  "authorization_sha256": "312d554ca49f303c89c9d0a0f7d1c38bbbf00a2128bc8fa1d6a63b764788f0bb",
+  "fixed_commit": "95b1ee86b1d90a7edb102d2d014a024087237316",
+  "source_sha256": "18528be54a690851d99784dcc968b98034eb297b3d0581b8419f316a2eef0597",
+  "protocol_sha256": "1d25ce171ea36bc38e45914384992ce9cb580028785a9b309aa61dd3fccb052c",
+  "cost_sha256": "c8b585f1346a5012a2b64f5af34e63ff5f522ae23069cbe4361903e09f63b881",
+  "budget_seconds": 11100,
+  "scientific_stop_after_seconds": 9900,
+  "updates": 1000,
+  "output": "/data2/lyh/gnn_project/DiHug/results/pubmed_o_multi_ema_formal_v1_20261028T222745/run",
+  "gpu_uuids": [
+    "GPU-12b85b68-69e6-12fa-76ce-986c0b46e8a7",
+    "GPU-cf73267c-774a-dada-fc26-ada91ccc27c1",
+    "GPU-dda1721a-d053-7371-3434-4c3c8502a1d4",
+    "GPU-994be766-a8bd-b90c-bf87-c667dfa8ab4d",
+    "GPU-e2284395-dd00-1e74-3eed-7f406fa69d5c",
+    "GPU-2db6cf6a-a8b5-58af-4e89-22bfc863a0fb",
+    "GPU-cddbf2e5-1af7-7219-ff58-38e6f4c44f69",
+    "GPU-360156ae-7a75-37f4-eaed-9a5500275409"
+  ],
+  "resource_authorization": {
+    "allocation_check_complete": true,
+    "allowed_uuids": [
+      "GPU-12b85b68-69e6-12fa-76ce-986c0b46e8a7",
+      "GPU-cf73267c-774a-dada-fc26-ada91ccc27c1",
+      "GPU-dda1721a-d053-7371-3434-4c3c8502a1d4",
+      "GPU-994be766-a8bd-b90c-bf87-c667dfa8ab4d",
+      "GPU-e2284395-dd00-1e74-3eed-7f406fa69d5c",
+      "GPU-2db6cf6a-a8b5-58af-4e89-22bfc863a0fb",
+      "GPU-cddbf2e5-1af7-7219-ff58-38e6f4c44f69",
+      "GPU-360156ae-7a75-37f4-eaed-9a5500275409"
+    ],
+    "reservation_conflicts": false,
+    "minimum_free_mib": 9000,
+    "authority": "user explicitly authorizes eight allocated idle RTX2080Ti for this panel; same local dedicated resources; no scheduler job/visibility mask detected; launcher rechecks processes and fuser",
+    "query_time": "2026-10-28T22:27:45.145026+08:00"
+  },
+  "environment": {
+    "python": "3.9.23 | packaged by conda-forge | (main, Jun  4 2025, 17:57:12) \n[GCC 13.3.0]",
+    "python_version": "3.9.23",
+    "executable": "/data2/lyh/miniconda3/envs/sparse_block/bin/python",
+    "system": "Linux-5.4.0-216-generic-x86_64-with-glibc2.31",
+    "machine": "x86_64",
+    "packages": {
+      "torch": "2.1.0+cu121",
+      "torch-geometric": "2.3.1",
+      "numpy": "1.23.0",
+      "scipy": "1.11.0",
+      "pytest": "8.4.2",
+      "networkx": "2.8.7"
+    },
+    "hip": null,
+    "cuda": "12.1",
+    "requested_device": "cuda",
+    "torch_runtime_version": "2.1.0+cu121",
+    "float32_matmul_precision": "highest",
+    "matmul_allow_tf32": false,
+    "deterministic_algorithms": true,
+    "deterministic_warn_only": false,
+    "torch_threads": 1,
+    "utc": "2026-10-28T14:04:05Z",
+    "device_name": "NVIDIA GeForce RTX 2080 Ti",
+    "visible_devices": 1,
+    "device_memory_bytes": 11546394624,
+    "device_type": "CUDA"
+  },
+  "initial_paths": {
+    "2026102812": "/data2/lyh/gnn_project/DiHug/results/typed_structure_192_oabc_formal_v1_20261028T090624/run/PubMed_O/initial.pt",
+    "2026102833": "/data2/lyh/gnn_project/DiHug/results/typed_structure_192_oabc_seed2_v1_20261028T110507/run/PubMed_O/initial.pt"
+  },
+  "train_seeds": [
+    2026102812,
+    2026102833,
+    2026102841,
+    2026102842,
+    2026102843,
+    2026102844,
+    2026102845,
+    2026102846
+  ],
+  "readouts": [
+    "raw",
+    "ema_0.9",
+    "ema_0.97",
+    "ema_0.99"
+  ],
+  "sample_seeds": [
+    2026102821,
+    2026102822
+  ],
+  "chain_count": 64
+}

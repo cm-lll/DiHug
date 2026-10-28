@@ -1,0 +1,128 @@
+{
+  "source_sha256": "18528be54a690851d99784dcc968b98034eb297b3d0581b8419f316a2eef0597",
+  "protocol_sha256": "1d25ce171ea36bc38e45914384992ce9cb580028785a9b309aa61dd3fccb052c",
+  "train_seed": 2026102833,
+  "dataset": "PubMed",
+  "arm": "O",
+  "config": {
+    "model": {
+      "layers": 8,
+      "width": 256,
+      "edge_width": 64,
+      "global_width": 128,
+      "heads": 8,
+      "ff_node": 256,
+      "ff_edge": 64,
+      "ff_global": 256,
+      "dropout": 0.1,
+      "cn_hidden": 32,
+      "joint_width": 128,
+      "max_wedges": 2000000,
+      "max_query_paths": 2000000
+    },
+    "optimizer": {
+      "type": "AdamW",
+      "lr": 0.0002,
+      "weight_decay": 1e-12,
+      "betas": [
+        0.9,
+        0.999
+      ],
+      "eps": 1e-08,
+      "amsgrad": false
+    },
+    "precision": "FP32 network/stable CE; float64 probability kernel",
+    "T": 1000,
+    "rounds": 1,
+    "schedule_offset": 0.008,
+    "tf32": false,
+    "version": "typed_structure_192_oabc_v1_1",
+    "arms": [
+      "O",
+      "A",
+      "B",
+      "C"
+    ],
+    "formal_authorized": false,
+    "feature_spec": {
+      "version": "typed_refex_relation_one_round_v2",
+      "depth": 1,
+      "base": "relation degree, closed-egonet internal and boundary edges",
+      "normalization": "log1p(base count)/log1p(schema bound); ONE round: for each relation mean and sum/(N-1) of base features",
+      "rank": "per-type held-out selection K=1..min(8,fold_sizes)",
+      "basis_seed": 2026102861,
+      "nmf_max_iter": 50000,
+      "nmf_tol": 1e-05,
+      "encoding": "per-node NNLS, fixed unit-L2 basis rows; no coefficient normalization",
+      "nnls_max_iter": 240
+    },
+    "inputs_per_update": 2,
+    "engineering_only": true,
+    "max_updates_per_dataset_arm": 5,
+    "seed": 2026102833,
+    "noise_times": [
+      1,
+      500,
+      1000
+    ],
+    "threads": 1,
+    "tolerances": {
+      "float64_features": 1e-10,
+      "fp32_atol": 2e-06,
+      "fp32_rtol": 1e-05
+    },
+    "datasets": {
+      "IMDB": {
+        "file": "assets/IMDB.npz",
+        "sha256": "398d59a0602e14dd0c92b8781e69a3234727d674923275864eec558770dffb5c",
+        "received_sha256": "351d066a702df18a188cff28822ea92182b0b1eb64ad0375e7f70e6a587ae466",
+        "reference_sha256": "10f1dbbbe55c6a069594b2dcb590d1b8295ca5436320ef4597cd30e6b7f73e42",
+        "type_names": [
+          "Director",
+          "Actor",
+          "Movie",
+          "Genre"
+        ],
+        "basis_kind": "pending complete held-out rank selection; no synthetic fallback"
+      },
+      "PubMed": {
+        "file": "assets/PubMed.npz",
+        "sha256": "f6ea8ec461052094dd02c6b07d8ebb69e85fb3e595195007563593b9568914ef",
+        "received_sha256": "42706434557b4b1fa24bdc71dc9d3ebea3a772689002421e77ad3c4b3b827a94",
+        "reference_sha256": "dacff5a392e23fbcfb695076a14a6db5317f4a4382b69af2a7596a1a217163f8",
+        "type_names": [
+          "Gene",
+          "Disease",
+          "Chemical",
+          "Species"
+        ],
+        "basis_kind": "pending complete held-out rank selection; no synthetic fallback"
+      }
+    },
+    "query_contract": "ALL active slots in ONE forward per input; S=18336, loss=(sum CE input1 + sum CE input2)/(2*S)",
+    "source_note": "normal2 sequential backward; O/A/B/C and held-out rank selection; formal execution requires independent review plus explicit continue confirmation"
+  },
+  "initial": {
+    "initial_sha256": "8aad77b1f9918592e85c40afa574d48d55100e964226b22f225684215a8d9282",
+    "rng_reset": {
+      "seeds": {
+        "python": 712761343,
+        "global_numpy": 3122254237,
+        "torch_cpu": 2333493601,
+        "torch_cuda": 946746831,
+        "generator": 3105930247
+      },
+      "state_sha256": {
+        "numpy": "1c7e0653b24ed87a357ff941e9ad64e82254d57ab134bbe6b684d55364de475d",
+        "global_numpy": "b7112b47132734493821e7646c577cb15fc00042e8d31af9e6d3d90170d18c44",
+        "python": "b962cc31bbb29e375469c22b4b8d7999ac17c2567bc49831ff7659de7ca6c70f",
+        "torch": "12243d6649b0912f4b8b9388262f7a2e961fead012211d0bba883462fcd7253a",
+        "device": "bacf88811851dc1cf6429fc461d86632e660a4588ffec9b6f7b0655c25439131"
+      },
+      "after_model_construction_and_copy": true
+    },
+    "optimizer": "new empty AdamW; no historical state"
+  },
+  "updates": 1000,
+  "approval_sha256": "4d3a2f327c6807758ac5ec1ee3fe876bc6601b90a9f7bc544befc71de31d8361"
+}
