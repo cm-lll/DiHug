@@ -1,0 +1,76 @@
+--- a/package/model_variants.py
++++ b/package/model_variants.py
+@@ -1,4 +1,7 @@
+-"""O: typed base; A: CN; B: ReFeX; C: ReFeX plus frozen variable-rank roles."""
++"""O/A/B/C preserved. D: CN+ReFeX; E: CN+ReFeX+frozen typed roles.
++
++One joint nonlinear head; no score addition or ensemble of trained models.
++"""
+ import time
+ import numpy as np
+ import torch
+@@ -28,22 +31,22 @@
+ class StructuralDenoiser(TypedSparseDenoiser):
+     architecture_version='typed_structure_192_oabc_v1'
+     def __init__(self,case,cfg,arm,basis=None):
+-        if arm not in ('O','A','B','C'):raise ValueError('arm')
+-        args=dict(cfg['model']);args['cn_hidden']=32 if arm=='A' else 0
++        if arm not in ('O','A','B','C','D','E'):raise ValueError('arm')
++        args=dict(cfg['model']);args['cn_hidden']=32 if arm in ('A','D','E') else 0
+         super().__init__(case['n_types'],case['n_families'],family_pairs=case['space'].pairs,prior=case['prior'],**args)
+         self.branch=DegreeBranch(case['n_families'],case['n_types'],cfg['model']['width'])
+         self.arm=arm;self.feature_calls=0;self.feature_seconds=0.;self.encoding_seconds=0.;self.transfer_seconds=0.
+-        if arm!='A':
++        if arm not in ('A','D','E'):
+             # CN is last in the original feature layout: remove every CN input
+             # and its learned readout columns, not merely mask a CN score.
+             start=self.joint_slices['CN'].start
+             first=self.joint_head[0];new=nn.Linear(start,first.out_features)
+             with torch.no_grad():new.weight.copy_(first.weight[:,:start]);new.bias.copy_(first.bias)
+             self.joint_head[0]=new;self.cn_feature_width=0;self.joint_slices['CN']=slice(start,start)
+-        if arm in ('B','C'):
++        if arm in ('B','C','D','E'):
+             self.refex_projection=nn.Linear(feature_width(case['n_families']),cfg['model']['width'],bias=False)
+             nn.init.zeros_(self.refex_projection.weight)
+-        if arm=='C':
++        if arm in ('C','E'):
+             if basis is None:raise ValueError('frozen basis required')
+             if isinstance(basis,dict):matrix=np.asarray(basis['basis'],dtype=np.float64);offsets=np.asarray(basis['offsets'],dtype=np.int64)
+             else:
+@@ -68,10 +71,10 @@
+     def joint_predict(self,ctx,graph,time,mask_cn=False,return_features=False):
+         if not hasattr(ctx,'degree_input'):ctx.degree_input=self.branch.input(ctx,time)
+         ctx.node_residual=self.branch(ctx.degree_input)
+-        if self.arm in ('B','C'):
++        if self.arm in ('B','C','D','E'):
+             key=(ctx.state_version,float(time),self.arm)
+             if hasattr(ctx,'structural_key') and ctx.structural_key!=key:raise ValueError('stale structural cache')
+-            if self.arm=='C':
++            if self.arm in ('C','E'):
+                 # Check both state_dict replacement/in-place writes and private CPU source.
+                 identity=self._role_identity()
+                 if identity!=self._basis_tensor_identity:raise ValueError('basis replaced; explicit checkpoint reload required')
+@@ -83,7 +86,7 @@
+                 self.feature_seconds+=__import__('time').perf_counter()-begin;self.feature_calls+=1
+                 begin=__import__('time').perf_counter()
+                 g=None
+-                if self.arm=='C':g,ctx.encoding_receipt=encode_typed(f,self._basis_cpu,self._offsets_cpu,ctx.types)
++                if self.arm in ('C','E'):g,ctx.encoding_receipt=encode_typed(f,self._basis_cpu,self._offsets_cpu,ctx.types)
+                 self.encoding_seconds+=__import__('time').perf_counter()-begin
+                 begin=__import__('time').perf_counter()
+                 ctx.structural_features=torch.tensor(f,dtype=torch.float32,device=ctx.device)
+@@ -93,12 +96,12 @@
+                 ctx.structural_key=key
+             # Cache only fixed input arrays, not learned outputs across optimizer steps.
+             ctx.node_residual=ctx.node_residual+self.refex_projection(ctx.structural_features)
+-            if self.arm=='C':ctx.node_residual=ctx.node_residual+self.role_projection(ctx.structural_roles)
++            if self.arm in ('C','E'):ctx.node_residual=ctx.node_residual+self.role_projection(ctx.structural_roles)
+         return super().joint_predict(ctx,graph,time,mask_cn,return_features)
+ 
+     def load_state_dict(self,state_dict,strict=True):
+         result=super().load_state_dict(state_dict,strict=strict)
+-        if self.arm=='C':
++        if self.arm in ('C','E'):
+             self._basis_cpu=self.role_basis.detach().cpu().numpy().copy();self._basis_cpu.flags.writeable=False
+             self._offsets_cpu=self.role_offsets.detach().cpu().numpy().copy();self._offsets_cpu.flags.writeable=False
+             self._basis_hash=digest(self._basis_cpu,self._offsets_cpu)

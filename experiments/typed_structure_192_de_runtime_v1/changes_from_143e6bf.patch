@@ -1,0 +1,628 @@
+--- a/package/model_variants.py
++++ b/package/model_variants.py
+@@ -1,4 +1,7 @@
+-"""O: typed base; A: CN; B: ReFeX; C: ReFeX plus frozen variable-rank roles."""
++"""O/A/B/C preserved. D: CN+ReFeX; E: CN+ReFeX+frozen typed roles.
++
++One joint nonlinear head; no score addition or ensemble of trained models.
++"""
+ import time
+ import numpy as np
+ import torch
+@@ -28,22 +31,22 @@
+ class StructuralDenoiser(TypedSparseDenoiser):
+     architecture_version='typed_structure_192_oabc_v1'
+     def __init__(self,case,cfg,arm,basis=None):
+-        if arm not in ('O','A','B','C'):raise ValueError('arm')
+-        args=dict(cfg['model']);args['cn_hidden']=32 if arm=='A' else 0
++        if arm not in ('O','A','B','C','D','E'):raise ValueError('arm')
++        args=dict(cfg['model']);args['cn_hidden']=32 if arm in ('A','D','E') else 0
+         super().__init__(case['n_types'],case['n_families'],family_pairs=case['space'].pairs,prior=case['prior'],**args)
+         self.branch=DegreeBranch(case['n_families'],case['n_types'],cfg['model']['width'])
+         self.arm=arm;self.feature_calls=0;self.feature_seconds=0.;self.encoding_seconds=0.;self.transfer_seconds=0.
+-        if arm!='A':
++        if arm not in ('A','D','E'):
+             # CN is last in the original feature layout: remove every CN input
+             # and its learned readout columns, not merely mask a CN score.
+             start=self.joint_slices['CN'].start
+             first=self.joint_head[0];new=nn.Linear(start,first.out_features)
+             with torch.no_grad():new.weight.copy_(first.weight[:,:start]);new.bias.copy_(first.bias)
+             self.joint_head[0]=new;self.cn_feature_width=0;self.joint_slices['CN']=slice(start,start)
+-        if arm in ('B','C'):
++        if arm in ('B','C','D','E'):
+             self.refex_projection=nn.Linear(feature_width(case['n_families']),cfg['model']['width'],bias=False)
+             nn.init.zeros_(self.refex_projection.weight)
+-        if arm=='C':
++        if arm in ('C','E'):
+             if basis is None:raise ValueError('frozen basis required')
+             if isinstance(basis,dict):matrix=np.asarray(basis['basis'],dtype=np.float64);offsets=np.asarray(basis['offsets'],dtype=np.int64)
+             else:
+@@ -68,10 +71,10 @@
+     def joint_predict(self,ctx,graph,time,mask_cn=False,return_features=False):
+         if not hasattr(ctx,'degree_input'):ctx.degree_input=self.branch.input(ctx,time)
+         ctx.node_residual=self.branch(ctx.degree_input)
+-        if self.arm in ('B','C'):
++        if self.arm in ('B','C','D','E'):
+             key=(ctx.state_version,float(time),self.arm)
+             if hasattr(ctx,'structural_key') and ctx.structural_key!=key:raise ValueError('stale structural cache')
+-            if self.arm=='C':
++            if self.arm in ('C','E'):
+                 # Check both state_dict replacement/in-place writes and private CPU source.
+                 identity=self._role_identity()
+                 if identity!=self._basis_tensor_identity:raise ValueError('basis replaced; explicit checkpoint reload required')
+@@ -83,7 +86,7 @@
+                 self.feature_seconds+=__import__('time').perf_counter()-begin;self.feature_calls+=1
+                 begin=__import__('time').perf_counter()
+                 g=None
+-                if self.arm=='C':g,ctx.encoding_receipt=encode_typed(f,self._basis_cpu,self._offsets_cpu,ctx.types)
++                if self.arm in ('C','E'):g,ctx.encoding_receipt=encode_typed(f,self._basis_cpu,self._offsets_cpu,ctx.types)
+                 self.encoding_seconds+=__import__('time').perf_counter()-begin
+                 begin=__import__('time').perf_counter()
+                 ctx.structural_features=torch.tensor(f,dtype=torch.float32,device=ctx.device)
+@@ -93,12 +96,12 @@
+                 ctx.structural_key=key
+             # Cache only fixed input arrays, not learned outputs across optimizer steps.
+             ctx.node_residual=ctx.node_residual+self.refex_projection(ctx.structural_features)
+-            if self.arm=='C':ctx.node_residual=ctx.node_residual+self.role_projection(ctx.structural_roles)
++            if self.arm in ('C','E'):ctx.node_residual=ctx.node_residual+self.role_projection(ctx.structural_roles)
+         return super().joint_predict(ctx,graph,time,mask_cn,return_features)
+ 
+     def load_state_dict(self,state_dict,strict=True):
+         result=super().load_state_dict(state_dict,strict=strict)
+-        if self.arm=='C':
++        if self.arm in ('C','E'):
+             self._basis_cpu=self.role_basis.detach().cpu().numpy().copy();self._basis_cpu.flags.writeable=False
+             self._offsets_cpu=self.role_offsets.detach().cpu().numpy().copy();self._offsets_cpu.flags.writeable=False
+             self._basis_hash=digest(self._basis_cpu,self._offsets_cpu)
+--- /dev/null
++++ b/package/test_de.py
+@@ -0,0 +1,124 @@
++"""Combination-only CPU checks. No optimizer updates or sampled graph."""
++import unittest
++from unittest.mock import patch
++import numpy as np
++import torch
++from test_oabc import fixture, prediction
++from test_engineering import config
++from model_variants import StructuralDenoiser, copy_common
++from normal2 import normal2, pair_inputs
++from hsgd.computational import FrozenTypedContext
++from hsgd.bw_preflight.common import plan_for, make_case
++
++torch.set_num_threads(1)
++
++class Combination(unittest.TestCase):
++    def models(self):
++        c,b=fixture();torch.manual_seed(411)
++        a=StructuralDenoiser(c,config(),'A')
++        models={}
++        for arm in 'DE':
++            m=StructuralDenoiser(c,config(),arm,b if arm=='E' else None)
++            copy_common(a,m);models[arm]=m
++        return c,a,models
++
++    def test_paths_and_zero_initial_baseline(self):
++        c,a,models=self.models();_,(_,la,pa)=prediction(c,a)
++        for arm,m in models.items():
++            self.assertIsNotNone(m.common_neighbor)
++            self.assertEqual(m.joint_head[0].in_features,a.joint_head[0].in_features)
++            self.assertTrue(hasattr(m,'refex_projection'))
++            self.assertEqual(hasattr(m,'role_projection'),arm=='E')
++            if arm=='D':
++                with patch('model_variants.encode_typed',side_effect=AssertionError('D used roles')):
++                    _,(_,l,p)=prediction(c,m)
++            else:_,(_,l,p)=prediction(c,m)
++            torch.testing.assert_close(la,l,atol=0,rtol=0)
++            torch.testing.assert_close(pa,p,atol=0,rtol=0)
++
++    def test_joint_nonzero_features_and_gradient_paths(self):
++        c,a,models=self.models()
++        for arm,m in models.items():
++            with torch.no_grad():
++                m.refex_projection.weight.fill_(.01)
++                if arm=='E':m.role_projection.weight.fill_(.02)
++            _,(_,l,p)=prediction(c,m);_,(_,la,pa)=prediction(c,a)
++            self.assertGreater(float((l-la).abs().max()),1e-7)
++            l.square().sum().backward()
++            for name in ['refex_projection.weight','common_neighbor.phi.0.weight']+(['role_projection.weight'] if arm=='E' else []):
++                grad=dict(m.named_parameters())[name].grad
++                self.assertIsNotNone(grad);self.assertTrue(torch.isfinite(grad).all())
++                self.assertGreater(float(grad.abs().max()),0)
++            if arm=='E':self.assertIsNone(m.role_basis.grad)
++
++    def test_query_edges_do_not_enter_Xt_CN(self):
++        c,_,models=self.models();ids,f,q=plan_for(c,13,1).block(0)
++        for m in models.values():
++            ctx=FrozenTypedContext(m,c['space'].types,c['clean'],c['space'].encode(c['clean'])[0],1)
++            old=ctx.old.copy();keys=ctx.cn_wedges.keys.clone()
++            ctx.predict(q,f,.5,1)
++            np.testing.assert_array_equal(old,ctx.old)
++            self.assertTrue(torch.equal(keys,ctx.cn_wedges.keys))
++            self.assertGreater(q.shape[1],old.shape[1]);ctx.close()
++
++    def test_nonzero_node_permutation(self):
++        c,_,models=self.models();perm=np.array([2,0,1,5,3,4])
++        types=np.empty_like(c['space'].types);types[perm]=c['space'].types
++        other=make_case(types,np.sort(perm[c['clean']],axis=0),c['space'].pairs)
++        for m in models.values():
++            with torch.no_grad():
++                m.refex_projection.weight.fill_(.01)
++                if m.arm=='E':m.role_projection.weight.fill_(.02)
++            ids,(_,l,p)=prediction(c,m);ids2,(_,l2,p2)=prediction(other,m)
++            _,_,q=plan_for(c,13,1).block(0)
++            f,local=other['space'].encode(np.sort(perm[q],axis=0));mapped=other['space'].offsets[f]+local
++            lookup={int(i):j for j,i in enumerate(ids2)};order=[lookup[int(i)] for i in mapped]
++            torch.testing.assert_close(l,l2[order],atol=2e-6,rtol=1e-5)
++            torch.testing.assert_close(p,p2[order],atol=2e-6,rtol=1e-5)
++
++    def test_endpoint_symmetry_and_edge_order(self):
++        c,_,models=self.models();_,f,q=plan_for(c,13,1).block(0)
++        for m in models.values():
++            with torch.no_grad():
++                m.refex_projection.weight.fill_(.01)
++                if m.arm=='E':m.role_projection.weight.fill_(.02)
++            _,(_,l,p)=prediction(c,m)
++            _,(_,l2,p2)=prediction(c,m,np.sort(c['clean'][::-1,::-1],axis=0))
++            torch.testing.assert_close(l,l2,atol=2e-6,rtol=1e-5)
++            ctx=FrozenTypedContext(m,c['space'].types,c['clean'],c['space'].encode(c['clean'])[0],1)
++            tq=torch.as_tensor(q);tf=torch.as_tensor(f)
++            ctx.node_residual=m.branch(m.branch.input(ctx,.5))
++            z=m.common_neighbor.aggregate(ctx,tq,tf,.5)
++            zr=m.common_neighbor.aggregate(ctx,tq.flip(0),tf,.5)
++            torch.testing.assert_close(z,zr,atol=2e-6,rtol=1e-5);ctx.close()
++            # Public graph API deliberately requires canonical endpoint order.
++
++    def test_cache_is_frozen_context_only(self):
++        c,_,models=self.models();_,f,q=plan_for(c,13,1).block(0)
++        for m in models.values():
++            ctx=FrozenTypedContext(m,c['space'].types,c['clean'],c['space'].encode(c['clean'])[0],1)
++            with torch.no_grad():ctx.predict(q,f,.5,1);ctx.predict(q,f,.5,1)
++            self.assertEqual(m.feature_calls,1)
++            with self.assertRaises(ValueError):ctx.predict(q,f,.5,2)
++            with torch.no_grad():m.refex_projection.weight.add_(.001)
++            with self.assertRaises(ValueError):ctx.predict(q,f,.5,1)
++            ctx.close();prediction(c,m);self.assertEqual(m.feature_calls,2)
++
++    def test_normal2_optimizer_membership_no_step(self):
++        c,_,models=self.models()
++        for m in models.values():
++            opt=torch.optim.AdamW(m.parameters())
++            self.assertEqual({id(p) for g in opt.param_groups for p in g['params']},{id(p) for p in m.parameters()})
++            inp=pair_inputs(c,dict(T=1000,seed=9),1,np.random.default_rng(11),500)
++            with patch.object(opt,'step',side_effect=AssertionError('CPU test cannot update')):
++                rec=normal2(m,opt,c,inp,1000,'cpu',False)
++            self.assertEqual(rec['optimizer_steps'],0)
++            self.assertTrue(torch.isfinite(m.refex_projection.weight.grad).all())
++
++    def test_E_dictionary_reload_exact(self):
++        c,_,models=self.models();m=models['E'];_,b=fixture()
++        n=StructuralDenoiser(c,config(),'E',b);n.load_state_dict(m.state_dict(),strict=True)
++        for k,v in m.state_dict().items():self.assertTrue(torch.equal(v,n.state_dict()[k]))
++        torch.testing.assert_close(prediction(c,m)[1][1],prediction(c,n)[1][1],atol=0,rtol=0)
++
++if __name__=='__main__':unittest.main()
+--- /dev/null
++++ b/package/engineering_de.py
+@@ -0,0 +1,129 @@
++"""Four combination cells, at most TWO disposable normal2 updates each.
++
++No scientific training entry, no reverse chain, no sampled state/graph.
++Run one dataset per selected GPU; inherited OABC launchers are not DE launchers.
++"""
++import argparse, pathlib, json, time, signal, resource, gc, traceback, os
++import numpy as np
++import torch
++from prepare import save, sha
++from experiment_contract import initialization, read_dictionary, reset_training_streams, source_binding
++from normal2 import normal2, pair_inputs, sync
++from probe import rng_get, rng_set, equal, input_hash
++from hsgd.bw_preflight.common import cpu_tree, environment, schedule, check_prob_device
++from hsgd.computational import FrozenTypedContext
++from hsgd.kernel import MarginalKernel
++
++def main():
++    parser=argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--dataset',choices=['IMDB','PubMed'],required=True)
++    parser.add_argument('--output',required=True)
++    parser.add_argument('--dictionaries',required=True)
++    args=parser.parse_args();out=pathlib.Path(args.output);out.mkdir(parents=True,exist_ok=False)
++    started=time.time();result=dict(status='running',cells={},formal_updates=0,complete_chains=0,new_graphs=0,
++        start_epoch=started,limit_seconds=900,CUDA_VISIBLE_DEVICES=os.environ.get('CUDA_VISIBLE_DEVICES'),
++        scope='engineering weights ONLY; exactly <=2 steps per dataset-arm; no scientific initialization')
++    def check():
++        if time.time()>=started+900:raise TimeoutError('bounded engineering only')
++        if (out/'STOP').exists():raise InterruptedError('STOP')
++    def interrupted(sig,frame):raise InterruptedError('signal '+str(sig))
++    for s in [signal.SIGINT,signal.SIGTERM,signal.SIGHUP,signal.SIGALRM]:signal.signal(s,interrupted)
++    signal.alarm(900)
++    try:
++        torch.set_num_threads(1);torch.set_num_interop_threads(1)
++        torch.use_deterministic_algorithms(True,warn_only=False)
++        torch.backends.cuda.matmul.allow_tf32=False;torch.backends.cudnn.allow_tf32=False
++        if not torch.cuda.is_available() or torch.cuda.device_count()!=1 or '2080 Ti' not in torch.cuda.get_device_name(0):
++            raise RuntimeError('exactly one visible RTX2080Ti required')
++        save(out/'environment.json',environment('cuda'))
++        save(out/'source.json',dict(zip(['files','sha256'],source_binding())))
++        basis,receipt=read_dictionary(args.dictionaries,args.dataset)
++        seed={'IMDB':2026102811,'PubMed':2026102812}[args.dataset]
++        for arm in 'DE':
++            check();folder=out/arm;folder.mkdir();row=dict(passed=False,reserved_steps=0,completed_steps=0)
++            result['cells'][args.dataset+'_'+arm]=row
++            m,case,cfg,proof=initialization(args.dataset,arm,seed,basis if arm=='E' else None)
++            cfg=dict(cfg,seed=seed);m=m.cuda();rng,rngproof=reset_training_streams(seed,args.dataset,'cuda')
++            initial=cpu_tree(m.state_dict());initial_rng=rng_get(rng,'cuda')
++            binding=dict(source_sha256=source_binding()[1],dictionary_sha256=receipt['basis_sha256'],dataset=args.dataset,arm=arm,config=cfg)
++            save(folder/'initialization.json',proof);save(folder/'rng.json',rngproof)
++            torch.save(dict(model=initial,rng=initial_rng,updates=0,binding=binding,purpose='DISPOSABLE ENGINEERING ONLY'),folder/'initial.pt')
++            row['initial_sha256']=sha(folder/'initial.pt');row['parameters']=proof['parameters']
++            opt=torch.optim.AdamW(m.parameters(),**{k:v for k,v in cfg['optimizer'].items() if k!='type'})
++            assert {id(p) for g in opt.param_groups for p in g['params']}=={id(p) for p in m.parameters()}
++            paired=pair_inputs(case,cfg,50,np.random.default_rng(2026102801),500)
++            row['input_sha256']=input_hash(paired)
++            for j,inp in enumerate(paired):np.savez_compressed(folder/('input_'+str(j)+'.npz'),**inp)
++            torch.cuda.reset_peak_memory_stats()
++            row['warmup_no_step']=normal2(m,opt,case,paired,1000,'cuda',False)
++            grad_names=['refex_projection.weight','common_neighbor.phi.0.weight']+(['role_projection.weight'] if arm=='E' else [])
++            row['gradients_at_initialization']={}
++            for name in grad_names:
++                g=dict(m.named_parameters())[name].grad
++                assert g is not None and torch.isfinite(g).all() and g.abs().max()>0,name
++                row['gradients_at_initialization'][name]=dict(max_abs=float(g.abs().max()),norm=float(g.norm()))
++            row['optimizer_membership_exact']=True;row['updates']=[]
++            for i in range(2):
++                check();row['reserved_steps']+=1;save(out/'summary.json',result)
++                rec=normal2(m,opt,case,paired,1000,'cuda',True);row['completed_steps']+=1;row['updates'].append(rec)
++                if i==0:
++                    payload=dict(model=cpu_tree(m.state_dict()),optimizer=cpu_tree(opt.state_dict()),rng=rng_get(rng,'cuda'),updates=1,binding=binding)
++                    begin=time.perf_counter();torch.save(payload,folder/'after1.pt');row['save_seconds']=time.perf_counter()-begin
++                    row['checkpoint_sha256']=sha(folder/'after1.pt')
++                    del m,opt;gc.collect()
++                    m,_,_,_=initialization(args.dataset,arm,seed,basis if arm=='E' else None);m=m.cuda()
++                    ck=torch.load(folder/'after1.pt',map_location='cpu',weights_only=False)
++                    assert sha(folder/'after1.pt')==row['checkpoint_sha256'] and ck['updates']==1 and ck['binding']==binding
++                    m.load_state_dict(ck['model'],strict=True)
++                    opt=torch.optim.AdamW(m.parameters(),**{k:v for k,v in cfg['optimizer'].items() if k!='type'})
++                    opt.load_state_dict(ck['optimizer']);rng_set(ck['rng'],rng,'cuda')
++                    row['model_load_exact']=equal(cpu_tree(m.state_dict()),ck['model'])
++                    row['optimizer_load_exact']=equal(cpu_tree(opt.state_dict()),ck['optimizer'])
++                    row['rng_load_exact']=equal(rng_get(rng,'cuda'),ck['rng'])
++                    assert row['model_load_exact'] and row['optimizer_load_exact'] and row['rng_load_exact']
++                    del payload,ck
++            # Post-update inputs expose nonzero learned projections. Not quality evaluation.
++            m.eval();row['full_query_components']=[]
++            for t in [1,500,1000]:
++                check();inp=pair_inputs(case,cfg,100+t,np.random.default_rng(2026102801+t),t)[0]
++                expected=np.flatnonzero(np.repeat(case['active'],case['space'].counts))
++                assert np.array_equal(np.sort(inp['ids']),expected)
++                counters=(m.feature_seconds,m.encoding_seconds,m.transfer_seconds)
++                sync('cuda');begin=time.perf_counter()
++                ctx=FrozenTypedContext(m,case['space'].types,inp['edges'],inp['edge_families'],('probe',t))
++                try:
++                    with torch.no_grad():
++                        p=ctx.predict(inp['query'],inp['f'],t/1000,('probe',t));check_prob_device(p,inp['f'],case,m.prior)
++                        prob=p.cpu().numpy().astype(np.float64)
++                    assert ctx.cn_wedges is not None and m.common_neighbor is not None
++                    assert m.feature_calls>0 and hasattr(ctx,'structural_features')
++                    np.testing.assert_array_equal(ctx.old,inp['edges'])
++                    if arm=='E':
++                        assert torch.isfinite(ctx.structural_roles).all() and (ctx.structural_roles>=0).all()
++                        assert np.array_equal(m._basis_cpu,basis['basis']) and m.role_basis.grad is None
++                    encoded=getattr(ctx,'encoding_receipt',None);wedges=ctx.cn_wedges.raw_wedges
++                finally:ctx.close()
++                sync('cuda');forward=time.perf_counter()-begin
++                state=np.zeros(case['space'].total,np.uint8);f,l=case['space'].encode(inp['edges']);state[case['space'].offsets[f]+l]=1
++                begin=time.perf_counter();q=MarginalKernel(case['prior'],schedule(1000)).reverse(prob,state[inp['ids']],inp['f'],t-1,t)
++                posterior=time.perf_counter()-begin;assert np.isfinite(q).all() and ((q>=0)&(q<=1)).all()
++                if t==1:np.testing.assert_allclose(q,prob,atol=2e-12,rtol=2e-12)
++                row['full_query_components'].append(dict(t=t,slots=len(prob),forwards=1,input_sha256=input_hash([inp]),
++                    network_context_and_features_seconds=forward,posterior_seconds=posterior,total_seconds=forward+posterior,
++                    refex_seconds=m.feature_seconds-counters[0],NNLS_seconds=m.encoding_seconds-counters[1],
++                    structural_transfer_seconds=m.transfer_seconds-counters[2],CN_wedges=wedges,encoding=encoded,
++                    sampling_and_commit_executed=False,quality_evidence=False))
++            row.update(passed=True,normal2_seconds=max(x['normal2_seconds'] for x in row['updates']),
++                sampling_component_seconds=max(x['total_seconds'] for x in row['full_query_components']),
++                peak_allocated_mib=torch.cuda.max_memory_allocated()/2**20,peak_reserved_mib=torch.cuda.max_memory_reserved()/2**20,
++                peak_rss_mib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024)
++            save(out/'summary.json',result);print(args.dataset,arm,'PASS',row['completed_steps'],flush=True)
++            del m,opt,initial,ctx;gc.collect();torch.cuda.empty_cache()
++        result['status']='passed_preparation_only'
++    except BaseException as exc:result.update(status='failed_or_incomplete',error=repr(exc),traceback=traceback.format_exc())
++    finally:
++        signal.alarm(0);result.update(ended_epoch=time.time(),seconds=time.time()-started)
++        save(out/'summary.json',result)
++    return 0 if result['status']=='passed_preparation_only' else 2
++
++if __name__=='__main__':raise SystemExit(main())
+--- /dev/null
++++ b/package/audit_pairing_de.py
+@@ -0,0 +1,69 @@
++"""Read-only old-initial-state comparison; constructs no trained model/output.
++
++Old initial checkpoints are caller-specified and checked against archived receipts.
++No optimizer.step, GPU operation, dictionary fitting or graph generation.
++"""
++import argparse,pathlib,json,hashlib,gc
++import numpy as np
++import torch
++from prepare import save,sha
++from experiment_contract import initialization,read_dictionary,reset_training_streams
++from normal2 import pair_inputs
++from probe import input_hash
++
++def main():
++    ap=argparse.ArgumentParser(description=__doc__)
++    ap.add_argument('--round1',required=True);ap.add_argument('--round2',required=True)
++    ap.add_argument('--dictionaries',required=True);ap.add_argument('--output',required=True)
++    a=ap.parse_args();out=pathlib.Path(a.output);out.mkdir(parents=True,exist_ok=False)
++    torch.set_num_threads(1);rows=[]
++    for index,oldroot in enumerate([pathlib.Path(a.round1),pathlib.Path(a.round2)]):
++        for dataset in ['IMDB','PubMed']:
++            seed=([2026102811,2026102834] if dataset=='IMDB' else [2026102812,2026102833])[index]
++            basis,receipt=read_dictionary(a.dictionaries,dataset)
++            old={};bindings={};hashes={}
++            for arm in 'ABC':
++                folder=oldroot/(dataset+'_'+arm);h=json.loads((folder/'initial.sha256.json').read_text())['sha256']
++                assert sha(folder/'initial.pt')==h
++                ck=torch.load(folder/'initial.pt',map_location='cpu',weights_only=False)
++                assert ck['updates']==0 and ck['binding']['arm']==arm and ck['binding']['config']['seed']==seed
++                assert ck['binding']['dictionary_sha256']==receipt['basis_sha256']
++                old[arm]=ck['model'];bindings[arm]=ck['binding'];hashes[arm]=h
++            for arm in 'DE':
++                model,case,cfg,proof=initialization(dataset,arm,seed,basis if arm=='E' else None)
++                state=model.state_dict();comparisons={}
++                for oldarm in 'ABC':
++                    matched=[];absent=[]
++                    for name,value in old[oldarm].items():
++                        if name not in state:absent.append(name);continue
++                        target=state[name]
++                        if name=='joint_head.0.weight':target=target[:,:value.shape[1]]
++                        assert target.shape==value.shape and torch.equal(target,value),(dataset,seed,arm,oldarm,name)
++                        matched.append(name)
++                    comparisons[oldarm]=dict(exact_matched=matched,not_present_in_new_arm=absent,initial_sha256=hashes[oldarm])
++                for key in ['model','optimizer','precision','T','rounds','schedule_offset','tf32','feature_spec','datasets']:
++                    assert cfg[key]==bindings['A']['config'][key],key
++                rng,rngproof=reset_training_streams(seed,dataset,'cpu')
++                archived_rng=json.loads((oldroot/(dataset+'_A')/'training_rng_reset.json').read_text())
++                assert rngproof['seeds']==archived_rng['seeds']
++                for name in ['numpy','global_numpy','python','torch']:
++                    assert rngproof['state_sha256'][name]==archived_rng['state_sha256'][name],name
++                lines=(oldroot/(dataset+'_A')/'training.jsonl').read_text().splitlines()[:3]
++                input_checks=[]
++                for j,line in enumerate(lines,1):
++                    inp=pair_inputs(case,dict(cfg,seed=seed),j,rng)
++                    actual=input_hash(inp);assert actual==json.loads(line)['input_sha256']
++                    input_checks.append(actual)
++                label=f'{dataset}_{seed}_{arm}'
++                save(out/(label+'.json'),dict(initialization=proof,comparisons=comparisons,rng=rngproof,
++                    first_three_training_inputs=input_checks,basis_sha256=receipt['basis_sha256'],
++                    CUDA_rng='not recreated in CPU audit; first-seed GPU engineering receipt compared separately',
++                    seed=seed,dataset=dataset,arm=arm,parameters=proof['parameters'],
++                    purpose='comparison-only untrained reconstruction; NOT a resumed trained model'))
++                rows.append(dict(label=label,passed=True,parameters=proof['parameters'],old_initial_hashes=hashes))
++                del model,state;gc.collect()
++            del old,ck;gc.collect()
++    save(out/'summary.json',dict(passed=True,cells=rows,old_trained_weights_used=False,optimizer_steps=0,
++        interpretation='paired common and corresponding projection initial tensors; architecture/parameter count differs intentionally'))
++
++if __name__=='__main__':main()
+--- /dev/null
++++ b/proposal.json
+@@ -0,0 +1,44 @@
++{
++  "version": "typed_structure_192_de_v1_preparation",
++  "source_results": ["b5b697361e389cd77d2fb09a84e77c0b6915407d", "143e6bf80a9858ec21e512da2f1a03e02e3a5a38"],
++  "formal_authorized": false,
++  "formal_start": null,
++  "formal_deadline": null,
++  "arms": {"D": ["base", "degree", "CN", "ReFeX"], "E": ["base", "degree", "CN", "ReFeX", "frozen_typed_RolX"]},
++  "train_seeds": {"IMDB": [2026102811,2026102834], "PubMed": [2026102812,2026102833]},
++  "sample_seeds": [2026102821,2026102822],
++  "updates_per_model": 1000,
++  "models": 8,
++  "complete_chains": 16,
++  "T": 1000,
++  "rounds": 1,
++  "S": 18336,
++  "normal2": "one zero_grad, two independent contexts, sumCE/(2*S) each backward, one optimizer.step",
++  "K": {"IMDB": [5,4,3,2], "PubMed": [8,8,8,6]},
++  "dictionary_refit": false,
++  "checkpoint_updates": [0,500,1000],
++  "sample_checkpoint": "final1000_only",
++  "contrasts": [["D","A"],["D","B"],["E","D"],["E","C"],["E","A"]],
++  "W1_main": "incident4",
++  "W1_compatibility": "all10 = 0.4 * incident4",
++  "aggregation": "per-graph reference errors first, paired generation seeds, mean within each training seed; never hide sign reversals across training seeds",
++  "metrics": ["degree_W1", "joint_degree_TV", "relation_edge_counts_and_errors", "typed_triangle_counts_and_TV", "closure_numerator_denominator", "clustering", "LCC", "components", "isolates", "degree_tails", "MP2_MP3_counts_and_composition", "sample_difference"],
++  "IMDB_focus": ["D-A-M", "D-A-A", "A-A-M", "Genre_sorted_degree_spectrum", "max_and_second_degree"],
++  "PubMed_focus": ["quantity_and_path_gains", "joint_degree_cost"],
++  "claims": "development comparison on two existing training seeds; not independent held-out confirmation, significance or large-graph validity",
++  "engineering_max_updates_per_cell": 2,
++  "engineering_max_updates_total": 8,
++  "engineering_max_GPUs": 2,
++  "queue": [
++    {"slot":0,"dataset":"PubMed","seed":2026102812,"arm":"E"},
++    {"slot":1,"dataset":"PubMed","seed":2026102833,"arm":"E"},
++    {"slot":2,"dataset":"PubMed","seed":2026102812,"arm":"D"},
++    {"slot":3,"dataset":"PubMed","seed":2026102833,"arm":"D"},
++    {"slot":4,"dataset":"IMDB","seed":2026102811,"arm":"E"},
++    {"slot":5,"dataset":"IMDB","seed":2026102834,"arm":"E"},
++    {"slot":6,"dataset":"IMDB","seed":2026102811,"arm":"D"},
++    {"slot":7,"dataset":"IMDB","seed":2026102834,"arm":"D"}
++  ],
++  "queue_status": "proposal only; same queue must be used for cost and execution after review and explicit budget authorization",
++  "inherited_OABC_launchers": "historical source only, not a DE launcher; do not invoke. No formal approval file is created in this preparation package."
++}
+--- /dev/null
++++ b/build_cost.py
+@@ -0,0 +1,43 @@
++"""Proposal-only cost calculation. Never invokes training or sampling."""
++import argparse,csv,json,math,pathlib
++
++def estimate(proposal,engineering,old):
++    rows={}
++    for dataset in ['IMDB','PubMed']:
++        baseline=[r for r in old if r['cell']==dataset+'_A']
++        for arm in 'DE':
++            label=dataset+'_'+arm;r=engineering[dataset]['cells'][label]
++            if not r['passed'] or r['completed_steps']!=2:raise ValueError('incomplete combination short check')
++            extra=max(x['refex_seconds']+x['NNLS_seconds'] for x in r['full_query_components'])
++            train=max(r['normal2_seconds'],max(float(x['normal2_postwarmup_mean_seconds']) for x in baseline)+2*extra)
++            # Historical chain time contains RNG/commit/I/O; component path does not.
++            oldstep=max(float(x[k])/1000 for x in baseline for k in ['sample_1_seconds','sample_2_seconds'])
++            step=max(r['sampling_component_seconds']+.01,oldstep+extra)
++            rows[label]=dict(measured_two_update_max=r['normal2_seconds'],measured_forward_posterior_max=r['sampling_component_seconds'],
++                measured_added_feature_encoding_max=extra,estimated_update_seconds=train,estimated_full_step_seconds=step,
++                train_1000_seconds=1000*train,two_T1000_chains_seconds=2000*step,
++                initialization_validation_save_allowance_seconds=120,estimated_worker_seconds=1000*train+2000*step+120,
++                peak_allocated_mib=r['peak_allocated_mib'],peak_reserved_mib=r['peak_reserved_mib'],peak_rss_mib=r['peak_rss_mib'])
++    queue=[dict(task,**rows[task['dataset']+'_'+task['arm']]) for task in proposal['queue']]
++    if len(queue)!=8 or len({r['slot'] for r in queue})!=8:raise ValueError('eight devices/one task each required')
++    critical=max(r['estimated_worker_seconds'] for r in queue)
++    planned=critical*1.25+1200+900+300
++    return dict(proposal_only=True,formal_authorized=False,queue=queue,cells=rows,
++        estimated_sum_task_seconds=sum(r['estimated_worker_seconds'] for r in queue),
++        estimated_eight_card_critical_path_seconds=critical,concurrency_planning_factor=1.25,
++        measured_eight_card_DE_throughput=False,evaluation_delivery_reserve_seconds=1200,
++        failure_reserve_seconds=900,unmeasured_state_reserve_seconds=300,
++        planned_seconds_before_rounding=planned,suggested_budget_minutes=math.ceil(planned/300)*5,
++        limits=['two engineering updates are not stable throughput',
++                'single-step inputs are forward-noised states, not full free-generation trajectories',
++                'new timing excludes sampling/commit; 0.01s component allowance and historical full-chain timings used',
++                '25 percent factor is planning margin, not measured concurrent DE performance',
++                'same queue must be used at execution; resource or budget changes require a new decision'])
++
++if __name__=='__main__':
++    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--evidence',required=True);p.add_argument('--old-costs',required=True);p.add_argument('--output',required=True);a=p.parse_args()
++    proposal=json.loads((pathlib.Path(__file__).parent/'proposal.json').read_text())
++    engineering={d:json.loads((pathlib.Path(a.evidence)/('gpu_'+d+'_original_env')/'summary.json').read_text()) for d in ['IMDB','PubMed']}
++    with open(a.old_costs) as f:old=list(csv.DictReader(f))
++    result=estimate(proposal,engineering,old)
++    with open(a.output,'x') as f:json.dump(result,f,indent=2,allow_nan=False)
+--- /dev/null
++++ b/test_cost.py
+@@ -0,0 +1,23 @@
++import unittest,json,pathlib
++from build_cost import estimate
++
++class Cost(unittest.TestCase):
++    def fixture(self):
++        p=json.loads((pathlib.Path(__file__).parent/'proposal.json').read_text());e={};old=[]
++        for d in ['IMDB','PubMed']:
++            e[d]={'cells':{}}
++            for a in 'DE':
++                e[d]['cells'][d+'_'+a]=dict(passed=True,completed_steps=2,normal2_seconds=3.,sampling_component_seconds=.6,
++                    full_query_components=[dict(refex_seconds=.01,NNLS_seconds=.01)],peak_allocated_mib=3000,peak_reserved_mib=3500,peak_rss_mib=4000)
++            old.append(dict(cell=d+'_A',normal2_postwarmup_mean_seconds='3',sample_1_seconds='600',sample_2_seconds='600'))
++        return p,e,old
++    def test_queue_and_wall_not_sum(self):
++        p,e,o=self.fixture();r=estimate(p,e,o)
++        self.assertEqual([(x['dataset'],x['seed'],x['arm'],x['slot']) for x in r['queue']],[(x['dataset'],x['seed'],x['arm'],x['slot']) for x in p['queue']])
++        self.assertEqual(r['estimated_sum_task_seconds'],8*r['estimated_eight_card_critical_path_seconds'])
++        self.assertFalse(r['formal_authorized']);self.assertFalse(r['measured_eight_card_DE_throughput'])
++    def test_incomplete_or_missing_cell_rejected(self):
++        p,e,o=self.fixture();e['IMDB']['cells']['IMDB_D']['passed']=False
++        with self.assertRaises(ValueError):estimate(p,e,o)
++
++if __name__=='__main__':unittest.main()
+--- /dev/null
++++ b/REVIEW.md
+@@ -0,0 +1,99 @@
++# CN + ReFeX / RolX：D/E准备审查
++
++本票只准备。正式训练0、完整链0、新图0、字典拟合0。GPU临时normal2更新共8次，四格各2次，额度已用完。停止等待独立审查和新的正式预算授权。
++
++## 1. 来源及唯一模型改动
++
++来源结果提交b5b697361e389cd77d2fb09a84e77c0b6915407d和143e6bf80a9858ec21e512da2f1a03e02e3a5a38。第二轮固定结果ZIP的SHA256为6e4b4249ab012972a7a2e47ddd7e6d7513837ec47f71facd9ba375da46462c4e，111个source载荷实际核对。本地旧记录另外与该ZIP中60份两轮ABC绑定、初态回执、初始化证明、随机流回执和训练日志逐字节对照。
++
++相对封存package，唯一修改的原模型文件是`model_variants.py`：
++
++* CN启用集合从A扩展至A/D/E；D/E保留A原联合头的全部CN列。
++* ReFeX启用集合从B/C扩展至B/C/D/E。
++* 固定角色启用集合从C扩展至C/E，包括严格加载与缓存绑定。
++* 没有改变原O/A/B/C路径。没有独立CN标量加分，没有双模型或概率平均。
++
++数据、字典、特征提取/NNLS、基础网络、CN、公共min/max、normal2、损失、噪声、后验及旧评价源码原字节保留，见`evidence/unchanged_source.json`。继承的配置版本及类版本名是历史公共框架元数据，不能单独作为新模型身份；本版身份由新源码SHA、D/E arm和配置/字典绑定共同确定。
++
++## 2. 实际数据流
++
++完整冻结Xt -> 当前度分支；同时Xt -> 630维ReFeX -> 节点投影。E再经同一冻结分类型非负基的NNLS得到不作行归一化的强度系数 -> 角色投影。三种残差在原节点输入位置相加。
++
++主干按原完整候选查询前向。CN的wedge邻接仍只从真实Xt边构造；原CN上下文使用共享的第一层Transformer在真实边上编码中间节点，而且会读取上述节点残差。因此组合不仅影响最后读出，也可能改变CN内容；不承诺它等于独立A的CN数值。
++
++原候选边隐藏表示、对称端点、全局/时间、CN等进入同一个非线性联合头，输出两logits，再走原p0和q。没有新增概率调控。RolX是当前ReFeX的再表达，不是新的观测或目标度配额。
++
++|数据集|D参数|E参数|D比A增加|E比D增加|
++|---|---:|---:|---:|---:|
++|IMDB|6,808,721|6,812,305|161,280|3,584|
++|PubMed|6,808,721|6,816,401|161,280|7,680|
++
++角色数保持IMDB 5/4/3/2、PubMed 8/8/8/6。PubMed四类型命中原选K上界；本次不扩大搜索。两张图和S=18,336不变；IMDB完整可动查询13,120，PubMed18,336。
++
++## 3. 公共初始化及旧结果复用
++
++`audit_pairing_de.py`对两个数据集、两个原seed、D/E共8个构造实例核对：
++
++1. 旧A/B/C初态文件按原回执SHA256验证，updates=0；没有加载训练后权重。
++2. D/E全部可对应张量与旧A/B/C初态逐张量相同，包含CN、联合头公共列、ReFeX投影，以及E与C的角色投影/字典。缺少的角色张量只在D对C比较中明确列为不适用。
++3. 模型、优化器、噪声、精度、数据和特征配置相同。只有新增组合架构不同，不要求完整新旧源码哈希相同。
++4. 模型构造后重置随机流；两轮CPU/Python/NumPy/显式Generator状态及前三次实际训练输入哈希一致。工程GPU检查另外确认第一训练seed的完整CUDA随机流回执与旧A一致。第二训练seed未额外运行GPU；不冒称该项已实测。
++5. 原采样和查询源码未变，因此配对采样合同可复用；本票未生成图，未实测新模型完整链。
++
++初态比较CPU构造不做前向或更新。四格GPU首次前向前另外保存完整工程初态、RNG和逐张量哈希，均标记不可用于正式科学初始化。旧模型和新组合模型的参数量不同，不能称严格等容量实验。
++
++## 4. 已执行检查与边界
++
++10项针对性CPU测试零失败、零跳过：8项模型组合检查加2项成本/队列检查。测试包含零投影时D/E与A输出一致，非零投影时预测响应与CN/ReFeX/RolX梯度可达，完整Xt边与查询边隔离，节点重编号、端点对称性、边序、缓存失效、冻结基加载，以及normal2/优化器覆盖。均为接口证据，不是生成质量。
++
++四格在两张RTX2080Ti上完成；GPU0依次IMDB D/E、GPU1依次PubMed D/E。实际依赖与历史正式binding仅时间字段不同：Python3.9.23、Torch2.1.0+cu121、PyG2.3.1、NumPy1.23.0、SciPy1.11.0。CPU线程1、FP32、TF32关闭、原确定性设置及CUBLAS_WORKSPACE_CONFIG=:4096:8保持。
++
++每格执行一次不更新的normal2预热/梯度检查、两次临时更新、一次checkpoint精确加载；第2次更新从第1次checkpoint载入后执行。模型、完整优化器、RNG、计数和绑定加载正确。没有另外跑连续第2步作逐位轨迹对照，因此本票不宣称新组合续算轨迹逐位复现；未改动部分的旧恢复证据沿用。
++
++每格在t=1/500/1000独立原核加噪输入上做一次完整查询前向及后验计算，角色编码通过原NNLS检查；保存输入哈希与覆盖。t=1 q=p0核对通过。没有调用采样或提交下一状态，未生成任何新图。
++
++首轮工程启动漏传既有CUBLAS变量，两个进程均在任何更新之前报错退出，累计0 step。保留失败目录；补齐原launcher环境后通过，不改科学配置。旧CPU/GPU逐元素等价失败保持，不在本票复测或宣称通过。
++
++## 5. 新组件成本
++
++|格|normal2两次范围/秒|完整查询前向+q/秒，三时刻范围|峰值allocated MiB|峰值reserved MiB|
++|---|---:|---:|---:|---:|
++|IMDB D|2.494–2.560|0.4730–0.4732|2346.7|2470|
++|IMDB E|2.527–2.543|0.4797–0.4810|2345.7|2502|
++|PubMed D|3.343–3.364|0.6288–0.6356|3195.7|3370|
++|PubMed E|3.392–3.393|0.6442–0.6484|3195.6|3390|
++
++IMDB ReFeX约8–9ms，E NNLS约8ms；PubMed ReFeX约10–15ms，E NNLS约15–16ms。保存一次checkpoint约0.15秒。详细分项、预热、后验、转移及逐参数梯度尺度见原回执。
++
++这只是固定工程输入的组件测量，不是稳定训练吞吐；前向包含完整上下文、CN、特征、设备同步与概率传回。没有把单查询块当完整反向步。新测量不包含采样/提交，预算另参考旧完整链耗时并加组件余量，不把估计写成已测完整步。
++
++单进程RSS高水位约4.0–4.1GiB，是进程累计峰值，不是每格独立增量；八进程约33GiB仅为规划量，并非同时峰值实测。主机当时可用内存约492GiB，CPU affinity 48。结束时两工程进程exit0，nvidia-smi无计算PID且卡上占用为0；未预留正式八卡。
++
++## 6. 正式计划与预算建议（未执行）
++
++`proposal.json`固定2数据集×2旧训练seed×D/E共8模型，每模型1000 normal2更新、2条T1000链共16图。保存0/500/1000，仅final1000生成。配对差固定D−A、D−B、E−D、E−C、E−A，两个训练seed分开展示。
++
++保持incident4主W1与all10兼容值、联合度TV、关系边数、类型三角/闭合、聚类、连通、孤立、度尾部、MP2/3数量与组成及样本差异。先逐图绝对误差，再求配对差和两图均值；null/缺失不只平均成功图。IMDB单列DAM/DAA/AAM与Genre度谱，PubMed同时报告数量/路径收益及联合度代价。
++
++旧`evaluation.py`和已修正`summarize.py`可复用统计函数；旧summarize的OABC路由不能原封不动当DE汇总。正式启动前须按proposal中的dataset/训练seed/生成seed/arm接通新旧结果路由并核对，不重新设计指标。继承的OABC launcher/worker仅保留作来源，当前不是DE正式入口；本票没有创建任何正式审批或自动激活入口。科学模型代码可审查，正式调度与结果路由尚需在批准预算后的启动准备中按固定队列接通。
++
++成本代码`build_cost.py`使用本票四格组件和两轮旧A完整链实测，不重测旧组；任务队列与`proposal.json`完全相同：PubMed E两个seed占slot0/1、PubMed D占2/3、IMDB E占4/5、IMDB D占6/7，一格一卡。
++
++最长任务约81分钟；25%是并发与状态变化的规划余量，不是已测八卡D/E性能。另保留20分钟评价交付、15分钟故障和5分钟未覆盖状态余量。计算后向上取整建议新的正式累计预算**145分钟**，未设置实际起点或截止，不能保证所有自由生成状态成本。
++
++正式前须重新确认八卡权限/他人任务/显存并采用同一队列。若卡数或科学设置不符，停止报告，不自动减组、缩T或延时。现有两次训练seed属于开发比较，不是独立留出验证或大图有效性证据。
++
++## 7. 复核命令与交付范围
++
++仅CPU复核（不消耗GPU更新额度）：
++
++```bash
++cd typed_structure_192_de_v1
++OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 PYTHONPATH=package \
++  /data2/lyh/miniconda3/envs/sparse_block/bin/python -m unittest -v test_de test_cost
++sha256sum -c SHA256SUMS
++```
++
++四格原GPU命令、输出、失败、初态及checkpoint哈希全部保留；已用完本票8次额度，不应自行重复GPU工程检查。ZIP包含源码、数据/字典、输入、报告及回执，不上传初始化/工程checkpoint二进制；它们保留本地并列入LOCAL_BINARY_ASSETS.json。没有私有训练权重或凭据。
++
++本票结论：组合路径已实现并通过限定工程检查，配对复用有明确证据；互补效果尚未验证。等待独立补丁审查及正式预算确认，不启动任何后续任务。

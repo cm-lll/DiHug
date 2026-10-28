@@ -1,0 +1,1163 @@
+--- a/package/admission.py
++++ b/package/admission.py
+@@ -8,18 +8,7 @@
+             if sha(root/name)!=e['files'][name]:raise ValueError('external approval hash differs '+dataset+'/'+name)
+         r=json.loads((root/'selection.json').read_text())
+         if r['status']!='passed' or r['K']!=e['K'] or r['offsets']!=e['offsets'] or r['offsets'][-1]!=e['dimension']:raise ValueError('dictionary approval dimensions/status')
+-def assignment(cost,updates,devices):
+-    """LPT, stable label ties; immutable per-device queues used by cost AND execution."""
+-    if not devices:raise ValueError('at least one device')
+-    queues=[[] for _ in devices];loads=[0.]*len(devices)
+-    tasks=[]
+-    for dataset in ['IMDB','PubMed']:
+-        for arm in 'OABC':
+-            c=cost['cells'][dataset+'_'+arm];seconds=updates*c['normal2_seconds']+2000*c['sampling_step_seconds']+c['validation_save_seconds']
+-            tasks.append((seconds,dataset,arm))
+-    for seconds,dataset,arm in sorted(tasks,key=lambda x:(-x[0],x[1],x[2])):
+-        i=min(range(len(devices)),key=lambda i:(loads[i],i));queues[i].append((dataset,arm));loads[i]+=seconds
+-    return queues,loads
++from runtime_plan import assignment
+ 
+ def verify_summary(package_root,approval):
+     path=pathlib.Path(package_root).parent/'summarize.py'
+--- a/package/experiment_contract.py
++++ b/package/experiment_contract.py
+@@ -20,18 +20,19 @@
+     return dict(basis=z['basis'],offsets=z['offsets']),receipt
+ 
+ def scientific_gate(ledger_path,approval_path,protocol_path,dictionary_dir,source_hash):
++    from runtime_plan import check_activation, validate_protocol
+     ledger=json.loads(pathlib.Path(ledger_path).read_text());approval=json.loads(pathlib.Path(approval_path).read_text())
+-    if time.time()>=ledger['deadline_epoch']:raise TimeoutError('original cumulative budget expired')
+-    # File is only written after explicit reviewed-user continuation, never by this package.
+-    if approval.get('independent_review')!='passed' or approval.get('user_continue_confirmed') is not True:raise PermissionError('independent review AND explicit user continuation required')
+-    if approval.get('ledger_sha256')!=sha(ledger_path) or approval.get('protocol_sha256')!=sha(protocol_path) or approval.get('source_sha256')!=source_hash:raise ValueError('approval/source/ledger binding mismatch')
+-    if approval.get('updates') not in (500,1000,2000):raise ValueError('outside frozen update tiers')
++    if approval.get('independent_review')!='passed' or approval.get('user_continue_confirmed') is not True:raise PermissionError('review and explicit continuation required')
++    if approval.get('protocol_sha256')!=sha(protocol_path) or approval.get('source_sha256')!=source_hash:raise ValueError('approval source/protocol mismatch')
++    if approval.get('updates')!=1000 or approval.get('budget_seconds')!=8700:raise ValueError('fixed run size/budget')
++    validate_protocol(json.loads(pathlib.Path(protocol_path).read_text()))
++    check_activation(ledger,approval,approval_path,protocol_path)
+     for dataset in ['IMDB','PubMed']:read_dictionary(dictionary_dir,dataset,approval['dictionaries'][dataset])
+     return ledger,approval
+ 
+ def source_binding():
+-    files={str(p.relative_to(ROOT)):sha(p) for p in ROOT.rglob('*') if p.is_file() and '__pycache__' not in str(p) and p.suffix in ('.py','.json','.npz')}
+-    return files,hashlib.sha256(json.dumps(files,sort_keys=True,separators=(',',':')).encode()).hexdigest()
++    from runtime_plan import source_binding as runtime_binding
++    return runtime_binding(ROOT)
+ 
+ def initialization(dataset,arm,seed,basis):
+     import torch
+@@ -51,18 +52,6 @@
+     if not all(proof.values()):raise AssertionError('common initialization bytes differ')
+     return model,case,cfg,dict(seed=seed,module_seed=module_seed,copied_exact=proof,tensor_sha256=hashes,parameters=sum(p.numel() for p in model.parameters()))
+ 
+-def recommend_tier(cost,remaining,parallel_devices):
+-    """Component-cost proposal using exactly the launcher's fixed LPT queues."""
+-    if not cost.get('complete_eight_cells') or parallel_devices<1:raise ValueError('no complete engineering cost gate')
+-    values=cost['cells'];labels=[d+'_'+a for d in ['IMDB','PubMed'] for a in 'OABC']
+-    if set(values)!=set(labels):raise ValueError('missing cells')
+-    result=[]
+-    for updates in [2000,1000,500]:
+-        from admission import assignment
+-        queues,loads=assignment(cost,updates,list(range(min(parallel_devices,8))))
+-        total=max(loads)*cost['concurrency_margin']+1200+900
+-        result.append(dict(updates=updates,seconds=total,fits=total<=remaining,unmeasured_concurrency_margin=cost['concurrency_margin']))
+-    return next((r for r in result if r['fits']),None),result
+ 
+ def reset_training_streams(seed,dataset,device):
+     import random,torch,pickle
+--- a/package/launch.py
++++ b/package/launch.py
+@@ -1,6 +1,7 @@
+ """Lightweight launch gate. No torch import, no fitting, no implicit authorization."""
+ import argparse,pathlib,json,time,hashlib,subprocess,sys,os,signal
+ from admission import dictionaries as check_dictionaries,assignment,verify_summary
++from runtime_plan import source_binding,validate_protocol,plan,task_id,check_activation,BUDGET_SECONDS
+ 
+ def sha(p):return hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest()
+ def resource_check(devices,authorization,rows,compute_output,device_users):
+@@ -18,23 +19,22 @@
+         receipt.append(dict(uuid=d,index=int(row[0]),name=row[2],free_mib=float(row[3]),used_mib=float(row[4]),utilization_percent=float(row[5])))
+     return receipt
+ def gate(root,ledger_path,approval_path,protocol_path,dictionaries,cost_path):
+-    ledger=json.loads(pathlib.Path(ledger_path).read_text());approval=json.loads(pathlib.Path(approval_path).read_text());protocol=json.loads(pathlib.Path(protocol_path).read_text())
+-    if time.time()>=ledger['deadline_epoch']:raise TimeoutError('original budget expired')
+-    if approval.get('independent_review')!='passed' or approval.get('user_continue_confirmed') is not True:raise PermissionError('review + user continuation missing')
+-    if approval.get('main_W1_definition_confirmed')!='type_weighted_incident4':raise PermissionError('main W1 definition must be explicitly confirmed before formal execution')
+-    if approval.get('ledger_sha256')!=sha(ledger_path) or approval.get('protocol_sha256')!=sha(protocol_path):raise ValueError('ledger/protocol differs')
+-    files={str(p.relative_to(root)):sha(p) for p in root.rglob('*') if p.is_file() and '__pycache__' not in str(p) and p.suffix in ('.py','.json','.npz')}
+-    source=hashlib.sha256(json.dumps(files,sort_keys=True,separators=(',',':')).encode()).hexdigest()
++    approval=json.loads(pathlib.Path(approval_path).read_text());protocol=json.loads(pathlib.Path(protocol_path).read_text())
++    if approval.get('independent_review')!='passed' or approval.get('user_continue_confirmed') is not True:raise PermissionError('review + explicit user continuation missing')
++    if not approval.get('review_reference') or not approval.get('user_authorization_reference'):raise PermissionError('review and authorization evidence references required')
++    if approval.get('main_W1_definition_confirmed')!='type_weighted_incident4':raise PermissionError('incident4 must be confirmed')
++    if approval.get('protocol_sha256')!=sha(protocol_path):raise ValueError('protocol differs')
++    validate_protocol(protocol)
++    files,source=source_binding(root)
+     if approval.get('source_sha256')!=source:raise ValueError('reviewed source differs')
+-    verify_summary(root,approval)
+-    check_dictionaries(dictionaries,approval)
+-    for dataset in protocol['datasets']:
+-        d=pathlib.Path(dictionaries)/('dictionary_'+dataset);r=json.loads((d/'selection.json').read_text())
+-        if r['status']!='passed' or sha(d/'final_basis.npz')!=r['basis_sha256']:raise RuntimeError('dictionary gate not passed: '+dataset)
++    verify_summary(root,approval);check_dictionaries(dictionaries,approval)
++    if approval.get('updates')!=1000 or approval.get('budget_seconds')!=BUDGET_SECONDS:raise ValueError('only fixed 1000 updates / 145 minutes supported')
+     cost=json.loads(pathlib.Path(cost_path).read_text())
+-    if approval.get('cost_sha256')!=sha(cost_path) or cost.get('complete_eight_cells') is not True:raise RuntimeError('complete eight-cell engineering cost evidence missing')
+-    if approval.get('updates') not in protocol['allowed_update_tiers']:raise ValueError('update tier')
+-    if any(not c.get('passed') for c in cost['cells'].values()) or len(cost['cells'])!=8:raise RuntimeError('engineering checks not all passed')
++    if approval.get('cost_sha256')!=sha(cost_path):raise ValueError('reviewed cost differs')
++    assignment(cost,1000,list(range(8)))
++    ledger=None
++    if ledger_path is not None:
++        ledger=json.loads(pathlib.Path(ledger_path).read_text());check_activation(ledger,approval,approval_path,protocol_path)
+     return ledger,approval,cost
+ 
+ def run_summary(root,out,approval,deadline):
+@@ -43,10 +43,12 @@
+     try:
+         if deadline-begin<=2:return dict(status='skipped_insufficient_delivery_time',remaining_seconds=deadline-begin)
+         script=verify_summary(root,approval)
++        if source_binding(root)[1]!=approval['source_sha256']:raise ValueError('approved runtime/config binding changed before summary')
+         with (out/'summary_process.log').open('xb') as log:
+             completed=subprocess.run([sys.executable,str(script),'--run',str(out),'--output',str(out/'unified_evaluation.json'),'--deadline-epoch',str(deadline-1)],stdout=log,stderr=subprocess.STDOUT,timeout=max(.01,deadline-time.time()-1))
+         receipt['exit_code']=completed.returncode
+         verify_summary(root,approval)
++        if source_binding(root)[1]!=approval['source_sha256']:raise ValueError('approved runtime/config binding changed during summary')
+         path=out/'unified_evaluation.json'
+         if path.exists():
+             result=json.loads(path.read_text());receipt.update(output_sha256=sha(path),reported_status=result.get('status'))
+@@ -71,12 +73,32 @@
+     return dict(status='complete' if complete else 'incomplete',execution_complete=execution_complete,jobs=finished,unstarted=tasks,primary_failures=failures,evaluation=evaluation,elapsed_since_activation=time.time()-ledger['start_epoch'])
+ 
+ def main():
+-    p=argparse.ArgumentParser();p.add_argument('mode',choices=['formal','gate']);p.add_argument('--ledger',required=True);p.add_argument('--approval',required=True);p.add_argument('--protocol',required=True);p.add_argument('--dictionary-dir',required=True);p.add_argument('--cost',required=True);p.add_argument('--output',required=True);p.add_argument('--gpu-uuids',nargs='+',required=True);args=p.parse_args()
++    entry_epoch=time.time()
++    p=argparse.ArgumentParser();p.add_argument('mode',choices=['formal','gate','dry-run']);p.add_argument('--approval');p.add_argument('--protocol',required=True);p.add_argument('--dictionary-dir');p.add_argument('--cost');p.add_argument('--output',required=True);p.add_argument('--gpu-uuids',nargs='+');p.add_argument('--manifest-output');args=p.parse_args()
+     root=pathlib.Path(__file__).resolve().parent
+-    ledger,approval,cost=gate(root,args.ledger,args.approval,args.protocol,args.dictionary_dir,args.cost)
++    protocol=json.loads(pathlib.Path(args.protocol).read_text());manifest=plan(protocol,args.output)
++    if args.mode=='dry-run':
++        # Deliberately before admission, subprocesses, CUDA discovery or activation.
++        manifest['source_sha256']=source_binding(root)[1]
++        if args.cost:
++            cost=json.loads(pathlib.Path(args.cost).read_text());queues,loads=assignment(cost,1000,list(range(8)))
++            manifest['cost_queue_matches_execution']=True;manifest['estimated_slot_seconds']=loads
++            manifest['estimated_total_seconds_with_reserves']=cost['planned_seconds_before_rounding']
++        if args.manifest_output:
++            with pathlib.Path(args.manifest_output).open('x') as f:json.dump(manifest,f,indent=2)
++        else:print(json.dumps(manifest,indent=2))
++        return 0
++    for name in ['approval','dictionary_dir','cost','gpu_uuids']:
++        if not getattr(args,name):p.error('--'+name.replace('_','-')+' required outside dry-run')
++    # Activation time is the entry to the formal launcher; checks consume this same window.
++    activated=entry_epoch
++    _,approval,cost=gate(root,None,args.approval,args.protocol,args.dictionary_dir,args.cost)
++    out=pathlib.Path(args.output).resolve()
++    if str(out)!=str(pathlib.Path(approval['output']).resolve()):raise ValueError('output is not approved')
++    protected=[root.parent.resolve(),pathlib.Path(args.dictionary_dir).resolve()]
++    if any(x==out or x in out.parents or out in x.parents for x in protected):raise ValueError('output overlaps protected source/input')
++    if out.exists():raise FileExistsError('new output required; no automatic resume/restart')
+     devices=args.gpu_uuids
+-    if len(devices)!=len(set(devices)) or not 1<=len(devices)<=8:raise ValueError('1..8 distinct allocated GPU UUIDs')
+-    # Respect scheduler/platform visibility instead of discovering outside allocations.
+     visibility=os.environ.get('CUDA_VISIBLE_DEVICES')
+     if visibility:
+         allowed=visibility.split(',')
+@@ -87,27 +109,36 @@
+     handles=subprocess.run(['fuser']+['/dev/nvidia'+rows[d][0] for d in devices if d in rows],capture_output=True,text=True)
+     if handles.returncode not in (0,1) or (handles.returncode==1 and handles.stderr.strip()):raise RuntimeError('cannot verify selected device handles: '+handles.stderr)
+     resource_receipt=resource_check(devices,approval['resource_authorization'],rows,compute,handles.stdout)
+-    # Admission for EXACT reviewed tier; no effect-dependent choice or post-start change.
+-    queues,loads=assignment(cost,approval['updates'],devices)
+-    tasks={device:queue for device,queue in zip(devices,queues)}
+-    expected=max(loads)*cost['concurrency_margin']+2100
+-    if expected>ledger['deadline_epoch']-time.time():raise TimeoutError('reviewed tier no longer fits; require explicit recorded pre-start lower tier')
++    queues,loads=assignment(cost,1000,devices);tasks={device:queue for device,queue in zip(devices,queues)}
++    expected=cost['planned_seconds_before_rounding']
++    if expected>BUDGET_SECONDS-(time.time()-activated):raise TimeoutError('fixed full panel does not fit; no tier change permitted')
+     if args.mode=='gate':print(json.dumps(dict(status='gate_passed_no_execution',expected_seconds=expected)));return 0
+-    out=pathlib.Path(args.output);out.mkdir(parents=True,exist_ok=False);stop=[False];running={};finished=[];failed=False;failures=[]
++    ledger=dict(start_epoch=activated,deadline_epoch=activated+BUDGET_SECONDS,budget_seconds=BUDGET_SECONDS,timezone='Asia/Shanghai',output=str(out),approval_sha256=sha(args.approval),source_sha256=approval['source_sha256'],protocol_sha256=sha(args.protocol),cost_sha256=sha(args.cost))
++    out.mkdir(parents=True,exist_ok=False);args.ledger=str(out/'activation.json')
++    with pathlib.Path(args.ledger).open('x') as f:json.dump(ledger,f,indent=2)
++    return supervise(root,args,ledger,approval,cost,devices,tasks,loads,expected,resource_receipt)
++
++
++def supervise(root,args,ledger,approval,cost,devices,tasks,loads,expected,resource_receipt,spawn=subprocess.Popen,summarizer=run_summary,poll_seconds=.25):
++    """Original fail-stop loop; injection is solely for CPU process tests, not a CLI bypass."""
++    out=pathlib.Path(args.output);stop=[False];running={};finished=[];failed=False;failures=[]
+     (out/'resource_admission.json').write_text(json.dumps(dict(epoch=time.time(),devices=resource_receipt,authority=approval['resource_authorization'],utilization_is_telemetry_only=True),indent=2))
+-    (out/'schedule.json').write_text(json.dumps(dict(queues=tasks,loads_seconds=loads,expected_seconds=expected,policy='LPT; fixed FIFO per device'),indent=2))
+-    for sig in [signal.SIGINT,signal.SIGTERM,signal.SIGHUP]:signal.signal(sig,lambda s,f:stop.__setitem__(0,True))
++    (out/'schedule.json').write_text(json.dumps(dict(queues=tasks,loads_seconds=loads,expected_seconds=expected,policy='frozen proposal slot order; one model/device, train then sample seeds sequentially'),indent=2))
++    previous_signals={sig:signal.signal(sig,lambda s,f:stop.__setitem__(0,True)) for sig in [signal.SIGINT,signal.SIGTERM,signal.SIGHUP]}
+     try:
+         while any(tasks.values()) or running:
+             if stop[0] or (out/'STOP').exists() or time.time()>=ledger['deadline_epoch']-1200:
+                 failed=True;failures.append(dict(stage='supervision',reason='signal' if stop[0] else 'STOP' if (out/'STOP').exists() else 'delivery_reserve_deadline'));break
+             for device in devices:
++                if stop[0] or (out/'STOP').exists() or time.time()>=ledger['deadline_epoch']-1200:break
+                 if device not in running and tasks[device] and not failed:
+-                    dataset,arm=tasks[device].pop(0);label=dataset+'_'+arm;log=(out/(label+'.log')).open('xb');env=dict(os.environ,CUDA_VISIBLE_DEVICES=device,OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1',MKL_NUM_THREADS='1',CUBLAS_WORKSPACE_CONFIG=':4096:8')
+-                    read_fd,write_fd=os.pipe();ticket=dict(parent_pid=os.getpid(),dataset=dataset,arm=arm,device=device,approval_sha256=sha(args.approval),cost_sha256=sha(args.cost),output=str((out/label).resolve()),admitted_epoch=time.time())
++                    dataset,train_seed,arm=tasks[device].pop(0);label=task_id(dataset,train_seed,arm);log=(out/(label+'.log')).open('xb');env=dict(os.environ,CUDA_VISIBLE_DEVICES=device,OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1',MKL_NUM_THREADS='1',CUBLAS_WORKSPACE_CONFIG=':4096:8')
++                    read_fd,write_fd=os.pipe();ticket=dict(parent_pid=os.getpid(),dataset=dataset,train_seed=train_seed,arm=arm,task_id=label,device=device,approval_sha256=sha(args.approval),cost_sha256=sha(args.cost),output=str((out/label).resolve()),admitted_epoch=time.time())
+                     os.write(write_fd,json.dumps(ticket).encode());os.close(write_fd)
+-                    cmd=[sys.executable,str(root/'worker.py'),'--dataset',dataset,'--arm',arm,'--output',str(out/label),'--dictionary-dir',args.dictionary_dir,'--ledger',args.ledger,'--approval',args.approval,'--protocol',args.protocol,'--cost',args.cost,'--launch-fd',str(read_fd)]
+-                    try:process=subprocess.Popen(cmd,env=env,stdout=log,stderr=subprocess.STDOUT,start_new_session=True,pass_fds=(read_fd,))
++                    cmd=[sys.executable,str(root/'worker.py'),'--dataset',dataset,'--arm',arm,'--train-seed',str(train_seed),'--output',str(out/label),'--dictionary-dir',args.dictionary_dir,'--ledger',args.ledger,'--approval',args.approval,'--protocol',args.protocol,'--cost',args.cost,'--launch-fd',str(read_fd)]
++                    try:process=spawn(cmd,env=env,stdout=log,stderr=subprocess.STDOUT,start_new_session=True,pass_fds=(read_fd,))
++                    except BaseException as exc:
++                        log.close();failures.append(dict(stage='worker_start',cell=label,error=repr(exc)));raise
+                     finally:os.close(read_fd)
+                     running[device]=(process,log,label)
+             for device,(process,log,label) in list(running.items()):
+@@ -120,7 +151,7 @@
+                         except Exception as exc:failure['receipt_error']=repr(exc)
+                         failures.append(failure)
+             if failed:break
+-            time.sleep(.25)
++            time.sleep(poll_seconds)
+     except BaseException as exc:
+         failed=True;failures.append(dict(stage='launcher',error=repr(exc)))
+     finally:
+@@ -137,8 +168,11 @@
+                 except ProcessLookupError:pass
+                 process.wait()
+             log.close();finished.append(dict(cell=label,exit_code=process.returncode,terminated=True))
+-        evaluation=run_summary(root,out,approval,ledger['deadline_epoch'])
++        (out/'execution_receipt.json').write_text(json.dumps(dict(jobs=finished,unstarted=tasks,primary_failures=failures,failed=failed),indent=2))
++        try:evaluation=summarizer(root,out,approval,ledger['deadline_epoch'])
++        except Exception as exc:evaluation=dict(status='failed',error=repr(exc))
+         receipt=final_receipt(out,finished,tasks,failed,failures,approval,ledger,evaluation);complete=receipt['status']=='complete'
+         (out/'launcher_summary.json').write_text(json.dumps(receipt,indent=2))
++        for sig,handler in previous_signals.items():signal.signal(sig,handler)
+     return 0 if complete else 2
+ if __name__=='__main__':raise SystemExit(main())
+--- a/package/worker.py
++++ b/package/worker.py
+@@ -44,15 +44,18 @@
+     return dict(seconds=time.perf_counter()-start,rows=rows,rng_unchanged=True,same_reference_only=True)
+ 
+ def main():
+-    ap=argparse.ArgumentParser();ap.add_argument('--dataset',choices=['IMDB','PubMed'],required=True);ap.add_argument('--arm',choices=list('OABC'),required=True);ap.add_argument('--output',required=True);ap.add_argument('--dictionary-dir',required=True);ap.add_argument('--ledger',required=True);ap.add_argument('--approval',required=True);ap.add_argument('--protocol',required=True);ap.add_argument('--cost',required=True);ap.add_argument('--launch-fd',type=int,required=True);args=ap.parse_args()
++    ap=argparse.ArgumentParser();ap.add_argument('--dataset',choices=['IMDB','PubMed'],required=True);ap.add_argument('--arm',choices=list('DE'),required=True);ap.add_argument('--train-seed',type=int,required=True);ap.add_argument('--output',required=True);ap.add_argument('--dictionary-dir',required=True);ap.add_argument('--ledger',required=True);ap.add_argument('--approval',required=True);ap.add_argument('--protocol',required=True);ap.add_argument('--cost',required=True);ap.add_argument('--launch-fd',type=int,required=True);args=ap.parse_args()
+     from launch import gate
+     from prepare import ROOT
+     ticket=json.loads(os.read(args.launch_fd,16384));os.close(args.launch_fd)
+-    if ticket['parent_pid']!=os.getppid() or ticket['dataset']!=args.dataset or ticket['arm']!=args.arm or ticket['device']!=os.environ.get('CUDA_VISIBLE_DEVICES') or ticket['output']!=str(pathlib.Path(args.output).resolve()) or ticket['approval_sha256']!=sha(args.approval) or ticket['cost_sha256']!=sha(args.cost) or time.time()-ticket['admitted_epoch']>60:raise PermissionError('valid current launcher admission required')
++    from runtime_plan import verify_ticket,initialization_for_task,task_id
++    verify_ticket(ticket,args,os.getppid(),os.environ.get('CUDA_VISIBLE_DEVICES'),time.time())
+     gate(ROOT,args.ledger,args.approval,args.protocol,args.dictionary_dir,args.cost)
+     source,source_hash=source_binding();ledger,approval=scientific_gate(args.ledger,args.approval,args.protocol,args.dictionary_dir,source_hash)
+-    # Both datasets must have fully valid dictionaries even for O/A/B.
+-    protocol=json.loads(pathlib.Path(args.protocol).read_text());dataset=args.dataset;arm=args.arm;out=pathlib.Path(args.output);out.mkdir(parents=True,exist_ok=False)
++    # Both datasets retain approved dictionaries; only E supplies the basis to the model.
++    protocol=json.loads(pathlib.Path(args.protocol).read_text());dataset=args.dataset;arm=args.arm;out=pathlib.Path(args.output)
++    if out.resolve()!=pathlib.Path(ledger['output']).resolve()/task_id(dataset,args.train_seed,arm):raise ValueError('task output not under activated run')
++    out.mkdir(parents=True,exist_ok=False)
+     stop=[False];in_update=False;completed=0;status=dict(status='initializing',formal_training_authorized=True,completed_updates=0,completed_chains=0)
+     def requested(s,f):stop[0]=True
+     for sig in [signal.SIGINT,signal.SIGTERM,signal.SIGHUP]:signal.signal(sig,requested)
+@@ -67,10 +70,11 @@
+         for key in ['python_version','torch_runtime_version','device_name']:
+             if approval['environment'][key]!=env[key]:raise ValueError('environment mismatch '+key)
+         if approval['environment']['packages']!=env['packages']:raise ValueError('dependency versions differ')
+-        basis,receipt=read_dictionary(args.dictionary_dir,dataset,approval['dictionaries'][dataset]);seed=protocol['train_seeds'][dataset]
+-        model,case,cfg,proof=initialization(dataset,arm,seed,basis if arm=='C' else None);cfg=dict(cfg,seed=seed)
++        basis,receipt=read_dictionary(args.dictionary_dir,dataset,approval['dictionaries'][dataset]);seed=args.train_seed
++        if seed not in protocol['train_seeds'][dataset]:raise ValueError('training seed not approved')
++        model,case,cfg,proof=initialization_for_task(initialization,dataset,arm,seed,basis);cfg=dict(cfg,seed=seed)
+         model=model.cuda();rng,rng_proof=reset_training_streams(seed,dataset,'cuda');save(out/'training_rng_reset.json',rng_proof)
+-        binding=dict(source_sha256=source_hash,source=source,protocol_sha256=sha(args.protocol),ledger_sha256=sha(args.ledger),dictionary_sha256=receipt['basis_sha256'],dataset=cfg['datasets'][dataset],arm=arm,config=cfg,environment=env,updates=approval['updates'])
++        binding=dict(task_id=task_id(dataset,seed,arm),dataset_name=dataset,train_seed=seed,source_sha256=source_hash,source=source,protocol_sha256=sha(args.protocol),ledger_sha256=sha(args.ledger),dictionary_sha256=receipt['basis_sha256'],dataset=cfg['datasets'][dataset],arm=arm,config=cfg,environment=env,updates=approval['updates'])
+         save(out/'binding.json',binding);save(out/'initialization.json',proof)
+         # Entire initial state and RNG saved before any forward, isolated from engineering.
+         initial=dict(model=cpu_tree(model.state_dict()),rng=rng_get(rng,'cuda'),updates=0,binding=binding,purpose='fresh scientific initial, never engineering weights')
+@@ -101,7 +105,7 @@
+                 if t%100==0 or t==1:
+                     atomic_checkpoint(folder/('complete_t%04d.pt'%next_t),dict(state=state,next_t=next_t,rng=rng_get(sample_rng,'cuda'),binding=binding,sample_seed=sample_seed,model_sha256=sha(out/'final.pt')))
+             edges,fam=state_edges(case,state);np.savez_compressed(folder/'graph.npz',types=case['space'].types,edges=edges,families=fam,schema=np.array(case['space'].pairs))
+-            save(folder/'metrics.json',evaluate(case,edges,cfg['datasets'][dataset]['type_names'],check));save(folder/'binding.json',dict(checkpoint_sha256=sha(out/'final.pt'),graph_sha256=sha(folder/'graph.npz'),seed=sample_seed,initial_rng=initial_rng,seconds=time.perf_counter()-begin,binding=binding))
++            save(folder/'metrics.json',evaluate(case,edges,cfg['datasets'][dataset]['type_names'],check));save(folder/'binding.json',dict(checkpoint_sha256=sha(out/'final.pt'),graph_sha256=sha(folder/'graph.npz'),metrics_sha256=sha(folder/'metrics.json'),seed=sample_seed,initial_rng=initial_rng,seconds=time.perf_counter()-begin,binding=binding))
+             status['completed_chains']+=1
+         status['status']='complete'
+     except BaseException as exc:
+--- /dev/null
++++ b/package/runtime_plan.py
+@@ -0,0 +1,115 @@
++"""CPU-only task identities, immutable schedule, and prospective run binding.
++
++Importing this module neither imports torch nor queries/activates a device.
++"""
++import hashlib
++import json
++import pathlib
++import time
++
++TRAIN_SEEDS = {'IMDB': (2026102811, 2026102834), 'PubMed': (2026102812, 2026102833)}
++SAMPLE_SEEDS = (2026102821, 2026102822)
++QUEUE = [('PubMed', 2026102812, 'E'), ('PubMed', 2026102833, 'E'),
++         ('PubMed', 2026102812, 'D'), ('PubMed', 2026102833, 'D'),
++         ('IMDB', 2026102811, 'E'), ('IMDB', 2026102834, 'E'),
++         ('IMDB', 2026102811, 'D'), ('IMDB', 2026102834, 'D')]
++BUDGET_SECONDS = 145 * 60
++
++
++def sha(path):
++    return hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest()
++
++
++def task_id(dataset, train_seed, arm):
++    if dataset not in TRAIN_SEEDS or train_seed not in TRAIN_SEEDS[dataset] or arm not in ('D', 'E'):
++        raise ValueError('outside frozen D/E task panel')
++    return '%s_s%d_%s' % (dataset, train_seed, arm)
++
++
++def validate_protocol(protocol):
++    if protocol['train_seeds'] != {d: list(s) for d, s in TRAIN_SEEDS.items()}:
++        raise ValueError('training seed panel changed')
++    if protocol['sample_seeds'] != list(SAMPLE_SEEDS):
++        raise ValueError('sampling seed panel changed')
++    for key, value in dict(updates_per_model=1000, models=8, complete_chains=16, T=1000, rounds=1, S=18336).items():
++        if protocol[key] != value:
++            raise ValueError('frozen protocol differs: ' + key)
++    if protocol['checkpoint_updates'] != [0, 500, 1000]:
++        raise ValueError('checkpoint policy')
++    if [(x['dataset'], x['seed'], x['arm']) for x in protocol['queue']] != QUEUE or [x['slot'] for x in protocol['queue']] != list(range(8)):
++        raise ValueError('proposal queue changed')
++
++
++def plan(protocol, output):
++    validate_protocol(protocol)
++    output = pathlib.Path(output).resolve()
++    tasks = []
++    for slot, (dataset, seed, arm) in enumerate(QUEUE):
++        label = task_id(dataset, seed, arm)
++        folder = output / label
++        tasks.append(dict(task_id=label, slot=slot, dataset=dataset, train_seed=seed, arm=arm,
++                          output=str(folder), updates=1000, checkpoint_updates=[0, 500, 1000],
++                          initialization='experiment_contract.initialization', role_basis=(arm == 'E'),
++                          samples=[dict(sample_seed=s, output=str(folder / ('sample_' + str(s))),
++                                        dependency=label + ':final1000', T=1000,
++                                        order=i, after='training' if i == 0 else 'sample_' + str(SAMPLE_SEEDS[i-1]))
++                                   for i, s in enumerate(SAMPLE_SEEDS)]))
++    return dict(mode='dry_run_only', formal_authorized=False, formal_start=None, formal_deadline=None,
++                task_count=8, sample_count=16, tasks=tasks, optimizer_steps=0, GPU_calls=0,
++                worker_launches=0, proposed_budget_seconds=BUDGET_SECONDS)
++
++
++def assignment(cost, updates, devices):
++    if updates != 1000 or len(devices) != 8 or len(set(devices)) != 8:
++        raise ValueError('exactly 1000 updates and eight distinct devices required; no tier selection')
++    if [(x['dataset'], x['seed'], x['arm']) for x in cost['queue']] != QUEUE or [x['slot'] for x in cost['queue']] != list(range(8)):
++        raise ValueError('cost queue differs from execution queue')
++    return [[t] for t in QUEUE], [x['estimated_worker_seconds'] for x in cost['queue']]
++
++
++def source_binding(package_root):
++    root = pathlib.Path(package_root).resolve().parent
++    files = {}
++    # Runtime/metric scripts, protocol, data, frozen dictionaries and historical
++    # payload index are bound together. Receipts/output directories are excluded.
++    for folder in ('package', 'dictionaries'):
++        for p in (root / folder).rglob('*'):
++            if p.is_file() and '__pycache__' not in p.parts and p.suffix in ('.py', '.json', '.npz'):
++                files[p.relative_to(root).as_posix()] = sha(p)
++    for name in ('summarize.py', 'summary_metrics.py', 'proposal.json', 'history/index.json', 'evidence/execution/cost_proposal.json'):
++        files[name] = sha(root / name)
++    digest = hashlib.sha256(json.dumps(files, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
++    return files, digest
++
++
++def check_activation(ledger, approval, approval_path, protocol_path, output=None):
++    if ledger['approval_sha256'] != sha(approval_path) or ledger['protocol_sha256'] != sha(protocol_path):
++        raise ValueError('activation input binding differs')
++    if ledger['source_sha256'] != approval['source_sha256'] or ledger['cost_sha256'] != approval['cost_sha256']:
++        raise ValueError('activation source/cost differs')
++    if ledger['deadline_epoch'] != ledger['start_epoch'] + BUDGET_SECONDS or ledger['budget_seconds'] != BUDGET_SECONDS:
++        raise ValueError('activation budget differs')
++    if ledger['output'] != str(pathlib.Path(approval['output']).resolve()):
++        raise ValueError('activation output differs')
++    if output is not None and ledger['output'] != str(pathlib.Path(output).resolve()):
++        raise ValueError('output differs')
++    if time.time() >= ledger['deadline_epoch']:
++        raise TimeoutError('formal deadline reached; no reset or restart')
++
++
++def initialization_for_task(initializer, dataset, arm, seed, basis):
++    """Small testable routing adapter; scientific initializer is unchanged."""
++    task_id(dataset, seed, arm)
++    if arm == 'E' and basis is None:
++        raise ValueError('E requires the approved frozen dictionary')
++    return initializer(dataset, arm, seed, basis if arm == 'E' else None)
++
++
++def verify_ticket(ticket, args, parent_pid, device, now):
++    label = task_id(args.dataset, args.train_seed, args.arm)
++    expected = dict(parent_pid=parent_pid, dataset=args.dataset, train_seed=args.train_seed,
++                    arm=args.arm, task_id=label, device=device,
++                    output=str(pathlib.Path(args.output).resolve()),
++                    approval_sha256=sha(args.approval), cost_sha256=sha(args.cost))
++    if any(ticket.get(k) != v for k, v in expected.items()) or not 0 <= now-ticket['admitted_epoch'] <= 60:
++        raise PermissionError('valid current launcher admission required')
+--- /dev/null
++++ b/summarize.py
+@@ -0,0 +1,184 @@
++"""D/E routing over frozen OABC receipts. No model import or graph generation."""
++import argparse
++import json
++import pathlib
++import sys
++import time
++import numpy as np
++
++ROOT = pathlib.Path(__file__).resolve().parent
++sys.path.insert(0, str(ROOT / 'package'))
++from runtime_plan import TRAIN_SEEDS, SAMPLE_SEEDS, task_id, sha
++from summary_metrics import graph_summary, strict_mean, paired, finite
++
++CONTRASTS = (('D','A'), ('D','B'), ('E','D'), ('E','C'), ('E','A'))
++
++
++def key(dataset, train_seed, sample_seed, arm):
++    if dataset not in TRAIN_SEEDS or train_seed not in TRAIN_SEEDS[dataset] or sample_seed not in SAMPLE_SEEDS or arm not in 'OABCDE':
++        raise ValueError('unknown result identity')
++    return dataset, train_seed, sample_seed, arm
++
++
++def safe_file(root, relative):
++    p = (root / relative).resolve()
++    if root.resolve() not in p.parents or not p.is_file():
++        raise ValueError('missing or escaping payload path: ' + str(relative))
++    return p
++
++
++def check_w1(metrics):
++    w = metrics.get('W1_definitions', {})
++    if finite(w.get('incident4')) and finite(w.get('all10_compat')):
++        if not np.isclose(w['all10_compat'], .4*w['incident4'], rtol=1e-12, atol=1e-12):
++            raise ValueError('incident4/all10 identity failed')
++
++
++def graph_arrays(path, asset):
++    with np.load(path, allow_pickle=False) as z:
++        types=z['types'];edges=z['edges'];families=z['families'];schema=z['schema']
++    np.testing.assert_array_equal(types, asset['types']);np.testing.assert_array_equal(schema, asset['schema'])
++    if edges.ndim!=2 or edges.shape[0]!=2 or families.shape!=(edges.shape[1],):raise ValueError('graph shape')
++    if edges.dtype.kind not in 'iu' or families.dtype.kind not in 'iu':raise ValueError('integer graph fields required')
++    if np.any(edges<0) or np.any(edges>=len(types)) or np.any(edges[0]>=edges[1]):raise ValueError('canonical simple endpoints')
++    if len(set(map(tuple,edges.T)))!=edges.shape[1]:raise ValueError('duplicate edge')
++    if np.any(families<0) or np.any(families>=len(schema)):raise ValueError('family bounds')
++    np.testing.assert_array_equal(np.sort(types[edges],axis=0).T,schema[families])
++    return types,edges
++
++
++def summarize_graph(dataset, metrics, asset, edges):
++    check_w1(metrics);reference=metrics['reference_metrics'];values=graph_summary(metrics,reference)
++    focus={}
++    if dataset=='IMDB':
++        for name,pattern in [('DAM','(0, 1, 2)'),('DAA','(0, 1, 1)'),('AAM','(1, 1, 2)')]:
++            v=(metrics.get('typed_triangles') or {}).get(pattern,0) if metrics.get('typed_triangles') is not None else None
++            r=(reference.get('typed_triangles') or {}).get(pattern,0) if reference.get('typed_triangles') is not None else None
++            values['raw'][name]=v;values['reference'][name]=r;values['absolute_error'][name]=abs(v-r) if v is not None and r is not None else None
++            focus[name]=dict(raw=v,reference=r,absolute_error=values['absolute_error'][name])
++        degree=np.bincount(edges.ravel(),minlength=len(asset['types']))
++        ref_degree=np.bincount(asset['edges'].ravel(),minlength=len(asset['types']))
++        order=np.sort(degree[asset['types']==3])[::-1].tolist();target=np.sort(ref_degree[asset['types']==3])[::-1].tolist()
++        focus['Genre_sorted_degree_spectrum']=dict(raw=order,reference=target)
++        for i,(v,r) in enumerate(zip(order,target),1):
++            name='Genre_sorted_degree_%02d'%i
++            values['raw'][name]=v;values['reference'][name]=r;values['absolute_error'][name]=abs(v-r)
++    return values,focus
++
++
++def assemble(records, templates, worker_status):
++    """Pure identity-based aggregation; no pairing by file ordering or graph order."""
++    indexed={}
++    for row in records:
++        ident=key(row['dataset'],row['train_seed'],row['sample_seed'],row['arm'])
++        if ident in indexed:raise ValueError('duplicate result identity: '+str(ident))
++        indexed[ident]=row
++    cells={};contrasts=[];mapping=[]
++    for dataset,seeds in TRAIN_SEEDS.items():
++        for train_seed in seeds:
++            for arm in 'OABCDE':
++                label='%s_s%d_%s'%(dataset,train_seed,arm)
++                status=worker_status.get(label,dict(status='not_started'))
++                rows=[];graphs={}
++                for sample in SAMPLE_SEEDS:
++                    ident=key(dataset,train_seed,sample,arm)
++                    row=indexed.get(ident,dict(dataset=dataset,train_seed=train_seed,sample_seed=sample,arm=arm,status='missing_or_not_started',reason='no graph result',worker_status=status))
++                    graphs[str(sample)]=row;rows.append(row)
++                    mapping.append(dict(dataset=dataset,train_seed=train_seed,sample_seed=sample,arm=arm,status=row['status'],source_commit=row.get('source_commit'),graph_sha256=row.get('graph_sha256'),path=row.get('path')))
++                ready=all(r['status']=='evaluated' for r in rows)
++                diversity=None
++                if ready and all('edge_set' in r for r in rows):
++                    a,b=[set(map(tuple,r['edge_set'])) for r in rows];union=len(a|b)
++                    diversity=dict(labelled_graphs_equal=a==b,edge_symmetric_difference=len(a^b),edge_jaccard=len(a&b)/union if union else 1.,scope='two labelled graphs, not population or isomorphism diversity')
++                cells[label]=dict(worker_status=status,graphs=graphs,mean=strict_mean([r['values'] for r in rows]) if ready else None,
++                                  mean_reason=None if ready else 'one_or_more_required_graphs_missing_or_failed',diversity=diversity)
++            for left,right in CONTRASTS:
++                pairs=[]
++                for sample in SAMPLE_SEEDS:
++                    a=indexed.get(key(dataset,train_seed,sample,left));b=indexed.get(key(dataset,train_seed,sample,right))
++                    av=a.get('values') if a and a['status']=='evaluated' else None
++                    bv=b.get('values') if b and b['status']=='evaluated' else None
++                    pairs.append(dict(sample_seed=sample,status='complete_graph_pair' if av is not None and bv is not None else 'missing_graph',difference=paired(av,bv,templates[dataset])))
++                ready=all(p['status']=='complete_graph_pair' for p in pairs)
++                contrasts.append(dict(dataset=dataset,train_seed=train_seed,contrast=left+'-'+right,pairs=pairs,
++                                      mean=strict_mean([p['difference'] for p in pairs]) if ready else None,
++                                      mean_reason=None if ready else 'one_or_more_required_graph_pairs_missing'))
++    new_ready=sum(r['status']=='evaluated' and r['arm'] in 'DE' for r in indexed.values())
++    old_ready=sum(r['status']=='evaluated' and r['arm'] in 'OABC' for r in indexed.values())
++    complete=new_ready==16 and old_ready==32 and all(v['worker_status'].get('status')=='complete' for v in cells.values())
++    return dict(status='complete' if complete else 'incomplete',new_evaluated_graphs=new_ready,old_evaluated_graphs=old_ready,
++                expected_new_graphs=16,expected_old_graphs=32,cells=cells,contrasts=contrasts,matching=mapping,
++                W1_definition='incident4 primary; all10 compatibility = 0.4 * incident4',
++                interpretation='left minus right; raw differences are not improvements; error differences <0 are metric-specific gains',
++                scope='two existing training seeds shown separately; no new held-out or large-graph claim')
++
++
++def collect(run, check=lambda:None):
++    run=pathlib.Path(run).resolve();history=ROOT/'history';idx=json.loads((history/'index.json').read_text())
++    # The index itself is part of approved source_binding; every consumed payload
++    # is verified against the hash extracted from the fixed published ZIP.
++    for relative,receipt in idx['files'].items():
++        check();p=safe_file(history,relative)
++        if sha(p)!=receipt['sha256'] or p.stat().st_size!=receipt['bytes']:raise ValueError('historical payload mismatch: '+relative)
++    assets={};templates={};records=[];statuses={};references={}
++    cfg=json.loads((ROOT/'package/config.json').read_text())
++    for dataset in TRAIN_SEEDS:
++        p=ROOT/'package'/cfg['datasets'][dataset]['file']
++        if sha(p)!=cfg['datasets'][dataset]['sha256']:raise ValueError('reference asset hash differs')
++        with np.load(p,allow_pickle=False) as z:assets[dataset]={k:z[k].copy() for k in z.files}
++    for item in idx['records']:
++        check();d=item['dataset'];s=item['train_seed'];arm=item['arm'];sample=item['sample_seed'];paths=item['paths'];cell=item['cell_files']
++        b=json.loads((history/paths['binding.json']).read_text());m=json.loads((history/paths['metrics.json']).read_text());binding=b['binding']
++        if binding['arm']!=arm or binding['config']['seed']!=s or b['seed']!=sample or binding['dataset']['sha256']!=cfg['datasets'][d]['sha256']:raise ValueError('historical identity/source differs')
++        if binding['dictionary_sha256']!=sha(ROOT/'dictionaries'/('dictionary_'+d)/'final_basis.npz'):raise ValueError('historical dictionary differs')
++        graph=history/paths['graph.npz']
++        if sha(graph)!=b['graph_sha256']:raise ValueError('historical graph binding')
++        types,edges=graph_arrays(graph,assets[d]);v,focus=summarize_graph(d,m,assets[d],edges)
++        if d in references and references[d]!=m['reference_metrics']:raise ValueError('historical reference metrics differ')
++        references[d]=m['reference_metrics'];templates[d]=v
++        statuses['%s_s%d_%s'%(d,s,arm)]=json.loads((history/cell['summary.json']).read_text())
++        records.append(dict(dataset=d,train_seed=s,sample_seed=sample,arm=arm,status='evaluated',source_commit=item['source_commit'],path='history/'+paths['graph.npz'],graph_sha256=sha(graph),values=v,focus=focus,raw_metrics=m,edge_set=edges.T.tolist(),source_limit=idx['checkpoints']))
++    for d,seeds in TRAIN_SEEDS.items():
++        for s in seeds:
++            for arm in 'DE':
++                check();label=task_id(d,s,arm);folder=run/label
++                try:status=json.loads((folder/'summary.json').read_text()) if (folder/'summary.json').exists() else dict(status='not_started' if not folder.exists() else 'incomplete_no_receipt')
++                except Exception as exc:status=dict(status='invalid_worker_receipt',error=repr(exc))
++                statuses[label]=status
++                final_hash=sha(folder/'final.pt') if (folder/'final.pt').exists() else None
++                for sample in SAMPLE_SEEDS:
++                    check();dest=folder/('sample_'+str(sample));row=dict(dataset=d,train_seed=s,sample_seed=sample,arm=arm,path=str(dest/'graph.npz'),worker_status=status)
++                    if not all((dest/n).exists() for n in ['graph.npz','binding.json','metrics.json']):
++                        row.update(status='missing_or_incomplete',reason='graph, metric or binding missing');records.append(row);continue
++                    try:
++                        b=json.loads((dest/'binding.json').read_text());binding=b['binding']
++                        if (binding.get('dataset_name'),binding.get('train_seed'),binding.get('arm'),binding.get('task_id'),b['seed'])!=(d,s,arm,label,sample):raise ValueError('new result identity mismatch')
++                        if binding!=json.loads((folder/'binding.json').read_text()):raise ValueError('sample and model binding differ')
++                        if final_hash is None or b['checkpoint_sha256']!=final_hash or binding['updates']!=1000 or binding['config']['seed']!=s:raise ValueError('final checkpoint binding')
++                        if sha(dest/'graph.npz')!=b['graph_sha256'] or sha(dest/'metrics.json')!=b['metrics_sha256']:raise ValueError('new graph/metric hash')
++                        if binding['dataset']['sha256']!=cfg['datasets'][d]['sha256'] or binding['dictionary_sha256']!=sha(ROOT/'dictionaries'/('dictionary_'+d)/'final_basis.npz'):raise ValueError('new data/dictionary differs')
++                        if binding['config']!=dict(cfg,seed=s):raise ValueError('new scientific config differs')
++                        types,edges=graph_arrays(dest/'graph.npz',assets[d]);m=json.loads((dest/'metrics.json').read_text())
++                        if m['reference_metrics']!=references[d]:raise ValueError('new/old fixed reference differs')
++                        v,focus=summarize_graph(d,m,assets[d],edges)
++                        row.update(status='evaluated',graph_sha256=b['graph_sha256'],values=v,focus=focus,raw_metrics=m,edge_set=edges.T.tolist())
++                    except TimeoutError:raise
++                    except Exception as exc:row.update(status='failed_evaluation',error=repr(exc))
++                    records.append(row)
++    result=assemble(records,templates,statuses);result['references']=references;result['historical_sources']=idx['sources']
++    if (run/'execution_receipt.json').exists():result['execution_receipt']=json.loads((run/'execution_receipt.json').read_text())
++    if (run/'launcher_summary.json').exists():result['launcher_receipt']=json.loads((run/'launcher_summary.json').read_text())
++    return result
++
++
++def main():
++    p=argparse.ArgumentParser();p.add_argument('--run',required=True);p.add_argument('--output',required=True);p.add_argument('--deadline-epoch',type=float);a=p.parse_args()
++    output=pathlib.Path(a.output).resolve()
++    if output==ROOT or ROOT in output.parents:raise ValueError('summary output must be outside immutable release')
++    def check():
++        if a.deadline_epoch is not None and time.time()>=a.deadline_epoch:raise TimeoutError('summary deadline reached')
++    check();result=collect(a.run,check);check()
++    with output.open('x') as f:json.dump(result,f,indent=2,allow_nan=False)
++    return 0 if result['status']=='complete' else 2
++
++if __name__=='__main__':raise SystemExit(main())
+--- /dev/null
++++ b/summary_metrics.py
+@@ -0,0 +1,63 @@
++"""Raw/reference/error summaries; missing metrics never disappear or get averaged away."""
++import argparse,pathlib,json,sys,hashlib,math,time,itertools
++import numpy as np
++sys.path.insert(0,str(pathlib.Path(__file__).parent/'package'))
++SEEDS=(2026102821,2026102822)
++DISTRIBUTIONS=('degree_W1_incident4','degree_W1_all10_compat','joint_degree_TV','typed_triangle_composition_TV','MP1_composition_TV','MP2_composition_TV','MP3_composition_TV')
++CLOSURE=('path_numerator','path_denominator','path_ratio','unique_pair_numerator','unique_pair_denominator','unique_pair_ratio')
++def sha(p):return hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest()
++def scalars(m):
++    r={k:m.get(k) for k in ['nodes','edges','triangles','lcc','isolates','maximum_degree','average_clustering','assortativity']}
++    r['components']=len(m['component_sizes']) if m.get('component_sizes') is not None else None
++    for i,v in enumerate(m.get('family_edges',[])):r['family_edges_'+str(i)]=v
++    for i in range(3):r['MP'+str(i+1)+'_total']=m['mp'][i].get('total') if len(m.get('mp',[]))>i and m['mp'][i] is not None else None
++    for pattern in itertools.combinations_with_replacement(range(len(m.get('typed_degree',{}))),3):
++        r['typed_triangle_'+str(pattern)]=(m.get('typed_triangles') or {}).get(str(pattern),0) if m.get('typed_triangles') is not None else None
++    for name,t in m.get('typed_degree',{}).items():
++        r['type_'+name+'_nodes']=t.get('count')
++        for i,col in enumerate(t.get('by_relation',[])):
++            for key in ['mean','max','zero','low_le1','p90','p99']:r['type_'+name+'_relation_'+str(i)+'_'+key]=col.get(key)
++    if m.get('imdb_closure') is not None:r.update({'closure_'+k:m['imdb_closure'].get(k) for k in CLOSURE})
++    if 'IMDB_focus' in m:r.update({k:m['IMDB_focus'].get(k) for k in ['AA','DAA','AAM']})
++    return r
++def finite(v):return isinstance(v,(int,float,np.integer,np.floating)) and not isinstance(v,(bool,np.bool_)) and math.isfinite(float(v))
++def reason(m,k):
++    if k.startswith('closure_') and k.endswith('_ratio'):
++        denom='unique_pair_denominator' if 'unique_pair' in k else 'path_denominator'
++        if (m.get('imdb_closure') or {}).get(denom)==0:return 'undefined_zero_closure_denominator'
++    if k=='assortativity' and m.get(k) is None:return 'undefined_constant_degree_or_no_edges'
++    return 'missing_or_nonfinite_metric'
++def graph_summary(metrics,reference):
++    raw=scalars(metrics);ref=scalars(reference);raw={k:raw.get(k) for k in ref}
++    dist={k:None for k in DISTRIBUTIONS};w=metrics.get('W1_definitions',{});p=metrics.get('primary',{});comparison=metrics.get('comparison',{})
++    dist.update(degree_W1_incident4=w.get('incident4'),degree_W1_all10_compat=w.get('all10_compat'),joint_degree_TV=p.get('type_weighted_joint_degree_TV'),typed_triangle_composition_TV=p.get('typed_triangle_composition_TV'))
++    for i,value in enumerate(comparison.get('mp_frequency_TV',[])[:3]):dist['MP'+str(i+1)+'_composition_TV']=value
++    groups=dict(raw=raw,reference=ref,absolute_error={},distribution_error=dist);undefined={g:{} for g in groups}
++    for g,m in [('raw',metrics),('reference',reference)]:
++        for k,v in groups[g].items():
++            if not finite(v):groups[g][k]=None;undefined[g][k]=reason(m,k)
++    for k in ref:
++        if groups['raw'][k] is None or groups['reference'][k] is None:groups['absolute_error'][k]=None;undefined['absolute_error'][k]='undefined_or_missing_raw_or_reference'
++        else:groups['absolute_error'][k]=abs(groups['raw'][k]-groups['reference'][k])
++    for k,v in dist.items():
++        if not finite(v):dist[k]=None;undefined['distribution_error'][k]='missing_or_nonfinite_distribution_error'
++    return dict(**groups,undefined=undefined)
++def strict_mean(rows):
++    result={};undefined={}
++    for group in sorted(set().union(*(r.keys() for r in rows))):
++        if group=='undefined':continue
++        result[group]={};undefined[group]={};keys=sorted(set().union(*(r.get(group,{}) for r in rows)))
++        for k in keys:
++            values=[r.get(group,{}).get(k) for r in rows]
++            if not all(finite(v) for v in values):result[group][k]=None;undefined[group][k]='one_or_more_required_seed_metrics_undefined_or_missing'
++            else:result[group][k]=sum(values)/len(values)
++    result['undefined']=undefined;return result
++def paired(left,right,template):
++    fields={'raw_difference':'raw','absolute_error_difference':'absolute_error','distribution_error_difference':'distribution_error'};out={};undefined={}
++    for target,source in fields.items():
++        keys=set(template[source]) | set((left or {}).get(source,{})) | set((right or {}).get(source,{}));out[target]={};undefined[target]={}
++        for k in sorted(keys):
++            a=(left or {}).get(source,{}).get(k);b=(right or {}).get(source,{}).get(k)
++            if not finite(a) or not finite(b):out[target][k]=None;undefined[target][k]='left_or_right_graph_or_metric_undefined_or_missing'
++            else:out[target][k]=a-b
++    return dict(**out,undefined=undefined)
+--- /dev/null
++++ b/build_history.py
+@@ -0,0 +1,52 @@
++"""Read-only extraction of already published result payloads; no re-evaluation."""
++import argparse
++import hashlib
++import json
++import pathlib
++import zipfile
++
++SOURCES = [
++    ('round1', 'b5b697361e389cd77d2fb09a84e77c0b6915407d', 'a200e9246c57a0bef873bf8ed71bc3e4e5450b2432dfa94454a12f7734ada0a1', 'run', {'IMDB':2026102811,'PubMed':2026102812}),
++    ('round2', '143e6bf80a9858ec21e512da2f1a03e02e3a5a38', '6e4b4249ab012972a7a2e47ddd7e6d7513837ec47f71facd9ba375da46462c4e', 'round2/run', {'IMDB':2026102834,'PubMed':2026102833}),
++]
++
++def digest(data):
++    return hashlib.sha256(data).hexdigest()
++
++def main():
++    p=argparse.ArgumentParser();p.add_argument('--round1',required=True);p.add_argument('--round2',required=True);p.add_argument('--output',required=True);a=p.parse_args()
++    output=pathlib.Path(a.output);output.mkdir(parents=True,exist_ok=False)
++    index=dict(sources=[],records=[],files={},checkpoints='historical hash receipts only; private weight bytes not re-certified here')
++    for label,commit,expected,prefix,seeds in SOURCES:
++        archive=pathlib.Path(getattr(a,label));assert digest(archive.read_bytes())==expected,'published archive hash mismatch'
++        with zipfile.ZipFile(archive) as z:
++            root=z.namelist()[0].split('/')[0]
++            manifest_bytes=z.read(root+'/PAYLOAD_MANIFEST.json');manifest={r['path']:r for r in json.loads(manifest_bytes)['files']}
++            index['sources'].append(dict(round=label,commit=commit,zip_sha256=expected,manifest_sha256=digest(manifest_bytes)))
++            def take(relative):
++                data=z.read(root+'/'+relative);m=manifest[relative]
++                assert digest(data)==m['sha256'] and len(data)==m['bytes'],relative
++                target=pathlib.Path(label)/relative[len(prefix)+1:]
++                dest=output/target;dest.parent.mkdir(parents=True,exist_ok=True)
++                if not dest.exists():dest.write_bytes(data)
++                elif dest.read_bytes()!=data:raise ValueError('conflicting historical payload')
++                index['files'][target.as_posix()]=dict(sha256=digest(data),bytes=len(data),archive_member=root+'/'+relative,source_commit=commit,archive_sha256=expected)
++                return target.as_posix(),data
++            for dataset,seed in seeds.items():
++                for arm in 'OABC':
++                    cell=prefix+'/'+dataset+'_'+arm
++                    cell_files={}
++                    for name in ['binding.json','summary.json','final.sha256.json','initialization.json','training_rng_reset.json']:
++                        path,data=take(cell+'/'+name);cell_files[name]=path
++                    binding=json.loads((output/cell_files['binding.json']).read_text())
++                    assert binding['arm']==arm and binding['config']['seed']==seed
++                    for sample in [2026102821,2026102822]:
++                        paths={name:take(cell+'/sample_'+str(sample)+'/'+name)[0] for name in ['graph.npz','metrics.json','binding.json']}
++                        b=json.loads((output/paths['binding.json']).read_text());final=json.loads((output/cell_files['final.sha256.json']).read_text())
++                        assert b['seed']==sample and b['binding']==binding and b['checkpoint_sha256']==final['sha256']
++                        assert b['graph_sha256']==index['files'][paths['graph.npz']]['sha256']
++                        index['records'].append(dict(dataset=dataset,train_seed=seed,sample_seed=sample,arm=arm,round=label,source_commit=commit,paths=paths,cell_files=cell_files))
++    (output/'index.json').write_text(json.dumps(index,indent=2,sort_keys=True))
++    print(json.dumps(dict(records=len(index['records']),files=len(index['files']),index_sha256=digest((output/'index.json').read_bytes()))))
++
++if __name__=='__main__':main()
+--- /dev/null
++++ b/audit_runtime.py
+@@ -0,0 +1,45 @@
++"""Static semantic/byte audit only. No model construction or backend access."""
++import argparse
++import ast
++import hashlib
++import json
++import pathlib
++
++def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
++def functions(p):return {n.name:ast.dump(n,include_attributes=False) for n in ast.parse(p.read_text()).body if isinstance(n,(ast.FunctionDef,ast.AsyncFunctionDef))}
++def main():
++    p=argparse.ArgumentParser();p.add_argument('--baseline',required=True);p.add_argument('--current',required=True);p.add_argument('--output',required=True);a=p.parse_args()
++    old=pathlib.Path(a.baseline);new=pathlib.Path(a.current)
++    allowed={'admission.py','launch.py','worker.py','experiment_contract.py'};same={};changed={}
++    for path in (old/'package').rglob('*'):
++        if not path.is_file() or '__pycache__' in path.parts:continue
++        relative=path.relative_to(old/'package');target=new/'package'/relative
++        assert target.is_file(),str(relative)
++        row=dict(old=sha(path),new=sha(target));row['equal']=row['old']==row['new']
++        if not row['equal']:
++            assert relative.as_posix() in allowed,'unapproved scientific source change: '+str(relative)
++            changed[relative.as_posix()]=row
++        else:same[relative.as_posix()]=row
++    dictionary={}
++    for path in (old/'dictionaries').rglob('*'):
++        if path.is_file():
++            relative=path.relative_to(old);assert sha(path)==sha(new/relative);dictionary[str(relative)]=sha(path)
++    assert sha(old/'proposal.json')==sha(new/'proposal.json'),'frozen protocol changed'
++    unchanged_functions={}
++    for filename,names in [('experiment_contract.py',['read_dictionary','initialization','reset_training_streams']),('worker.py',['atomic_checkpoint','validation']),('launch.py',['resource_check'])]:
++        left=functions(old/'package'/filename);right=functions(new/'package'/filename)
++        for name in names:
++            assert left[name]==right[name],filename+':'+name;unchanged_functions[filename+':'+name]=True
++    left=ast.parse((old/'package/worker.py').read_text());right=ast.parse((new/'package/worker.py').read_text())
++    for target in ['position','t']:
++        find=lambda tree:[ast.dump(n,include_attributes=False) for n in ast.walk(tree) if isinstance(n,ast.For) and isinstance(n.target,ast.Name) and n.target.id==target]
++        assert find(left)==find(right) and find(left),'scientific training/reverse loop differs'
++        unchanged_functions['worker:for '+target]=True
++    helper=functions(new/'summary_metrics.py');reference=functions(old/'reference/summarize_oabc.py')
++    for name in ['scalars','finite','reason','graph_summary','strict_mean','paired']:
++        assert helper[name]==reference[name],name
++        unchanged_functions['metric_helper:'+name]=True
++    out=dict(status='passed',baseline_commit='89922be56927412dbdb2b5f9e6f36f8264f027d4',unchanged_files=same,runtime_only_changes=changed,dictionary_sha256=dictionary,protocol_sha256=sha(new/'proposal.json'),unchanged_semantics=unchanged_functions,limits='static equivalence and prior engineering evidence reused; no new network/GPU verification')
++    with pathlib.Path(a.output).open('x') as f:json.dump(out,f,indent=2)
++    print(json.dumps(dict(status='passed',unchanged_files=len(same),runtime_changed=len(changed),dictionary_files=len(dictionary),semantic_checks=len(unchanged_functions))))
++if __name__=='__main__':main()
+--- /dev/null
++++ b/tests/mock_worker.py
+@@ -0,0 +1,15 @@
++"""CPU process fixture, NOT a scientific worker and no activation authority."""
++import argparse
++import json
++import os
++import pathlib
++import time
++
++p=argparse.ArgumentParser();p.add_argument('--output',required=True);p.add_argument('--launch-fd',type=int,required=True);p.add_argument('--behavior',required=True);a,unused=p.parse_known_args()
++out=pathlib.Path(a.output);out.mkdir(exist_ok=False)
++ticket=json.loads(os.read(a.launch_fd,16384));os.close(a.launch_fd)
++(out/'fixture_ticket.json').write_text(json.dumps(ticket))
++if a.behavior=='sleep':time.sleep(10)
++rc=9 if a.behavior=='fail' else 0
++(out/'summary.json').write_text(json.dumps(dict(status='complete' if rc==0 else 'failed_or_incomplete',completed_updates=1000 if rc==0 else 0,completed_chains=2 if rc==0 else 0,error=None if rc==0 else 'synthetic_worker_failure',fixture_only=True,actual_optimizer_steps=0,actual_generated_graphs=0)))
++raise SystemExit(rc)
+--- /dev/null
++++ b/tests/test_runtime.py
+@@ -0,0 +1,276 @@
++import ast
++import copy
++import importlib.util
++import json
++import os
++import pathlib
++import subprocess
++import sys
++import time
++from types import SimpleNamespace
++
++import pytest
++
++ROOT=pathlib.Path(__file__).resolve().parents[1]
++sys.path.insert(0,str(ROOT));sys.path.insert(0,str(ROOT/'package'))
++import launch
++import runtime_plan as rp
++import admission
++import summarize as sm
++
++
++def protocol():return json.loads((ROOT/'proposal.json').read_text())
++def cost():return json.loads((ROOT/'evidence/execution/cost_proposal.json').read_text())
++
++
++def test_exact_tasks_and_dependency_paths(tmp_path):
++    p=rp.plan(protocol(),tmp_path/'unstarted')
++    assert (p['task_count'],p['sample_count'])==(8,16)
++    assert len({r['task_id'] for r in p['tasks']})==8
++    assert len({s['output'] for r in p['tasks'] for s in r['samples']})==16
++    for r in p['tasks']:
++        assert str(r['train_seed']) in r['output'] and r['dataset'] in r['output'] and r['output'].endswith('_'+r['arm'])
++        assert r['updates']==1000 and r['checkpoint_updates']==[0,500,1000]
++        assert r['role_basis']==(r['arm']=='E')
++        assert all(s['dependency']==r['task_id']+':final1000' and s['T']==1000 for s in r['samples'])
++        assert [s['sample_seed'] for s in r['samples']]==list(rp.SAMPLE_SEEDS)
++    assert not (tmp_path/'unstarted').exists()
++
++
++@pytest.mark.parametrize('field,value',[('updates_per_model',500),('rounds',20),('sample_seeds',[1,2])])
++def test_scientific_task_config_rejected(field,value):
++    p=protocol();p[field]=value
++    with pytest.raises(ValueError):rp.plan(p,'/tmp/unused')
++
++
++def test_budget_queue_is_execution_queue():
++    c=cost();queues,loads=admission.assignment(c,1000,list(range(8)))
++    assert [x[0] for x in queues]==rp.QUEUE
++    assert loads==[r['estimated_worker_seconds'] for r in c['queue']]
++    estimate=max(loads)*c['concurrency_planning_factor']+c['evaluation_delivery_reserve_seconds']+c['failure_reserve_seconds']+c['unmeasured_state_reserve_seconds']
++    assert estimate==c['planned_seconds_before_rounding'] and estimate<8700
++    c['queue'][0],c['queue'][1]=c['queue'][1],c['queue'][0]
++    with pytest.raises(ValueError):admission.assignment(c,1000,list(range(8)))
++    with pytest.raises(ValueError):admission.assignment(cost(),1000,list(range(7)))
++
++
++def test_public_dry_cli_no_workers_gpu_or_activation(tmp_path,monkeypatch):
++    def forbidden(*a,**k):raise AssertionError('subprocess/GPU must not be touched')
++    for name in ['Popen','run','check_output']:monkeypatch.setattr(launch.subprocess,name,forbidden)
++    output=tmp_path/'no_run';manifest=tmp_path/'dry.json'
++    monkeypatch.setattr(sys,'argv',['launch.py','dry-run','--protocol',str(ROOT/'proposal.json'),'--cost',str(ROOT/'evidence/execution/cost_proposal.json'),'--output',str(output),'--manifest-output',str(manifest)])
++    assert launch.main()==0
++    d=json.loads(manifest.read_text());assert not output.exists() and d['worker_launches']==d['GPU_calls']==d['optimizer_steps']==0
++    assert d['formal_start'] is None and d['formal_deadline'] is None
++
++
++def test_dry_cli_real_subprocess(tmp_path):
++    env=dict(os.environ,CUDA_VISIBLE_DEVICES='',OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1',MKL_NUM_THREADS='1')
++    r=subprocess.run([sys.executable,str(ROOT/'package/launch.py'),'dry-run','--protocol',str(ROOT/'proposal.json'),'--output',str(tmp_path/'never_created')],env=env,capture_output=True,text=True,timeout=10)
++    assert r.returncode==0,r.stderr
++    assert json.loads(r.stdout)['sample_count']==16 and not (tmp_path/'never_created').exists()
++
++
++@pytest.mark.parametrize('arm',['D','E'])
++def test_initialization_routes_and_no_scientific_constructor(arm):
++    basis=object();calls=[]
++    def initializer(*args):calls.append(args);return 'mock'
++    assert rp.initialization_for_task(initializer,'IMDB',arm,2026102811,basis)=='mock'
++    assert calls==[('IMDB',arm,2026102811,basis if arm=='E' else None)]
++    if arm=='E':
++        with pytest.raises(ValueError):rp.initialization_for_task(initializer,'IMDB',arm,2026102811,None)
++
++
++def test_worker_parser_and_real_routing_static():
++    s=(ROOT/'package/worker.py').read_text();tree=ast.parse(s)
++    assert "choices=list('DE')" in s and "--train-seed" in s
++    assert 'initialization_for_task(initialization,dataset,arm,seed,basis)' in s
++    assert "arm=='C'" not in s and "seed=protocol['train_seeds'][dataset]" not in s
++    # Existing sequence still constructs/copies, then resets training streams,
++    # then persists initial before validation/training.
++    assert s.index('model,case,cfg,proof=')<s.index('rng,rng_proof=reset_training_streams')<s.index("atomic_checkpoint(out/'initial.pt'")<s.index('validation_rows=')
++    assert any(isinstance(x,ast.For) and ast.unparse(x.target)=='sample_seed' for x in ast.walk(tree))
++
++
++def test_dictionary_approval_actual_files_and_dimensions():
++    approved={'dictionaries':{}}
++    for dataset in rp.TRAIN_SEEDS:
++        root=ROOT/'dictionaries'/('dictionary_'+dataset);r=json.loads((root/'selection.json').read_text())
++        approved['dictionaries'][dataset]=dict(files={n:rp.sha(root/n) for n in ['final_basis.npz','selection.json','panel.json','frozen_splits.json']},K=r['K'],offsets=r['offsets'],dimension=r['offsets'][-1])
++    admission.dictionaries(ROOT/'dictionaries',approved)
++    approved['dictionaries']['IMDB']['files']['final_basis.npz']='0'*64
++    with pytest.raises(ValueError):admission.dictionaries(ROOT/'dictionaries',approved)
++
++
++def test_runtime_binding_covers_summary_worker_protocol_history(monkeypatch):
++    files,base=rp.source_binding(ROOT/'package')
++    for relative in ['summarize.py','summary_metrics.py','proposal.json','package/launch.py','package/worker.py','package/runtime_plan.py','history/index.json']:
++        assert relative in files
++    original=rp.sha
++    for relative in ['summarize.py','summary_metrics.py','proposal.json','package/worker.py']:
++        target=ROOT/relative
++        monkeypatch.setattr(rp,'sha',lambda p: 'f'*64 if pathlib.Path(p)==target else original(p))
++        assert rp.source_binding(ROOT/'package')[1]!=base
++    monkeypatch.setattr(rp,'sha',original)
++    with pytest.raises(ValueError):admission.verify_summary(ROOT/'package',{'summarize_sha256':'0'*64})
++
++
++def test_ticket_training_seed_and_output_binding(tmp_path):
++    f=tmp_path/'fixture_not_approval';f.write_text('CPU fixture only, NOT authorized')
++    a=SimpleNamespace(dataset='IMDB',train_seed=2026102811,arm='E',output=str(tmp_path/'IMDB_s2026102811_E'),approval=str(f),cost=str(f))
++    t=dict(parent_pid=123,dataset=a.dataset,train_seed=a.train_seed,arm=a.arm,task_id=rp.task_id(a.dataset,a.train_seed,a.arm),device='mock',output=a.output,approval_sha256=rp.sha(f),cost_sha256=rp.sha(f),admitted_epoch=10.)
++    rp.verify_ticket(t,a,123,'mock',11.)
++    t['train_seed']=2026102834
++    with pytest.raises(PermissionError):rp.verify_ticket(t,a,123,'mock',11.)
++
++
++def template():
++    return dict(raw={'edges':10.,'closure_path_ratio':None},reference={'edges':10.,'closure_path_ratio':None},absolute_error={'edges':0.,'closure_path_ratio':None},distribution_error={'degree_W1_incident4':0.,'MP2_composition_TV':0.,'MP3_composition_TV':0.},undefined={})
++
++
++def synthetic_records():
++    rows=[];statuses={}
++    for d,seeds in rp.TRAIN_SEEDS.items():
++        for si,seed in enumerate(seeds):
++            for arm in 'OABCDE':
++                statuses['%s_s%d_%s'%(d,seed,arm)]={'status':'complete'}
++                for j,sample in enumerate(rp.SAMPLE_SEEDS):
++                    value=100*si+10*'OABCDE'.index(arm)+j
++                    v=template();v['raw']['edges']=value;v['absolute_error']['edges']=abs(value-10);v['distribution_error']['degree_W1_incident4']=value/10
++                    rows.append(dict(dataset=d,train_seed=seed,sample_seed=sample,arm=arm,status='evaluated',values=v))
++    return rows,statuses
++
++
++def test_five_contrasts_exact_seed_identity_and_direction():
++    rows,status=synthetic_records();r=sm.assemble(list(reversed(rows)),{d:template() for d in rp.TRAIN_SEEDS},status)
++    assert r['status']=='complete' and len(r['contrasts'])==20
++    for c in r['contrasts']:
++        left,right=c['contrast'].split('-');si=rp.TRAIN_SEEDS[c['dataset']].index(c['train_seed'])
++        expected=[]
++        for j,p in enumerate(c['pairs']):
++            a=100*si+10*'OABCDE'.index(left)+j;b=100*si+10*'OABCDE'.index(right)+j
++            assert p['difference']['raw_difference']['edges']==a-b
++            assert p['difference']['absolute_error_difference']['edges']==abs(a-10)-abs(b-10)
++            expected.append(abs(a-10)-abs(b-10))
++        assert c['mean']['absolute_error_difference']['edges']==sum(expected)/2
++    assert r['cells']['IMDB_s2026102834_D']['mean']['raw']['edges']!=r['cells']['IMDB_s2026102811_D']['mean']['raw']['edges']
++
++
++def test_graph_error_before_mean_null_and_missing_propagate():
++    rows,status=synthetic_records()
++    sel=[x for x in rows if (x['dataset'],x['train_seed'],x['arm'])==('IMDB',2026102811,'E')]
++    for row,val in zip(sel,[8,12]):row['values']['raw']['edges']=val;row['values']['absolute_error']['edges']=2
++    r=sm.assemble(rows,{d:template() for d in rp.TRAIN_SEEDS},status)
++    mean=r['cells']['IMDB_s2026102811_E']['mean'];assert mean['raw']['edges']==10 and mean['absolute_error']['edges']==2
++    assert mean['raw']['closure_path_ratio'] is None
++    rows.remove(sel[1]);r=sm.assemble(rows,{d:template() for d in rp.TRAIN_SEEDS},status)
++    assert r['status']=='incomplete' and r['cells']['IMDB_s2026102811_E']['mean'] is None
++    for c in r['contrasts']:
++        if c['dataset']=='IMDB' and c['train_seed']==2026102811 and c['contrast'].startswith('E-'):
++            assert c['mean'] is None and c['pairs'][1]['difference']['raw_difference']['edges'] is None
++
++
++def test_duplicate_and_unknown_seed_rejected():
++    rows,status=synthetic_records()
++    with pytest.raises(ValueError):sm.assemble(rows+[rows[0]],{d:template() for d in rp.TRAIN_SEEDS},status)
++    rows[0]['train_seed']=123
++    with pytest.raises(ValueError):sm.assemble(rows,{d:template() for d in rp.TRAIN_SEEDS},status)
++
++
++@pytest.mark.parametrize('mode',['success','failure','STOP','deadline','summary_failure'])
++def test_real_cpu_mock_processes_same_supervisor(tmp_path,mode):
++    out=tmp_path/'mock_run';out.mkdir();f=tmp_path/'not_authorized.txt';f.write_text('CPU mock only')
++    args=SimpleNamespace(output=str(out),approval=str(f),cost=str(f),dictionary_dir=str(ROOT/'dictionaries'),ledger=str(f),protocol=str(ROOT/'proposal.json'))
++    devices=['MOCK-'+str(i) for i in range(8)];queues,loads=rp.assignment(cost(),1000,devices);tasks=dict(zip(devices,queues))
++    now=time.time();ledger=dict(start_epoch=now,deadline_epoch=now+1500);approval=dict(updates=1000,resource_authorization={'fixture_only':True})
++    children=[];commands=[]
++    def spawn(cmd,**kwargs):
++        assert pathlib.Path(cmd[1]).name=='worker.py'
++        assert kwargs['env']['CUBLAS_WORKSPACE_CONFIG']==':4096:8'
++        assert all(kwargs['env'][k]=='1' for k in ['OMP_NUM_THREADS','OPENBLAS_NUM_THREADS','MKL_NUM_THREADS'])
++        commands.append(cmd)
++        behavior='success' if mode in ['success','summary_failure'] else 'fail' if mode=='failure' and len(commands)==1 else 'sleep'
++        process=subprocess.Popen([cmd[0],str(ROOT/'tests/mock_worker.py')]+cmd[2:]+['--behavior',behavior],**kwargs);children.append(process)
++        if mode=='STOP':(out/'STOP').write_text('CPU fixture stop')
++        if mode=='deadline':ledger['deadline_epoch']=time.time()+1199
++        return process
++    def summary(*unused):
++        if mode=='summary_failure':raise RuntimeError('synthetic summary failure')
++        return dict(status='complete' if mode=='success' else 'incomplete_summary_saved')
++    rc=launch.supervise(ROOT/'package',args,ledger,approval,cost(),devices,tasks,loads,1.,[],spawn=spawn,summarizer=summary,poll_seconds=.01)
++    r=json.loads((out/'launcher_summary.json').read_text())
++    assert all(p.poll() is not None for p in children) and len(commands)<=8
++    labels=[c[c.index('--output')+1] for c in commands];assert len(set(labels))==len(labels)
++    assert rc==(0 if mode=='success' else 2)
++    if mode=='success':
++        assert len(commands)==8 and r['status']=='complete'
++        for cmd,expected in zip(commands,rp.QUEUE):
++            ticket=json.loads((pathlib.Path(cmd[cmd.index('--output')+1])/'fixture_ticket.json').read_text())
++            assert (ticket['dataset'],ticket['train_seed'],ticket['arm'])==expected
++            assert ticket['task_id']==rp.task_id(*expected)
++    if mode=='failure':assert any(x.get('exit_code')==9 for x in r['primary_failures'])
++    if mode in ['STOP','deadline']:
++        assert len(commands)==1 and sum(map(len,r['unstarted'].values()))==7
++        assert r['primary_failures'][0]['reason']==('STOP' if mode=='STOP' else 'delivery_reserve_deadline')
++    if mode=='summary_failure':assert 'synthetic summary failure' in r['evaluation']['error'] and r['execution_complete'] is True
++    assert json.loads((out/'execution_receipt.json').read_text())['primary_failures']==r['primary_failures']
++
++
++def test_history_readonly_real_records_and_no_new_run(tmp_path):
++    r=sm.collect(tmp_path/'not_started')
++    assert r['old_evaluated_graphs']==32 and r['new_evaluated_graphs']==0 and r['status']=='incomplete'
++    assert not (tmp_path/'not_started').exists() and len(r['matching'])==48
++    assert len(r['contrasts'])==20 and all(c['mean'] is None for c in r['contrasts'])
++    cell=r['cells']['IMDB_s2026102834_C'];f=cell['graphs']['2026102821']['focus']
++    assert {'DAM','DAA','AAM','Genre_sorted_degree_spectrum'}<=set(f)
++    assert len(f['Genre_sorted_degree_spectrum']['raw'])==10
++    assert cell['graphs']['2026102821']['source_commit']=='143e6bf80a9858ec21e512da2f1a03e02e3a5a38'
++
++
++def test_resource_permission_not_utilization_mock_only():
++    ids=['GPU-'+str(i) for i in range(8)];rows={d:[str(i),d,'NVIDIA GeForce RTX 2080 Ti','11000','0','1'] for i,d in enumerate(ids)}
++    auth=dict(basis='explicit_user_eight_card_authorization',allowed_uuids=ids,reservation_conflicts=[],allocation_check_complete=True,minimum_free_mib=4000)
++    assert len(launch.resource_check(ids,auth,rows,'',''))==8
++    auth['allocation_check_complete']=False
++    with pytest.raises(PermissionError):launch.resource_check(ids,auth,rows,'','')
++
++
++@pytest.mark.parametrize('fault',[None,'wrong_seed','metric_hash','missing_graph','worker_failed'])
++def test_new_result_loader_with_explicit_engineering_replay(tmp_path,fault):
++    # Copy an OLD graph as a clearly marked CPU I/O fixture, never a D/E result.
++    # No model weights loaded and no new graph generated.
++    import shutil
++    out=tmp_path/'synthetic_loader_fixture';out.mkdir();cfg=json.loads((ROOT/'package/config.json').read_text())
++    folder=out/'IMDB_s2026102811_E';folder.mkdir();source=ROOT/'history/round1/IMDB_C'
++    b=json.loads((source/'binding.json').read_text());b.update(dataset_name='IMDB',train_seed=2026102811,arm='E',task_id=folder.name,config=dict(cfg,seed=2026102811),fixture_only=True)
++    (folder/'binding.json').write_text(json.dumps(b));(folder/'final.pt').write_bytes(b'NOT A CHECKPOINT: CPU I/O fixture only')
++    (folder/'summary.json').write_text(json.dumps(dict(status='failed_or_incomplete' if fault=='worker_failed' else 'complete',error='synthetic_primary_failure' if fault=='worker_failed' else None,fixture_only=True)))
++    for seed in rp.SAMPLE_SEEDS:
++        dest=folder/('sample_'+str(seed));dest.mkdir();old=source/dest.name
++        for name in ['graph.npz','metrics.json']:shutil.copyfile(old/name,dest/name)
++        sample=dict(seed=seed,checkpoint_sha256=rp.sha(folder/'final.pt'),graph_sha256=rp.sha(dest/'graph.npz'),metrics_sha256=rp.sha(dest/'metrics.json'),binding=b,fixture_only=True)
++        if fault=='wrong_seed':sample['seed']=2026102822 if seed==2026102821 else 2026102821
++        if fault=='metric_hash':sample['metrics_sha256']='0'*64
++        (dest/'binding.json').write_text(json.dumps(sample))
++    if fault=='missing_graph':(folder/'sample_2026102822/graph.npz').unlink()
++    r=sm.collect(out);cell=r['cells'][folder.name]
++    assert r['status']=='incomplete' # other seven models are absent in this fixture
++    if fault in ['wrong_seed','metric_hash']:assert r['new_evaluated_graphs']==0 and cell['mean'] is None
++    elif fault=='missing_graph':assert r['new_evaluated_graphs']==1 and cell['mean'] is None
++    else:assert r['new_evaluated_graphs']==2
++    if fault=='worker_failed':assert cell['worker_status']['error']=='synthetic_primary_failure'
++
++
++def test_run_summary_tampering_does_not_launch_process(tmp_path,monkeypatch):
++    monkeypatch.setattr(launch.subprocess,'run',lambda *a,**k:(_ for _ in ()).throw(AssertionError('must not execute')))
++    receipt=launch.run_summary(ROOT/'package',tmp_path,{'summarize_sha256':'0'*64},time.time()+60)
++    assert receipt['status']=='failed' and 'hash mismatch' in receipt['error']
++
++
++def test_unapproved_formal_entry_rejects_before_device_access(tmp_path,monkeypatch):
++    # Deliberately invalid fixture, never an activation-capable approval file.
++    fixture=tmp_path/'REJECTED_CPU_FIXTURE.json';fixture.write_text(json.dumps({'independent_review':'not_authorized','user_continue_confirmed':False}))
++    monkeypatch.setattr(launch.subprocess,'check_output',lambda *a,**k:(_ for _ in ()).throw(AssertionError('no device calls')))
++    monkeypatch.setattr(sys,'argv',['launch.py','formal','--approval',str(fixture),'--protocol',str(ROOT/'proposal.json'),'--dictionary-dir',str(ROOT/'dictionaries'),'--cost',str(ROOT/'evidence/execution/cost_proposal.json'),'--output',str(tmp_path/'not_activated'),'--gpu-uuids','not-a-device'])
++    with pytest.raises(PermissionError):launch.main()
++    assert not (tmp_path/'not_activated').exists()
+--- /dev/null
++++ b/RUNTIME_REVIEW.md
+@@ -0,0 +1,58 @@
++# D/E运行接线审查
++
++本版本基于`89922be56927412dbdb2b5f9e6f36f8264f027d4`。本票只接运行层；正式训练、optimizer.step、完整链、GPU访问、字典拟合均为0。没有创建可激活正式运行的审批文件，也没有正式起点或截止。继承的`evidence/execution/ledger.json`属于**上一票准备记录**，不能用于激活本轮。
++
++## 改动边界
++
++- `package/runtime_plan.py`集中定义任务身份、冻结队列、E/D字典路由、入场票据及运行源码绑定。
++- `package/launch.py`仍使用原失败即停止的子进程监督循环。增加无设备访问的`dry-run`，把OABC枚举改为固定八个D/E任务，固定1000更新，不再自动挑更新档位。
++- `package/worker.py`增加`--train-seed`；E传入已批准字典、D传None。调用原`initialization`、`reset_training_streams`、`normal2`、`validation`、`reverse_step`。只给结果绑定增加完整任务身份和metrics哈希。
++- `package/experiment_contract.py`只适配运行绑定；初始化、公共参数复制、训练随机流重置、字典读取函数不变。
++- 新`summarize.py`只接身份匹配和比较路由。`summary_metrics.py`的六个指标整理/误差/均值函数与旧汇总AST一致，`package/evaluation.py`字节不变。
++
++静态审计结果见`runtime_evidence/scientific_invariance.json`：57个既有package文件、8份字典工件及proposal字节不变；只有4个既有运行层文件改变。训练更新循环、逐反向步循环及14项函数/循环语义核对通过。没有新增模型、损失、噪声、后验或角色表示修订。目录中的旧`REVIEW.md`及`reference/`是原准备证据，当前运行说明以本文为准。
++
++## 固定队列与依赖
++
++|槽位|数据集|训练seed|组别|
++|---|---|---|---|
++|0|PubMed|2026102812|E|
++|1|PubMed|2026102833|E|
++|2|PubMed|2026102812|D|
++|3|PubMed|2026102833|D|
++|4|IMDB|2026102811|E|
++|5|IMDB|2026102834|E|
++|6|IMDB|2026102811|D|
++|7|IMDB|2026102834|D|
++
++任务目录形如`IMDB_s2026102811_E`，内部`sample_2026102821/`和`sample_2026102822/`。每卡独立训练0→500→1000，再依次运行两条T1000链；只有final1000用于生成。没有重试、补抽或跨seed目录复用。模型和公共参数构造完成后，原函数重置配对随机流，再保存初态；不使用工程短测权重。
++
++## 旧结果如何复用
++
++`history/index.json`绑定两份已发布ZIP及每个原载荷。第一轮固定`b5b697361e389cd77d2fb09a84e77c0b6915407d`，第二轮固定`143e6bf80a9858ec21e512da2f1a03e02e3a5a38`。已核验32张旧图、176份只读载荷；包含O参考。权重只沿用历史哈希回执，本票不重新加载或认证私有权重字节。
++
++通过`dataset + train_seed + sample_seed + arm`关联，不按文件排序。每个数据集、每个训练seed分别给D−A、D−B、E−D、E−C、E−A，每项保留两个采样seed与其均值，共20个比较单元。原始数量差和逐图绝对误差差分开；先逐图取绝对误差，再求均值。分布误差直接作差。缺图时整对均值null；存在指标null时该指标均值null，原因保留。
++
++incident4为主，all10兼容值单列并校验0.4关系。原MP1/2/3及MP2/MP3组成、联合度、闭合机会、度尾部等均保留。额外显式展示原typed-triangle表中的DAM、DAA、AAM；Genre排序度谱只从已保存图统计，不构造新图。PubMed保留原真实类型标签。两训练seed不合并掩盖方向变化，16张新图不能在尚未生成时算作完成。
++
++## 绑定、授权和失败路径
++
++运行绑定覆盖package源码/配置/数据、冻结字典、proposal、cost、根目录summarize和summary_metrics、历史索引。索引再绑定所有旧载荷。launcher启动、worker入场和汇总调用前后均核对相应绑定。文件路径变化不被当成科学配置变化；旧结果的源码哈希也不要求等于新增D/E运行代码哈希。
++
++`RELEASE_BINDING.json`只是审查输入清单，**不是授权**。未来实际审批必须另有独立审查通过及用户继续确认的来源记录、精确源码/协议/成本/字典/环境、输出路径、1000更新、8700秒及八卡权限。包内不生成此文件。launcher只在真实审批和资源检查通过后创建新的`activation.json`；起点为该次formal入口开始，截止严格为起点+145分钟，不能重复启动到已有目录。旧账本不改写。
++
++八卡权限、预留、他人进程及显存须在未来正式启动时核对。本票没有查询设备。原资源门保留，利用率仅遥测，不单凭1%拒绝；也不能仅凭进程列表为空替代权限记录。没有正式授权时，在任何GPU查询前拒绝。
++
++STOP、信号、worker失败和交付预留截止均沿原监督逻辑停止，不重启。只清理本launcher启动的子进程组。保存`execution_receipt.json`后尽量汇总，再写`launcher_summary.json`；汇总失败/超时不会覆盖原失败原因。SIGKILL等不可捕获终止无法保证finally运行。已经完成但整个worker后续失败的图可保留，运行整体仍为incomplete。
++
++## CPU验收和限度
++
++`runtime_evidence/`记录本票测试和干运行。模拟worker只是短CPU进程，回执明确`fixture_only`；其中“1000/2”是测试状态字段，实际optimizer.step和生成图为0，不能计作科学运行。既有图用于I/O夹具时显式标为旧图回放，不冒充D/E输出。
++
++未执行：GPU查询/复测、模型前后向、任何优化器更新、字典拟合、正式worker、T1000链、D/E效果评价。原工程和跨后端失败记录原样继承，不以本票CPU运行层测试替代。
++
++## 成本和下一步
++
++复用原成本：八任务耗时之和约566.89分钟；八卡关键路径约80.55分钟。1.25并发规划系数后约100.69分钟，加20分钟评价交付、15分钟故障、5分钟未测状态余量，总计140.69分钟，拟议145分钟。此系数不是已测八卡并发性能，也不是完成保证。实际执行严格采用上表，不重新排序或改为七卡。准备耗时另记；等待本次审查不占尚未开始的正式窗口。
++
++本轮交付后停止。独立接线审查和用户明确正式授权到达后，才核对八卡和实际剩余预算并启动；资源不足或成本不适用时报告，不缩实验。
+--- /dev/null
++++ b/COMMANDS.md
+@@ -0,0 +1,40 @@
++# 本地复核与未来运行命令
++
++进入解包后的`typed_structure_192_de_runtime_v1`。使用现有环境，不安装或升级依赖。
++
++```bash
++export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
++PY=/data2/lyh/miniconda3/envs/sparse_block/bin/python
++sha256sum -c SHA256SUMS
++env -u PYTEST_ADDOPTS CUDA_VISIBLE_DEVICES='' "$PY" -m pytest -q tests/test_runtime.py
++"$PY" package/launch.py dry-run \
++  --protocol proposal.json --cost evidence/execution/cost_proposal.json \
++  --output /tmp/DE_PROPOSED_NOT_STARTED \
++  --manifest-output /tmp/de_dry_manifest_NEW.json
++```
++
++`dry-run`只写指定清单，不创建任务目录、不启动worker、不访问GPU、不建立正式账本。清单文件必须不存在。
++
++下面是**未来获批后**的命令结构，本轮未执行。审批文件必须由真实审查及用户继续授权产生，当前包不提供可激活的审批文件。GPU UUID顺序对应冻结槽0至7，不用GPU编号代替UUID。不能为通过检查擅自解除平台设备隔离。
++
++```bash
++export CUBLAS_WORKSPACE_CONFIG=:4096:8
++"$PY" package/launch.py formal \
++  --protocol proposal.json --dictionary-dir dictionaries \
++  --cost evidence/execution/cost_proposal.json \
++  --approval "$REVIEWED_APPROVAL" --output "$NEW_RUN" \
++  --gpu-uuids "$GPU_SLOT0" "$GPU_SLOT1" "$GPU_SLOT2" "$GPU_SLOT3" \
++              "$GPU_SLOT4" "$GPU_SLOT5" "$GPU_SLOT6" "$GPU_SLOT7"
++```
++
++将来输出目录必须新建且在源包/输入之外。launcher是唯一正式入口，worker需要父进程管道票据；不要直接运行worker，也不要用旧OABC命令。没有自动恢复或失败重抽入口。
++
++未来运行中查看`$NEW_RUN/schedule.json`、各任务`progress.json`、任务`.log`及`sample_<seed>/steps.jsonl`；安全停止可创建`$NEW_RUN/STOP`。完成/失败后保存整个目录，重点返回：`activation.json`、`resource_admission.json`、`execution_receipt.json`、`launcher_summary.json`、`unified_evaluation.json`、`summary_process.log`及各任务`summary.json`。
++
++对已有运行离线重汇总可以使用下面的CPU入口。输出文件不得已存在，也不能写入不可变源包。返回0表示完整，2表示不完整；指标或输入损坏会保留错误，不伪造成功。
++
++```bash
++"$PY" summarize.py --run "$EXISTING_RUN" --output "$NEW_SUMMARY_JSON"
++```
++
++未来审批所需字段（说明，不是审批实例）：`independent_review=passed`、`user_continue_confirmed=true`及两个证据引用；`RELEASE_BINDING.json`中的source/protocol/cost/summarize/dictionaries绑定；`updates=1000`、`budget_seconds=8700`、`main_W1_definition_confirmed=type_weighted_incident4`、新的绝对output；冻结软件environment；实际resource_authorization含八卡UUID、明确权限依据、allocation_check_complete、reservation_conflicts、minimum_free_mib。不得仅复制这些字段伪造授权。

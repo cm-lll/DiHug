@@ -1,0 +1,24 @@
+{
+  "status": "failed_or_incomplete",
+  "cells": {
+    "PubMed_D": {
+      "passed": false,
+      "reserved_steps": 0,
+      "completed_steps": 0,
+      "initial_sha256": "3f13dbeab21900509f2778ab4f205f8638944695b26305e9f66eb4c921733ae2",
+      "parameters": 6808721,
+      "input_sha256": "e8f31895904264e59e512fbac4a4b9c953faae0c34f3b35dc012b3b7d54597bc"
+    }
+  },
+  "formal_updates": 0,
+  "complete_chains": 0,
+  "new_graphs": 0,
+  "start_epoch": 1793163308.1728873,
+  "limit_seconds": 900,
+  "CUDA_VISIBLE_DEVICES": "GPU-cf73267c-774a-dada-fc26-ada91ccc27c1",
+  "scope": "engineering weights ONLY; exactly <=2 steps per dataset-arm; no scientific initialization",
+  "error": "RuntimeError('Deterministic behavior was enabled with either `torch.use_deterministic_algorithms(True)` or `at::Context::setDeterministicAlgorithms(true)`, but this operation is not deterministic because it uses CuBLAS and you have CUDA >= 10.2. To enable deterministic behavior in this case, you must set an environment variable before running your PyTorch application: CUBLAS_WORKSPACE_CONFIG=:4096:8 or CUBLAS_WORKSPACE_CONFIG=:16:8. For more information, go to https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility')",
+  "traceback": "Traceback (most recent call last):\n  File \"/data2/lyh/gnn_project/DiHug/research_branches/typed_structure_192_de_v1/package/engineering_de.py\", line 58, in main\n    row['warmup_no_step']=normal2(m,opt,case,paired,1000,'cuda',False)\n  File \"/data2/lyh/gnn_project/DiHug/research_branches/typed_structure_192_de_v1/package/normal2.py\", line 27, in normal2\n    graph,logits,p=ctx.predict(inp['query'],inp['f'],inp['t']/T,token,details=True)\n  File \"/data2/lyh/gnn_project/DiHug/research_branches/typed_structure_192_de_v1/package/hsgd/computational.py\", line 125, in predict\n    logits, p0 = self.run_network(graph, time, state_version)\n  File \"/data2/lyh/gnn_project/DiHug/research_branches/typed_structure_192_de_v1/package/hsgd/computational.py\", line 117, in run_network\n    logits = self.model.joint_predict(self,graph,time)\n  File \"/data2/lyh/gnn_project/DiHug/research_branches/typed_structure_192_de_v1/package/model_variants.py\", line 98, in joint_predict\n    ctx.node_residual=ctx.node_residual+self.refex_projection(ctx.structural_features)\n  File \"/data2/lyh/miniconda3/envs/sparse_block/lib/python3.9/site-packages/torch/nn/modules/module.py\", line 1518, in _wrapped_call_impl\n    return self._call_impl(*args, **kwargs)\n  File \"/data2/lyh/miniconda3/envs/sparse_block/lib/python3.9/site-packages/torch/nn/modules/module.py\", line 1527, in _call_impl\n    return forward_call(*args, **kwargs)\n  File \"/data2/lyh/miniconda3/envs/sparse_block/lib/python3.9/site-packages/torch/nn/modules/linear.py\", line 114, in forward\n    return F.linear(input, self.weight, self.bias)\nRuntimeError: Deterministic behavior was enabled with either `torch.use_deterministic_algorithms(True)` or `at::Context::setDeterministicAlgorithms(true)`, but this operation is not deterministic because it uses CuBLAS and you have CUDA >= 10.2. To enable deterministic behavior in this case, you must set an environment variable before running your PyTorch application: CUBLAS_WORKSPACE_CONFIG=:4096:8 or CUBLAS_WORKSPACE_CONFIG=:16:8. For more information, go to https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility\n",
+  "ended_epoch": 1793163319.9569044,
+  "seconds": 11.78401780128479
+}
