@@ -1,0 +1,99 @@
+{
+  "independent_review": "passed",
+  "review_basis": "user approved fixed 42b83015 and specifically authorized resource-gate-only amendment followed by execution",
+  "user_continue_confirmed": true,
+  "main_W1_definition_confirmed": "type_weighted_incident4",
+  "updates": 1000,
+  "source_sha256": "6349f816a273679e2f08bb0d887065d23f77b488e68b3a5aca036683d6258429",
+  "summarize_sha256": "89066d0f96901e48622e4566b5c9bfca02b3e68e14de08618a691dee6fb38404",
+  "protocol_sha256": "1d6685666b89cd1217e682cf7bbc1b89c5d09e404314cc926c30b69adaba335a",
+  "cost_sha256": "c922b86373fe7e918e2a445ff90f29b7811398aaea75659e8bae5e346cdb6e8f",
+  "dictionaries": {
+    "IMDB": {
+      "files": {
+        "final_basis.npz": "3b5d9207c4a1ee0349385e5f30f6268f4a6fc13df70912f62a7f279f9f0bae50",
+        "selection.json": "f4daf29fa57b9deb962c66c40d4d9e4a71db75d066b9ccdd5aedc21d16b69e36",
+        "panel.json": "7b0080817810aa770250501e002de4a5387d88bbbfa0550fc2118956ef1af951",
+        "frozen_splits.json": "1af6534e1fcda03265a499b93d62131c45e56a2fc1dc79f9caf55b2806d927ee"
+      },
+      "K": [
+        5,
+        4,
+        3,
+        2
+      ],
+      "offsets": [
+        0,
+        5,
+        9,
+        12,
+        14
+      ],
+      "dimension": 14
+    },
+    "PubMed": {
+      "files": {
+        "final_basis.npz": "a852a959c41a8d69dce37a0df542d4852e997450843888ba3c5e46a79e62f14e",
+        "selection.json": "a51a6d8a4ed47712a3792fac7acb603660e8aee4dc9ba15afef3c8a7ed19cd0d",
+        "panel.json": "eaf94f3557a87ea76688b20652dfd0e745e0ebc9f877d20f7b6f304750c3413d",
+        "frozen_splits.json": "2f84b8ddaf18b6336d032c6058b7a22951b74f99c8234892d6e04a58e4a69564"
+      },
+      "K": [
+        8,
+        8,
+        8,
+        6
+      ],
+      "offsets": [
+        0,
+        8,
+        16,
+        24,
+        30
+      ],
+      "dimension": 30
+    }
+  },
+  "environment": {
+    "python_version": "3.9.23",
+    "torch_runtime_version": "2.1.0+cu121",
+    "device_name": "NVIDIA GeForce RTX 2080 Ti",
+    "packages": {
+      "torch": "2.1.0+cu121",
+      "torch-geometric": "2.3.1",
+      "numpy": "1.23.0",
+      "scipy": "1.11.0",
+      "pytest": "8.4.2",
+      "networkx": "2.8.7"
+    }
+  },
+  "resource_authorization": {
+    "basis": "explicit_user_eight_card_authorization",
+    "allowed_uuids": [
+      "GPU-12b85b68-69e6-12fa-76ce-986c0b46e8a7",
+      "GPU-cf73267c-774a-dada-fc26-ada91ccc27c1",
+      "GPU-dda1721a-d053-7371-3434-4c3c8502a1d4",
+      "GPU-994be766-a8bd-b90c-bf87-c667dfa8ab4d",
+      "GPU-e2284395-dd00-1e74-3eed-7f406fa69d5c",
+      "GPU-2db6cf6a-a8b5-58af-4e89-22bfc863a0fb",
+      "GPU-cddbf2e5-1af7-7219-ff58-38e6f4c44f69",
+      "GPU-360156ae-7a75-37f4-eaed-9a5500275409"
+    ],
+    "allocation_check_complete": true,
+    "reservation_conflicts": [],
+    "allocation_evidence": "user explicitly authorizes all 8 physical RTX2080Ti; no scheduler tools, job/visibility masks, compute tasks or device handles detected",
+    "minimum_free_mib": 5556,
+    "minimum_basis": "historical maximum reserved 3508 MiB + 2048 MiB admission margin; not a worst-case chain guarantee",
+    "snapshot_sha256": "00deda836562bc205487df5007a74c8bfc2f6c64196ac70655c8bf1d66b8e641"
+  },
+  "effective_execution": {
+    "models": 8,
+    "chains": 16,
+    "T": 1000,
+    "updates": 1000,
+    "budget_seconds": 8400,
+    "scientific_protocol_sha256": "1d6685666b89cd1217e682cf7bbc1b89c5d09e404314cc926c30b69adaba335a",
+    "note": "new user-authorized execution ledger overrides expired preparation budget annotations; scientific fields unchanged"
+  },
+  "ledger_sha256": "0057562abb838033b45afb9adb63ab6b3e8ac6e453bc0b97dd26fe1cbb975f2e"
+}

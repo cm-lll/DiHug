@@ -1,0 +1,48 @@
+--- a/package/launch.py
++++ b/package/launch.py
+@@ -3,6 +3,20 @@
+ from admission import dictionaries as check_dictionaries,assignment,verify_summary
+ 
+ def sha(p):return hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest()
++def resource_check(devices,authorization,rows,compute_output,device_users):
++    """Permission is explicit; utilization is telemetry, not an ownership test."""
++    if len(devices)!=8 or len(set(devices))!=8:raise PermissionError('this run requires exactly eight distinct cards')
++    if authorization.get('basis')!='explicit_user_eight_card_authorization' or set(devices)!=set(authorization.get('allowed_uuids',[])):raise PermissionError('selected cards lack explicit resource authorization')
++    if authorization.get('reservation_conflicts') or authorization.get('allocation_check_complete') is not True:raise PermissionError('allocation/reservation check incomplete or conflicting')
++    if device_users.strip():raise RuntimeError('selected GPU device has open process handles; no interference')
++    if any(line.split(',')[0].strip() in devices for line in compute_output.splitlines() if line.strip()):raise RuntimeError('selected GPU has an existing compute task')
++    receipt=[]
++    for d in devices:
++        if d not in rows or '2080 Ti' not in rows[d][2]:raise RuntimeError('selected RTX2080Ti not present: '+d)
++        row=rows[d]
++        if float(row[3])<authorization['minimum_free_mib'] or float(row[4])>10:raise RuntimeError('insufficient free memory or existing allocation: '+d)
++        receipt.append(dict(uuid=d,index=int(row[0]),name=row[2],free_mib=float(row[3]),used_mib=float(row[4]),utilization_percent=float(row[5])))
++    return receipt
+ def gate(root,ledger_path,approval_path,protocol_path,dictionaries,cost_path):
+     ledger=json.loads(pathlib.Path(ledger_path).read_text());approval=json.loads(pathlib.Path(approval_path).read_text());protocol=json.loads(pathlib.Path(protocol_path).read_text())
+     if time.time()>=ledger['deadline_epoch']:raise TimeoutError('original budget expired')
+@@ -67,10 +81,12 @@
+     if visibility:
+         allowed=visibility.split(',')
+         if not all(v.startswith('GPU-') for v in allowed) or not set(devices)<=set(allowed):raise PermissionError('ambiguous/restricted platform visibility; no override')
+-    visible=subprocess.check_output(['nvidia-smi','--query-gpu=uuid,name,memory.used,utilization.gpu','--format=csv,noheader,nounits'],text=True)
+-    rows={row.split(',')[0].strip():[x.strip() for x in row.split(',')] for row in visible.splitlines()}
+-    for d in devices:
+-        if d not in rows or '2080 Ti' not in rows[d][1] or int(rows[d][2])>10 or int(rows[d][3])>0:raise RuntimeError('selected GPU not confirmed idle RTX2080Ti: '+d)
++    visible=subprocess.check_output(['nvidia-smi','--query-gpu=index,uuid,name,memory.free,memory.used,utilization.gpu','--format=csv,noheader,nounits'],text=True)
++    rows={row.split(',')[1].strip():[x.strip() for x in row.split(',')] for row in visible.splitlines()}
++    compute=subprocess.check_output(['nvidia-smi','--query-compute-apps=gpu_uuid,pid,used_memory','--format=csv,noheader,nounits'],text=True)
++    handles=subprocess.run(['fuser']+['/dev/nvidia'+rows[d][0] for d in devices if d in rows],capture_output=True,text=True)
++    if handles.returncode not in (0,1) or (handles.returncode==1 and handles.stderr.strip()):raise RuntimeError('cannot verify selected device handles: '+handles.stderr)
++    resource_receipt=resource_check(devices,approval['resource_authorization'],rows,compute,handles.stdout)
+     # Admission for EXACT reviewed tier; no effect-dependent choice or post-start change.
+     queues,loads=assignment(cost,approval['updates'],devices)
+     tasks={device:queue for device,queue in zip(devices,queues)}
+@@ -78,6 +94,7 @@
+     if expected>ledger['deadline_epoch']-time.time():raise TimeoutError('reviewed tier no longer fits; require explicit recorded pre-start lower tier')
+     if args.mode=='gate':print(json.dumps(dict(status='gate_passed_no_execution',expected_seconds=expected)));return 0
+     out=pathlib.Path(args.output);out.mkdir(parents=True,exist_ok=False);stop=[False];running={};finished=[];failed=False;failures=[]
++    (out/'resource_admission.json').write_text(json.dumps(dict(epoch=time.time(),devices=resource_receipt,authority=approval['resource_authorization'],utilization_is_telemetry_only=True),indent=2))
+     (out/'schedule.json').write_text(json.dumps(dict(queues=tasks,loads_seconds=loads,expected_seconds=expected,policy='LPT; fixed FIFO per device'),indent=2))
+     for sig in [signal.SIGINT,signal.SIGTERM,signal.SIGHUP]:signal.signal(sig,lambda s,f:stop.__setitem__(0,True))
+     try:
