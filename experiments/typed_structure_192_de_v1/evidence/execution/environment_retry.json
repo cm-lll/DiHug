@@ -1,0 +1,19 @@
+{
+  "epoch": 1793163410.3102176,
+  "reason": "Restored existing launcher CUBLAS_WORKSPACE_CONFIG=:4096:8; omitted on first manual engineering invocation. No science configuration change.",
+  "prior_attempts": [
+    {
+      "dataset": "IMDB",
+      "first_attempt": "results/typed_structure_192_de_preparation_v1/gpu_IMDB",
+      "error": "RuntimeError('Deterministic behavior was enabled with either `torch.use_deterministic_algorithms(True)` or `at::Context::setDeterministicAlgorithms(true)`, but this operation is not deterministic because it uses CuBLAS and you have CUDA >= 10.2. To enable deterministic behavior in this case, you must set an environment variable before running your PyTorch application: CUBLAS_WORKSPACE_CONFIG=:4096:8 or CUBLAS_WORKSPACE_CONFIG=:16:8. For more information, go to https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility')",
+      "steps": 0
+    },
+    {
+      "dataset": "PubMed",
+      "first_attempt": "results/typed_structure_192_de_preparation_v1/gpu_PubMed",
+      "error": "RuntimeError('Deterministic behavior was enabled with either `torch.use_deterministic_algorithms(True)` or `at::Context::setDeterministicAlgorithms(true)`, but this operation is not deterministic because it uses CuBLAS and you have CUDA >= 10.2. To enable deterministic behavior in this case, you must set an environment variable before running your PyTorch application: CUBLAS_WORKSPACE_CONFIG=:4096:8 or CUBLAS_WORKSPACE_CONFIG=:16:8. For more information, go to https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility')",
+      "steps": 0
+    }
+  ],
+  "total_engineering_limit": 8
+}
