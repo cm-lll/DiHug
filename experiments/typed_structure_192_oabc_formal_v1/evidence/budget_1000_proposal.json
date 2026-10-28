@@ -1,0 +1,311 @@
+{
+  "scope": "PROPOSAL ONLY; NOT APPROVAL",
+  "updates_per_model": 1000,
+  "models": 8,
+  "chains": 16,
+  "T": 1000,
+  "source_cost_sha256": "c922b86373fe7e918e2a445ff90f29b7811398aaea75659e8bae5e346cdb6e8f",
+  "resource_snapshot_sha256": "4cf95174c741e1c770b5840497d83562fc3ffded996ac3ab8283c681b385fe53",
+  "cells": {
+    "IMDB_O": {
+      "training_seconds": 2475.91763921082,
+      "two_full_chains_seconds": 887.8692258149385,
+      "validation_save_seconds": 14.756057941354811,
+      "normal2_component_seconds": 2.47591763921082,
+      "full_step_component_seconds": 0.4439346129074693,
+      "total_component_seconds": 3378.5429229671136
+    },
+    "IMDB_A": {
+      "training_seconds": 2594.9731273576617,
+      "two_full_chains_seconds": 923.9846877753735,
+      "validation_save_seconds": 14.885639912448823,
+      "normal2_component_seconds": 2.5949731273576617,
+      "full_step_component_seconds": 0.46199234388768673,
+      "total_component_seconds": 3533.843455045484
+    },
+    "IMDB_B": {
+      "training_seconds": 2487.9462802782655,
+      "two_full_chains_seconds": 914.2679460346699,
+      "validation_save_seconds": 15.136663654819131,
+      "normal2_component_seconds": 2.4879462802782655,
+      "full_step_component_seconds": 0.45713397301733494,
+      "total_component_seconds": 3417.3508899677545
+    },
+    "IMDB_C": {
+      "training_seconds": 2532.169656828046,
+      "two_full_chains_seconds": 933.7715022265911,
+      "validation_save_seconds": 15.264063517563045,
+      "normal2_component_seconds": 2.532169656828046,
+      "full_step_component_seconds": 0.46688575111329556,
+      "total_component_seconds": 3481.2052225722
+    },
+    "PubMed_O": {
+      "training_seconds": 3352.2168658673763,
+      "two_full_chains_seconds": 1209.2233002185822,
+      "validation_save_seconds": 16.16762833762914,
+      "normal2_component_seconds": 3.3522168658673763,
+      "full_step_component_seconds": 0.6046116501092911,
+      "total_component_seconds": 4577.607794423588
+    },
+    "PubMed_A": {
+      "training_seconds": 3530.2181327715516,
+      "two_full_chains_seconds": 1255.8360118418932,
+      "validation_save_seconds": 16.35317110735923,
+      "normal2_component_seconds": 3.5302181327715516,
+      "full_step_component_seconds": 0.6279180059209466,
+      "total_component_seconds": 4802.407315720804
+    },
+    "PubMed_B": {
+      "training_seconds": 3367.830182425678,
+      "two_full_chains_seconds": 1238.7943137437105,
+      "validation_save_seconds": 16.644853866659105,
+      "normal2_component_seconds": 3.3678301824256778,
+      "full_step_component_seconds": 0.6193971568718553,
+      "total_component_seconds": 4623.269350036047
+    },
+    "PubMed_C": {
+      "training_seconds": 3489.3751312047243,
+      "two_full_chains_seconds": 1283.7445084005594,
+      "validation_save_seconds": 16.812240816652775,
+      "normal2_component_seconds": 3.4893751312047243,
+      "full_step_component_seconds": 0.6418722542002797,
+      "total_component_seconds": 4789.9318804219365
+    }
+  },
+  "total_task_component_seconds": 32604.158831154928,
+  "confirmed_idle_at_snapshot": [
+    "GPU-12b85b68-69e6-12fa-76ce-986c0b46e8a7",
+    "GPU-cf73267c-774a-dada-fc26-ada91ccc27c1",
+    "GPU-dda1721a-d053-7371-3434-4c3c8502a1d4",
+    "GPU-994be766-a8bd-b90c-bf87-c667dfa8ab4d",
+    "GPU-e2284395-dd00-1e74-3eed-7f406fa69d5c",
+    "GPU-cddbf2e5-1af7-7219-ff58-38e6f4c44f69",
+    "GPU-360156ae-7a75-37f4-eaed-9a5500275409"
+  ],
+  "excluded_at_snapshot": [
+    {
+      "uuid": "GPU-2db6cf6a-a8b5-58af-4e89-22bfc863a0fb",
+      "index": 5,
+      "reason": "not zero utilization/memory in every read-only snapshot, or compute process present"
+    }
+  ],
+  "queue_policy": "admission.assignment LPT; descending total seconds, stable label ties, next minimum-load device; FIFO per device",
+  "scenarios": [
+    {
+      "name": "current_snapshot",
+      "requires_new_idle_check": true,
+      "cards": 7,
+      "per_device": [
+        {
+          "uuid": "GPU-12b85b68-69e6-12fa-76ce-986c0b46e8a7",
+          "queue": [
+            "PubMed_A"
+          ],
+          "training_seconds": 3530.2181327715516,
+          "two_full_chains_seconds": 1255.8360118418932,
+          "validation_save_seconds": 16.35317110735923,
+          "total_component_seconds": 4802.407315720804
+        },
+        {
+          "uuid": "GPU-cf73267c-774a-dada-fc26-ada91ccc27c1",
+          "queue": [
+            "PubMed_C"
+          ],
+          "training_seconds": 3489.3751312047243,
+          "two_full_chains_seconds": 1283.7445084005594,
+          "validation_save_seconds": 16.812240816652775,
+          "total_component_seconds": 4789.9318804219365
+        },
+        {
+          "uuid": "GPU-dda1721a-d053-7371-3434-4c3c8502a1d4",
+          "queue": [
+            "PubMed_B"
+          ],
+          "training_seconds": 3367.830182425678,
+          "two_full_chains_seconds": 1238.7943137437105,
+          "validation_save_seconds": 16.644853866659105,
+          "total_component_seconds": 4623.269350036047
+        },
+        {
+          "uuid": "GPU-994be766-a8bd-b90c-bf87-c667dfa8ab4d",
+          "queue": [
+            "PubMed_O"
+          ],
+          "training_seconds": 3352.2168658673763,
+          "two_full_chains_seconds": 1209.2233002185822,
+          "validation_save_seconds": 16.16762833762914,
+          "total_component_seconds": 4577.607794423588
+        },
+        {
+          "uuid": "GPU-e2284395-dd00-1e74-3eed-7f406fa69d5c",
+          "queue": [
+            "IMDB_A"
+          ],
+          "training_seconds": 2594.9731273576617,
+          "two_full_chains_seconds": 923.9846877753735,
+          "validation_save_seconds": 14.885639912448823,
+          "total_component_seconds": 3533.843455045484
+        },
+        {
+          "uuid": "GPU-cddbf2e5-1af7-7219-ff58-38e6f4c44f69",
+          "queue": [
+            "IMDB_C"
+          ],
+          "training_seconds": 2532.169656828046,
+          "two_full_chains_seconds": 933.7715022265911,
+          "validation_save_seconds": 15.264063517563045,
+          "total_component_seconds": 3481.2052225722
+        },
+        {
+          "uuid": "GPU-360156ae-7a75-37f4-eaed-9a5500275409",
+          "queue": [
+            "IMDB_B",
+            "IMDB_O"
+          ],
+          "training_seconds": 4963.863919489086,
+          "two_full_chains_seconds": 1802.1371718496084,
+          "validation_save_seconds": 29.892721596173942,
+          "total_component_seconds": 6795.893812934868
+        }
+      ],
+      "component_critical_path_seconds": 6795.893812934868,
+      "unmeasured_concurrency_allowance_seconds": 1698.973453233717,
+      "evaluation_delivery_reserve_seconds": 1200,
+      "fault_exit_reserve_seconds": 900,
+      "total_proposed_seconds": 10594.867266168585,
+      "total_proposed_minutes": 176.58112110280976,
+      "proposed_rounded_budget_minutes": 180
+    },
+    {
+      "name": "conditional_eight_idle_cards",
+      "requires_new_idle_check": true,
+      "cards": 8,
+      "per_device": [
+        {
+          "uuid": "GPU-12b85b68-69e6-12fa-76ce-986c0b46e8a7",
+          "queue": [
+            "PubMed_A"
+          ],
+          "training_seconds": 3530.2181327715516,
+          "two_full_chains_seconds": 1255.8360118418932,
+          "validation_save_seconds": 16.35317110735923,
+          "total_component_seconds": 4802.407315720804
+        },
+        {
+          "uuid": "GPU-cf73267c-774a-dada-fc26-ada91ccc27c1",
+          "queue": [
+            "PubMed_C"
+          ],
+          "training_seconds": 3489.3751312047243,
+          "two_full_chains_seconds": 1283.7445084005594,
+          "validation_save_seconds": 16.812240816652775,
+          "total_component_seconds": 4789.9318804219365
+        },
+        {
+          "uuid": "GPU-dda1721a-d053-7371-3434-4c3c8502a1d4",
+          "queue": [
+            "PubMed_B"
+          ],
+          "training_seconds": 3367.830182425678,
+          "two_full_chains_seconds": 1238.7943137437105,
+          "validation_save_seconds": 16.644853866659105,
+          "total_component_seconds": 4623.269350036047
+        },
+        {
+          "uuid": "GPU-994be766-a8bd-b90c-bf87-c667dfa8ab4d",
+          "queue": [
+            "PubMed_O"
+          ],
+          "training_seconds": 3352.2168658673763,
+          "two_full_chains_seconds": 1209.2233002185822,
+          "validation_save_seconds": 16.16762833762914,
+          "total_component_seconds": 4577.607794423588
+        },
+        {
+          "uuid": "GPU-e2284395-dd00-1e74-3eed-7f406fa69d5c",
+          "queue": [
+            "IMDB_A"
+          ],
+          "training_seconds": 2594.9731273576617,
+          "two_full_chains_seconds": 923.9846877753735,
+          "validation_save_seconds": 14.885639912448823,
+          "total_component_seconds": 3533.843455045484
+        },
+        {
+          "uuid": "GPU-2db6cf6a-a8b5-58af-4e89-22bfc863a0fb",
+          "queue": [
+            "IMDB_C"
+          ],
+          "training_seconds": 2532.169656828046,
+          "two_full_chains_seconds": 933.7715022265911,
+          "validation_save_seconds": 15.264063517563045,
+          "total_component_seconds": 3481.2052225722
+        },
+        {
+          "uuid": "GPU-cddbf2e5-1af7-7219-ff58-38e6f4c44f69",
+          "queue": [
+            "IMDB_B"
+          ],
+          "training_seconds": 2487.9462802782655,
+          "two_full_chains_seconds": 914.2679460346699,
+          "validation_save_seconds": 15.136663654819131,
+          "total_component_seconds": 3417.3508899677545
+        },
+        {
+          "uuid": "GPU-360156ae-7a75-37f4-eaed-9a5500275409",
+          "queue": [
+            "IMDB_O"
+          ],
+          "training_seconds": 2475.91763921082,
+          "two_full_chains_seconds": 887.8692258149385,
+          "validation_save_seconds": 14.756057941354811,
+          "total_component_seconds": 3378.5429229671136
+        }
+      ],
+      "component_critical_path_seconds": 4802.407315720804,
+      "unmeasured_concurrency_allowance_seconds": 1200.601828930201,
+      "evaluation_delivery_reserve_seconds": 1200,
+      "fault_exit_reserve_seconds": 900,
+      "total_proposed_seconds": 8103.009144651005,
+      "total_proposed_minutes": 135.05015241085007,
+      "proposed_rounded_budget_minutes": 140
+    }
+  ],
+  "measurement_scope": "historical bounded single-GPU component measurements, two GPU processes with four sequential cells each; not 7/8-GPU contention measurement",
+  "limits": [
+    "25% planning margin is unmeasured, not guaranteed concurrency performance",
+    "forward-noise probe states do not bound evolving free-generation CN/NNLS cost",
+    "validation/save is component extrapolation with 10 seconds/cell IO allowance, not measured formal throughput",
+    "resource snapshot is not a reservation; recheck and recompute identical queue before any separately authorized run"
+  ],
+  "formal_authorized": false,
+  "formal_start": null,
+  "formal_deadline": null,
+  "resource_followup": {
+    "recorded_epoch": 1793148570.5662224,
+    "user_message": "\u53ef\u4ee5\u516b\u5361",
+    "meaning": "eight-card resource-use confirmation only, not formal training authorization",
+    "query_gpu_stdout": "0, GPU-12b85b68-69e6-12fa-76ce-986c0b46e8a7, NVIDIA GeForce RTX 2080 Ti, 11264, 0, 0\n1, GPU-cf73267c-774a-dada-fc26-ada91ccc27c1, NVIDIA GeForce RTX 2080 Ti, 11264, 0, 0\n2, GPU-dda1721a-d053-7371-3434-4c3c8502a1d4, NVIDIA GeForce RTX 2080 Ti, 11264, 0, 0\n3, GPU-994be766-a8bd-b90c-bf87-c667dfa8ab4d, NVIDIA GeForce RTX 2080 Ti, 11264, 0, 0\n4, GPU-e2284395-dd00-1e74-3eed-7f406fa69d5c, NVIDIA GeForce RTX 2080 Ti, 11264, 0, 0\n5, GPU-2db6cf6a-a8b5-58af-4e89-22bfc863a0fb, NVIDIA GeForce RTX 2080 Ti, 11264, 0, 1\n6, GPU-cddbf2e5-1af7-7219-ff58-38e6f4c44f69, NVIDIA GeForce RTX 2080 Ti, 11264, 0, 1\n7, GPU-360156ae-7a75-37f4-eaed-9a5500275409, NVIDIA GeForce RTX 2080 Ti, 11264, 0, 0\n",
+    "query_compute_apps_stdout": "",
+    "query_exit_code": 0,
+    "strict_zero_usage_indices": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      7
+    ],
+    "not_strict_zero_indices": [
+      5,
+      6
+    ],
+    "all_memory_used_mib": 0,
+    "do_not_infer_compute_process_from_1_percent": true,
+    "launch_idle_guard_unchanged": true,
+    "preferred_budget_scenario": "conditional_eight_idle_cards",
+    "formal_authorized": false
+  },
+  "resource_followup_sha256": "a880bd662fa5a86d58072002fcf835544a79a57177679175fc8cdf6a88a64d28",
+  "preferred_scenario": "conditional_eight_idle_cards"
+}
