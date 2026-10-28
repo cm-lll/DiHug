@@ -1,0 +1,693 @@
+diff --git a/experiments/pubmed_o_ema_runtime_v1/build_cost.py b/experiments/pubmed_o_ema_runtime_v1/build_cost.py
+new file mode 100644
+index 0000000..59ab119
+--- /dev/null
++++ b/experiments/pubmed_o_ema_runtime_v1/build_cost.py
+@@ -0,0 +1,34 @@
++"""Measured incremental EMA cost + sealed O costs; never activates a budget."""
++import argparse,pathlib,json
++from runtime_contract import ROOT,read,save,sha,jobs,source_binding,BUDGET,RESERVE
++def estimate(preflight):
++    history=read(ROOT/'initial_assets.json')['records'];p=preflight
++    # Use second same-input update, not cold update1. Retain both raw timings.
++    row=p['paired_updates'][1];ema_overhead=row['ema_wrapper_seconds']
++    component=max(row['unchanged_normal2_component_seconds'],row['original_normal2_seconds'])
++    # Engineering GPU was exclusive; old8-task measurements include real contention.
++    per_update=max(component,max(x['training_seconds']/1000 for x in history))+ema_overhead
++    chain=max(max(x['historical_two_chains_seconds']) for x in history)
++    extra_validation=3*p['validation']['ema']['seconds']
++    save_load=3*(p['checkpoint_save_seconds']+p['restore_seconds'])
++    historic_other=max(x['historical_total_elapsed_seconds']-x['training_seconds']-sum(x['historical_two_chains_seconds']) for x in history)
++    critical=1000*per_update+4*chain+historic_other+extra_validation+save_load
++    # Explicit small concurrency/state-cost planning allowance, not a measurement.
++    allowance=.10*critical;planned=critical+allowance+RESERVE
++    return dict(status='passed' if p['status']=='passed' and planned<=BUDGET else 'not_admitted',
++                schedule=jobs(),per_update_seconds=per_update,measured_incremental_ema_seconds=ema_overhead,
++                measured_warm_normal2_seconds=component,historical_max_chain_seconds=chain,
++                extra_three_ema_validations_seconds=extra_validation,checkpoint_extra_conservative_seconds=save_load,
++                historical_initialization_validation_save_seconds=historic_other,critical_compute_seconds=critical,
++                unmeasured_planning_allowance_seconds=allowance,delivery_seconds=RESERVE,planned_seconds=planned,
++                proposed_budget_seconds=BUDGET,source_sha256=source_binding()[1],
++                limits='five engineering updates; no new chain measured. State-dependent cost and two-task contention remain estimates; no completion guarantee.')
++def main():
++    p=argparse.ArgumentParser();p.add_argument('--preflight',required=True);p.add_argument('--output',required=True);a=p.parse_args()
++    out=pathlib.Path(a.output)
++    if out.exists():raise FileExistsError(out)
++    report=read(a.preflight)
++    if report['source_sha256']!=source_binding()[1]:raise ValueError('preflight/source binding differs')
++    c=estimate(report);c.update(preflight_path=str(pathlib.Path(a.preflight).resolve()),preflight_sha256=sha(a.preflight))
++    save(out,c);print(json.dumps(c,indent=2))
++if __name__=='__main__':main()
+diff --git a/experiments/pubmed_o_ema_runtime_v1/model_io.py b/experiments/pubmed_o_ema_runtime_v1/model_io.py
+new file mode 100644
+index 0000000..c8b6120
+--- /dev/null
++++ b/experiments/pubmed_o_ema_runtime_v1/model_io.py
+@@ -0,0 +1,29 @@
++"""Only construction/loading glue. Scientific model and initial bytes unchanged."""
++import sys,pathlib,time
++ROOT=pathlib.Path(__file__).resolve().parent
++sys.path.insert(0,str(ROOT/'package'))
++import torch
++from prepare import load_case
++from model_variants import StructuralDenoiser
++from experiment_contract import reset_training_streams
++from runtime_contract import initial_path,asset
++from probe import equal
++from hsgd.bw_preflight.common import environment
++
++def configure():
++    torch.set_num_threads(1);torch.set_num_interop_threads(1)
++    torch.use_deterministic_algorithms(True,warn_only=False)
++    torch.backends.cuda.matmul.allow_tf32=False;torch.backends.cudnn.allow_tf32=False
++    if not torch.cuda.is_available() or torch.cuda.device_count()!=1 or '2080 Ti' not in torch.cuda.get_device_name(0):raise RuntimeError('one RTX2080Ti required')
++    return environment('cuda')
++def fresh(seed,overrides=None):
++    path=initial_path(seed,overrides);p=torch.load(path,map_location='cpu');case,cfg=load_case('PubMed')
++    if p['updates']!=0 or p['binding']['arm']!='O' or p['binding']['config']['seed']!=seed:raise ValueError('not the bound O scientific initial')
++    if p['binding']['dataset']['sha256']!=cfg['datasets']['PubMed']['sha256']:raise ValueError('initial data binding')
++    for key in ['model','optimizer','T','rounds','precision','tf32','schedule_offset']:
++        if p['binding']['config'][key]!=cfg[key]:raise ValueError('initial scientific config '+key)
++    model=StructuralDenoiser(case,cfg,'O');model.load_state_dict(p['model'],strict=True)
++    if not equal(model.state_dict(),p['model']):raise ValueError('initial load differs')
++    model=model.cuda();rng,rng_receipt=reset_training_streams(seed,'PubMed','cuda')
++    opt=torch.optim.AdamW(model.parameters(),**{k:v for k,v in cfg['optimizer'].items() if k!='type'})
++    return model,opt,case,dict(cfg,seed=seed),rng,dict(initial_sha256=asset(seed)['initial_sha256_from_sealed_receipt'],rng_reset=rng_receipt,optimizer='new empty AdamW; no historical state')
+diff --git a/experiments/pubmed_o_ema_runtime_v1/preflight.py b/experiments/pubmed_o_ema_runtime_v1/preflight.py
+new file mode 100644
+index 0000000..0461287
+--- /dev/null
++++ b/experiments/pubmed_o_ema_runtime_v1/preflight.py
+@@ -0,0 +1,93 @@
++"""One GPU, exactly five temporary normal2 optimizer calls; no chain sampling.
++
++2 raw +2 EMA +1 repeated second update after checkpoint restore. All initial
++bytes, losses, random inputs and scientific functions are the formal ones.
++"""
++import argparse,pathlib,time,json,signal,traceback,resource,sys,os,gc
++from runtime_contract import ROOT,source_binding,save,sha,output_check
++sys.path.insert(0,str(ROOT/'package'))
++import torch
++from model_io import configure,fresh
++from normal2 import normal2,pair_inputs,sync
++from probe import equal,rng_get,rng_set,input_hash,flatten,metric
++from hsgd.bw_preflight.common import cpu_tree
++from worker import validation,atomic_checkpoint
++from ema import ParameterEMA
++from integration import complete_normal2,checkpoint_payload,restore_payload,ema_validation
++
++def compare(a,b):
++    aa=flatten(a);bb=flatten(b)
++    if aa.keys()!=bb.keys():raise AssertionError('tensor keys differ')
++    rows={k:metric(v,bb[k]) for k,v in aa.items()}
++    return dict(exact=equal(a,b),passes=all(r['passes'] for r in rows.values()),tensors=rows)
++def main():
++    started=time.time();p=argparse.ArgumentParser();p.add_argument('--output',required=True);a=p.parse_args()
++    out=output_check(a.output,[ROOT]);out.mkdir(parents=True)
++    count=[0];deadline=started+900
++    result=dict(status='running',engineering_only=True,formal_training=0,new_graphs=0,source_sha256=source_binding()[1],started_epoch=started,cap_seconds=900)
++    def interrupt(s,f):raise InterruptedError('preflight signal/deadline')
++    for s in [signal.SIGTERM,signal.SIGINT,signal.SIGHUP,signal.SIGALRM]:signal.signal(s,interrupt)
++    signal.alarm(max(1,int(deadline-time.time())))
++    def check():
++        if time.time()>=deadline or (out/'STOP').exists():raise InterruptedError('preflight budget/STOP')
++    def build():
++        check();m,o,c,cfg,r,proof=fresh(2026102812)
++        original=o.step
++        def counted(*args,**kwargs):
++            check()
++            if count[0]>=5:raise RuntimeError('engineering optimizer cap')
++            count[0]+=1;save(out/'update_count.json',dict(optimizer_step_calls=count[0],maximum=5))
++            return original(*args,**kwargs)
++        o.step=counted
++        return m,o,c,cfg,r,proof
++    try:
++        result['environment']=configure();torch.cuda.reset_peak_memory_stats();start=time.perf_counter()
++        model,opt,case,cfg,rng,proof=build();result['initial']=proof
++        atomic_checkpoint(out/'engineering_initial.pt',dict(model=cpu_tree(model.state_dict()),rng=rng_get(rng,'cuda'),updates=0,purpose='engineering only'))
++        raw=[]
++        for u in (1,2):
++            inp=pair_inputs(case,cfg,u,rng);rec=normal2(model,opt,case,inp,1000,'cuda',True)
++            raw.append(dict(input_hash=input_hash(inp),rng=rng_get(rng,'cuda'),model=cpu_tree(model.state_dict()),optimizer=cpu_tree(opt.state_dict()),gradients={n:cpu_tree(p.grad) for n,p in model.named_parameters()},record=rec))
++        del model,opt;gc.collect();torch.cuda.empty_cache()
++        model,opt,case,cfg,rng,proof=build();ema=ParameterEMA(model);enhanced=[];binding=dict(source_sha256=result['source_sha256'],purpose='isolated engineering',seed=2026102812)
++        for u in (1,2):
++            check();inp=pair_inputs(case,cfg,u,rng);sync('cuda');begin=time.perf_counter()
++            rec=complete_normal2(normal2,model,opt,case,inp,1000,'cuda',ema,u-1);sync('cuda');wall=time.perf_counter()-begin
++            row=dict(update=u,input_exact=input_hash(inp)==raw[u-1]['input_hash'],rng_exact=equal(rng_get(rng,'cuda'),raw[u-1]['rng']),
++                     model=compare(model.state_dict(),raw[u-1]['model']),optimizer=compare(opt.state_dict(),raw[u-1]['optimizer']),
++                     gradients=compare({n:p.grad for n,p in model.named_parameters()},raw[u-1]['gradients']),
++                     original_normal2_seconds=raw[u-1]['record']['normal2_seconds'],normal2_with_ema_seconds=wall,
++                     unchanged_normal2_component_seconds=rec['normal2_seconds'],ema_wrapper_seconds=wall-rec['normal2_seconds'])
++            enhanced.append(row)
++            if u==1:
++                begin=time.perf_counter();atomic_checkpoint(out/'engineering_u1.pt',checkpoint_payload(model,opt,ema,1,rng_get(rng,'cuda'),binding));result['checkpoint_save_seconds']=time.perf_counter()-begin
++        expected=checkpoint_payload(model,opt,ema,2,rng_get(rng,'cuda'),binding)
++        before=(cpu_tree(model.state_dict()),cpu_tree(opt.state_dict()),rng_get(rng,'cuda'),model.training)
++        check();begin=time.perf_counter();vraw=validation(model,case,cfg,2026102812,rng);vema=ema_validation(validation,model,ema,case,cfg,2026102812,rng)
++        result['validation']=dict(raw=vraw,ema=vema,total_seconds=time.perf_counter()-begin,
++                                  raw_model_exact=equal(before[0],model.state_dict()),optimizer_exact=equal(before[1],opt.state_dict()),
++                                  rng_exact=equal(before[2],rng_get(rng,'cuda')),mode_exact=before[3]==model.training)
++        del model,opt,ema;gc.collect();torch.cuda.empty_cache()
++        model,opt,case,cfg,rng,proof=build();ema=ParameterEMA(model)
++        loaded=torch.load(out/'engineering_u1.pt',map_location='cpu');begin=time.perf_counter()
++        u=restore_payload(loaded,model,opt,ema,binding,lambda s:rng_set(s,rng,'cuda'))
++        result['restore_seconds']=time.perf_counter()-begin
++        result['loaded_exact']=dict(model=equal(loaded['model'],model.state_dict()),optimizer=equal(loaded['optimizer'],opt.state_dict()),
++                                    ema=equal(loaded['ema'],ema.state_dict()),rng=equal(loaded['rng'],rng_get(rng,'cuda')),updates=u==1)
++        inp=pair_inputs(case,cfg,2,rng);result['restored_input_exact']=input_hash(inp)==raw[1]['input_hash']
++        complete_normal2(normal2,model,opt,case,inp,1000,'cuda',ema,1)
++        actual=checkpoint_payload(model,opt,ema,2,rng_get(rng,'cuda'),binding)
++        result['continuation']={k:compare(actual[k],expected[k]) for k in ['model','optimizer','ema']};result['continuation_rng_exact']=equal(actual['rng'],expected['rng'])
++        atomic_checkpoint(out/'engineering_resumed_u2.pt',actual)
++        result['paired_updates']=enhanced
++        passed=all(x['input_exact'] and x['rng_exact'] and all(x[k]['passes'] for k in ['model','optimizer','gradients']) for x in enhanced)
++        passed=passed and all(result['loaded_exact'].values()) and all(result['validation'][k] for k in ['raw_model_exact','optimizer_exact','rng_exact','mode_exact'])
++        passed=passed and result['restored_input_exact'] and result['continuation_rng_exact'] and all(x['passes'] for x in result['continuation'].values())
++        result['status']='passed' if passed else 'failed';result['compute_and_evidence_seconds']=time.perf_counter()-start
++    except BaseException as exc:result.update(status='failed_or_incomplete',error=repr(exc),traceback=traceback.format_exc())
++    finally:
++        signal.alarm(0);result.update(optimizer_step_calls=count[0],finished_epoch=time.time(),total_seconds=time.time()-started,peak_rss_mib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024)
++        if torch.cuda.is_initialized():result.update(peak_allocated_mib=torch.cuda.max_memory_allocated()/2**20,peak_reserved_mib=torch.cuda.max_memory_reserved()/2**20)
++        save(out/'preflight.json',result)
++    return 0 if result['status']=='passed' else 2
++if __name__=='__main__':raise SystemExit(main())
+diff --git a/experiments/pubmed_o_ema_runtime_v1/run.py b/experiments/pubmed_o_ema_runtime_v1/run.py
+new file mode 100644
+index 0000000..dca263d
+--- /dev/null
++++ b/experiments/pubmed_o_ema_runtime_v1/run.py
+@@ -0,0 +1,113 @@
++"""Two training trajectories, then eight existing-kernel chains; no auto approval."""
++import argparse,os,pathlib,json,time,subprocess,signal,sys,shutil
++from runtime_contract import ROOT,jobs,source_binding,sha,read,save,approval_gate,output_check,BUDGET,RESERVE,SEEDS,asset
++
++def resources(devices,authority,rows,processes,handles):
++    if len(devices)!=2 or len(set(devices))!=2:raise ValueError('frozen default queue requires two distinct GPUs')
++    if not authority.get('allocation_check_complete') or authority.get('reservation_conflicts') or not set(devices)<=set(authority.get('allowed_uuids',[])):raise PermissionError('GPU allocation not explicitly verified')
++    if handles.strip() or any(x.split(',')[0].strip() in devices for x in processes.splitlines() if x.strip()):raise RuntimeError('selected device has another process')
++    selected=[]
++    for d in devices:
++        r=rows[d]
++        if '2080 Ti' not in r[2] or float(r[3])<authority['minimum_free_mib']:raise RuntimeError('GPU model/free-memory gate')
++        selected.append(dict(index=r[0],uuid=d,name=r[2],free_mib=float(r[3]),used_mib=float(r[4]),utilization_percent=float(r[5])))
++    return selected
++
++def summary_process(out,deadline,binding):
++    receipt=dict(status='not_started')
++    try:
++        if time.time()+2>=deadline:return dict(status='not_completed_insufficient_time')
++        if source_binding()[1]!=binding:raise ValueError('runtime/summary source changed')
++        with (out/'summary_process.log').open('xb') as log:
++            p=subprocess.run([sys.executable,str(ROOT/'summarize.py'),'--run',str(out),'--output',str(out/'unified_evaluation.json'),
++                              '--deadline',str(deadline-1)],env=dict(os.environ,CUDA_VISIBLE_DEVICES='',OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1',MKL_NUM_THREADS='1'),
++                              stdout=log,stderr=subprocess.STDOUT,timeout=max(.01,deadline-time.time()-1))
++        r=read(out/'unified_evaluation.json');receipt=dict(status=r['status'],exit_code=p.returncode,sha256=sha(out/'unified_evaluation.json'))
++        if source_binding()[1]!=binding:raise ValueError('summary source changed during evaluation')
++        if (p.returncode==0)!=(r['status']=='complete'):raise ValueError('summary completion inconsistent')
++    except BaseException as e:receipt=dict(status='failed_or_incomplete',error=repr(e))
++    return receipt
++
++def supervise(out,approval_path,ledger_path,devices,spawn=subprocess.Popen,summarizer=summary_process,poll=.25):
++    ledger=read(ledger_path);stop=[False];running={};finished=[];failures=[];pending=jobs()['training'].copy();stage='training'
++    handlers={s:signal.signal(s,lambda s,f:stop.__setitem__(0,True)) for s in [signal.SIGINT,signal.SIGTERM,signal.SIGHUP]}
++    try:
++        while pending or running:
++            if stop[0] or (out/'STOP').exists() or time.time()>=ledger['deadline_epoch']-RESERVE:raise InterruptedError('signal/STOP/delivery reserve')
++            for slot,device in enumerate(devices):
++                if slot in running:continue
++                job=next((j for j in pending if j['slot']==slot),None)
++                if job is None:continue
++                pending.remove(job);log=(out/(job['id']+'.log')).open('xb');rd,wr=os.pipe()
++                ticket=dict(parent_pid=os.getpid(),job=job,device=device,approval_sha256=sha(approval_path),ledger_sha256=sha(ledger_path))
++                os.write(wr,json.dumps(ticket).encode());os.close(wr)
++                env=dict(os.environ,CUDA_VISIBLE_DEVICES=device,OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1',MKL_NUM_THREADS='1',CUBLAS_WORKSPACE_CONFIG=':4096:8')
++                try:process=spawn([sys.executable,str(ROOT/'run_worker.py'),'--approval',str(approval_path),'--ledger',str(ledger_path),'--launch-fd',str(rd)],
++                                  env=env,stdout=log,stderr=subprocess.STDOUT,pass_fds=(rd,),start_new_session=True)
++                except BaseException:log.close();pending.insert(0,job);raise
++                finally:os.close(rd)
++                running[slot]=(process,log,job)
++            for slot,(p,log,j) in list(running.items()):
++                code=p.poll()
++                if code is not None:
++                    log.close();del running[slot];item=dict(job=j,exit_code=code);finished.append(item)
++                    try:item['receipt']=read(out/j['directory']/'summary.json')
++                    except Exception as e:item['receipt_error']=repr(e)
++                    r=item.get('receipt',{})
++                    if code!=0 or r.get('status')!='complete' or (j['mode']=='train' and r.get('completed_updates')!=1000) or (j['mode']=='sample' and r.get('completed_chains')!=1):
++                        failures.append(item);raise RuntimeError('worker failed/incomplete '+j['id'])
++            if not pending and not running and stage=='training':
++                # Both final checkpoints must exist before any independent test chain.
++                stage='sampling';pending=jobs()['sampling'].copy()
++            save(out/'launcher_progress.json',dict(stage=stage,finished=finished,pending=pending,running=[x[2] for x in running.values()]))
++            if pending or running:time.sleep(poll)
++    except BaseException as e:failures.append(dict(stage=stage,error=repr(e)))
++    finally:
++        for p,log,j in running.values():
++            try:
++                if p.poll() is None:os.killpg(p.pid,signal.SIGTERM)
++            except ProcessLookupError:pass
++        cleanup_deadline=min(time.time()+30,ledger['deadline_epoch'])
++        for p,log,j in running.values():
++            try:p.wait(timeout=max(.01,cleanup_deadline-time.time()))
++            except subprocess.TimeoutExpired:
++                try:os.killpg(p.pid,signal.SIGKILL)
++                except ProcessLookupError:pass
++                p.wait()
++            log.close();finished.append(dict(job=j,exit_code=p.returncode,terminated=True))
++        all_jobs=jobs()['training']+jobs()['sampling'];done={x['job']['id'] for x in finished}
++        receipt=dict(status='incomplete',jobs=finished,unstarted=[j for j in all_jobs if j['id'] not in done],primary_failures=failures)
++        save(out/'execution_receipt.json',receipt)
++        try:receipt['evaluation']=summarizer(out,ledger['deadline_epoch'],ledger['source_sha256'])
++        except BaseException as e:receipt['evaluation']=dict(status='failed',error=repr(e))
++        if not failures and len(finished)==10 and receipt['evaluation']['status']=='complete':receipt['status']='complete'
++        receipt.update(finished_epoch=time.time(),elapsed_seconds=time.time()-ledger['start_epoch']);save(out/'launcher_summary.json',receipt)
++        for s,h in handlers.items():signal.signal(s,h)
++    return 0 if receipt['status']=='complete' else 2
++
++def main():
++    entered=time.time();p=argparse.ArgumentParser();p.add_argument('mode',choices=['dry-run','formal']);p.add_argument('--output',required=True)
++    p.add_argument('--approval');p.add_argument('--cost');p.add_argument('--gpu-uuids',nargs='+');a=p.parse_args()
++    if a.mode=='dry-run':print(json.dumps(dict(**jobs(),source_sha256=source_binding()[1],formal_activated=False),indent=2));return 0
++    if not a.approval or not a.cost or not a.gpu_uuids:p.error('formal requires approved cost, authorization and two GPU UUIDs')
++    approval,cost=approval_gate(a.approval,a.cost,a.output)
++    protected=[ROOT]+[pathlib.Path(approval.get('initial_paths',{}).get(str(s),asset(s)['initial_path'])).parent for s in SEEDS]
++    out=output_check(a.output,protected);devices=a.gpu_uuids
++    if devices!=approval['gpu_uuids']:raise ValueError('approved GPU/queue identity differs')
++    visibility=os.environ.get('CUDA_VISIBLE_DEVICES')
++    if visibility and (not all(v.startswith('GPU-') for v in visibility.split(',')) or not set(devices)<=set(visibility.split(','))):raise PermissionError('cannot override restricted/ambiguous platform visibility')
++    rows={r.split(',')[1].strip():[x.strip() for x in r.split(',')] for r in subprocess.check_output(['nvidia-smi','--query-gpu=index,uuid,name,memory.free,memory.used,utilization.gpu','--format=csv,noheader,nounits'],text=True).splitlines()}
++    processes=subprocess.check_output(['nvidia-smi','--query-compute-apps=gpu_uuid,pid,used_memory','--format=csv,noheader,nounits'],text=True)
++    handles=subprocess.run(['fuser']+['/dev/nvidia'+rows[d][0] for d in devices],capture_output=True,text=True)
++    if handles.returncode not in (0,1) or (handles.returncode==1 and handles.stderr.strip()):raise RuntimeError('device owner check unavailable')
++    resource=resources(devices,approval['resource_authorization'],rows,processes,handles.stdout)
++    existing=out.parent
++    while not existing.exists():existing=existing.parent
++    if shutil.disk_usage(existing).free<4*2**30:raise RuntimeError('less than4GiB free on actual output filesystem')
++    if cost['planned_seconds']>BUDGET-(time.time()-entered):raise TimeoutError('approved queue no longer fits')
++    # Formal entry time includes all launch checks, never reset after admission.
++    ledger=dict(start_epoch=entered,deadline_epoch=entered+BUDGET,timezone='Asia/Shanghai',budget_seconds=BUDGET,output=str(out),
++                source_sha256=source_binding()[1],approval_sha256=sha(a.approval),cost_sha256=sha(a.cost))
++    out.mkdir(parents=True);save(out/'activation.json',ledger);save(out/'resources.json',resource);save(out/'queue.json',jobs())
++    return supervise(out,pathlib.Path(a.approval),out/'activation.json',devices)
++if __name__=='__main__':raise SystemExit(main())
+diff --git a/experiments/pubmed_o_ema_runtime_v1/run_worker.py b/experiments/pubmed_o_ema_runtime_v1/run_worker.py
+new file mode 100644
+index 0000000..9a9c58a
+--- /dev/null
++++ b/experiments/pubmed_o_ema_runtime_v1/run_worker.py
+@@ -0,0 +1,123 @@
++"""Adapted frozen O worker: same normal2/validation/reverse_step/evaluate calls.
++
++Train once, export two independent final readouts; each chain authenticates and
++loads exactly its selected file. Only launcher-issued pipes admit formal jobs.
++"""
++import argparse,json,os,pathlib,signal,time,traceback,resource,copy,sys
++from runtime_contract import ROOT,read,save,sha,source_binding,verify_ticket,verify_readout,cell,RESERVE
++sys.path.insert(0,str(ROOT/'package'))
++import numpy as np
++import torch
++from model_io import configure,fresh
++from worker import validation,atomic_checkpoint
++from normal2 import normal2,pair_inputs
++from probe import rng_get,input_hash
++from hsgd.bw_preflight.common import schedule,state_edges,cpu_tree
++from hsgd.kernel import MarginalKernel
++from hsgd.runtime import reverse_step
++from evaluation import evaluate
++from ema import ParameterEMA
++from integration import complete_normal2,checkpoint_payload,ema_validation,final_readouts
++
++def paired_validation(model,ema,case,cfg,seed,rng):
++    return dict(raw=validation(model,case,cfg,seed,rng),ema=ema_validation(validation,model,ema,case,cfg,seed,rng))
++
++def export_readouts(out,model,ema,updates,binding):
++    states=final_readouts(model,ema,updates);receipt=dict(train_seed=binding['train_seed'],updates=updates,
++        checkpoint_sha256=sha(out/'final.pt'),files={},binding=binding)
++    for kind,state in states.items():
++        path=out/('readout_'+kind+'.pt')
++        atomic_checkpoint(path,dict(model=state,readout=kind,updates=updates,train_seed=binding['train_seed'],
++                                   binding=binding,checkpoint_sha256=receipt['checkpoint_sha256']))
++        receipt['files'][kind]=dict(file=path.name,sha256=sha(path))
++    save(out/'readouts.json',receipt)
++
++def train(job,out,approval,ledger,check,progress):
++    model,opt,case,cfg,rng,proof=fresh(job['train_seed'],approval.get('initial_paths'));ema=ParameterEMA(model)
++    binding=dict(source_sha256=source_binding()[1],protocol_sha256=sha(ROOT/'protocol.json'),train_seed=job['train_seed'],
++                 dataset='PubMed',arm='O',config=cfg,initial=proof,updates=1000,approval_sha256=ledger['approval_sha256'])
++    save(out/'binding.json',binding)
++    completed=0
++    def snapshot(name):atomic_checkpoint(out/name,checkpoint_payload(model,opt,ema,completed,rng_get(rng,'cuda'),binding))
++    # theta0, fresh empty optimizer, all RNG saved BEFORE any forward.
++    snapshot('initial.pt');rows=[dict(updates=0,**paired_validation(model,ema,case,cfg,job['train_seed'],rng))]
++    save(out/'validation.json',rows)
++    try:
++        for position in range(1,1001):
++            check();inputs=pair_inputs(case,cfg,position,rng);begin=time.perf_counter()
++            rec=complete_normal2(normal2,model,opt,case,inputs,1000,'cuda',ema,completed);completed=position
++            rec.update(update=completed,total_update_seconds=time.perf_counter()-begin,input_sha256=input_hash(inputs),t=[x['t'] for x in inputs])
++            with (out/'training.jsonl').open('a') as f:f.write(json.dumps(rec)+'\n')
++            progress.update(completed_updates=completed,ema_updates=ema.updates);save(out/'progress.json',progress)
++            if completed in [500,1000]:
++                check();snapshot('midpoint.pt' if completed==500 else 'final.pt')
++                rows.append(dict(updates=completed,**paired_validation(model,ema,case,cfg,job['train_seed'],rng)));save(out/'validation.json',rows)
++        check();export_readouts(out,model,ema,completed,binding)
++    except BaseException:
++        if ema.at_update_boundary:
++            try:snapshot('stopped_u%d.pt'%completed)
++            except BaseException as e:progress['stop_save_error']=repr(e)
++        else:progress['incomplete_update_not_saved']=True
++        raise
++
++def sample(job,out,run,approval,check,progress):
++    path,receipt=verify_readout(run,job)
++    payload=torch.load(path,map_location='cpu')
++    if (payload['train_seed'],payload['readout'],payload['updates'],payload['checkpoint_sha256'])!=(job['train_seed'],job['readout'],1000,receipt['checkpoint_sha256']):raise ValueError('selected readout metadata mismatch')
++    if payload['binding']!=receipt['binding'] or payload['binding']['source_sha256']!=source_binding()[1]:raise ValueError('selected readout source')
++    model,opt,case,cfg,unused,proof=fresh(job['train_seed'],approval.get('initial_paths'));del opt,unused
++    model.load_state_dict(payload['model'],strict=True);model.eval()
++    # Hash of actual loaded selected readout, never raw's hash substituted for EMA.
++    from probe import equal
++    if not equal(model.state_dict(),payload['model']):raise ValueError('readout load mismatch')
++    del payload
++    kernel=MarginalKernel(case['prior'],schedule(1000));families=np.repeat(np.arange(case['n_families']),case['space'].counts)
++    sample_rng=np.random.default_rng(job['sample_seed']);state=(sample_rng.random(case['space'].total)<case['prior'][families]).astype(np.uint8)
++    initial_rng=copy.deepcopy(sample_rng.bit_generator.state);initial_state_sha=__import__('hashlib').sha256(state.tobytes()).hexdigest();next_t=1000;begin=time.perf_counter()
++    def state_save(name):atomic_checkpoint(out/name,dict(state=state,next_t=next_t,rng=rng_get(sample_rng,'cuda'),job=job,model_sha256=sha(path)))
++    try:
++        for t in range(1000,0,-1):
++            check();candidate,rec=reverse_step(model,case,state,kernel,t,1,job['sample_seed'],sample_rng,'cuda',check_time=check,trace=False)
++            state=candidate;next_t=t-1
++            with (out/'steps.jsonl').open('a') as f:f.write(json.dumps(rec)+'\n')
++            if t%100==0 or t==1:state_save('complete_t%04d.pt'%next_t)
++        check();edges,fam=state_edges(case,state)
++        np.savez_compressed(out/'graph.npz',types=case['space'].types,edges=edges,families=fam,schema=np.array(case['space'].pairs))
++        save(out/'metrics.json',evaluate(case,edges,cfg['datasets']['PubMed']['type_names'],check));check()
++        save(out/'binding.json',dict(job=job,readout=job['readout'],model_sha256=sha(path),checkpoint_sha256=receipt['checkpoint_sha256'],
++            graph_sha256=sha(out/'graph.npz'),metrics_sha256=sha(out/'metrics.json'),source_sha256=source_binding()[1],
++            initial_state_sha256=initial_state_sha,initial_rng=initial_rng,seconds=time.perf_counter()-begin))
++        progress['completed_chains']=1
++    except BaseException:
++        try:state_save('stopped_chain.pt')
++        except BaseException as e:progress['chain_save_error']=repr(e)
++        raise
++
++def main():
++    p=argparse.ArgumentParser();p.add_argument('--launch-fd',type=int,required=True);p.add_argument('--approval',required=True);p.add_argument('--ledger',required=True);a=p.parse_args()
++    ticket=json.loads(os.read(a.launch_fd,32768));os.close(a.launch_fd);job=ticket['job']
++    from runtime_contract import jobs
++    if job not in jobs()['training']+jobs()['sampling']:raise ValueError('noncanonical job')
++    verify_ticket(ticket,job,a.approval,a.ledger,os.environ.get('CUDA_VISIBLE_DEVICES'),os.getppid())
++    approval=read(a.approval);ledger=read(a.ledger);run=pathlib.Path(ledger['output']);out=run/job['directory'];out.mkdir(parents=True,exist_ok=False)
++    stop=[False]
++    for sig in [signal.SIGINT,signal.SIGTERM,signal.SIGHUP]:signal.signal(sig,lambda s,f:stop.__setitem__(0,True))
++    def check():
++        if stop[0] or (run/'STOP').exists() or (out/'STOP').exists():raise InterruptedError('STOP/signal')
++        if time.time()>=ledger['deadline_epoch']-RESERVE:raise TimeoutError('delivery reserve reached')
++    progress=dict(status='running',job=job,completed_updates=0,completed_chains=0,started_epoch=time.time())
++    try:
++        check();env=configure()
++        for k in ['python_version','torch_runtime_version','packages','device_name']:
++            if env[k]!=approval['environment'][k]:raise ValueError('environment mismatch '+k)
++        save(out/'environment.json',env)
++        if job['mode']=='train':train(job,out,approval,ledger,check,progress)
++        else:sample(job,out,run,approval,check,progress)
++        progress['status']='complete'
++    except BaseException as e:progress.update(status='incomplete',error=repr(e),traceback=traceback.format_exc())
++    finally:
++        progress.update(finished_epoch=time.time(),peak_rss_mib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024)
++        if torch.cuda.is_initialized():progress.update(peak_allocated_mib=torch.cuda.max_memory_allocated()/2**20,peak_reserved_mib=torch.cuda.max_memory_reserved()/2**20)
++        save(out/'summary.json',progress)
++    return 0 if progress['status']=='complete' else 2
++if __name__=='__main__':raise SystemExit(main())
+diff --git a/experiments/pubmed_o_ema_runtime_v1/runtime_contract.py b/experiments/pubmed_o_ema_runtime_v1/runtime_contract.py
+new file mode 100644
+index 0000000..01b626d
+--- /dev/null
++++ b/experiments/pubmed_o_ema_runtime_v1/runtime_contract.py
+@@ -0,0 +1,70 @@
++"""EMA runtime identities and bindings; deliberately no torch/GPU import."""
++import hashlib,json,pathlib,os
++ROOT=pathlib.Path(__file__).resolve().parent
++SEEDS=(2026102812,2026102833)
++SAMPLES=(2026102821,2026102822)
++BUDGET=7800
++RESERVE=1200
++def sha(path):return hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest()
++def read(path):return json.loads(pathlib.Path(path).read_text())
++def save(path,value):
++    path=pathlib.Path(path);tmp=path.with_suffix(path.suffix+'.tmp')
++    tmp.write_text(json.dumps(value,indent=2,allow_nan=False));os.replace(tmp,path)
++def cell(seed):
++    if seed not in SEEDS:raise ValueError('unknown training seed')
++    return 'PubMed_s%d_O'%seed
++def jobs():
++    train=[];sample=[]
++    for slot,seed in enumerate(SEEDS):
++        train.append(dict(id=cell(seed),mode='train',train_seed=seed,slot=slot,directory=cell(seed),updates=1000))
++        for r in ('raw','ema'):
++            for s in SAMPLES:
++                sample.append(dict(id=f'{cell(seed)}_{r}_{s}',mode='sample',train_seed=seed,readout=r,sample_seed=s,
++                                   slot=slot,directory=f'{cell(seed)}/{r}/sample_{s}',T=1000,depends_on=cell(seed)))
++    return dict(training=train,sampling=sample,policy='two GPUs; both training jobs finish before sampling; four serial chains per GPU')
++def source_binding():
++    files={str(p.relative_to(ROOT)):sha(p) for p in sorted(ROOT.rglob('*')) if p.is_file()
++           and '__pycache__' not in str(p) and '.pytest_cache' not in str(p)
++           and ((p.suffix=='.py') or p==ROOT/'protocol.json' or p==ROOT/'initial_assets.json'
++                or p==ROOT/'reference.json' or (ROOT/'package' in p.parents and p.suffix in ('.json','.npz')))}
++    return files,hashlib.sha256(json.dumps(files,sort_keys=True).encode()).hexdigest()
++def asset(seed):
++    return next(x for x in read(ROOT/'initial_assets.json')['records'] if x['train_seed']==seed)
++def initial_path(seed,overrides=None):
++    a=asset(seed);p=pathlib.Path((overrides or {}).get(str(seed),a['initial_path']))
++    if sha(p)!=a['initial_sha256_from_sealed_receipt']:raise ValueError('initial checkpoint hash differs')
++    return p
++def readout_path(run,seed,kind):
++    if kind not in ('raw','ema'):raise ValueError('readout')
++    return pathlib.Path(run)/cell(seed)/('readout_'+kind+'.pt')
++def verify_readout(run,job):
++    folder=pathlib.Path(run)/cell(job['train_seed']);receipt=read(folder/'readouts.json')
++    if receipt['train_seed']!=job['train_seed'] or receipt['updates']!=1000:raise ValueError('readout identity/count')
++    p=readout_path(run,job['train_seed'],job['readout'])
++    if sha(p)!=receipt['files'][job['readout']]['sha256']:raise ValueError('readout bytes differ')
++    if sha(folder/'final.pt')!=receipt['checkpoint_sha256']:raise ValueError('readout final checkpoint differs')
++    if read(folder/'summary.json')['status']!='complete':raise ValueError('training incomplete')
++    return p,receipt
++def approval_gate(path,cost_path,output):
++    a=read(path);c=read(cost_path)
++    if a.get('user_formal_authorized') is not True or a.get('independent_review')!='passed' or not a.get('authorization_reference'):raise PermissionError('explicit formal approval missing')
++    if a['source_sha256']!=source_binding()[1] or a['protocol_sha256']!=sha(ROOT/'protocol.json'):raise ValueError('source/protocol binding')
++    if a['budget_seconds']!=BUDGET or a['updates']!=1000 or a['cost_sha256']!=sha(cost_path):raise ValueError('budget/count/cost binding')
++    if pathlib.Path(a['output']).resolve()!=pathlib.Path(output).resolve():raise ValueError('output binding')
++    if c['source_sha256']!=a['source_sha256'] or c['status']!='passed' or c['schedule']!=jobs():raise ValueError('cost/source/queue mismatch')
++    if c['planned_seconds']>BUDGET:raise ValueError('budget insufficient')
++    evidence=read(c['preflight_path'])
++    if sha(c['preflight_path'])!=c['preflight_sha256'] or evidence['status']!='passed' or evidence['source_sha256']!=a['source_sha256']:raise ValueError('preflight evidence binding')
++    for seed in SEEDS:initial_path(seed,a.get('initial_paths'))
++    return a,c
++def verify_ticket(ticket,job,approval,ledger,device,parent):
++    if ticket.get('parent_pid')!=parent or ticket.get('job')!=job or ticket.get('device')!=device:raise PermissionError('launcher ticket mismatch')
++    if ticket['approval_sha256']!=sha(approval) or ticket['ledger_sha256']!=sha(ledger):raise ValueError('launch binding differs')
++    l=read(ledger);a=read(approval)
++    if l['approval_sha256']!=sha(approval) or l['source_sha256']!=source_binding()[1] or a['source_sha256']!=l['source_sha256']:raise ValueError('activated source/approval mismatch')
++    if l['deadline_epoch']!=l['start_epoch']+BUDGET:raise ValueError('deadline changed')
++def output_check(path,protected):
++    p=pathlib.Path(path).resolve()
++    if p.exists():raise FileExistsError('new output only, no automatic restart')
++    if any(p==q or q in p.parents or p in q.parents for q in [pathlib.Path(x).resolve() for x in protected]):raise ValueError('output overlaps source/input')
++    return p
+diff --git a/experiments/pubmed_o_ema_runtime_v1/summarize.py b/experiments/pubmed_o_ema_runtime_v1/summarize.py
+new file mode 100644
+index 0000000..8e7d9c3
+--- /dev/null
++++ b/experiments/pubmed_o_ema_runtime_v1/summarize.py
+@@ -0,0 +1,83 @@
++"""Identity-based raw/EMA comparison using unchanged graph metric definitions."""
++import argparse,pathlib,time,json
++import numpy as np
++from runtime_contract import ROOT,SEEDS,SAMPLES,jobs,cell,read,sha,save,source_binding,verify_readout
++from summary_metrics import graph_summary,paired,strict_mean
++from assessment import assess
++
++def assemble(records,reference):
++    template=graph_summary(reference,reference);cells={};contrasts=[];assessment_rows=[]
++    index={}
++    for row in records:
++        k=(row['train_seed'],row['readout'],row['sample_seed'])
++        if k in index:raise ValueError('duplicate identity')
++        index[k]=row
++    expected={(s,r,k) for s in SEEDS for r in ('raw','ema') for k in SAMPLES}
++    if set(index)!=expected:raise ValueError('must explicitly record all eight results, including missing ones')
++    for seed in SEEDS:
++        for r in ('raw','ema'):
++            rows=[index[seed,r,k] for k in SAMPLES];ready=all(x['status']=='complete' for x in rows)
++            diversity=None
++            if ready:
++                a,b=[set(map(tuple,x['edge_set'])) for x in rows];union=len(a|b)
++                diversity=dict(labelled_graphs_equal=a==b,edge_symmetric_difference=len(a^b),edge_jaccard=len(a&b)/union if union else 1.,scope='two labelled samples only; no topology/population diversity guarantee')
++            cells[f'{cell(seed)}_{r}']=dict(graphs=rows,mean=strict_mean([x['values'] for x in rows]) if ready else None,
++                                          mean_reason=None if ready else 'required_graph_missing_or_failed',diversity=diversity)
++        diffs=[]
++        for k in SAMPLES:
++            left,right=index[seed,'ema',k],index[seed,'raw',k]
++            ready=left['status']==right['status']=='complete'
++            diffs.append(dict(sample_seed=k,status='complete' if ready else 'incomplete',difference=paired(left.get('values'),right.get('values'),template)))
++        contrasts.append(dict(train_seed=seed,contrast='ema-raw',per_sample=diffs,mean=strict_mean([x['difference'] for x in diffs]) if all(x['status']=='complete' for x in diffs) else None))
++    for row in records:
++        a={k:row[k] for k in ['train_seed','readout','sample_seed','status']}
++        if row['status']=='complete':
++            m=row['metrics'];a.update(edges=m['edges'],W1_incident4=m['W1_definitions']['incident4'],LCC=m['lcc'],family_edges=m['family_edges'],other_metrics=m)
++        assessment_rows.append(a)
++    return dict(status='complete' if all(x['status']=='complete' for x in records) else 'incomplete',cells=cells,contrasts=contrasts,
++                assessment=assess(assessment_rows),scope='one trajectory per training seed, raw and EMA readouts; two training seeds exploratory, not new role contribution')
++
++def collect(run,check=lambda:None):
++    reference=read(ROOT/'reference.json');records=[]
++    with np.load(ROOT/'package/assets/PubMed.npz',allow_pickle=False) as z:types=z['types'];schema=z['schema']
++    for job in jobs()['sampling']:
++        check();folder=run/job['directory'];row=dict(train_seed=job['train_seed'],readout=job['readout'],sample_seed=job['sample_seed'],status='incomplete',path=str(folder))
++        try:
++            if (folder/'summary.json').exists():row['worker_receipt']=read(folder/'summary.json')
++            else:row['worker_receipt']=dict(status='not_started' if not folder.exists() else 'incomplete_no_receipt')
++            if row['worker_receipt']['status']!='complete':raise ValueError('worker not complete')
++            path,receipt=verify_readout(run,job);b=read(folder/'binding.json');m=read(folder/'metrics.json')
++            if b['job']!=job or b['readout']!=job['readout'] or b['model_sha256']!=sha(path) or b['checkpoint_sha256']!=receipt['checkpoint_sha256']:raise ValueError('sample/readout identity mismatch')
++            if b['source_sha256']!=source_binding()[1] or sha(folder/'graph.npz')!=b['graph_sha256'] or sha(folder/'metrics.json')!=b['metrics_sha256']:raise ValueError('sample/source hashes differ')
++            if m['reference_metrics']!=reference:raise ValueError('reference differs')
++            with np.load(folder/'graph.npz',allow_pickle=False) as z:
++                np.testing.assert_array_equal(z['types'],types);np.testing.assert_array_equal(z['schema'],schema);edges=z['edges'];fam=z['families']
++            if edges.shape!=(2,m['edges']) or fam.shape!=(m['edges'],) or np.any(edges<0) or np.any(edges>=len(types)) or np.any(edges[0]>=edges[1]) or len(set(map(tuple,edges.T)))!=m['edges']:raise ValueError('graph contract')
++            if np.any(fam<0) or np.any(fam>=len(schema)):raise ValueError('family bounds')
++            np.testing.assert_array_equal(np.sort(types[edges],axis=0).T,schema[fam])
++            np.testing.assert_array_equal(np.bincount(fam,minlength=len(schema)),m['family_edges'])
++            if not np.isclose(m['W1_definitions']['all10_compat'],.4*m['W1_definitions']['incident4'],atol=1e-12,rtol=1e-12):raise ValueError('W1 conventions differ')
++            row.update(status='complete',values=graph_summary(m,reference),metrics=m,edge_set=edges.T.tolist(),binding=b)
++        except (TimeoutError,InterruptedError):raise
++        except Exception as e:row['reason']=repr(e)
++        records.append(row)
++    # Initial state/random stream pairing must match across readouts and training seeds.
++    for k in SAMPLES:
++        rows=[x for x in records if x['sample_seed']==k and x['status']=='complete']
++        if rows:
++            first=rows[0]['binding']
++            for row in rows:
++                if row['binding']['initial_state_sha256']!=first['initial_state_sha256'] or row['binding']['initial_rng']!=first['initial_rng']:
++                    row.update(status='incomplete',reason='sampling initial state/RNG pairing differs');row.pop('values',None)
++    return assemble(records,reference)
++
++def main():
++    p=argparse.ArgumentParser();p.add_argument('--run',required=True);p.add_argument('--output',required=True);p.add_argument('--deadline',type=float,required=True);a=p.parse_args()
++    run=pathlib.Path(a.run);out=pathlib.Path(a.output)
++    if out.exists():raise FileExistsError('do not overwrite summary')
++    def check():
++        if time.time()>=a.deadline:raise TimeoutError('summary deadline')
++    try:check();r=collect(run,check);check()
++    except BaseException as e:r=dict(status='incomplete',summary_error=repr(e))
++    save(out,r);return 0 if r['status']=='complete' else 2
++if __name__=='__main__':raise SystemExit(main())
+diff --git a/experiments/pubmed_o_ema_runtime_v1/test_runtime.py b/experiments/pubmed_o_ema_runtime_v1/test_runtime.py
+new file mode 100644
+index 0000000..1bc72a4
+--- /dev/null
++++ b/experiments/pubmed_o_ema_runtime_v1/test_runtime.py
+@@ -0,0 +1,100 @@
++import json,pathlib,sys,time,copy,os,subprocess
++import pytest
++from runtime_contract import jobs,cell,save,sha,read,verify_readout,verify_ticket,output_check,BUDGET,ROOT
++from run import supervise,resources
++from summarize import assemble
++from summary_metrics import graph_summary
++from assessment import SEEDS,SAMPLES
++
++def test_two_trajectories_eight_correct_chains_and_cli():
++    p=jobs();assert len(p['training'])==2 and len(p['sampling'])==8
++    assert len({j['directory'] for j in p['training']+p['sampling']})==10
++    assert all(j['updates']==1000 for j in p['training']) and all(j['T']==1000 for j in p['sampling'])
++    assert all(j['depends_on']==cell(j['train_seed']) and j['readout'] in ('raw','ema') for j in p['sampling'])
++    r=subprocess.run([sys.executable,str(ROOT/'run.py'),'dry-run','--output','/tmp/not_created_ema_dryrun'],capture_output=True,text=True)
++    assert r.returncode==0 and json.loads(r.stdout)['formal_activated'] is False
++    r=subprocess.run([sys.executable,str(ROOT/'run.py'),'formal','--output','/tmp/not_created_ema_dryrun'],capture_output=True,text=True)
++    assert r.returncode!=0 and not pathlib.Path('/tmp/not_created_ema_dryrun').exists()
++
++def test_real_export_files_and_readout_tampering(tmp_path):
++    import torch
++    from ema import ParameterEMA
++    from run_worker import export_readouts
++    from worker import atomic_checkpoint
++    m=torch.nn.Linear(2,2);e=ParameterEMA(m)
++    with torch.no_grad():m.weight.add_(2)
++    e.updates=1000;folder=tmp_path/cell(SEEDS[0]);folder.mkdir()
++    atomic_checkpoint(folder/'final.pt',dict(updates=1000));export_readouts(folder,m,e,1000,dict(train_seed=SEEDS[0]))
++    save(folder/'summary.json',dict(status='complete'))
++    actual={}
++    for r in ('raw','ema'):
++        j=next(j for j in jobs()['sampling'] if j['train_seed']==SEEDS[0] and j['readout']==r)
++        p,_=verify_readout(tmp_path,j);actual[r]=torch.load(p,map_location='cpu')
++        assert actual[r]['readout']==r
++    assert not torch.equal(actual['raw']['model']['weight'],actual['ema']['model']['weight'])
++    (folder/'readout_ema.pt').write_bytes((folder/'readout_raw.pt').read_bytes())
++    with pytest.raises(ValueError):verify_readout(tmp_path,j)
++
++def setup_launcher(tmp_path):
++    out=tmp_path/'run';out.mkdir();approval=tmp_path/'approval.json';save(approval,{'fixture':True})
++    ledger=out/'activation.json';save(ledger,dict(start_epoch=time.time(),deadline_epoch=time.time()+7800,source_sha256='fixture'))
++    return out,approval,ledger
++def fake_spawner(out,seen,fail=None):
++    class Process:
++        def __init__(self,cmd,**kwargs):
++            fd=kwargs['pass_fds'][0];t=json.loads(os.read(fd,32768));j=t['job'];seen.append(j)
++            self.returncode=2 if j['id']==fail else 0
++            folder=out/j['directory'];folder.mkdir(parents=True)
++            save(folder/'summary.json',dict(status='complete' if self.returncode==0 else 'incomplete',completed_updates=1000 if j['mode']=='train' else 0,completed_chains=1 if j['mode']=='sample' else 0,error='fixture failure' if self.returncode else None))
++        def poll(self):return self.returncode
++        def wait(self,timeout=None):return self.returncode
++    return Process
++def test_schedule_barrier_success(tmp_path):
++    out,a,l=setup_launcher(tmp_path);seen=[]
++    rc=supervise(out,a,l,['gpu0','gpu1'],spawn=fake_spawner(out,seen),summarizer=lambda *a:dict(status='complete'),poll=0)
++    assert rc==0 and len(seen)==10 and [j['mode'] for j in seen[:2]]==['train','train']
++    for slot in (0,1):assert [j['readout'] for j in seen if j['mode']=='sample' and j['slot']==slot]==['raw','raw','ema','ema']
++def test_failure_preserves_cause_and_does_not_sample(tmp_path):
++    out,a,l=setup_launcher(tmp_path);seen=[]
++    def bad_summary(*a):raise RuntimeError('summary failure')
++    rc=supervise(out,a,l,['gpu0','gpu1'],spawn=fake_spawner(out,seen,cell(SEEDS[0])),summarizer=bad_summary,poll=0)
++    r=read(out/'launcher_summary.json');assert rc==2 and r['primary_failures'] and r['evaluation']['status']=='failed'
++    assert all(j['mode']=='train' for j in seen) and len(r['unstarted'])==8
++@pytest.mark.parametrize('why',['STOP','deadline'])
++def test_stop_never_restarts_or_launches(tmp_path,why):
++    out,a,l=setup_launcher(tmp_path);seen=[]
++    if why=='STOP':(out/'STOP').touch()
++    else:
++        x=read(l);x['deadline_epoch']=time.time()+1100;save(l,x)
++    assert supervise(out,a,l,['gpu0','gpu1'],spawn=fake_spawner(out,seen),summarizer=lambda *a:dict(status='incomplete'),poll=0)==2
++    assert seen==[] and len(read(out/'launcher_summary.json')['unstarted'])==10
++
++def fixture_records():
++    ref=read(ROOT/'reference.json');rs=[]
++    for seed in SEEDS:
++        for r in ('raw','ema'):
++            for s in SAMPLES:
++                m=copy.deepcopy(ref);m.update(W1_definitions={'incident4':1.,'all10_compat':.4},primary={'type_weighted_joint_degree_TV':.4,'typed_triangle_composition_TV':.1},comparison={'mp_frequency_TV':[.1,.2,.3]})
++                change=10 if r=='raw' else 5
++                if seed==SEEDS[1]:change*=2
++                m['edges']+=change;m['family_edges'][0]+=change
++                rs.append(dict(train_seed=seed,readout=r,sample_seed=s,status='complete',metrics=m,values=graph_summary(m,ref),edge_set=[[0,1]]))
++    return rs,ref
++def test_pairing_mean_and_missing_propagation():
++    rs,ref=fixture_records();r=assemble(list(reversed(rs)),ref)
++    assert r['status']=='complete'
++    assert [c['mean']['absolute_error_difference']['edges'] for c in r['contrasts']]==[-5.,-10.]
++    assert r['assessment']['accuracy_conclusion']=='consistent_accuracy_gain_in_this_panel'
++    rs[0]=dict(train_seed=SEEDS[0],readout='raw',sample_seed=SAMPLES[0],status='incomplete',reason='fixture missing')
++    r=assemble(rs,ref);assert r['status']=='incomplete' and r['contrasts'][0]['mean'] is None and r['cells'][cell(SEEDS[0])+'_raw']['mean'] is None
++    assert r['assessment']['pooled_error_difference'] is None
++def test_resource_utilization_is_not_authority_or_failure():
++    ds=['GPU-a','GPU-b'];rows={d:[str(i),d,'RTX 2080 Ti','11000','0','1'] for i,d in enumerate(ds)}
++    a=dict(allocation_check_complete=True,allowed_uuids=ds,minimum_free_mib=9000)
++    assert len(resources(ds,a,rows,'',''))==2
++    with pytest.raises(PermissionError):resources(ds,dict(a,allocation_check_complete=False),rows,'','')
++    with pytest.raises(RuntimeError):resources(ds,a,rows,'GPU-a, 123, 100','')
++def test_output_overlap_rejected_before_mkdir(tmp_path):
++    src=tmp_path/'source';src.mkdir();before=list(src.iterdir())
++    with pytest.raises(ValueError):output_check(src/'bad',[src])
++    assert list(src.iterdir())==before

@@ -1,0 +1,130 @@
+{
+  "status": "passed",
+  "schedule": {
+    "training": [
+      {
+        "id": "PubMed_s2026102812_O",
+        "mode": "train",
+        "train_seed": 2026102812,
+        "slot": 0,
+        "directory": "PubMed_s2026102812_O",
+        "updates": 1000
+      },
+      {
+        "id": "PubMed_s2026102833_O",
+        "mode": "train",
+        "train_seed": 2026102833,
+        "slot": 1,
+        "directory": "PubMed_s2026102833_O",
+        "updates": 1000
+      }
+    ],
+    "sampling": [
+      {
+        "id": "PubMed_s2026102812_O_raw_2026102821",
+        "mode": "sample",
+        "train_seed": 2026102812,
+        "readout": "raw",
+        "sample_seed": 2026102821,
+        "slot": 0,
+        "directory": "PubMed_s2026102812_O/raw/sample_2026102821",
+        "T": 1000,
+        "depends_on": "PubMed_s2026102812_O"
+      },
+      {
+        "id": "PubMed_s2026102812_O_raw_2026102822",
+        "mode": "sample",
+        "train_seed": 2026102812,
+        "readout": "raw",
+        "sample_seed": 2026102822,
+        "slot": 0,
+        "directory": "PubMed_s2026102812_O/raw/sample_2026102822",
+        "T": 1000,
+        "depends_on": "PubMed_s2026102812_O"
+      },
+      {
+        "id": "PubMed_s2026102812_O_ema_2026102821",
+        "mode": "sample",
+        "train_seed": 2026102812,
+        "readout": "ema",
+        "sample_seed": 2026102821,
+        "slot": 0,
+        "directory": "PubMed_s2026102812_O/ema/sample_2026102821",
+        "T": 1000,
+        "depends_on": "PubMed_s2026102812_O"
+      },
+      {
+        "id": "PubMed_s2026102812_O_ema_2026102822",
+        "mode": "sample",
+        "train_seed": 2026102812,
+        "readout": "ema",
+        "sample_seed": 2026102822,
+        "slot": 0,
+        "directory": "PubMed_s2026102812_O/ema/sample_2026102822",
+        "T": 1000,
+        "depends_on": "PubMed_s2026102812_O"
+      },
+      {
+        "id": "PubMed_s2026102833_O_raw_2026102821",
+        "mode": "sample",
+        "train_seed": 2026102833,
+        "readout": "raw",
+        "sample_seed": 2026102821,
+        "slot": 1,
+        "directory": "PubMed_s2026102833_O/raw/sample_2026102821",
+        "T": 1000,
+        "depends_on": "PubMed_s2026102833_O"
+      },
+      {
+        "id": "PubMed_s2026102833_O_raw_2026102822",
+        "mode": "sample",
+        "train_seed": 2026102833,
+        "readout": "raw",
+        "sample_seed": 2026102822,
+        "slot": 1,
+        "directory": "PubMed_s2026102833_O/raw/sample_2026102822",
+        "T": 1000,
+        "depends_on": "PubMed_s2026102833_O"
+      },
+      {
+        "id": "PubMed_s2026102833_O_ema_2026102821",
+        "mode": "sample",
+        "train_seed": 2026102833,
+        "readout": "ema",
+        "sample_seed": 2026102821,
+        "slot": 1,
+        "directory": "PubMed_s2026102833_O/ema/sample_2026102821",
+        "T": 1000,
+        "depends_on": "PubMed_s2026102833_O"
+      },
+      {
+        "id": "PubMed_s2026102833_O_ema_2026102822",
+        "mode": "sample",
+        "train_seed": 2026102833,
+        "readout": "ema",
+        "sample_seed": 2026102822,
+        "slot": 1,
+        "directory": "PubMed_s2026102833_O/ema/sample_2026102822",
+        "T": 1000,
+        "depends_on": "PubMed_s2026102833_O"
+      }
+    ],
+    "policy": "two GPUs; both training jobs finish before sampling; four serial chains per GPU"
+  },
+  "per_update_seconds": 3.4202756990268828,
+  "measured_incremental_ema_seconds": 0.09775429125875235,
+  "measured_warm_normal2_seconds": 3.2605142556130886,
+  "historical_max_chain_seconds": 621.8176114745438,
+  "extra_three_ema_validations_seconds": 5.4985307129099965,
+  "checkpoint_extra_conservative_seconds": 6.614648879505694,
+  "historical_initialization_validation_save_seconds": 61.12781041394919,
+  "critical_compute_seconds": 5980.787134931423,
+  "unmeasured_planning_allowance_seconds": 598.0787134931423,
+  "delivery_seconds": 1200,
+  "planned_seconds": 7778.865848424565,
+  "proposed_budget_seconds": 7800,
+  "source_sha256": "a5502d2ca385014a07def4e3069ed897c365f850f4cb3492faed278f629f7b54",
+  "limits": "five engineering updates; no new chain measured. State-dependent cost and two-task contention remain estimates; no completion guarantee.",
+  "preflight_path": "/data2/lyh/gnn_project/DiHug/results/pubmed_o_ema_runtime_v1/gpu_preflight/preflight.json",
+  "preflight_sha256": "250d1236f0e47e4697228fe0a1dec0bcfbb4239c9355c7722cd85d6b83364f16"
+}

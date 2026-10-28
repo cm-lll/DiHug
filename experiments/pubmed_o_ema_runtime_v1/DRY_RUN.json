@@ -1,0 +1,111 @@
+{
+  "training": [
+    {
+      "id": "PubMed_s2026102812_O",
+      "mode": "train",
+      "train_seed": 2026102812,
+      "slot": 0,
+      "directory": "PubMed_s2026102812_O",
+      "updates": 1000
+    },
+    {
+      "id": "PubMed_s2026102833_O",
+      "mode": "train",
+      "train_seed": 2026102833,
+      "slot": 1,
+      "directory": "PubMed_s2026102833_O",
+      "updates": 1000
+    }
+  ],
+  "sampling": [
+    {
+      "id": "PubMed_s2026102812_O_raw_2026102821",
+      "mode": "sample",
+      "train_seed": 2026102812,
+      "readout": "raw",
+      "sample_seed": 2026102821,
+      "slot": 0,
+      "directory": "PubMed_s2026102812_O/raw/sample_2026102821",
+      "T": 1000,
+      "depends_on": "PubMed_s2026102812_O"
+    },
+    {
+      "id": "PubMed_s2026102812_O_raw_2026102822",
+      "mode": "sample",
+      "train_seed": 2026102812,
+      "readout": "raw",
+      "sample_seed": 2026102822,
+      "slot": 0,
+      "directory": "PubMed_s2026102812_O/raw/sample_2026102822",
+      "T": 1000,
+      "depends_on": "PubMed_s2026102812_O"
+    },
+    {
+      "id": "PubMed_s2026102812_O_ema_2026102821",
+      "mode": "sample",
+      "train_seed": 2026102812,
+      "readout": "ema",
+      "sample_seed": 2026102821,
+      "slot": 0,
+      "directory": "PubMed_s2026102812_O/ema/sample_2026102821",
+      "T": 1000,
+      "depends_on": "PubMed_s2026102812_O"
+    },
+    {
+      "id": "PubMed_s2026102812_O_ema_2026102822",
+      "mode": "sample",
+      "train_seed": 2026102812,
+      "readout": "ema",
+      "sample_seed": 2026102822,
+      "slot": 0,
+      "directory": "PubMed_s2026102812_O/ema/sample_2026102822",
+      "T": 1000,
+      "depends_on": "PubMed_s2026102812_O"
+    },
+    {
+      "id": "PubMed_s2026102833_O_raw_2026102821",
+      "mode": "sample",
+      "train_seed": 2026102833,
+      "readout": "raw",
+      "sample_seed": 2026102821,
+      "slot": 1,
+      "directory": "PubMed_s2026102833_O/raw/sample_2026102821",
+      "T": 1000,
+      "depends_on": "PubMed_s2026102833_O"
+    },
+    {
+      "id": "PubMed_s2026102833_O_raw_2026102822",
+      "mode": "sample",
+      "train_seed": 2026102833,
+      "readout": "raw",
+      "sample_seed": 2026102822,
+      "slot": 1,
+      "directory": "PubMed_s2026102833_O/raw/sample_2026102822",
+      "T": 1000,
+      "depends_on": "PubMed_s2026102833_O"
+    },
+    {
+      "id": "PubMed_s2026102833_O_ema_2026102821",
+      "mode": "sample",
+      "train_seed": 2026102833,
+      "readout": "ema",
+      "sample_seed": 2026102821,
+      "slot": 1,
+      "directory": "PubMed_s2026102833_O/ema/sample_2026102821",
+      "T": 1000,
+      "depends_on": "PubMed_s2026102833_O"
+    },
+    {
+      "id": "PubMed_s2026102833_O_ema_2026102822",
+      "mode": "sample",
+      "train_seed": 2026102833,
+      "readout": "ema",
+      "sample_seed": 2026102822,
+      "slot": 1,
+      "directory": "PubMed_s2026102833_O/ema/sample_2026102822",
+      "T": 1000,
+      "depends_on": "PubMed_s2026102833_O"
+    }
+  ],
+  "policy": "two GPUs; both training jobs finish before sampling; four serial chains per GPU"
+}
