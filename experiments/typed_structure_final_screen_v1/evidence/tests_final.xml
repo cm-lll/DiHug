@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="19" time="4.739" timestamp="2026-10-29T03:00:54.137070+08:00" hostname="GPU-Node01"><testcase classname="experiments.typed_structure_final_screen_v1.test_screen" name="test_exact_queue_and_dependencies" time="0.001" /><testcase classname="experiments.typed_structure_final_screen_v1.test_screen" name="test_asset_dictionary_bindings" time="0.002" /><testcase classname="experiments.typed_structure_final_screen_v1.test_screen" name="test_no_formal_budget_or_approval" time="0.001" /><testcase classname="experiments.typed_structure_final_screen_v1.test_screen" name="test_ema_formula_theta0_and_rng" time="0.025" /><testcase classname="experiments.typed_structure_final_screen_v1.test_screen" name="test_final3000_only_and_independent_exports" time="0.001" /><testcase classname="experiments.typed_structure_final_screen_v1.test_screen" name="test_ema_validation_exception_restores" time="0.002" /><testcase classname="experiments.typed_structure_final_screen_v1.test_screen" name="test_mock_real_train_loop_milestones" time="1.863"><failure message="OSError: [Errno 28] No space left on device">OSError: [Errno 28] No space left on device
+
+During handling of the above exception, another exception occurred:
+
+monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x7fce2f32c9d0&gt;
+tmp_path = PosixPath('/tmp/pytest-of-lyh/pytest-625/test_mock_real_train_loop_mile0')
+
+    def test_mock_real_train_loop_milestones(monkeypatch,tmp_path):
+        import run_worker as w
+        m=torch.nn.Linear(1,1);o=torch.optim.AdamW(m.parameters());j=R.jobs()['training'][0];snaps=[];valid=[]
+        monkeypatch.setattr(w,'fresh',lambda *a:(m,o,{}, {},None,{}))
+        monkeypatch.setattr(w,'rng_get',lambda *a:{})
+        monkeypatch.setattr(w,'atomic_checkpoint',lambda p,x:snaps.append((p.name,x['updates'],x['ema']['updates'])))
+        monkeypatch.setattr(w,'paired_validation',lambda m,e,*a:valid.append(e.updates) or {})
+        monkeypatch.setattr(w,'pair_inputs',lambda *a:[{'t':1},{'t':500}])
+        monkeypatch.setattr(w,'input_hash',lambda *a:'mock')
+        def step(fn,m,o,c,inp,T,device,e,u):e.updates=u+1;return {'optimizer_steps':1}
+        monkeypatch.setattr(w,'complete_normal2',step)
+        monkeypatch.setattr(w,'export_readouts',lambda out,m,e,u,b:valid.append(('export',u,e.updates)))
+&gt;       w.train(j,tmp_path,{},dict(approval_sha256='mock'),lambda:None,{})
+
+test_screen.py:62: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+run_worker.py:53: in train
+    progress.update(completed_updates=completed,ema_updates=ema.updates);save(out/'progress.json',progress)
+runtime_contract.py:12: in save
+    tmp.write_text(json.dumps(value,indent=2,allow_nan=False));os.replace(tmp,path)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = PosixPath('/tmp/pytest-of-lyh/pytest-625/test_mock_real_train_loop_mile0/progress.json.tmp')
+data = '{\n  "completed_updates": 986,\n  "ema_updates": 986\n}'
+encoding = None, errors = None
+
+    def write_text(self, data, encoding=None, errors=None):
+        """
+        Open the file in text mode, write to it, and close the file.
+        """
+        if not isinstance(data, str):
+            raise TypeError('data must be str, not %s' %
+                            data.__class__.__name__)
+        with self.open(mode='w', encoding=encoding, errors=errors) as f:
+&gt;           return f.write(data)
+E           OSError: [Errno 28] No space left on device
+
+/data2/lyh/miniconda3/envs/sparse_block/lib/python3.9/pathlib.py:1214: OSError</failure></testcase><testcase classname="experiments.typed_structure_final_screen_v1.test_screen" name="test_readout_wrong_identity_or_bytes_rejected" time="0.003" /><testcase classname="experiments.typed_structure_final_screen_v1.test_screen" name="test_summary_is_in_source_binding" time="0.014" /><testcase classname="experiments.typed_structure_final_screen_v1.test_screen" name="test_output_overlap_rejected" time="0.001" /><testcase classname="experiments.typed_structure_final_screen_v1.test_screen" name="test_original_lcc_induced_and_actual_capacities" time="0.002" /><testcase classname="experiments.typed_structure_final_screen_v1.test_screen" name="test_scalar_error_first_and_null_propagation" time="0.001" /><testcase classname="experiments.typed_structure_final_screen_v1.test_screen" name="test_mp_labels_and_zero_denominator" time="0.062" /><testcase classname="experiments.typed_structure_final_screen_v1.test_screen" name="test_missing_type_distribution_is_null" time="0.055" /><testcase classname="experiments.typed_structure_final_screen_v1.test_screen" name="test_w1_compatibility_and_exact_self_reference" time="0.272" /><testcase classname="experiments.typed_structure_final_screen_v1.test_screen" name="test_supervisor_mock_success_failure[False]" time="0.021" /><testcase classname="experiments.typed_structure_final_screen_v1.test_screen" name="test_supervisor_mock_success_failure[True]" time="0.007" /><testcase classname="experiments.typed_structure_final_screen_v1.test_screen" name="test_stop_does_not_spawn" time="0.003" /><testcase classname="experiments.typed_structure_final_screen_v1.test_screen" name="test_public_dry_run_never_creates_output" time="0.110" /></testsuite></testsuites>

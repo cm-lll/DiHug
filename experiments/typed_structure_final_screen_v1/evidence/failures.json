@@ -1,0 +1,17 @@
+[
+  {
+    "stage": "sandbox GPU visibility",
+    "error": "nvidia-smi driver not accessible inside sandbox",
+    "resolution": "read-only host check succeeds; no driver/environment change"
+  },
+  {
+    "stage": "CPU receipt collector attempt1",
+    "error": "KeyError: generator",
+    "resolution": "saved explicit Generator is named numpy in inherited RNG contract; collector fixed; no GPU rerun or scientific change"
+  },
+  {
+    "stage": "CPU regression repeat",
+    "error": "OSError errno28 system /tmp full; 1 failed,18 passed",
+    "resolution": "retained tests_final.xml, switched pytest basetemp to own data2 result volume; no cleanup or GPU repetition"
+  }
+]

@@ -1,0 +1,1034 @@
+{
+  "status": "passed",
+  "proposal_only": true,
+  "formal_authorized": false,
+  "source_sha256": "8b81b023888ea4c68a33b78736b93154e08a1a56978516f6de1030e282ae9484",
+  "schedule": {
+    "training": [
+      {
+        "dataset": "PubMed",
+        "arm": "E",
+        "train_seed": 2026102912,
+        "slot": 0,
+        "id": "PubMed_s2026102912_E",
+        "mode": "train",
+        "directory": "PubMed_s2026102912_E",
+        "updates": 3000
+      },
+      {
+        "dataset": "PubMed",
+        "arm": "D",
+        "train_seed": 2026102912,
+        "slot": 1,
+        "id": "PubMed_s2026102912_D",
+        "mode": "train",
+        "directory": "PubMed_s2026102912_D",
+        "updates": 3000
+      },
+      {
+        "dataset": "PubMed",
+        "arm": "A",
+        "train_seed": 2026102912,
+        "slot": 2,
+        "id": "PubMed_s2026102912_A",
+        "mode": "train",
+        "directory": "PubMed_s2026102912_A",
+        "updates": 3000
+      },
+      {
+        "dataset": "PubMed",
+        "arm": "C",
+        "train_seed": 2026102912,
+        "slot": 3,
+        "id": "PubMed_s2026102912_C",
+        "mode": "train",
+        "directory": "PubMed_s2026102912_C",
+        "updates": 3000
+      },
+      {
+        "dataset": "IMDB",
+        "arm": "E",
+        "train_seed": 2026102911,
+        "slot": 4,
+        "id": "IMDB_s2026102911_E",
+        "mode": "train",
+        "directory": "IMDB_s2026102911_E",
+        "updates": 3000
+      },
+      {
+        "dataset": "IMDB",
+        "arm": "D",
+        "train_seed": 2026102911,
+        "slot": 5,
+        "id": "IMDB_s2026102911_D",
+        "mode": "train",
+        "directory": "IMDB_s2026102911_D",
+        "updates": 3000
+      },
+      {
+        "dataset": "IMDB",
+        "arm": "A",
+        "train_seed": 2026102911,
+        "slot": 6,
+        "id": "IMDB_s2026102911_A",
+        "mode": "train",
+        "directory": "IMDB_s2026102911_A",
+        "updates": 3000
+      },
+      {
+        "dataset": "IMDB",
+        "arm": "C",
+        "train_seed": 2026102911,
+        "slot": 7,
+        "id": "IMDB_s2026102911_C",
+        "mode": "train",
+        "directory": "IMDB_s2026102911_C",
+        "updates": 3000
+      }
+    ],
+    "sampling": [
+      {
+        "dataset": "PubMed",
+        "arm": "E",
+        "train_seed": 2026102912,
+        "slot": 0,
+        "id": "PubMed_s2026102912_E_ema_0.99_2026102821",
+        "mode": "sample",
+        "readout": "ema_0.99",
+        "sample_seed": 2026102821,
+        "directory": "PubMed_s2026102912_E/ema_0.99/sample_2026102821",
+        "T": 1000,
+        "depends_on": "PubMed_s2026102912_E"
+      },
+      {
+        "dataset": "PubMed",
+        "arm": "E",
+        "train_seed": 2026102912,
+        "slot": 0,
+        "id": "PubMed_s2026102912_E_ema_0.99_2026102822",
+        "mode": "sample",
+        "readout": "ema_0.99",
+        "sample_seed": 2026102822,
+        "directory": "PubMed_s2026102912_E/ema_0.99/sample_2026102822",
+        "T": 1000,
+        "depends_on": "PubMed_s2026102912_E"
+      },
+      {
+        "dataset": "PubMed",
+        "arm": "D",
+        "train_seed": 2026102912,
+        "slot": 1,
+        "id": "PubMed_s2026102912_D_ema_0.99_2026102821",
+        "mode": "sample",
+        "readout": "ema_0.99",
+        "sample_seed": 2026102821,
+        "directory": "PubMed_s2026102912_D/ema_0.99/sample_2026102821",
+        "T": 1000,
+        "depends_on": "PubMed_s2026102912_D"
+      },
+      {
+        "dataset": "PubMed",
+        "arm": "D",
+        "train_seed": 2026102912,
+        "slot": 1,
+        "id": "PubMed_s2026102912_D_ema_0.99_2026102822",
+        "mode": "sample",
+        "readout": "ema_0.99",
+        "sample_seed": 2026102822,
+        "directory": "PubMed_s2026102912_D/ema_0.99/sample_2026102822",
+        "T": 1000,
+        "depends_on": "PubMed_s2026102912_D"
+      },
+      {
+        "dataset": "PubMed",
+        "arm": "A",
+        "train_seed": 2026102912,
+        "slot": 2,
+        "id": "PubMed_s2026102912_A_ema_0.99_2026102821",
+        "mode": "sample",
+        "readout": "ema_0.99",
+        "sample_seed": 2026102821,
+        "directory": "PubMed_s2026102912_A/ema_0.99/sample_2026102821",
+        "T": 1000,
+        "depends_on": "PubMed_s2026102912_A"
+      },
+      {
+        "dataset": "PubMed",
+        "arm": "A",
+        "train_seed": 2026102912,
+        "slot": 2,
+        "id": "PubMed_s2026102912_A_ema_0.99_2026102822",
+        "mode": "sample",
+        "readout": "ema_0.99",
+        "sample_seed": 2026102822,
+        "directory": "PubMed_s2026102912_A/ema_0.99/sample_2026102822",
+        "T": 1000,
+        "depends_on": "PubMed_s2026102912_A"
+      },
+      {
+        "dataset": "PubMed",
+        "arm": "C",
+        "train_seed": 2026102912,
+        "slot": 3,
+        "id": "PubMed_s2026102912_C_ema_0.99_2026102821",
+        "mode": "sample",
+        "readout": "ema_0.99",
+        "sample_seed": 2026102821,
+        "directory": "PubMed_s2026102912_C/ema_0.99/sample_2026102821",
+        "T": 1000,
+        "depends_on": "PubMed_s2026102912_C"
+      },
+      {
+        "dataset": "PubMed",
+        "arm": "C",
+        "train_seed": 2026102912,
+        "slot": 3,
+        "id": "PubMed_s2026102912_C_ema_0.99_2026102822",
+        "mode": "sample",
+        "readout": "ema_0.99",
+        "sample_seed": 2026102822,
+        "directory": "PubMed_s2026102912_C/ema_0.99/sample_2026102822",
+        "T": 1000,
+        "depends_on": "PubMed_s2026102912_C"
+      },
+      {
+        "dataset": "IMDB",
+        "arm": "E",
+        "train_seed": 2026102911,
+        "slot": 4,
+        "id": "IMDB_s2026102911_E_ema_0.99_2026102821",
+        "mode": "sample",
+        "readout": "ema_0.99",
+        "sample_seed": 2026102821,
+        "directory": "IMDB_s2026102911_E/ema_0.99/sample_2026102821",
+        "T": 1000,
+        "depends_on": "IMDB_s2026102911_E"
+      },
+      {
+        "dataset": "IMDB",
+        "arm": "E",
+        "train_seed": 2026102911,
+        "slot": 4,
+        "id": "IMDB_s2026102911_E_ema_0.99_2026102822",
+        "mode": "sample",
+        "readout": "ema_0.99",
+        "sample_seed": 2026102822,
+        "directory": "IMDB_s2026102911_E/ema_0.99/sample_2026102822",
+        "T": 1000,
+        "depends_on": "IMDB_s2026102911_E"
+      },
+      {
+        "dataset": "IMDB",
+        "arm": "D",
+        "train_seed": 2026102911,
+        "slot": 5,
+        "id": "IMDB_s2026102911_D_ema_0.99_2026102821",
+        "mode": "sample",
+        "readout": "ema_0.99",
+        "sample_seed": 2026102821,
+        "directory": "IMDB_s2026102911_D/ema_0.99/sample_2026102821",
+        "T": 1000,
+        "depends_on": "IMDB_s2026102911_D"
+      },
+      {
+        "dataset": "IMDB",
+        "arm": "D",
+        "train_seed": 2026102911,
+        "slot": 5,
+        "id": "IMDB_s2026102911_D_ema_0.99_2026102822",
+        "mode": "sample",
+        "readout": "ema_0.99",
+        "sample_seed": 2026102822,
+        "directory": "IMDB_s2026102911_D/ema_0.99/sample_2026102822",
+        "T": 1000,
+        "depends_on": "IMDB_s2026102911_D"
+      },
+      {
+        "dataset": "IMDB",
+        "arm": "A",
+        "train_seed": 2026102911,
+        "slot": 6,
+        "id": "IMDB_s2026102911_A_ema_0.99_2026102821",
+        "mode": "sample",
+        "readout": "ema_0.99",
+        "sample_seed": 2026102821,
+        "directory": "IMDB_s2026102911_A/ema_0.99/sample_2026102821",
+        "T": 1000,
+        "depends_on": "IMDB_s2026102911_A"
+      },
+      {
+        "dataset": "IMDB",
+        "arm": "A",
+        "train_seed": 2026102911,
+        "slot": 6,
+        "id": "IMDB_s2026102911_A_ema_0.99_2026102822",
+        "mode": "sample",
+        "readout": "ema_0.99",
+        "sample_seed": 2026102822,
+        "directory": "IMDB_s2026102911_A/ema_0.99/sample_2026102822",
+        "T": 1000,
+        "depends_on": "IMDB_s2026102911_A"
+      },
+      {
+        "dataset": "IMDB",
+        "arm": "C",
+        "train_seed": 2026102911,
+        "slot": 7,
+        "id": "IMDB_s2026102911_C_ema_0.99_2026102821",
+        "mode": "sample",
+        "readout": "ema_0.99",
+        "sample_seed": 2026102821,
+        "directory": "IMDB_s2026102911_C/ema_0.99/sample_2026102821",
+        "T": 1000,
+        "depends_on": "IMDB_s2026102911_C"
+      },
+      {
+        "dataset": "IMDB",
+        "arm": "C",
+        "train_seed": 2026102911,
+        "slot": 7,
+        "id": "IMDB_s2026102911_C_ema_0.99_2026102822",
+        "mode": "sample",
+        "readout": "ema_0.99",
+        "sample_seed": 2026102822,
+        "directory": "IMDB_s2026102911_C/ema_0.99/sample_2026102822",
+        "T": 1000,
+        "depends_on": "IMDB_s2026102911_C"
+      }
+    ],
+    "policy": "eight cards one model per card; all training finish then two serial EMA chains per card"
+  },
+  "cells": [
+    {
+      "task": {
+        "dataset": "PubMed",
+        "arm": "E",
+        "train_seed": 2026102912,
+        "slot": 0,
+        "id": "PubMed_s2026102912_E",
+        "mode": "train",
+        "directory": "PubMed_s2026102912_E",
+        "updates": 3000
+      },
+      "history": [
+        {
+          "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_192_de_formal_v1_20261028T140346/run/PubMed_s2026102833_E",
+          "training_log_sha256": "f32eccf3edecc30dc50778eb10332e48994e78137f1ebd1f5dcfe8bf1a24df3a",
+          "normal2_mean": 3.4043521175741325,
+          "normal2_p95": 3.414276013802737,
+          "chains_seconds": [
+            660.2948777507991,
+            657.6917023640126
+          ],
+          "chain_bindings": [
+            {
+              "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_192_de_formal_v1_20261028T140346/run/PubMed_s2026102833_E/sample_2026102821/binding.json",
+              "sha256": "03494e496f5b001d4ed01adee209552ea334d23e0946eaf93bc1b9deafe4c9e1"
+            },
+            {
+              "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_192_de_formal_v1_20261028T140346/run/PubMed_s2026102833_E/sample_2026102822/binding.json",
+              "sha256": "e0d9001a83afe7a248a7995891a67c00ea9dfdd5ee3081af367adb410dfc6a0b"
+            }
+          ]
+        },
+        {
+          "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_192_de_formal_v1_20261028T140346/run/PubMed_s2026102812_E",
+          "training_log_sha256": "2cb0ea678b27c78b664646a947f0aa4c08c3ae59bf411d24eaecc498bf6be589",
+          "normal2_mean": 3.4149948792747367,
+          "normal2_p95": 3.4538913146592676,
+          "chains_seconds": [
+            658.1773516619578,
+            655.5892318934202
+          ],
+          "chain_bindings": [
+            {
+              "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_192_de_formal_v1_20261028T140346/run/PubMed_s2026102812_E/sample_2026102821/binding.json",
+              "sha256": "9f5b332d3c3b3e6b2c9cddb108280bbde6d2a55127ecd6ac1d3cc22643252eb2"
+            },
+            {
+              "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_192_de_formal_v1_20261028T140346/run/PubMed_s2026102812_E/sample_2026102822/binding.json",
+              "sha256": "1ec96a1d9d7cb178b53ec4ba6a773a4bff949287fafba98d6fb84c335dff35ff"
+            }
+          ]
+        }
+      ],
+      "engineering": {
+        "raw_normal2_seconds": 4.341460766270757,
+        "normal2_with_ema_seconds": 3.4988787565380335,
+        "normal2_seconds": 3.3947579953819513,
+        "ema_overhead_seconds": 0.10412076115608215,
+        "note": "one-step repeats, not stable throughput"
+      },
+      "query": {
+        "dataset": "PubMed",
+        "arm": "E",
+        "t": 500,
+        "query_slots": 18336,
+        "blocks": 1,
+        "forward_including_context_features_transfers_checks_seconds": 0.6815556902438402,
+        "posterior_seconds": 0.006114109419286251,
+        "feature_seconds": 0.010334552265703678,
+        "encoding_seconds": 0.016000225208699703,
+        "transfer_seconds": 0.00035853311419487,
+        "engineering_checkpoint_sha256": "7cb59d4eb037d1bcde4b4069216bf0c0c9b4b438b17bec54174d5ba3845ee01e",
+        "source_sha256": "bdca966e4eb0cc985709a4a86f656a7cf554eabaec4e228ff1ece77bf20340c5",
+        "state_commits": 0,
+        "new_graphs": 0,
+        "optimizer_steps": 0,
+        "note": "one ordinary forward-noise state; no sampling or full chain; not all-state throughput"
+      },
+      "normal2_planning_seconds": 3.5580120758153497,
+      "training_3000_seconds": 10674.03622744605,
+      "chain_planning_seconds": 660.2948777507991,
+      "two_chains_seconds": 1320.5897555015981,
+      "validation_seconds": 16.087608516216278,
+      "save_seconds": 12.564865697175264,
+      "construction_and_load_allowance_seconds": 20.0,
+      "phase_train_seconds": 10722.688701659441,
+      "phase_sampling_seconds": 1330.5897555015981,
+      "peak_allocated_mib": 3170.0791015625,
+      "peak_reserved_mib": 3430.0
+    },
+    {
+      "task": {
+        "dataset": "PubMed",
+        "arm": "D",
+        "train_seed": 2026102912,
+        "slot": 1,
+        "id": "PubMed_s2026102912_D",
+        "mode": "train",
+        "directory": "PubMed_s2026102912_D",
+        "updates": 3000
+      },
+      "history": [
+        {
+          "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_192_de_formal_v1_20261028T140346/run/PubMed_s2026102833_D",
+          "training_log_sha256": "989f799b4ad1edcbd05ea6633a137b6ffcc180b3759972f40d5924846b78df6d",
+          "normal2_mean": 3.4083593648395047,
+          "normal2_p95": 3.4150913055054843,
+          "chains_seconds": [
+            650.1362645113841,
+            647.8966055735946
+          ],
+          "chain_bindings": [
+            {
+              "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_192_de_formal_v1_20261028T140346/run/PubMed_s2026102833_D/sample_2026102821/binding.json",
+              "sha256": "d93c4d7143d953dac382057080b49370dbfd6d340871247bb1a18005de9ca1b3"
+            },
+            {
+              "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_192_de_formal_v1_20261028T140346/run/PubMed_s2026102833_D/sample_2026102822/binding.json",
+              "sha256": "e7e03ca0f62d39f50080adb3dbbd9febbb3460b702d65338c939a5d2acf8f306"
+            }
+          ]
+        },
+        {
+          "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_192_de_formal_v1_20261028T140346/run/PubMed_s2026102812_D",
+          "training_log_sha256": "6e1b066b953695f16079b5ff07f8287aa20f6c9e716fede7c4884deaf1fd7fdd",
+          "normal2_mean": 3.417579831182021,
+          "normal2_p95": 3.473606900125742,
+          "chains_seconds": [
+            647.29493624717,
+            645.1185395410284
+          ],
+          "chain_bindings": [
+            {
+              "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_192_de_formal_v1_20261028T140346/run/PubMed_s2026102812_D/sample_2026102821/binding.json",
+              "sha256": "b30b45e12da9c7073663683133e43fe1b7577edef654ed2830d44cf221d719c1"
+            },
+            {
+              "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_192_de_formal_v1_20261028T140346/run/PubMed_s2026102812_D/sample_2026102822/binding.json",
+              "sha256": "006b2b66be47b9fe7ea7597780fd31f00f726ea558038f83ebf5b658b8d031cb"
+            }
+          ]
+        }
+      ],
+      "engineering": {
+        "raw_normal2_seconds": 4.258813964203,
+        "normal2_with_ema_seconds": 3.4284734996035695,
+        "normal2_seconds": 3.3312244853004813,
+        "ema_overhead_seconds": 0.09724901430308819,
+        "note": "one-step repeats, not stable throughput"
+      },
+      "query": {
+        "dataset": "PubMed",
+        "arm": "D",
+        "t": 500,
+        "query_slots": 18336,
+        "blocks": 1,
+        "forward_including_context_features_transfers_checks_seconds": 0.6785252979025245,
+        "posterior_seconds": 0.006029197014868259,
+        "feature_seconds": 0.01040427666157484,
+        "encoding_seconds": 1.0719522833824158e-06,
+        "transfer_seconds": 0.0005320059135556221,
+        "engineering_checkpoint_sha256": "50307a91d212107375ac082155ba6ea0be01726de068470a0c5601e21a1664c4",
+        "source_sha256": "ad0a1c2fe9082ba1e51e24bbce157ccfb6d66e3a52cbac5a7b96fe2adddafa01",
+        "state_commits": 0,
+        "new_graphs": 0,
+        "optimizer_steps": 0,
+        "note": "one ordinary forward-noise state; no sampling or full chain; not all-state throughput"
+      },
+      "normal2_planning_seconds": 3.5708559144288303,
+      "training_3000_seconds": 10712.56774328649,
+      "chain_planning_seconds": 650.1362645113841,
+      "two_chains_seconds": 1300.2725290227681,
+      "validation_seconds": 15.49437853321433,
+      "save_seconds": 13.30202859453857,
+      "construction_and_load_allowance_seconds": 20.0,
+      "phase_train_seconds": 10761.364150414243,
+      "phase_sampling_seconds": 1310.2725290227681,
+      "peak_allocated_mib": 3169.82421875,
+      "peak_reserved_mib": 3430.0
+    },
+    {
+      "task": {
+        "dataset": "PubMed",
+        "arm": "A",
+        "train_seed": 2026102912,
+        "slot": 2,
+        "id": "PubMed_s2026102912_A",
+        "mode": "train",
+        "directory": "PubMed_s2026102912_A",
+        "updates": 3000
+      },
+      "history": [
+        {
+          "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_192_oabc_formal_v1_20261028T090624/run/PubMed_A",
+          "training_log_sha256": "bd8652aa4f2a2f8e1cf30239943dc235b81aa09fcdb5fe6b0a3d47b2edc0e56c",
+          "normal2_mean": 3.335152185571628,
+          "normal2_p95": 3.342843330092728,
+          "chains_seconds": [
+            629.6107593802735,
+            627.2980673005804
+          ],
+          "chain_bindings": [
+            {
+              "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_192_oabc_formal_v1_20261028T090624/run/PubMed_A/sample_2026102821/binding.json",
+              "sha256": "6ab9d9e97724f5ee2c1b049c2298213564c5106a61ac5ec732edd3492a9c10d6"
+            },
+            {
+              "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_192_oabc_formal_v1_20261028T090624/run/PubMed_A/sample_2026102822/binding.json",
+              "sha256": "415c7844746f742e16ce8bed7f5f82c4406e5a08082c1ccab7afa322c28dbc2b"
+            }
+          ]
+        },
+        {
+          "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_192_oabc_seed2_v1_20261028T110507/run/PubMed_A",
+          "training_log_sha256": "9126f49a4173b98010ba1b4b1ee8a278df8e036ba023627b4999c8afe0fc3d8a",
+          "normal2_mean": 3.343502729335547,
+          "normal2_p95": 3.353440581634641,
+          "chains_seconds": [
+            629.1295397542417,
+            627.4426134321839
+          ],
+          "chain_bindings": [
+            {
+              "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_192_oabc_seed2_v1_20261028T110507/run/PubMed_A/sample_2026102821/binding.json",
+              "sha256": "bdc0c924e4dcd82dc78e0964d0ad8b058aa1ba5ced18c1fce3400e87bab6633b"
+            },
+            {
+              "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_192_oabc_seed2_v1_20261028T110507/run/PubMed_A/sample_2026102822/binding.json",
+              "sha256": "e00d832732df4b76f28be7f3cbca052c4d38d1dfc42acc683523e5f70e3230ed"
+            }
+          ]
+        }
+      ],
+      "engineering": {
+        "raw_normal2_seconds": 4.320063409395516,
+        "normal2_with_ema_seconds": 3.4820204321295023,
+        "normal2_seconds": 3.3818524703383446,
+        "ema_overhead_seconds": 0.10016796179115772,
+        "note": "one-step repeats, not stable throughput"
+      },
+      "query": {
+        "dataset": "PubMed",
+        "arm": "A",
+        "t": 500,
+        "query_slots": 18336,
+        "blocks": 1,
+        "forward_including_context_features_transfers_checks_seconds": 1.6059838654473424,
+        "posterior_seconds": 0.0063292719423770905,
+        "feature_seconds": 0.0,
+        "encoding_seconds": 0.0,
+        "transfer_seconds": 0.0,
+        "engineering_checkpoint_sha256": "4d9f4f04c0f1d3908bc9a94a32eae66fa28bfc4939e7f162504037cb90fd2363",
+        "source_sha256": "ad0a1c2fe9082ba1e51e24bbce157ccfb6d66e3a52cbac5a7b96fe2adddafa01",
+        "state_commits": 0,
+        "new_graphs": 0,
+        "optimizer_steps": 0,
+        "note": "one ordinary forward-noise state; no sampling or full chain; not all-state throughput"
+      },
+      "normal2_planning_seconds": 3.4820204321295023,
+      "training_3000_seconds": 10446.061296388507,
+      "chain_planning_seconds": 629.6107593802735,
+      "two_chains_seconds": 1259.221518760547,
+      "validation_seconds": 15.331487063318491,
+      "save_seconds": 14.7567303981632,
+      "construction_and_load_allowance_seconds": 20.0,
+      "phase_train_seconds": 10496.149513849989,
+      "phase_sampling_seconds": 1269.221518760547,
+      "peak_allocated_mib": 3167.51708984375,
+      "peak_reserved_mib": 3424.0
+    },
+    {
+      "task": {
+        "dataset": "PubMed",
+        "arm": "C",
+        "train_seed": 2026102912,
+        "slot": 3,
+        "id": "PubMed_s2026102912_C",
+        "mode": "train",
+        "directory": "PubMed_s2026102912_C",
+        "updates": 3000
+      },
+      "history": [
+        {
+          "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_192_oabc_formal_v1_20261028T090624/run/PubMed_C",
+          "training_log_sha256": "1948c3a45ba043fcd1d6d1bfb0f69630495385c4deecaa7da9d428eecdee1220",
+          "normal2_mean": 3.3712137683449153,
+          "normal2_p95": 3.4285111187025903,
+          "chains_seconds": [
+            644.5414610309526,
+            642.0677763149142
+          ],
+          "chain_bindings": [
+            {
+              "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_192_oabc_formal_v1_20261028T090624/run/PubMed_C/sample_2026102821/binding.json",
+              "sha256": "4ae13a8744b7c4a273ec249dbaa35db776d5e9e33c9b1550a472f1f98407c8c1"
+            },
+            {
+              "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_192_oabc_formal_v1_20261028T090624/run/PubMed_C/sample_2026102822/binding.json",
+              "sha256": "02963f833a1054a8f75355f7b67cec5d0f73716a807227e89fa7ebb7f8b5dd83"
+            }
+          ]
+        },
+        {
+          "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_192_oabc_seed2_v1_20261028T110507/run/PubMed_C",
+          "training_log_sha256": "39c644343b2c39de72bec3f6a4d1f8099baf7aa662b5b5f55c958b8fb87329a7",
+          "normal2_mean": 3.367469591049281,
+          "normal2_p95": 3.4208855316974223,
+          "chains_seconds": [
+            648.8496435144916,
+            646.7789452327415
+          ],
+          "chain_bindings": [
+            {
+              "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_192_oabc_seed2_v1_20261028T110507/run/PubMed_C/sample_2026102821/binding.json",
+              "sha256": "3b58b721f687fdb337444fc841d362f119c3c4a6af6fc4f31a78422250bfb5d6"
+            },
+            {
+              "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_192_oabc_seed2_v1_20261028T110507/run/PubMed_C/sample_2026102822/binding.json",
+              "sha256": "93d313433f334d6251416f9429271767f80169206d45029dbb8fd3014cc469aa"
+            }
+          ]
+        }
+      ],
+      "engineering": {
+        "raw_normal2_seconds": 4.31456870213151,
+        "normal2_with_ema_seconds": 3.458141665905714,
+        "normal2_seconds": 3.3621717570349574,
+        "ema_overhead_seconds": 0.09596990887075663,
+        "note": "one-step repeats, not stable throughput"
+      },
+      "query": {
+        "dataset": "PubMed",
+        "arm": "C",
+        "t": 500,
+        "query_slots": 18336,
+        "blocks": 1,
+        "forward_including_context_features_transfers_checks_seconds": 0.6573190363124013,
+        "posterior_seconds": 0.00610863883048296,
+        "feature_seconds": 0.010262109339237213,
+        "encoding_seconds": 0.01719225663691759,
+        "transfer_seconds": 0.0003337077796459198,
+        "engineering_checkpoint_sha256": "b5d036ffe81271699effe1f0fc8b08b92bb0dabc28d2c8fc3d7b53039c259e14",
+        "source_sha256": "ad0a1c2fe9082ba1e51e24bbce157ccfb6d66e3a52cbac5a7b96fe2adddafa01",
+        "state_commits": 0,
+        "new_graphs": 0,
+        "optimizer_steps": 0,
+        "note": "one ordinary forward-noise state; no sampling or full chain; not all-state throughput"
+      },
+      "normal2_planning_seconds": 3.524481027573347,
+      "training_3000_seconds": 10573.443082720041,
+      "chain_planning_seconds": 648.8496435144916,
+      "two_chains_seconds": 1297.6992870289832,
+      "validation_seconds": 15.611969817429781,
+      "save_seconds": 14.791252098977566,
+      "construction_and_load_allowance_seconds": 20.0,
+      "phase_train_seconds": 10623.846304636449,
+      "phase_sampling_seconds": 1307.6992870289832,
+      "peak_allocated_mib": 3170.205078125,
+      "peak_reserved_mib": 3428.0
+    },
+    {
+      "task": {
+        "dataset": "IMDB",
+        "arm": "E",
+        "train_seed": 2026102911,
+        "slot": 4,
+        "id": "IMDB_s2026102911_E",
+        "mode": "train",
+        "directory": "IMDB_s2026102911_E",
+        "updates": 3000
+      },
+      "history": [
+        {
+          "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_192_de_formal_v1_20261028T140346/run/IMDB_s2026102811_E",
+          "training_log_sha256": "f80fcee30d9ec2dc82cec74d8fac0040a7ee2dda1c8242c5fa57750230411aee",
+          "normal2_mean": 2.563601722045984,
+          "normal2_p95": 2.569952532555908,
+          "chains_seconds": [
+            503.0094314701855,
+            502.98602255713195
+          ],
+          "chain_bindings": [
+            {
+              "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_192_de_formal_v1_20261028T140346/run/IMDB_s2026102811_E/sample_2026102821/binding.json",
+              "sha256": "bc0141e6243c785034aadad3481308e9e9bff4d4030007dec6cd7f2f624aca77"
+            },
+            {
+              "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_192_de_formal_v1_20261028T140346/run/IMDB_s2026102811_E/sample_2026102822/binding.json",
+              "sha256": "6e63fd9a2bfaae2a8983de1e4a2962d68af4f3d4f49ade8c88778bb6f325b06e"
+            }
+          ]
+        },
+        {
+          "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_192_de_formal_v1_20261028T140346/run/IMDB_s2026102834_E",
+          "training_log_sha256": "022b47d02657eb2f2f653ab6bbd6846044e00268d92a524230c64b7158f296aa",
+          "normal2_mean": 2.5834415149701826,
+          "normal2_p95": 2.6514157319441436,
+          "chains_seconds": [
+            499.8694442519918,
+            499.29532275907695
+          ],
+          "chain_bindings": [
+            {
+              "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_192_de_formal_v1_20261028T140346/run/IMDB_s2026102834_E/sample_2026102821/binding.json",
+              "sha256": "47e4bab82978cf3729f38796f6a4b4915154bd8f37597e30023b9c19bc979bbc"
+            },
+            {
+              "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_192_de_formal_v1_20261028T140346/run/IMDB_s2026102834_E/sample_2026102822/binding.json",
+              "sha256": "eadac7ad2aed95a40d65bbf6b414eaa39a2125e93bca7e3ab3e3a6150b1e501a"
+            }
+          ]
+        }
+      ],
+      "engineering": {
+        "raw_normal2_seconds": 3.4576219618320465,
+        "normal2_with_ema_seconds": 2.6239935625344515,
+        "normal2_seconds": 2.5238908138126135,
+        "ema_overhead_seconds": 0.100102748721838,
+        "note": "one-step repeats, not stable throughput"
+      },
+      "query": {
+        "dataset": "IMDB",
+        "arm": "E",
+        "t": 500,
+        "query_slots": 13120,
+        "blocks": 1,
+        "forward_including_context_features_transfers_checks_seconds": 0.5087621323764324,
+        "posterior_seconds": 0.0039841970428824425,
+        "feature_seconds": 0.008789543062448502,
+        "encoding_seconds": 0.008461898192763329,
+        "transfer_seconds": 0.0003311997279524803,
+        "engineering_checkpoint_sha256": "8d2cbe040aca44b4699c22f3f6ca76bd36481630b4ed748475d2e753325f1f0d",
+        "source_sha256": "ad0a1c2fe9082ba1e51e24bbce157ccfb6d66e3a52cbac5a7b96fe2adddafa01",
+        "state_commits": 0,
+        "new_graphs": 0,
+        "optimizer_steps": 0,
+        "note": "one ordinary forward-noise state; no sampling or full chain; not all-state throughput"
+      },
+      "normal2_planning_seconds": 2.7515184806659816,
+      "training_3000_seconds": 8254.555441997945,
+      "chain_planning_seconds": 503.0094314701855,
+      "two_chains_seconds": 1006.018862940371,
+      "validation_seconds": 12.061958074569702,
+      "save_seconds": 12.996886666864157,
+      "construction_and_load_allowance_seconds": 20.0,
+      "phase_train_seconds": 8299.61428673938,
+      "phase_sampling_seconds": 1016.018862940371,
+      "peak_allocated_mib": 2320.794921875,
+      "peak_reserved_mib": 2510.0
+    },
+    {
+      "task": {
+        "dataset": "IMDB",
+        "arm": "D",
+        "train_seed": 2026102911,
+        "slot": 5,
+        "id": "IMDB_s2026102911_D",
+        "mode": "train",
+        "directory": "IMDB_s2026102911_D",
+        "updates": 3000
+      },
+      "history": [
+        {
+          "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_192_de_formal_v1_20261028T140346/run/IMDB_s2026102834_D",
+          "training_log_sha256": "44d2cebab845100597dcf64b6d8a157ff925eed7c36f5ec250395e8f67dcc025",
+          "normal2_mean": 2.533626085717287,
+          "normal2_p95": 2.541148680914193,
+          "chains_seconds": [
+            491.4562206622213,
+            491.10362827125937
+          ],
+          "chain_bindings": [
+            {
+              "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_192_de_formal_v1_20261028T140346/run/IMDB_s2026102834_D/sample_2026102821/binding.json",
+              "sha256": "9936fa74504d27b1f0a96cfd1ba3d6c1dd48e5241baab6dd53b7ce5526662b90"
+            },
+            {
+              "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_192_de_formal_v1_20261028T140346/run/IMDB_s2026102834_D/sample_2026102822/binding.json",
+              "sha256": "91889d6446a48d009ca0f18fbac1d0cc2a5ca9888fc869eacba68df42ff9d37a"
+            }
+          ]
+        },
+        {
+          "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_192_de_formal_v1_20261028T140346/run/IMDB_s2026102811_D",
+          "training_log_sha256": "53bd0ebde3cdecab2247b3a81a02a7eb47a1ac1d96bba20384c76aa826ac9945",
+          "normal2_mean": 2.540678245235403,
+          "normal2_p95": 2.578466970752925,
+          "chains_seconds": [
+            489.758684752509,
+            489.6571679767221
+          ],
+          "chain_bindings": [
+            {
+              "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_192_de_formal_v1_20261028T140346/run/IMDB_s2026102811_D/sample_2026102821/binding.json",
+              "sha256": "907f2c5e366dc28174c105c93c289284dd957e1030de1349bd5674c7947f6f80"
+            },
+            {
+              "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_192_de_formal_v1_20261028T140346/run/IMDB_s2026102811_D/sample_2026102822/binding.json",
+              "sha256": "3e696b7212a9cf3356435711676ace5b9e7cb28fc5ea09d062268dbb0371fffa"
+            }
+          ]
+        }
+      ],
+      "engineering": {
+        "raw_normal2_seconds": 3.522749454714358,
+        "normal2_with_ema_seconds": 2.6628847997635603,
+        "normal2_seconds": 2.5626710411161184,
+        "ema_overhead_seconds": 0.10021375864744186,
+        "note": "one-step repeats, not stable throughput"
+      },
+      "query": {
+        "dataset": "IMDB",
+        "arm": "D",
+        "t": 500,
+        "query_slots": 13120,
+        "blocks": 1,
+        "forward_including_context_features_transfers_checks_seconds": 0.5258384943008423,
+        "posterior_seconds": 0.003996247425675392,
+        "feature_seconds": 0.008895047008991241,
+        "encoding_seconds": 1.3047829270362854e-06,
+        "transfer_seconds": 0.0005038697272539139,
+        "engineering_checkpoint_sha256": "9c58054cac3a28952f52a02ad718ea97e8e4fe24f1ff911c82e9d464aa7be328",
+        "source_sha256": "ad0a1c2fe9082ba1e51e24bbce157ccfb6d66e3a52cbac5a7b96fe2adddafa01",
+        "state_commits": 0,
+        "new_graphs": 0,
+        "optimizer_steps": 0,
+        "note": "one ordinary forward-noise state; no sampling or full chain; not all-state throughput"
+      },
+      "normal2_planning_seconds": 2.6786807294003667,
+      "training_3000_seconds": 8036.0421882011005,
+      "chain_planning_seconds": 491.4562206622213,
+      "two_chains_seconds": 982.9124413244426,
+      "validation_seconds": 12.242831885814667,
+      "save_seconds": 12.198682548478246,
+      "construction_and_load_allowance_seconds": 20.0,
+      "phase_train_seconds": 8080.4837026353935,
+      "phase_sampling_seconds": 992.9124413244426,
+      "peak_allocated_mib": 2320.67578125,
+      "peak_reserved_mib": 2510.0
+    },
+    {
+      "task": {
+        "dataset": "IMDB",
+        "arm": "A",
+        "train_seed": 2026102911,
+        "slot": 6,
+        "id": "IMDB_s2026102911_A",
+        "mode": "train",
+        "directory": "IMDB_s2026102911_A",
+        "updates": 3000
+      },
+      "history": [
+        {
+          "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_192_oabc_formal_v1_20261028T090624/run/IMDB_A",
+          "training_log_sha256": "3eed45f7ff35b6d96e0b8cefadfa95c06a09aeeb8df6df58b04b88f5f86a92c0",
+          "normal2_mean": 2.5568357900524483,
+          "normal2_p95": 2.6143980730324983,
+          "chains_seconds": [
+            481.7360624829307,
+            481.39418045897037
+          ],
+          "chain_bindings": [
+            {
+              "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_192_oabc_formal_v1_20261028T090624/run/IMDB_A/sample_2026102821/binding.json",
+              "sha256": "78364a24836d0f3786724f249b95ac9e691f89e3d85bfee648688d09c98fd849"
+            },
+            {
+              "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_192_oabc_formal_v1_20261028T090624/run/IMDB_A/sample_2026102822/binding.json",
+              "sha256": "9b34406bf0057a0d41a7d7acfd64aed10bb8593b8b6b09e8e1e9fb8505a44935"
+            }
+          ]
+        },
+        {
+          "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_192_oabc_seed2_v1_20261028T110507/run/IMDB_A",
+          "training_log_sha256": "5a3d5a38b3774c7b93792ed01a4584e668d32e8b04792e84a7723fd6af2c89ff",
+          "normal2_mean": 2.528669719949327,
+          "normal2_p95": 2.53797476682812,
+          "chains_seconds": [
+            483.40860437136143,
+            483.36912690941244
+          ],
+          "chain_bindings": [
+            {
+              "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_192_oabc_seed2_v1_20261028T110507/run/IMDB_A/sample_2026102821/binding.json",
+              "sha256": "91d147131a95da86d4e240b9d64509093111dc25383da085c0160906ae4a41c2"
+            },
+            {
+              "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_192_oabc_seed2_v1_20261028T110507/run/IMDB_A/sample_2026102822/binding.json",
+              "sha256": "69d0a0d6d1d7eb4e9b3e2469f9bf8e39662e00059782638ed9bbfb96d50c1e6b"
+            }
+          ]
+        }
+      ],
+      "engineering": {
+        "raw_normal2_seconds": 3.531891348771751,
+        "normal2_with_ema_seconds": 2.6990398056805134,
+        "normal2_seconds": 2.560828883200884,
+        "ema_overhead_seconds": 0.13821092247962952,
+        "note": "one-step repeats, not stable throughput"
+      },
+      "query": {
+        "dataset": "IMDB",
+        "arm": "A",
+        "t": 500,
+        "query_slots": 13120,
+        "blocks": 1,
+        "forward_including_context_features_transfers_checks_seconds": 1.4494903609156609,
+        "posterior_seconds": 0.004723497666418552,
+        "feature_seconds": 0.0,
+        "encoding_seconds": 0.0,
+        "transfer_seconds": 0.0,
+        "engineering_checkpoint_sha256": "7d8d21c69b3da7a2a9a809bce00bae213bba05e0d7e6d679b36735e012e080e8",
+        "source_sha256": "ad0a1c2fe9082ba1e51e24bbce157ccfb6d66e3a52cbac5a7b96fe2adddafa01",
+        "state_commits": 0,
+        "new_graphs": 0,
+        "optimizer_steps": 0,
+        "note": "one ordinary forward-noise state; no sampling or full chain; not all-state throughput"
+      },
+      "normal2_planning_seconds": 2.752608995512128,
+      "training_3000_seconds": 8257.826986536384,
+      "chain_planning_seconds": 483.40860437136143,
+      "two_chains_seconds": 966.8172087427229,
+      "validation_seconds": 11.981226403266191,
+      "save_seconds": 8.169414153322577,
+      "construction_and_load_allowance_seconds": 20.0,
+      "phase_train_seconds": 8297.977627092972,
+      "phase_sampling_seconds": 976.8172087427229,
+      "peak_allocated_mib": 2318.36865234375,
+      "peak_reserved_mib": 2504.0
+    },
+    {
+      "task": {
+        "dataset": "IMDB",
+        "arm": "C",
+        "train_seed": 2026102911,
+        "slot": 7,
+        "id": "IMDB_s2026102911_C",
+        "mode": "train",
+        "directory": "IMDB_s2026102911_C",
+        "updates": 3000
+      },
+      "history": [
+        {
+          "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_192_oabc_formal_v1_20261028T090624/run/IMDB_C",
+          "training_log_sha256": "862a4e08f0c35cc6aa15577e5d952f7e8a8d2f1ef7038d080a54b427c81316ef",
+          "normal2_mean": 2.510422514998658,
+          "normal2_p95": 2.5665856337174775,
+          "chains_seconds": [
+            485.2358860364184,
+            485.82335299346596
+          ],
+          "chain_bindings": [
+            {
+              "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_192_oabc_formal_v1_20261028T090624/run/IMDB_C/sample_2026102821/binding.json",
+              "sha256": "dcb13327772561731217854b03ec083a883bb973b1d9e6bf2741483474c24e2b"
+            },
+            {
+              "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_192_oabc_formal_v1_20261028T090624/run/IMDB_C/sample_2026102822/binding.json",
+              "sha256": "92fa3bd77ae606acee2946a9d34d009585103a88c50616f55091d8dc09be6f7f"
+            }
+          ]
+        },
+        {
+          "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_192_oabc_seed2_v1_20261028T110507/run/IMDB_C",
+          "training_log_sha256": "07acfe207cf254b8f96c7830d0d6bfc80be59bc63495a412756aa17462995c2a",
+          "normal2_mean": 2.5007501382259045,
+          "normal2_p95": 2.514109094813466,
+          "chains_seconds": [
+            483.087555821985,
+            482.8898690296337
+          ],
+          "chain_bindings": [
+            {
+              "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_192_oabc_seed2_v1_20261028T110507/run/IMDB_C/sample_2026102821/binding.json",
+              "sha256": "1bae9bb49826e8c541db91d1353c6b83814e840806d9b1ceb4ca24d0c44a2af1"
+            },
+            {
+              "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_192_oabc_seed2_v1_20261028T110507/run/IMDB_C/sample_2026102822/binding.json",
+              "sha256": "75177b2e5321dc75b95d1a76611e86f981506c7af4010b241499900a910d08e3"
+            }
+          ]
+        }
+      ],
+      "engineering": {
+        "raw_normal2_seconds": 3.379079619422555,
+        "normal2_with_ema_seconds": 2.5595794450491667,
+        "normal2_seconds": 2.4639079058542848,
+        "ema_overhead_seconds": 0.09567153919488192,
+        "note": "one-step repeats, not stable throughput"
+      },
+      "query": {
+        "dataset": "IMDB",
+        "arm": "C",
+        "t": 500,
+        "query_slots": 13120,
+        "blocks": 1,
+        "forward_including_context_features_transfers_checks_seconds": 0.49005753360688686,
+        "posterior_seconds": 0.004033264704048634,
+        "feature_seconds": 0.008970700204372406,
+        "encoding_seconds": 0.008820069022476673,
+        "transfer_seconds": 0.00032695941627025604,
+        "engineering_checkpoint_sha256": "f1b0c33b79a357b95d9a1116e91bf72f481dd10111461c793ccec1c48f322356",
+        "source_sha256": "ad0a1c2fe9082ba1e51e24bbce157ccfb6d66e3a52cbac5a7b96fe2adddafa01",
+        "state_commits": 0,
+        "new_graphs": 0,
+        "optimizer_steps": 0,
+        "note": "one ordinary forward-noise state; no sampling or full chain; not all-state throughput"
+      },
+      "normal2_planning_seconds": 2.6622571729123594,
+      "training_3000_seconds": 7986.771518737079,
+      "chain_planning_seconds": 485.82335299346596,
+      "two_chains_seconds": 971.6467059869319,
+      "validation_seconds": 11.556803677231073,
+      "save_seconds": 7.816213080659509,
+      "construction_and_load_allowance_seconds": 20.0,
+      "phase_train_seconds": 8026.144535494969,
+      "phase_sampling_seconds": 981.6467059869319,
+      "peak_allocated_mib": 2320.5537109375,
+      "peak_reserved_mib": 2508.0
+    }
+  ],
+  "training_phase_seconds": 10761.364150414243,
+  "sampling_phase_seconds": 1330.5897555015981,
+  "compute_body_seconds": 12091.953905915841,
+  "concurrency_planning_extra_seconds": 1813.7930858873763,
+  "evaluation_LCC_seconds": 300.0,
+  "delivery_reserve_seconds": 1200.0,
+  "fault_allowance_seconds": 900.0,
+  "planned_seconds": 16305.746991803218,
+  "requested_budget_seconds": 16800,
+  "uncertainty": "15% planning margin is not measured eight-way performance. Historical full chains use old1000 raw readouts; new3000 EMA state evolution is unmeasured. One-step probes are not stable throughput.",
+  "stop_rule": "new approved formal start+budget, science stops20minutes before deadline; no automatic resume,restart,redraw or changed scale"
+}
