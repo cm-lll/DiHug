@@ -1,0 +1,34 @@
+{
+  "frozen_at": "2026-10-29T01:37:18.861528+08:00",
+  "base": "a4a87a19ca17ba866300ea8bcbe7b49e27302a9e",
+  "all_graphs": 64,
+  "selection": "max nodes over all legal undirected relations; tied components lexicographic sorted original storage IDs; retain every internal edge",
+  "statistical_unit": "training seed; eachseed2 samples; old2/new6/all8 separately",
+  "primary": "EMA0.99 vs raw, per-graph absolute edge error relative926",
+  "variable_node_contract": {
+    "slot_capacity": "n_a*n_b or n_a*(n_a-1)/2 on actual retained nodes",
+    "degree_distribution": "each present type empirical distribution normalized by its actual retained count; no pergraph degree rescaling",
+    "main_incident4": "keep reference type weights40/192,74/192,66/192,12/192; mean4 incident family W1 pertype; exactly original at192",
+    "all10": "same fixed reference weights, mean10 columns; must equal0.4*incident4",
+    "actual_typeweights": "separate explicitly named compatibility value; not silently replace main",
+    "missing_type": "null that type conditional distribution and main aggregate; never impute zeros"
+  },
+  "legacy_HGEN": {
+    "square": "source squares() countsK4 cliques, separately named; real4cycles counted with old project definition",
+    "clustering": "legacy3T/claw retained separately from standard transitivity3T/wedges",
+    "gini": "legacy zero-based formula retained; standard one-based formula separately named",
+    "entropy": "original epsilon0.0001 preserved and named",
+    "powerlaw": "native package missing; leave null, retain distinct existing project fixedxmin1 alpha+KS",
+    "degree_MMD": "existing project histogram-exact unbiased raw degree RBFexp(-4*delta^2), raw and clipped; no torch dependency",
+    "cpl": "finite offdiagonal ordered pairs; report pair counts/reachable share and separately LCC-only; disconnected global diameter null"
+  },
+  "walks": "legacy oriented typed walks allowing repeated nodes/backtracking; reverse signatures pooled, NOT divided by2",
+  "MP": "frozen simple unoriented MP1/2/3; allnodes distinct; reverse signatures canonical; no label shift",
+  "comparison": "both raw-to-LCC pergraph and EMA-to-raw perversion; absolute errors pergraph before averaging; null strict propagation",
+  "new_descriptive_adaptations": [
+    "all40 typed twohop closure opportunity/numerator ratios generalize existing triangle+wedge and IMDB path/unique-pair counting to PubMed types, clearly distinct from frozen absent PubMed closure",
+    "type/relation retention and capacities on actual node inventory",
+    "reference-fixed type weights for variable n, plus actualweights compatibility"
+  ],
+  "no_scientific_actions": true
+}
