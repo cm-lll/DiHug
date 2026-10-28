@@ -1,0 +1,96 @@
+{
+  "baseline_commit": "0c4ed6b4d2dfa5b67aa6983e7d665fbc49667d96",
+  "dispatch_erratum_commit": "12c8b52897f45d1b106c710997cd5543c22ea24d",
+  "arms": [
+    "O",
+    "A",
+    "B",
+    "C"
+  ],
+  "datasets": [
+    "IMDB",
+    "PubMed"
+  ],
+  "normal2_inputs": 2,
+  "S": 18336,
+  "query_rounds": 1,
+  "T": 1000,
+  "fitting_panel": {
+    "times": [
+      0,
+      100,
+      500,
+      1000
+    ],
+    "noisy_roots": [
+      2026102831,
+      2026102832
+    ],
+    "layer_weights": [
+      0.25,
+      0.25,
+      0.25,
+      0.25
+    ],
+    "clean_row_multiplier": "sqrt(2)",
+    "noisy_row_multiplier": 1
+  },
+  "node_fold_root": 2026102851,
+  "feature_group_seed": 2026102853,
+  "feature_group_count": 30,
+  "feature_sides": [
+    15,
+    15
+  ],
+  "fit_root": 2026102861,
+  "rank_rule": "1..min(8, number of nodes in each training fold)",
+  "score": "two node folds times two masked directions; clean MSE/4 plus each noisy MSE/8; mean four scores",
+  "tie_tolerance": 1e-12,
+  "rank_choice": "smallest K within 1e-12 of minimum; no incomplete candidate selection",
+  "NMF": {
+    "solver": "cd",
+    "beta_loss": "frobenius",
+    "init": "nndsvda",
+    "tol": 1e-05,
+    "max_iter": 50000,
+    "shuffle": false,
+    "alpha_W": 0,
+    "alpha_H": 0,
+    "l1_ratio": 0
+  },
+  "NNLS": {
+    "dtype": "float64",
+    "maxiter": "max(240,30*K)",
+    "KKT_limit": 1e-07
+  },
+  "engineering_times": [
+    1,
+    500,
+    1000
+  ],
+  "engineering_max_updates_per_cell": 5,
+  "train_seeds": {
+    "IMDB": 2026102811,
+    "PubMed": 2026102812
+  },
+  "sample_seeds": [
+    2026102821,
+    2026102822
+  ],
+  "allowed_update_tiers": [
+    2000,
+    1000,
+    500
+  ],
+  "evaluation_reserve_seconds": 1200,
+  "failure_reserve_seconds": 900,
+  "budget_seconds": 10800,
+  "preparation_limit_seconds": 2700,
+  "formal_authorized": false,
+  "review_required": true,
+  "continue_confirmation_required": true,
+  "cpu_gpu_equivalence": "historical failure retained, not claimed; experiment limited to frozen same-GPU-model environment",
+  "quality_claim_scope": "one training seed per dataset and two samples per model, exploratory only",
+  "revision_base": "4123d8f7da6dada9513f592aabdcc81b053bc4a9",
+  "dictionary_source": "exact original saved states and splits, no resampling"
+}

@@ -1,0 +1,729 @@
+--- /dev/null
++++ b/README_中文.md
+@@ -0,0 +1,63 @@
++# O/A/B/C 小修 v1.2：仅提交审查
++
++基线为 `1873b35f65379683602bf8c44a487a2a175e7c4d`。本版不授权训练、生成、字典拟合或GPU复测。旧准备票及旧失败记录保留；本次没有创建正式审批文件、正式起点或截止时间。
++
++## 修改范围
++
++1. 汇总的 `mp[0] / mp[1] / mp[2]` 正确标为 MP1 / MP2 / MP3。底层计数未改：无向简单路径，反向合并，不允许重复节点；不是允许回访的 walk 计数。
++2. 每图保存完整原始指标、固定参考、标量绝对误差和分布误差。数量差、绝对误差差、分布误差差分开；先逐图计算绝对误差，再求两图均值。保留逐关系边数、类型三角、度尾部、闭合分子分母及机会数。MP2/MP3组成TV纳入逐seed和均值。
++3. 零闭合分母保留 null 和原因。缺指标不取字段交集；任一必需seed缺图，整格均值及相关配对均值为null；指标未定义时相应指标均值为null。可用图仍独立保留，失败、未启动、缺失及无效回执显式登记。
++4. W1主口径固定 `degree_W1_incident4`；兼容 `degree_W1_all10_compat` 独立计算并验证为主口径的0.4倍（仅本次四类型十族schema）。不与旧E07混算。
++5. 工程恢复和独立审计显式要求 `optimizer_exact is True`，同时保留原输入、梯度、参数、RNG及容差检查。旧八份回执只读复核；新增CPU优化器状态负例仅扰动一个exp_avg元素，虽然仍在原容差内，总门必须失败。
++6. 审批新增 `summarize_sha256`，绑定根目录实际执行的 summarize.py。launcher启动、worker经launcher gate启动、汇总调用前均检查，汇总返回后再检查一次。此字段必须来自真实独立审查，不由运行器自签。
++7. 监督器退出时在原截止范围内尝试完整或不完整汇总。`launcher_summary.json.primary_failures` 保留原失败；`evaluation` 单列汇总失败、超时或时间不足，不覆盖原原因。退出前的清理和原1200秒交付保留逻辑不变。
++8. `admission.assignment` 的固定LPT队列同时用于成本和执行：按预计总时长降序、标签稳定破平局，分给当前最轻载设备，设备内部FIFO。启动写出 `schedule.json`，不再用估算和实际执行两套队列。
++9. 按用户本轮补充意见，normal2中单次观察参数未变化改为记录，不再硬失败。零梯度或FP32舍入均可能导致该现象；仍检查原损失和梯度有限性、无梯度异常，以及观察参数变化非有限。CPU测试只对保存张量做比较，没有执行optimizer.step。原两份半损失、顺序反向、一次清梯度和一次更新逻辑未改。
++
++## 科学设置与证据
++
++模型、630维ReFeX、编码器、损失、噪声、后验、T1000、完整查询、配置、两图载荷、协议及min/max公共实现保持原字节。normal2仅修改上述更新观察规则，数学计算不变。`evidence/baseline_expected.json` 来自固定基线Git对象；`existing_record_audit.json` 给出逐文件核对。
++
++- IMDB K=5/4/3/2，字典SHA256：`3b5d9207c4a1ee0349385e5f30f6268f4a6fc13df70912f62a7f279f9f0bae50`。
++- PubMed K=8/8/8/6，字典SHA256：`a852a959c41a8d69dce37a0df542d4852e997450843888ba3c5e46a79e62f14e`。四类型仍全部命中K上界，不能解释成已确定真实角色数。
++- 历史CPU/GPU等价失败不改写；旧同GPU通过仅作为既有证据，本轮没有重新执行。
++- `evidence/engineering_*`、`cost_proposal.json`、字典四文件均为原1873提交的历史材料，原字节保留。`audit_existing_records.py` 为本轮只读审计入口。
++- 原 `audit_revision.py` 和历史测试保留追溯；本票不执行其全套旧实验复核，也不使用其中旧截止预算建议。当前预算入口是 `propose_budget.py`。
++
++## 本地检查命令（仅CPU）
++
++在解包根目录执行，复用现有环境，不安装依赖：
++
++```bash
++export CUDA_VISIBLE_DEVICES=''
++export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
++PY=/data2/lyh/miniconda3/envs/sparse_block/bin/python
++sha256sum -c SHA256SUMS
++"$PY" -m unittest -v test_summary_revision
++"$PY" audit_existing_records.py
++"$PY" propose_budget.py
++"$PY" summarize.py --help
++```
++
++测试使用明确标记的CPU工程夹具，不构造去噪模型，不调用optimizer.step，不采样科学图；四节点路径直接通过统一汇总输出验证3/2/1计数。负例中的临时审批回执只在自动清理的测试目录中存在，不是正式审批。
++
++已有运行汇总可单独执行 `summarize.py --run <已有结果目录> --output <新的JSON路径>`。结果不完整时退出码2；完整时0；汇总异常非零。不覆盖已存在输出。此命令不启动模型任务。
++
++## 1000更新预算提案，不是执行授权
++
++2026-10-28约08:36的三次只读查询：GPU0/1/2/3/4/6/7均为0MiB、0%且无计算进程；GPU5持续1%，未纳入确认空闲。8张物理卡均为RTX2080Ti，11GiB。没有更改设备隔离或占用卡。CPU可见48线程、负载约1.7、可用内存约491.7GiB；本票限制CPU线程为1。
++
++| 情形 | 组件关键路径 | 未测25%规划余量 | 评价交付 | 故障退出 | 合计 | 建议新预算 |
++|---|---:|---:|---:|---:|---:|---:|
++| 当前7卡快照 | 113.26分钟 | 28.32分钟 | 20分钟 | 15分钟 | 176.58分钟 | 180分钟 |
++| 条件性8卡全空闲 | 80.04分钟 | 20.01分钟 | 20分钟 | 15分钟 | 135.05分钟 | 140分钟 |
++
++当前7卡队列：0→PubMed A，1→PubMed C，2→PubMed B，3→PubMed O，4→IMDB A，6→IMDB C，7→IMDB B后IMDB O。完整UUID、分项时间和条件性8卡队列见 `evidence/budget_1000_proposal.json`。
++
++后续用户确认“可以八卡”，因此优先采用八卡140分钟提案：0→PubMed A，1→PubMed C，2→PubMed B，3→PubMed O，4→IMDB A，5→IMDB C，6→IMDB B，7→IMDB O。补查时八卡均0MiB且无计算进程记录，5/6卡利用率读数为1%，其余0%；这些读数不证明被他人占用，也不能写成通过严格零利用率启动门。详见 `resource_followup.json`；启动前仍按既有门重新确认，不在本票放宽。早先七卡快照与预算保留作为历史备选。
++
++训练主体和单步采样成本来自历史有限工程测量，原测量为两个GPU进程各顺序测四格。验证保存由组件外推并含每格10秒IO预留。25%不是实测七/八卡并发加速或竞争结论；普通前向噪声状态也不保证自由生成全链的CN/NNLS成本上界。七卡180分钟方案接近建议总额，不能承诺按时完成。实际运行前须重新核验空闲资源、按同一LPT函数核对队列和预算，由用户另行批准新的起止时间。
++
++本票未执行正式训练、完整链、字典重拟合、GPU八格重测或新的工程更新。下一步仅是独立补丁审查；自测、发布和空闲资源不构成正式授权。
++
++数值解释：字节/哈希及载入状态可要求精确一致；计算结果须按事前规定的尺度、绝对/相对容差与数学性质判断。当前工程恢复精确优化器门是本实现已满足且本票要求保留的门，不是所有方法、后端和后续轨迹普遍需要逐位相同的声明。不重复已通过检查。NMF收敛仅说明本次求解通过，不证明角色生成有效；字典已经收敛，继续冻结。旧人工等待账本不倒改；未来正式计算窗口应另行授权，不在本票沿用旧截止。
+--- /dev/null
++++ b/RESULTS.md
+@@ -0,0 +1,19 @@
++# 本地小修验收，未执行科学实验
++
++基线1873b35；独立v1.2，不覆盖旧包。当前21项针对性CPU测试通过，0失败、0错误、0跳过。测试进程墙钟6.43秒，峰值RSS约501.35MiB；单线程、CUDA不可见，不调用去噪网络。此耗时是CPU回归成本，不是训练吞吐。
++
++独立ZIP解包后102项原载荷哈希/字节数通过，21项同一受影响CPU测试再次通过，旧记录审计和预算重算与源目录结果一致，汇总CLI帮助正常退出。解包复验共9.95秒，测试子进程6.32秒、峰值RSS约500.71MiB。最终打包仅补入这些复验证据及文字结果，并再次检查载荷与实测源码逐文件相同，不更换实现。
++
++实际覆盖：汇总入口的MP长度1/2/3映射与四节点路径3/2/1计数；逐图绝对误差后平均；数量差与误差差分离；null与缺字段传播；缺图不平均成功项；16张合成夹具的完整汇总；MP2/MP3组成TV；incident4/all10独立计算与0.4关系；类型三角参考零值误差；单元素优化器扰动在容差内但非精确时拒绝；原恢复条件保留；根summarize.py启动及调用前篡改拒绝；真实轻量子进程的不完整汇总、异常及超时；原失败原因保留；LPT预算/执行共享函数；单次观察参数未变化允许、非有限变化拒绝。
++
++八份既有恢复JSON与固定提交哈希相同，optimizer_exact、rng_exact、历史load_exact及所有原恢复分量均通过新增严格判据。本轮只读审计，没有GPU复算。现有精确续算是既有实现的证据，不是跨后端/所有轨迹必须逐位相同的普遍条件。
++
++52份未修改源码、配置、数据与协议文件逐项匹配基线，包括模型、特征、编码、CE、噪声、后验及公共min/max。normal2只改观察参数变化的失败判定和日志，计算的两份半损失、反向累积及optimizer.step位置均不改。最终字典四文件逐项匹配基线；没有重新拟合。PubMed四类型命中K上界的限制保留。
++
++当前只读资源证据和后续八卡确认分开保存：初次三次快照为7张严格空闲；用户后续确认可以八卡。补查八卡均0MiB、无计算进程，GPU5/6为1%利用率，启动时应重新检查，不能冒称已通过严格零利用率门。
++
++八卡主方案每模型1000更新、两个采样seed，共8次训练/16条T1000链：组件关键路径80.04分钟，未实测并发余量20.01分钟，统一评价交付20分钟，故障退出15分钟，合计135.05分钟，建议新预算140分钟。七卡历史备选176.58分钟，建议180分钟。均未获正式执行授权，没有设置新起止时间。组件计时来自旧单卡短测，25%余量不代表已测并发，生成中状态变化仍可能改变成本。
++
++本轮未执行：扩散训练、完整生成链、NMF重拟合、八格GPU复测、任何optimizer.step、正式审批创建、旧账本重置。CPU/GPU旧失败不改写。下一步仅等待独立补丁审查及用户明确的新正式授权，不自动进入实验。
++
++复现和口径见README_中文.md；机器证据见evidence目录。旧大量候选因子和初始权重仍保留在1873原发行包，本小修包不重复打包它们。
+--- /dev/null
++++ b/audit_existing_records.py
+@@ -0,0 +1,31 @@
++"""Read-only CPU receipt audit. No torch import, tensor loading, fit or forward."""
++import argparse,hashlib,json,pathlib,sys
++ROOT=pathlib.Path(__file__).resolve().parent
++sys.path.insert(0,str(ROOT/'package'))
++from admission import dictionaries
++from restore_checks import restoration_passes
++def sha(p):return hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest()
++def audit(evidence):
++    root=pathlib.Path(evidence);expected=json.loads((root/'baseline_expected.json').read_text())
++    verified={}
++    for rel,digest in expected['evidence_files'].items():
++        actual=sha(root/rel)
++        if actual!=digest:raise ValueError('fixed baseline evidence differs: '+rel)
++        verified[rel]=actual
++    binding=json.loads((root/'dictionary_bindings_PROPOSAL_NOT_APPROVAL.json').read_text());dictionaries(root,binding)
++    unchanged={}
++    for rel,digest in expected['unchanged_source'].items():
++        actual=sha(ROOT/rel)
++        if actual!=digest:raise ValueError('scientific source differs: '+rel)
++        unchanged[rel]=actual
++    rows={}
++    for d in ['IMDB','PubMed']:
++        for a in 'OABC':
++            r=json.loads((root/('engineering_'+d)/a/'restore.json').read_text())
++            row=json.loads((root/('engineering_'+d)/'summary.json').read_text())['cells'][d+'_'+a]
++            passed=r['optimizer_exact'] is True and restoration_passes(r) and r['passes'] is True and row['load_exact'] is True
++            rows[d+'_'+a]=dict(passed=passed,optimizer_exact=r['optimizer_exact'],rng_exact=r['rng_exact'],historical_load_exact=row['load_exact'],original_receipt_passed=r['passes'])
++            if not passed:raise ValueError('existing restore gate failed: '+d+'_'+a)
++    return dict(status='passed_existing_records_only',baseline=expected['baseline'],evidence_sha256=verified,unchanged_source_sha256=unchanged,restore=rows,dictionaries=binding['dictionaries'],pubmed_all_types_hit_Kmax=True,new_optimizer_steps=0,new_gpu_tests=0,new_dictionary_fits=0,formal_updates=0,new_generated_graphs=0)
++if __name__=='__main__':
++    p=argparse.ArgumentParser();p.add_argument('--evidence',default=str(ROOT/'evidence'));a=p.parse_args();print(json.dumps(audit(a.evidence),indent=2))
+--- a/audit_revision.py
++++ b/audit_revision.py
+@@ -6,6 +6,7 @@
+ from role_dictionary import weighted_rows,masked_score
+ from admission import assignment
+ from probe import equal
++from restore_checks import restoration_passes
+ 
+ def main(root):
+     root=pathlib.Path(root);report=dict(status='passed',dictionaries={},engineering={},source_scope='GPU source snapshots retained; later additions are launcher/summary/tests, not neural code',formal_updates=0,generated_graphs=0);cost=dict(complete_eight_cells=True,cells={},concurrency_margin=1.25,margin_meaning='UNMEASURED conservative planning factor; not eight-card throughput evidence',schedule='fixed immutable per-device FIFO queues from admission.assignment')
+@@ -26,7 +27,7 @@
+         e=root/('engineering_'+dataset);receipt=json.loads((e/'summary.json').read_text());assert receipt['status']=='engineering_completed_no_formal';rng_proofs=[];models={}
+         for arm in 'OABC':
+             label=dataset+'_'+arm;row=receipt['cells'][label];assert row['passed'] and row['actual_steps']==3;initial=torch.load(e/arm/'initial.pt',map_location='cpu');models[arm]=initial['model'];assert initial['updates']==0;rng_proofs.append(initial['rng']);proof=json.loads((e/arm/'initialization.json').read_text());assert all(proof['copied_exact'].values())
+-            same=json.loads((e/arm/'same_gpu.json').read_text());rest=json.loads((e/arm/'restore.json').read_text());assert same['passes'] and rest['passes'] and row['load_exact']
++            same=json.loads((e/arm/'same_gpu.json').read_text());rest=json.loads((e/arm/'restore.json').read_text());assert same['passes'] and rest['passes'] and rest['optimizer_exact'] is True and restoration_passes(rest) and row['load_exact']
+             report['engineering'][label]=dict(steps=3,load_exact=True,same_gpu_passed=True,same_gpu_gradient_max_abs=max(v['max_abs'] for v in same['gradients'].values()),continuation_passed=True,continuation_parameter_max_abs=max(v['max_abs'] for v in rest['parameters'].values()),optimizer_exact=rest['optimizer_exact'],rng_exact=rest['rng_exact'],parameters=row['parameters'],normal2_seconds=row['normal2_seconds'],sampling_step_seconds=row['sampling_step_seconds'],peak_allocated_mib=row['peak_allocated_mib'],peak_reserved_mib=row['peak_reserved_mib'])
+             # Nine fixed validation forwards + three checkpoint writes + explicit 10s per-cell unmeasured I/O reserve.
+             allowance=3*sum(x['total_seconds'] for x in row['full_step'])+3*row['save_seconds']+10
+--- a/package/admission.py
++++ b/package/admission.py
+@@ -9,10 +9,20 @@
+         r=json.loads((root/'selection.json').read_text())
+         if r['status']!='passed' or r['K']!=e['K'] or r['offsets']!=e['offsets'] or r['offsets'][-1]!=e['dimension']:raise ValueError('dictionary approval dimensions/status')
+ def assignment(cost,updates,devices):
+-    """One immutable FIFO queue per device, shared by budget and execution."""
++    """LPT, stable label ties; immutable per-device queues used by cost AND execution."""
++    if not devices:raise ValueError('at least one device')
+     queues=[[] for _ in devices];loads=[0.]*len(devices)
++    tasks=[]
+     for dataset in ['IMDB','PubMed']:
+         for arm in 'OABC':
+             c=cost['cells'][dataset+'_'+arm];seconds=updates*c['normal2_seconds']+2000*c['sampling_step_seconds']+c['validation_save_seconds']
+-            i=min(range(len(devices)),key=lambda i:loads[i]);queues[i].append((dataset,arm));loads[i]+=seconds
++            tasks.append((seconds,dataset,arm))
++    for seconds,dataset,arm in sorted(tasks,key=lambda x:(-x[0],x[1],x[2])):
++        i=min(range(len(devices)),key=lambda i:(loads[i],i));queues[i].append((dataset,arm));loads[i]+=seconds
+     return queues,loads
++
++def verify_summary(package_root,approval):
++    path=pathlib.Path(package_root).parent/'summarize.py'
++    expected=approval.get('summarize_sha256')
++    if not expected or sha(path)!=expected:raise ValueError('approved external summarize.py hash mismatch')
++    return path
+--- a/package/engineering_real.py
++++ b/package/engineering_real.py
+@@ -11,6 +11,7 @@
+ from hsgd.bw_preflight.common import cpu_tree,environment,schedule
+ from hsgd.computational import FrozenTypedContext
+ from hsgd.kernel import MarginalKernel
++from restore_checks import restoration_passes
+ 
+ def main():
+     p=argparse.ArgumentParser();p.add_argument('--dataset',choices=['IMDB','PubMed'],required=True);p.add_argument('--dictionaries',required=True);p.add_argument('--output',required=True);p.add_argument('--ledger',required=True);a=p.parse_args()
+@@ -63,7 +64,7 @@
+                     begin=time.perf_counter();torch.save(dict(model=cpu_tree(m.state_dict()),optimizer=cpu_tree(opt.state_dict()),rng=rng_get(rng,'cuda'),updates=1,binding=binding),folder/'after1.pt');row['save_seconds']=time.perf_counter()-begin;row['checkpoint_sha256']=sha(folder/'after1.pt')
+                 if i==1:continuous=dict(model=cpu_tree(m.state_dict()),optimizer=cpu_tree(opt.state_dict()),rng=rng_get(rng,'cuda'));lastdiag=dg
+                 if i==2:
+-                    comp=compare_diagnostics(lastdiag,dg);comp['parameters']={k:metric(v,m.state_dict()[k]) for k,v in continuous['model'].items()};current=cpu_tree(opt.state_dict());comp['optimizer_exact']=equal(continuous['optimizer'],current);comp['optimizer']={k:metric(v,flatten(current)[k]) for k,v in flatten(continuous['optimizer']).items()};comp['rng_exact']=equal(continuous['rng'],rng_get(rng,'cuda'));comp['passes']=comp['passes'] and all(v['passes'] for v in comp['parameters'].values()) and all(v['passes'] for v in comp['optimizer'].values()) and comp['rng_exact'];save(folder/'restore.json',comp);assert comp['passes'];row['restore_passed']=True
++                    comp=compare_diagnostics(lastdiag,dg);comp['parameters']={k:metric(v,m.state_dict()[k]) for k,v in continuous['model'].items()};current=cpu_tree(opt.state_dict());comp['optimizer_exact']=equal(continuous['optimizer'],current);comp['optimizer']={k:metric(v,flatten(current)[k]) for k,v in flatten(continuous['optimizer']).items()};comp['rng_exact']=equal(continuous['rng'],rng_get(rng,'cuda'));comp['passes']=comp['passes'] and comp['optimizer_exact'] and restoration_passes(comp);save(folder/'restore.json',comp);assert comp['passes'];row['restore_passed']=True
+             row.update(passed=True,updates=hist,normal2_seconds=max(x['normal2_seconds'] for x in hist),sampling_step_seconds=max(x['total_seconds'] for x in timings),validation_save_seconds=None,peak_allocated_mib=torch.cuda.max_memory_allocated()/2**20,peak_reserved_mib=torch.cuda.max_memory_reserved()/2**20,peak_rss_mib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024,parameters=proof['parameters'])
+             save(out/'summary.json',result);del m,opt,initial,continuous,lastdiag,dg;gc.collect();torch.cuda.empty_cache();print(label,'PASS',row['actual_steps'],flush=True)
+         result['status']='engineering_completed_no_formal'
+--- a/package/evaluation.py
++++ b/package/evaluation.py
+@@ -5,16 +5,25 @@
+ 
+ def evaluate(case,edges,type_names,check=lambda:None):
+     result=graph(case,edges,type_names,check);reference=graph(case,case['clean'],type_names,check);comparison=compare(result,reference)
+-    types=case['space'].types;w1=joint=0.;per_type={}
++    types=case['space'].types;w1=all_columns=joint=0.;per_type={}
+     for typ,name in enumerate(type_names):
+         rel=[r for r,pair in enumerate(case['space'].pairs) if typ in pair]
+         weight=float(np.mean(types==typ));value=float(np.mean(np.array(comparison['typed_relation_degree_W1'][name])[rel]))
+         w1+=weight*value;joint+=weight*comparison['joint_relation_degree_TV'][name]
++        values=np.asarray(comparison['typed_relation_degree_W1'][name],dtype=float)
++        nonincident=[r for r in range(case['n_families']) if r not in rel]
++        if np.any(values[nonincident]!=0):raise ValueError('nonincident relation W1 must be zero')
++        all_columns+=weight*float(np.mean(values))
+         per_type[name]=dict(weight=weight,incident_relations=rel,mean_incident_relation_W1=value)
+     tri_tv=tv(Counter(result['typed_triangles']),Counter(reference['typed_triangles']))
+     result.update(comparison=comparison,primary=dict(type_weighted_relation_degree_W1=w1,type_weighted_joint_degree_TV=joint,typed_triangle_composition_TV=tri_tv),weight_definition=per_type)
++    ratio=.4 if len(type_names)==4 and case['n_families']==10 and all(len(x['incident_relations'])==4 for x in per_type.values()) else None
++    if ratio is not None and not np.isclose(all_columns,ratio*w1,atol=1e-12,rtol=1e-12):raise ValueError('incident4/all10 W1 consistency failure')
++    result['W1_definitions']=dict(main='incident4',incident4=w1,all10_compat=all_columns,all10_to_incident4_ratio=ratio,scope='all10 names apply to the two frozen 4-type/10-family datasets; toy schemas use actual column count')
+     if type_names==['Director','Actor','Movie','Genre']:
+         aa=case['space'].pairs.index((1,1));result['IMDB_focus']=dict(AA=result['family_edges'][aa],DAA=result['typed_triangles'].get(str((0,1,1)),0),AAM=result['typed_triangles'].get(str((1,1,2)),0))
++        reference['IMDB_focus']=dict(AA=reference['family_edges'][aa],DAA=reference['typed_triangles'].get(str((0,1,1)),0),AAM=reference['typed_triangles'].get(str((1,1,2)),0))
++    result['reference_metrics']=reference
+     return result
+ 
+ def paired_table(rows):
+--- a/package/experiment_contract.py
++++ b/package/experiment_contract.py
+@@ -52,15 +52,14 @@
+     return model,case,cfg,dict(seed=seed,module_seed=module_seed,copied_exact=proof,tensor_sha256=hashes,parameters=sum(p.numel() for p in model.parameters()))
+ 
+ def recommend_tier(cost,remaining,parallel_devices):
+-    """Measured per-cell cost; conservative dataset/arm-independent wave ordering."""
++    """Component-cost proposal using exactly the launcher's fixed LPT queues."""
+     if not cost.get('complete_eight_cells') or parallel_devices<1:raise ValueError('no complete engineering cost gate')
+     values=cost['cells'];labels=[d+'_'+a for d in ['IMDB','PubMed'] for a in 'OABC']
+     if set(values)!=set(labels):raise ValueError('missing cells')
+     result=[]
+     for updates in [2000,1000,500]:
+-        durations=[values[k]['normal2_seconds']*updates+2*1000*values[k]['sampling_step_seconds']+values[k]['validation_save_seconds'] for k in labels]
+-        loads=[0.]*min(parallel_devices,8)
+-        for value in durations:loads[loads.index(min(loads))]+=value
++        from admission import assignment
++        queues,loads=assignment(cost,updates,list(range(min(parallel_devices,8))))
+         total=max(loads)*cost['concurrency_margin']+1200+900
+         result.append(dict(updates=updates,seconds=total,fits=total<=remaining,unmeasured_concurrency_margin=cost['concurrency_margin']))
+     return next((r for r in result if r['fits']),None),result
+--- a/package/launch.py
++++ b/package/launch.py
+@@ -1,6 +1,6 @@
+ """Lightweight launch gate. No torch import, no fitting, no implicit authorization."""
+ import argparse,pathlib,json,time,hashlib,subprocess,sys,os,signal
+-from admission import dictionaries as check_dictionaries,assignment
++from admission import dictionaries as check_dictionaries,assignment,verify_summary
+ 
+ def sha(p):return hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest()
+ def gate(root,ledger_path,approval_path,protocol_path,dictionaries,cost_path):
+@@ -12,6 +12,7 @@
+     files={str(p.relative_to(root)):sha(p) for p in root.rglob('*') if p.is_file() and '__pycache__' not in str(p) and p.suffix in ('.py','.json','.npz')}
+     source=hashlib.sha256(json.dumps(files,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+     if approval.get('source_sha256')!=source:raise ValueError('reviewed source differs')
++    verify_summary(root,approval)
+     check_dictionaries(dictionaries,approval)
+     for dataset in protocol['datasets']:
+         d=pathlib.Path(dictionaries)/('dictionary_'+dataset);r=json.loads((d/'selection.json').read_text())
+@@ -21,6 +22,39 @@
+     if approval.get('updates') not in protocol['allowed_update_tiers']:raise ValueError('update tier')
+     if any(not c.get('passed') for c in cost['cells'].values()) or len(cost['cells'])!=8:raise RuntimeError('engineering checks not all passed')
+     return ledger,approval,cost
++
++def run_summary(root,out,approval,deadline):
++    """Best effort on both success and failure; never raises over the primary cause."""
++    begin=time.time();receipt=dict(status='not_started',started_epoch=begin)
++    try:
++        if deadline-begin<=2:return dict(status='skipped_insufficient_delivery_time',remaining_seconds=deadline-begin)
++        script=verify_summary(root,approval)
++        with (out/'summary_process.log').open('xb') as log:
++            completed=subprocess.run([sys.executable,str(script),'--run',str(out),'--output',str(out/'unified_evaluation.json'),'--deadline-epoch',str(deadline-1)],stdout=log,stderr=subprocess.STDOUT,timeout=max(.01,deadline-time.time()-1))
++        receipt['exit_code']=completed.returncode
++        verify_summary(root,approval)
++        path=out/'unified_evaluation.json'
++        if path.exists():
++            result=json.loads(path.read_text());receipt.update(output_sha256=sha(path),reported_status=result.get('status'))
++            if completed.returncode==0 and result.get('status')=='complete':receipt['status']='complete'
++            elif completed.returncode==2 and result.get('status')=='incomplete':receipt['status']='incomplete_summary_saved'
++            else:receipt['status']='failed_or_inconsistent_summary'
++        else:receipt['status']='failed_no_summary_output'
++    except subprocess.TimeoutExpired as exc:receipt.update(status='timeout',error=repr(exc))
++    except Exception as exc:receipt.update(status='failed',error=repr(exc))
++    receipt['seconds']=time.time()-begin
++    return receipt
++
++def final_receipt(out,finished,tasks,failed,failures,approval,ledger,evaluation):
++    execution_complete=not failed and len(finished)==8 and all(r['exit_code']==0 for r in finished)
++    if execution_complete:
++        for row in finished:
++            try:
++                r=json.loads((out/row['cell']/'summary.json').read_text())
++                if r.get('status')!='complete' or r.get('completed_updates')!=approval['updates'] or r.get('completed_chains')!=2:raise ValueError('worker completion contract')
++            except Exception as exc:execution_complete=False;failures.append(dict(cell=row['cell'],error=repr(exc),stage='worker_receipt'))
++    complete=execution_complete and evaluation['status']=='complete'
++    return dict(status='complete' if complete else 'incomplete',execution_complete=execution_complete,jobs=finished,unstarted=tasks,primary_failures=failures,evaluation=evaluation,elapsed_since_activation=time.time()-ledger['start_epoch'])
+ 
+ def main():
+     p=argparse.ArgumentParser();p.add_argument('mode',choices=['formal','gate']);p.add_argument('--ledger',required=True);p.add_argument('--approval',required=True);p.add_argument('--protocol',required=True);p.add_argument('--dictionary-dir',required=True);p.add_argument('--cost',required=True);p.add_argument('--output',required=True);p.add_argument('--gpu-uuids',nargs='+',required=True);args=p.parse_args()
+@@ -43,11 +77,13 @@
+     expected=max(loads)*cost['concurrency_margin']+2100
+     if expected>ledger['deadline_epoch']-time.time():raise TimeoutError('reviewed tier no longer fits; require explicit recorded pre-start lower tier')
+     if args.mode=='gate':print(json.dumps(dict(status='gate_passed_no_execution',expected_seconds=expected)));return 0
+-    out=pathlib.Path(args.output);out.mkdir(parents=True,exist_ok=False);stop=[False];running={};finished=[];failed=False
++    out=pathlib.Path(args.output);out.mkdir(parents=True,exist_ok=False);stop=[False];running={};finished=[];failed=False;failures=[]
++    (out/'schedule.json').write_text(json.dumps(dict(queues=tasks,loads_seconds=loads,expected_seconds=expected,policy='LPT; fixed FIFO per device'),indent=2))
+     for sig in [signal.SIGINT,signal.SIGTERM,signal.SIGHUP]:signal.signal(sig,lambda s,f:stop.__setitem__(0,True))
+     try:
+         while any(tasks.values()) or running:
+-            if stop[0] or (out/'STOP').exists() or time.time()>=ledger['deadline_epoch']-1200:failed=True;break
++            if stop[0] or (out/'STOP').exists() or time.time()>=ledger['deadline_epoch']-1200:
++                failed=True;failures.append(dict(stage='supervision',reason='signal' if stop[0] else 'STOP' if (out/'STOP').exists() else 'delivery_reserve_deadline'));break
+             for device in devices:
+                 if device not in running and tasks[device] and not failed:
+                     dataset,arm=tasks[device].pop(0);label=dataset+'_'+arm;log=(out/(label+'.log')).open('xb');env=dict(os.environ,CUDA_VISIBLE_DEVICES=device,OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1',MKL_NUM_THREADS='1',CUBLAS_WORKSPACE_CONFIG=':4096:8')
+@@ -61,25 +97,31 @@
+                 rc=process.poll()
+                 if rc is not None:
+                     log.close();finished.append(dict(cell=label,exit_code=rc));del running[device]
+-                    if rc!=0:failed=True
++                    if rc!=0:
++                        failed=True;failure=dict(stage='worker',cell=label,exit_code=rc)
++                        try:failure['worker_receipt']=json.loads((out/label/'summary.json').read_text())
++                        except Exception as exc:failure['receipt_error']=repr(exc)
++                        failures.append(failure)
+             if failed:break
+             time.sleep(.25)
++    except BaseException as exc:
++        failed=True;failures.append(dict(stage='launcher',error=repr(exc)))
+     finally:
+         for process,log,label in running.values():
+-            if process.poll() is None:os.killpg(process.pid,signal.SIGTERM)
++            try:
++                if process.poll() is None:os.killpg(process.pid,signal.SIGTERM)
++            except ProcessLookupError:pass
++            except Exception as exc:failures.append(dict(stage='cleanup_signal',cell=label,error=repr(exc)));failed=True
+         cleanup_deadline=min(time.time()+30,ledger['deadline_epoch'])
+         for process,log,label in running.values():
+             try:process.wait(timeout=max(.1,cleanup_deadline-time.time()))
+-            except subprocess.TimeoutExpired:os.killpg(process.pid,signal.SIGKILL);process.wait()
++            except subprocess.TimeoutExpired:
++                try:os.killpg(process.pid,signal.SIGKILL)
++                except ProcessLookupError:pass
++                process.wait()
+             log.close();finished.append(dict(cell=label,exit_code=process.returncode,terminated=True))
+-        complete=not failed and len(finished)==8 and all(r['exit_code']==0 for r in finished)
+-        if complete:
+-            for row in finished:
+-                receipt=json.loads((out/row['cell']/'summary.json').read_text())
+-                if receipt.get('status')!='complete' or receipt.get('completed_updates')!=approval['updates'] or receipt.get('completed_chains')!=2:complete=False
+-        if complete:
+-            evaluation=subprocess.run([sys.executable,str(root.parent/'summarize.py'),'--run',str(out),'--output',str(out/'unified_evaluation.json')],timeout=max(.1,ledger['deadline_epoch']-time.time()))
+-            complete=evaluation.returncode==0
+-        (out/'launcher_summary.json').write_text(json.dumps(dict(status='complete' if complete else 'incomplete',jobs=finished,unstarted=tasks,elapsed_since_activation=time.time()-ledger['start_epoch']),indent=2))
++        evaluation=run_summary(root,out,approval,ledger['deadline_epoch'])
++        receipt=final_receipt(out,finished,tasks,failed,failures,approval,ledger,evaluation);complete=receipt['status']=='complete'
++        (out/'launcher_summary.json').write_text(json.dumps(receipt,indent=2))
+     return 0 if complete else 2
+ if __name__=='__main__':raise SystemExit(main())
+--- a/package/normal2.py
++++ b/package/normal2.py
+@@ -7,6 +7,13 @@
+     return [train_input(case,cfg['T'],1,cfg['seed'],2*position+j,rng,force_t=force_t) for j in range(2)]
+ def sync(device):
+     if str(device).startswith('cuda'):torch.cuda.synchronize(device)
++def update_observation(before,after,step):
++    """A watched tensor is a diagnostic, not an every-update success criterion."""
++    changed=float((after.detach()-before).abs().max())
++    if not np.isfinite(changed):raise FloatingPointError('nonfinite observed parameter change')
++    return dict(changed=changed,observed_parameter='backbone.lin_out_E.weight',
++                observed_parameter_changed=bool(changed>0) if step else None,
++                update_note='watched_parameter_unchanged_not_failure' if step and changed==0 else None)
+ def normal2(model,opt,case,inputs,T,device,step=True,diagnostics=None):
+     if len(inputs)!=2:raise ValueError('exactly two inputs')
+     sync(device);start=time.perf_counter();opt.zero_grad(set_to_none=True);model.train()
+@@ -37,7 +44,6 @@
+     before=model.backbone.lin_out_E.weight.detach().clone();begin=time.perf_counter()
+     if step:opt.step()
+     sync(device);optimizer_seconds=time.perf_counter()-begin
+-    changed=float((model.backbone.lin_out_E.weight-before).abs().max())
+-    if step and not changed>0:raise RuntimeError('expected parameter did not change')
++    observation=update_observation(before,model.backbone.lin_out_E.weight,step)
+     return dict(loss=total,inputs=rows,gradient_norm=norm,optimizer_seconds=optimizer_seconds,
+-                changed=changed,normal2_seconds=time.perf_counter()-start,optimizer_steps=int(step),feature_calls=model.feature_calls)
++                **observation,normal2_seconds=time.perf_counter()-start,optimizer_steps=int(step),feature_calls=model.feature_calls)
+--- /dev/null
++++ b/package/restore_checks.py
+@@ -0,0 +1,9 @@
++"""Strict continuation gate. Tolerances never replace exact optimizer state."""
++def restoration_passes(record):
++    try:
++        return (record['optimizer_exact'] is True and record['rng_exact'] is True
++            and record['loss']['passes'] is True and len(record['inputs'])==2
++            and all(row[key]['passes'] is True for row in record['inputs'] for key in ['logits','p0','loss'])
++            and all(record[group] and all(v['passes'] is True for v in record[group].values())
++                    for group in ['gradients','parameters','optimizer']))
++    except (KeyError,TypeError):return False
+--- /dev/null
++++ b/propose_budget.py
+@@ -0,0 +1,37 @@
++"""Read-only 1000-update proposal, using the launcher's exact LPT queues. No admission."""
++import argparse,hashlib,json,pathlib,sys
++ROOT=pathlib.Path(__file__).resolve().parent
++sys.path.insert(0,str(ROOT/'package'))
++from admission import assignment
++def sha(p):return hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest()
++def proposal(cost_path,resources_path):
++    cost=json.loads(pathlib.Path(cost_path).read_text());resources=json.loads(pathlib.Path(resources_path).read_text());samples=resources['gpu_samples'];devices=[];excluded=[]
++    parsed=[]
++    for sample in samples:
++        if sample['returncode']!=0 or sample['compute_returncode']!=0:raise ValueError('resource query failed')
++        parsed.append({r.split(',')[1].strip():[x.strip() for x in r.split(',')] for r in sample['output'].splitlines()})
++    for uuid,row in parsed[-1].items():
++        idle=all(uuid in s and '2080 Ti' in s[uuid][2] and int(s[uuid][4])==0 and int(s[uuid][5])==0 for s in parsed)
++        process_absent=all(uuid not in s['compute_processes'] for s in samples)
++        if idle and process_absent:devices.append(uuid)
++        else:excluded.append(dict(uuid=uuid,index=int(row[0]),reason='not zero utilization/memory in every read-only snapshot, or compute process present'))
++    cells={}
++    for label,row in cost['cells'].items():
++        cells[label]=dict(training_seconds=1000*row['normal2_seconds'],two_full_chains_seconds=2000*row['sampling_step_seconds'],validation_save_seconds=row['validation_save_seconds'],normal2_component_seconds=row['normal2_seconds'],full_step_component_seconds=row['sampling_step_seconds'])
++        cells[label]['total_component_seconds']=sum(cells[label][k] for k in ['training_seconds','two_full_chains_seconds','validation_save_seconds'])
++    scenarios=[]
++    for name,ids in [('current_snapshot',devices),('conditional_eight_idle_cards',list(parsed[-1]))]:
++        queues,loads=assignment(cost,1000,ids);per_device=[]
++        for uuid,q,load in zip(ids,queues,loads):
++            pieces={k:sum(cells[d+'_'+a][k] for d,a in q) for k in ['training_seconds','two_full_chains_seconds','validation_save_seconds']}
++            per_device.append(dict(uuid=uuid,queue=[d+'_'+a for d,a in q],**pieces,total_component_seconds=load))
++        critical=max(loads);planned=critical*cost['concurrency_margin']+2100
++        scenarios.append(dict(name=name,requires_new_idle_check=True,cards=len(ids),per_device=per_device,component_critical_path_seconds=critical,unmeasured_concurrency_allowance_seconds=critical*(cost['concurrency_margin']-1),evaluation_delivery_reserve_seconds=1200,fault_exit_reserve_seconds=900,total_proposed_seconds=planned,total_proposed_minutes=planned/60,proposed_rounded_budget_minutes=int((planned+299)//300)*5))
++    result=dict(scope='PROPOSAL ONLY; NOT APPROVAL',updates_per_model=1000,models=8,chains=16,T=1000,source_cost_sha256=sha(cost_path),resource_snapshot_sha256=sha(resources_path),cells=cells,total_task_component_seconds=sum(c['total_component_seconds'] for c in cells.values()),confirmed_idle_at_snapshot=devices,excluded_at_snapshot=excluded,queue_policy='admission.assignment LPT; descending total seconds, stable label ties, next minimum-load device; FIFO per device',scenarios=scenarios,measurement_scope='historical bounded single-GPU component measurements, two GPU processes with four sequential cells each; not 7/8-GPU contention measurement',limits=['25% planning margin is unmeasured, not guaranteed concurrency performance','forward-noise probe states do not bound evolving free-generation CN/NNLS cost','validation/save is component extrapolation with 10 seconds/cell IO allowance, not measured formal throughput','resource snapshot is not a reservation; recheck and recompute identical queue before any separately authorized run'],formal_authorized=False,formal_start=None,formal_deadline=None)
++    followup=pathlib.Path(resources_path).parent/'resource_followup.json'
++    if followup.exists():
++        result['resource_followup']=json.loads(followup.read_text());result['resource_followup_sha256']=sha(followup)
++        result['preferred_scenario']=result['resource_followup']['preferred_budget_scenario']
++    return result
++if __name__=='__main__':
++    p=argparse.ArgumentParser();p.add_argument('--cost',default=str(ROOT/'evidence/cost_proposal.json'));p.add_argument('--resources',default=str(ROOT/'evidence/current_resources.json'));a=p.parse_args();print(json.dumps(proposal(a.cost,a.resources),indent=2))
+--- a/summarize.py
++++ b/summarize.py
+@@ -1,50 +1,102 @@
+-"""Independent raw-graph evaluation; missing/failed cells remain explicit.
+-Does not train, sample, repair, choose checkpoints or silently average successes.
+-"""
+-import argparse,pathlib,json,sys,hashlib
++"""Raw/reference/error summaries; missing metrics never disappear or get averaged away."""
++import argparse,pathlib,json,sys,hashlib,math,time,itertools
+ import numpy as np
+ sys.path.insert(0,str(pathlib.Path(__file__).parent/'package'))
+ from prepare import load_case
+ from evaluation import evaluate
+-
+-def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
++SEEDS=(2026102821,2026102822)
++DISTRIBUTIONS=('degree_W1_incident4','degree_W1_all10_compat','joint_degree_TV','typed_triangle_composition_TV','MP1_composition_TV','MP2_composition_TV','MP3_composition_TV')
++CLOSURE=('path_numerator','path_denominator','path_ratio','unique_pair_numerator','unique_pair_denominator','unique_pair_ratio')
++def sha(p):return hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest()
+ def scalars(m):
+-    r=dict(m['primary']);r.update({k:m[k] for k in ['edges','triangles','lcc','isolates','maximum_degree','average_clustering']});r['components']=len(m['component_sizes'])
+-    r.update({'family_edges_'+str(i):v for i,v in enumerate(m['family_edges'])})
+-    if m['imdb_closure']:
+-        r.update({'closure_'+k:v for k,v in m['imdb_closure'].items() if v is not None})
+-    for i,row in enumerate(m['mp']):r['MP'+str(i+2)+'_total']=row['total']
+-    if 'IMDB_focus' in m:r.update(m['IMDB_focus'])
++    r={k:m.get(k) for k in ['nodes','edges','triangles','lcc','isolates','maximum_degree','average_clustering','assortativity']}
++    r['components']=len(m['component_sizes']) if m.get('component_sizes') is not None else None
++    for i,v in enumerate(m.get('family_edges',[])):r['family_edges_'+str(i)]=v
++    for i in range(3):r['MP'+str(i+1)+'_total']=m['mp'][i].get('total') if len(m.get('mp',[]))>i and m['mp'][i] is not None else None
++    for pattern in itertools.combinations_with_replacement(range(len(m.get('typed_degree',{}))),3):
++        r['typed_triangle_'+str(pattern)]=(m.get('typed_triangles') or {}).get(str(pattern),0) if m.get('typed_triangles') is not None else None
++    for name,t in m.get('typed_degree',{}).items():
++        r['type_'+name+'_nodes']=t.get('count')
++        for i,col in enumerate(t.get('by_relation',[])):
++            for key in ['mean','max','zero','low_le1','p90','p99']:r['type_'+name+'_relation_'+str(i)+'_'+key]=col.get(key)
++    if m.get('imdb_closure') is not None:r.update({'closure_'+k:m['imdb_closure'].get(k) for k in CLOSURE})
++    if 'IMDB_focus' in m:r.update({k:m['IMDB_focus'].get(k) for k in ['AA','DAA','AAM']})
+     return r
+-
+-def collect(root):
+-    root=pathlib.Path(root);rows={};cells={};contrasts=[]
++def finite(v):return isinstance(v,(int,float,np.integer,np.floating)) and not isinstance(v,(bool,np.bool_)) and math.isfinite(float(v))
++def reason(m,k):
++    if k.startswith('closure_') and k.endswith('_ratio'):
++        denom='unique_pair_denominator' if 'unique_pair' in k else 'path_denominator'
++        if (m.get('imdb_closure') or {}).get(denom)==0:return 'undefined_zero_closure_denominator'
++    if k=='assortativity' and m.get(k) is None:return 'undefined_constant_degree_or_no_edges'
++    return 'missing_or_nonfinite_metric'
++def graph_summary(metrics,reference):
++    raw=scalars(metrics);ref=scalars(reference);raw={k:raw.get(k) for k in ref}
++    dist={k:None for k in DISTRIBUTIONS};w=metrics.get('W1_definitions',{});p=metrics.get('primary',{});comparison=metrics.get('comparison',{})
++    dist.update(degree_W1_incident4=w.get('incident4'),degree_W1_all10_compat=w.get('all10_compat'),joint_degree_TV=p.get('type_weighted_joint_degree_TV'),typed_triangle_composition_TV=p.get('typed_triangle_composition_TV'))
++    for i,value in enumerate(comparison.get('mp_frequency_TV',[])[:3]):dist['MP'+str(i+1)+'_composition_TV']=value
++    groups=dict(raw=raw,reference=ref,absolute_error={},distribution_error=dist);undefined={g:{} for g in groups}
++    for g,m in [('raw',metrics),('reference',reference)]:
++        for k,v in groups[g].items():
++            if not finite(v):groups[g][k]=None;undefined[g][k]=reason(m,k)
++    for k in ref:
++        if groups['raw'][k] is None or groups['reference'][k] is None:groups['absolute_error'][k]=None;undefined['absolute_error'][k]='undefined_or_missing_raw_or_reference'
++        else:groups['absolute_error'][k]=abs(groups['raw'][k]-groups['reference'][k])
++    for k,v in dist.items():
++        if not finite(v):dist[k]=None;undefined['distribution_error'][k]='missing_or_nonfinite_distribution_error'
++    return dict(**groups,undefined=undefined)
++def strict_mean(rows):
++    result={};undefined={}
++    for group in sorted(set().union(*(r.keys() for r in rows))):
++        if group=='undefined':continue
++        result[group]={};undefined[group]={};keys=sorted(set().union(*(r.get(group,{}) for r in rows)))
++        for k in keys:
++            values=[r.get(group,{}).get(k) for r in rows]
++            if not all(finite(v) for v in values):result[group][k]=None;undefined[group][k]='one_or_more_required_seed_metrics_undefined_or_missing'
++            else:result[group][k]=sum(values)/len(values)
++    result['undefined']=undefined;return result
++def paired(left,right,template):
++    fields={'raw_difference':'raw','absolute_error_difference':'absolute_error','distribution_error_difference':'distribution_error'};out={};undefined={}
++    for target,source in fields.items():
++        keys=set(template[source]) | set((left or {}).get(source,{})) | set((right or {}).get(source,{}));out[target]={};undefined[target]={}
++        for k in sorted(keys):
++            a=(left or {}).get(source,{}).get(k);b=(right or {}).get(source,{}).get(k)
++            if not finite(a) or not finite(b):out[target][k]=None;undefined[target][k]='left_or_right_graph_or_metric_undefined_or_missing'
++            else:out[target][k]=a-b
++    return dict(**out,undefined=undefined)
++def collect(root,check=lambda:None):
++    root=pathlib.Path(root);rows={};cells={};contrasts=[];references={}
+     for dataset in ['IMDB','PubMed']:
+-        case,cfg=load_case(dataset)
++        check();case,cfg=load_case(dataset);names=cfg['datasets'][dataset]['type_names'];reference_eval=evaluate(case,case['clean'],names,check);reference=reference_eval['reference_metrics'];references[dataset]=reference;template=graph_summary(reference_eval,reference)
+         for arm in 'OABC':
+-            label=dataset+'_'+arm;folder=root/label;summary=folder/'summary.json';status=json.loads(summary.read_text()) if summary.exists() else dict(status='not_started');entry=dict(worker_status=status,graphs={},mean=None,diversity=None);cells[label]=entry;sets=[]
+-            for seed in [2026102821,2026102822]:
+-                sample=folder/('sample_'+str(seed));g=sample/'graph.npz';binding=sample/'binding.json'
+-                if not g.exists() or not binding.exists():entry['graphs'][str(seed)]=dict(status='missing_or_incomplete');continue
++            check();label=dataset+'_'+arm;folder=root/label;summary=folder/'summary.json'
++            try:status=json.loads(summary.read_text()) if summary.exists() else dict(status='not_started')
++            except Exception as exc:status=dict(status='invalid_worker_receipt',error=repr(exc))
++            entry=dict(worker_status=status,graphs={},mean=None,mean_reason='required_two_graphs_not_available',diversity=None);cells[label]=entry;sets=[]
++            for seed in SEEDS:
++                check();sample=folder/('sample_'+str(seed));g=sample/'graph.npz';binding=sample/'binding.json'
++                if not g.exists() or not binding.exists():entry['graphs'][str(seed)]=dict(status='not_started' if status.get('status')=='not_started' else 'missing_or_incomplete',reason='graph_or_binding_missing');continue
+                 try:
+                     b=json.loads(binding.read_text());assert b['seed']==seed and b['graph_sha256']==sha(g);assert b['checkpoint_sha256']==sha(folder/'final.pt');assert b['binding']['arm']==arm
+                     z=np.load(g,allow_pickle=False);np.testing.assert_array_equal(z['types'],case['space'].types);np.testing.assert_array_equal(z['schema'],case['space'].pairs)
+-                    e=z['edges'];np.testing.assert_array_equal(case['space'].encode(e)[0],z['families']);metrics=evaluate(case,e,cfg['datasets'][dataset]['type_names']);entry['graphs'][str(seed)]=dict(status='evaluated',sha256=sha(g),metrics=metrics);rows[(dataset,arm,seed)]=scalars(metrics);sets.append(set(map(tuple,e.T)))
++                    e=z['edges'];np.testing.assert_array_equal(case['space'].encode(e)[0],z['families']);metrics=evaluate(case,e,names,check);values=graph_summary(metrics,reference)
++                    entry['graphs'][str(seed)]=dict(status='evaluated',sha256=sha(g),raw_metrics=metrics,reference_metrics=reference,summary=values);rows[(dataset,arm,seed)]=values;sets.append(set(map(tuple,e.T)))
++                except TimeoutError:raise
+                 except Exception as exc:entry['graphs'][str(seed)]=dict(status='failed_evaluation',error=repr(exc))
+             if len(sets)==2:
+-                keys=set.intersection(*(set(rows[(dataset,arm,s)]) for s in [2026102821,2026102822]));entry['mean']={k:sum(rows[(dataset,arm,s)][k] for s in [2026102821,2026102822])/2 for k in keys}
+-                union=len(sets[0]|sets[1]);entry['diversity']=dict(labelled_graphs_equal=sets[0]==sets[1],edge_symmetric_difference=len(sets[0]^sets[1]),edge_jaccard=len(sets[0]&sets[1])/union if union else 1.,scope='two labelled samples only; no isomorphism or population-diversity certification')
++                entry['mean']=strict_mean([rows[(dataset,arm,s)] for s in SEEDS]);entry['mean_reason']=None
++                union=len(sets[0]|sets[1]);entry['diversity']=dict(labelled_graphs_equal=sets[0]==sets[1],edge_symmetric_difference=len(sets[0]^sets[1]),edge_jaccard=len(sets[0]&sets[1])/union if union else 1.,scope='two labelled samples; no isomorphism or population-diversity claim')
+         for left,right in [('A','O'),('B','O'),('B','A'),('C','B'),('C','A')]:
+             pairs=[]
+-            for seed in [2026102821,2026102822]:
+-                a=rows.get((dataset,left,seed));b=rows.get((dataset,right,seed));pairs.append(dict(seed=seed,status='complete' if a is not None and b is not None else 'missing',difference={k:a[k]-b[k] for k in a.keys()&b.keys()} if a is not None and b is not None else None))
+-            mean=None
+-            if all(x['status']=='complete' for x in pairs):mean={k:sum(x['difference'][k] for x in pairs)/2 for k in pairs[0]['difference'].keys()&pairs[1]['difference'].keys()}
+-            contrasts.append(dict(dataset=dataset,contrast=left+'-'+right,pairs=pairs,mean=mean))
++            for seed in SEEDS:
++                a=rows.get((dataset,left,seed));b=rows.get((dataset,right,seed));pairs.append(dict(seed=seed,status='complete_graph_pair' if a is not None and b is not None else 'missing_graph',difference=paired(a,b,template)))
++            complete=all(x['status']=='complete_graph_pair' for x in pairs)
++            contrasts.append(dict(dataset=dataset,contrast=left+'-'+right,pairs=pairs,mean=strict_mean([x['difference'] for x in pairs]) if complete else None,mean_reason=None if complete else 'one_or_more_required_seed_graphs_missing'))
+     complete=len(rows)==16 and all(c['worker_status'].get('status')=='complete' for c in cells.values())
+-    return dict(status='complete' if complete else 'incomplete',evaluated_graphs=len(rows),expected_graphs=16,cells=cells,contrasts=contrasts,W1_definition='per-type mean of 4 incident schema relations, node-count weighted; old E07 averaged all10. For same schema and zero nonincident dimensions, old_all10 = 0.4 * this_incident4. Main definition requires approval before formal run.',quality_claim='one training seed/dataset, two graphs/model, exploratory only')
+-
++    return dict(status='complete' if complete else 'incomplete',evaluated_graphs=len(rows),expected_graphs=16,references=references,cells=cells,contrasts=contrasts,W1_definition='main degree_W1_incident4; compatibility degree_W1_all10_compat = 0.4 * incident4 for these schemas, independently checked',interpretation='raw count differences are not improvement; absolute-error or distribution-error differences <0 indicate lower error for that metric, not global superiority',quality_claim='one training seed/dataset, two graphs/model, exploratory only')
+ if __name__=='__main__':
+-    p=argparse.ArgumentParser();p.add_argument('--run',required=True);p.add_argument('--output',required=True);a=p.parse_args();result=collect(a.run)
+-    with pathlib.Path(a.output).open('x') as f:json.dump(result,f,indent=2)
++    p=argparse.ArgumentParser();p.add_argument('--run',required=True);p.add_argument('--output',required=True);p.add_argument('--deadline-epoch',type=float);a=p.parse_args()
++    def check():
++        if a.deadline_epoch is not None and time.time()>=a.deadline_epoch:raise TimeoutError('summary deadline reached')
++    check();result=collect(a.run,check);check()
++    with pathlib.Path(a.output).open('x') as f:json.dump(result,f,indent=2,allow_nan=False)
+     raise SystemExit(0 if result['status']=='complete' else 2)
+--- /dev/null
++++ b/test_summary_revision.py
+@@ -0,0 +1,158 @@
++"""Only CPU engineering fixtures; no denoiser, fitting, optimizer or sampling."""
++import copy,hashlib,itertools,json,pathlib,sys,tempfile,time,unittest
++from unittest.mock import patch
++import numpy as np
++ROOT=pathlib.Path(__file__).resolve().parent
++sys.path.insert(0,str(ROOT/'package'))
++import summarize as summary
++import launch,admission
++from experiment_contract import recommend_tier
++from restore_checks import restoration_passes
++from evaluation import evaluate
++from hsgd.bw_preflight.common import make_case
++
++NAMES=['Director','Actor','Movie','Genre']
++def fixture():
++    return make_case(np.arange(4),np.array([[0,1,2],[1,2,3]]),tuple(itertools.combinations_with_replacement(range(4),2)))
++def loader(dataset):return fixture(),{'datasets':{dataset:{'type_names':NAMES}}}
++def value(edges=None):
++    c=fixture();m=evaluate(c,c['clean'] if edges is None else edges,NAMES)
++    return summary.graph_summary(m,m['reference_metrics']),m
++def save_graph(root,dataset,arm,seed):
++    c=fixture();folder=root/(dataset+'_'+arm);folder.mkdir(exist_ok=True)
++    (folder/'final.pt').write_bytes(b'ENGINEERING FIXTURE ONLY; NOT A MODEL')
++    (folder/'summary.json').write_text(json.dumps(dict(status='complete',completed_updates=1000,completed_chains=2)))
++    sample=folder/('sample_'+str(seed));sample.mkdir()
++    np.savez(sample/'graph.npz',types=c['space'].types,schema=c['space'].pairs,edges=c['clean'],families=c['space'].encode(c['clean'])[0])
++    (sample/'binding.json').write_text(json.dumps(dict(seed=seed,graph_sha256=summary.sha(sample/'graph.npz'),checkpoint_sha256=summary.sha(folder/'final.pt'),binding={'arm':arm})))
++def record():
++    good={'passes':True}
++    return dict(optimizer_exact=True,rng_exact=True,loss=good,inputs=[{k:good for k in ['logits','p0','loss']} for _ in range(2)],**{g:{'x':good} for g in ['gradients','parameters','optimizer']})
++def dummy_script(root,body):
++    package=root/'package';package.mkdir();script=root/'summarize.py';script.write_text(body)
++    out=root/'out';out.mkdir();return package,out,{'summarize_sha256':summary.sha(script)}
++
++class SummaryRevision(unittest.TestCase):
++    def test_path_labels_in_full_summary_output(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            root=pathlib.Path(tmp);save_graph(root,'IMDB','O',summary.SEEDS[0])
++            with patch.object(summary,'load_case',loader):r=summary.collect(root)
++        raw=r['cells']['IMDB_O']['graphs'][str(summary.SEEDS[0])]['summary']['raw']
++        self.assertEqual([raw['MP%d_total'%i] for i in [1,2,3]],[3,2,1]);self.assertNotIn('MP4_total',raw)
++    def test_absolute_error_before_mean(self):
++        a,m=value();b=copy.deepcopy(a);a['raw']['edges']=2;b['raw']['edges']=4
++        for x in [a,b]:x['absolute_error']['edges']=abs(x['raw']['edges']-x['reference']['edges'])
++        mean=summary.strict_mean([a,b]);self.assertEqual(mean['raw']['edges'],3);self.assertEqual(mean['absolute_error']['edges'],1)
++    def test_pair_raw_and_error_are_separate(self):
++        a,_=value();b=copy.deepcopy(a);a['raw']['edges']=4;a['absolute_error']['edges']=1;b['raw']['edges']=2;b['absolute_error']['edges']=1
++        r=summary.paired(a,b,a);self.assertEqual(r['raw_difference']['edges'],2);self.assertEqual(r['absolute_error_difference']['edges'],0)
++    def test_zero_closure_denominator_preserved(self):
++        a,m=value();self.assertIsNone(a['raw']['closure_path_ratio']);self.assertEqual(a['raw']['closure_path_denominator'],0)
++        self.assertEqual(a['undefined']['raw']['closure_path_ratio'],'undefined_zero_closure_denominator')
++    def test_null_and_missing_metric_propagation(self):
++        a,_=value();b=copy.deepcopy(a);b['raw']['closure_path_ratio']=.5;b['absolute_error']['closure_path_ratio']=.5
++        del b['raw']['edges'];r=summary.strict_mean([a,b]);p=summary.paired(a,b,a)
++        self.assertIsNone(r['raw']['closure_path_ratio']);self.assertIsNone(r['raw']['edges']);self.assertIsNone(p['raw_difference']['edges'])
++        self.assertIsNone(p['raw_difference']['closure_path_ratio'])
++    def test_missing_group_not_dropped(self):
++        r=summary.strict_mean([{'raw':{'a':1}},{'raw':{'a':2},'extra':{'b':4}}]);self.assertIsNone(r['extra']['b'])
++    def test_missing_graph_not_average_successes(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            root=pathlib.Path(tmp);save_graph(root,'IMDB','O',summary.SEEDS[0]);(root/'IMDB_O/summary.json').write_text('{"status":"failed","error":"fixture failure"}')
++            with patch.object(summary,'load_case',loader):r=summary.collect(root)
++        self.assertEqual(r['evaluated_graphs'],1);self.assertEqual(r['status'],'incomplete');self.assertEqual(len(r['cells']),8)
++        self.assertIsNone(r['cells']['IMDB_O']['mean']);self.assertEqual(r['cells']['IMDB_O']['worker_status']['error'],'fixture failure')
++        self.assertTrue(all(c['mean'] is None for c in r['contrasts']));self.assertEqual(r['cells']['PubMed_C']['worker_status']['status'],'not_started')
++    def test_complete_fixture_summary(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            root=pathlib.Path(tmp)
++            for d,a,s in itertools.product(['IMDB','PubMed'],'OABC',summary.SEEDS):save_graph(root,d,a,s)
++            with patch.object(summary,'load_case',loader):r=summary.collect(root)
++        self.assertEqual(r['status'],'complete');self.assertEqual(r['evaluated_graphs'],16)
++        self.assertTrue(all(c['mean']['raw_difference']['MP3_total']==0 for c in r['contrasts']))
++        json.dumps(r,allow_nan=False)
++    def test_mp_composition_pair_and_mean(self):
++        a,m=value(np.array([[0,0,0],[1,2,3]]));b,_=value()
++        for i in [2,3]:self.assertEqual(a['distribution_error']['MP%d_composition_TV'%i],m['comparison']['mp_frequency_TV'][i-1])
++        self.assertGreater(a['distribution_error']['MP2_composition_TV'],0);self.assertGreater(a['distribution_error']['MP3_composition_TV'],0)
++        p=summary.paired(a,b,b);mean=summary.strict_mean([p,p]);self.assertEqual(mean['distribution_error_difference']['MP2_composition_TV'],p['distribution_error_difference']['MP2_composition_TV'])
++    def test_w1_independent_compatibility(self):
++        a,m=value(np.array([[0,1],[1,2]]));self.assertGreater(a['distribution_error']['degree_W1_incident4'],0)
++        self.assertAlmostEqual(a['distribution_error']['degree_W1_all10_compat'],.4*a['distribution_error']['degree_W1_incident4'],places=14)
++    def test_reference_zero_triangle_is_count_error_not_schema_ban(self):
++        a,m=value(np.array([[0,0,1],[1,2,2]]));key='typed_triangle_(0, 1, 2)'
++        self.assertEqual(a['raw'][key],1);self.assertEqual(a['reference'][key],0);self.assertEqual(a['absolute_error'][key],1)
++        self.assertTrue(m['schema_legal']);self.assertIn('type_Genre_relation_9_zero',a['absolute_error'])
++    def test_exact_optimizer_negative_inside_tolerance(self):
++        import torch
++        from probe import equal,metric,flatten
++        r=record();self.assertTrue(restoration_passes(r))
++        saved={'state':{0:{'step':torch.tensor(2.),'exp_avg':torch.ones(3),'exp_avg_sq':torch.ones(3)}},'param_groups':[{'params':[0],'lr':.0002}]}
++        restored=copy.deepcopy(saved);restored['state'][0]['exp_avg'][1]=torch.nextafter(torch.tensor(1.),torch.tensor(2.))
++        a,b=flatten(saved),flatten(restored)
++        r['optimizer']={k:metric(a[k],b[k]) for k in a};r['optimizer_exact']=equal(saved,restored)
++        self.assertTrue(all(x['passes'] for x in r['optimizer'].values()))
++        self.assertEqual(sum(int((a[k]!=b[k]).sum()) for k in a),1);self.assertFalse(r['optimizer_exact']);self.assertFalse(restoration_passes(r))
++    def test_original_restore_gates_preserved(self):
++        for field in ['rng_exact','loss','inputs','gradients','parameters','optimizer']:
++            r=record()
++            if field=='rng_exact':r[field]=False
++            elif field=='loss':r[field]={'passes':False}
++            elif field=='inputs':r[field][0]={'logits':{'passes':False},'p0':{'passes':True},'loss':{'passes':True}}
++            else:r[field]={'x':{'passes':False}}
++            self.assertFalse(restoration_passes(r),field)
++    def test_zero_single_parameter_update_is_observation(self):
++        import torch
++        from normal2 import update_observation
++        before=torch.ones(2);after=before.clone()
++        r=update_observation(before,after,True);self.assertEqual(r['changed'],0);self.assertFalse(r['observed_parameter_changed'])
++        after=before+torch.tensor(1e-10,dtype=torch.float32)
++        self.assertTrue(torch.equal(before,after));self.assertEqual(update_observation(before,after,True)['update_note'],'watched_parameter_unchanged_not_failure')
++        self.assertIsNone(update_observation(before,after,False)['observed_parameter_changed'])
++        self.assertTrue(update_observation(before,before+1,True)['observed_parameter_changed'])
++    def test_nonfinite_observation_still_rejected(self):
++        import torch
++        from normal2 import update_observation
++        for bad in [float('nan'),float('inf')]:
++            with self.assertRaises(FloatingPointError):update_observation(torch.ones(1),torch.tensor([bad]),True)
++    def test_source_hash_rejected_before_invocation(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            p,out,approval=dummy_script(pathlib.Path(tmp),'raise AssertionError("must not run")')
++            self.assertEqual(admission.verify_summary(p,approval),p.parent/'summarize.py')
++            (p.parent/'summarize.py').write_text('print("tampered")')
++            with self.assertRaises(ValueError):admission.verify_summary(p,approval)
++            r=launch.run_summary(p,out,approval,time.time()+20);self.assertEqual(r['status'],'failed');self.assertFalse((out/'summary_process.log').exists())
++    def test_source_hash_rejected_by_launch_gate(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            root=pathlib.Path(tmp);p,out,a=dummy_script(root,'# fixture')
++            ledger=root/'ledger.json';protocol=root/'protocol.json';ap=root/'test_only_receipt.json'
++            ledger.write_text(json.dumps({'deadline_epoch':time.time()+60}));protocol.write_text('{}')
++            a.update(independent_review='passed',user_continue_confirmed=True,main_W1_definition_confirmed='type_weighted_incident4',ledger_sha256=launch.sha(ledger),protocol_sha256=launch.sha(protocol),source_sha256=hashlib.sha256(b'{}').hexdigest())
++            ap.write_text(json.dumps(a));(root/'summarize.py').write_text('# changed')
++            with self.assertRaisesRegex(ValueError,'summarize'):launch.gate(p,ledger,ap,protocol,root/'absent',root/'absent')
++    def test_real_subprocess_incomplete_summary(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            p,out,a=dummy_script(pathlib.Path(tmp),'import sys,pathlib,json\np=pathlib.Path(sys.argv[sys.argv.index("--output")+1]);p.write_text(json.dumps({"status":"incomplete"}));sys.exit(2)\n')
++            r=launch.run_summary(p,out,a,time.time()+10);self.assertEqual(r['status'],'incomplete_summary_saved');self.assertEqual(r['exit_code'],2)
++    def test_summary_failure_preserves_primary(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            p,out,a=dummy_script(pathlib.Path(tmp),'raise RuntimeError("fixture summary failure")')
++            evaluation=launch.run_summary(p,out,a,time.time()+10)
++            r=launch.final_receipt(out,[{'cell':'IMDB_A','exit_code':7}],{'GPU':['unstarted']},True,[{'stage':'worker','error':'ORIGINAL'}],{'updates':1000},{'start_epoch':time.time()},evaluation)
++            self.assertEqual(r['status'],'incomplete');self.assertEqual(r['primary_failures'][0]['error'],'ORIGINAL');self.assertEqual(r['evaluation']['status'],'failed_no_summary_output')
++    def test_summary_timeout_and_insufficient_time(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            p,out,a=dummy_script(pathlib.Path(tmp),'import time;time.sleep(5)')
++            r=launch.run_summary(p,out,a,time.time()+2.2);self.assertEqual(r['status'],'timeout')
++            r=launch.run_summary(p,out,a,time.time());self.assertEqual(r['status'],'skipped_insufficient_delivery_time')
++    def test_lpt_budget_and_launcher_same_function(self):
++        cost=dict(complete_eight_cells=True,concurrency_margin=1.25,cells={d+'_'+a:dict(normal2_seconds=i+1,sampling_step_seconds=.1,validation_save_seconds=3) for i,(d,a) in enumerate(itertools.product(['IMDB','PubMed'],'OABC'))})
++        self.assertIs(launch.assignment,admission.assignment)
++        for n in [7,8]:
++            devices=list(range(n));queues,loads=admission.assignment(cost,1000,devices);_,tiers=recommend_tier(cost,1e9,n)
++            self.assertEqual(tiers[1]['seconds'],max(loads)*1.25+2100);self.assertEqual(sum(map(len,queues)),8)
++            for q,load in zip(queues,loads):self.assertEqual(load,sum(1000*cost['cells'][d+'_'+a]['normal2_seconds']+203 for d,a in q))
++            if n==7:self.assertEqual([q for q in queues if len(q)==2],[[('IMDB','A'),('IMDB','O')]])
++            else:self.assertTrue(all(len(q)==1 for q in queues))
++
++if __name__=='__main__':unittest.main()
