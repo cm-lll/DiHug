@@ -1,0 +1,92 @@
+{
+  "status": "review_only_not_activated",
+  "training": [
+    {
+      "id": "PubMed_s2026102812_O",
+      "train_seed": 2026102812,
+      "updates": 1000,
+      "readouts": [
+        "raw",
+        "ema"
+      ],
+      "directory": "PubMed_s2026102812_O"
+    },
+    {
+      "id": "PubMed_s2026102833_O",
+      "train_seed": 2026102833,
+      "updates": 1000,
+      "readouts": [
+        "raw",
+        "ema"
+      ],
+      "directory": "PubMed_s2026102833_O"
+    }
+  ],
+  "sampling": [
+    {
+      "id": "PubMed_s2026102812_O_raw_2026102821",
+      "depends_on": "PubMed_s2026102812_O",
+      "readout": "raw",
+      "sample_seed": 2026102821,
+      "T": 1000,
+      "directory": "PubMed_s2026102812_O/raw/sample_2026102821"
+    },
+    {
+      "id": "PubMed_s2026102812_O_raw_2026102822",
+      "depends_on": "PubMed_s2026102812_O",
+      "readout": "raw",
+      "sample_seed": 2026102822,
+      "T": 1000,
+      "directory": "PubMed_s2026102812_O/raw/sample_2026102822"
+    },
+    {
+      "id": "PubMed_s2026102812_O_ema_2026102821",
+      "depends_on": "PubMed_s2026102812_O",
+      "readout": "ema",
+      "sample_seed": 2026102821,
+      "T": 1000,
+      "directory": "PubMed_s2026102812_O/ema/sample_2026102821"
+    },
+    {
+      "id": "PubMed_s2026102812_O_ema_2026102822",
+      "depends_on": "PubMed_s2026102812_O",
+      "readout": "ema",
+      "sample_seed": 2026102822,
+      "T": 1000,
+      "directory": "PubMed_s2026102812_O/ema/sample_2026102822"
+    },
+    {
+      "id": "PubMed_s2026102833_O_raw_2026102821",
+      "depends_on": "PubMed_s2026102833_O",
+      "readout": "raw",
+      "sample_seed": 2026102821,
+      "T": 1000,
+      "directory": "PubMed_s2026102833_O/raw/sample_2026102821"
+    },
+    {
+      "id": "PubMed_s2026102833_O_raw_2026102822",
+      "depends_on": "PubMed_s2026102833_O",
+      "readout": "raw",
+      "sample_seed": 2026102822,
+      "T": 1000,
+      "directory": "PubMed_s2026102833_O/raw/sample_2026102822"
+    },
+    {
+      "id": "PubMed_s2026102833_O_ema_2026102821",
+      "depends_on": "PubMed_s2026102833_O",
+      "readout": "ema",
+      "sample_seed": 2026102821,
+      "T": 1000,
+      "directory": "PubMed_s2026102833_O/ema/sample_2026102821"
+    },
+    {
+      "id": "PubMed_s2026102833_O_ema_2026102822",
+      "depends_on": "PubMed_s2026102833_O",
+      "readout": "ema",
+      "sample_seed": 2026102822,
+      "T": 1000,
+      "directory": "PubMed_s2026102833_O/ema/sample_2026102822"
+    }
+  ],
+  "formal_authorized": false
+}

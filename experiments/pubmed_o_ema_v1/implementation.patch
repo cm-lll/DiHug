@@ -1,0 +1,833 @@
+diff --git a/experiments/pubmed_o_ema_v1/README.md b/experiments/pubmed_o_ema_v1/README.md
+new file mode 100644
+index 0000000..fb334c4
+--- /dev/null
++++ b/experiments/pubmed_o_ema_v1/README.md
+@@ -0,0 +1,77 @@
++# PubMed O：固定EMA读出的最小实现（仅供审查）
++
++本包只增加参数EMA及其原循环接入函数、冻结协议和CPU小张量验收。**不是可直接启动正式实验的运行包。** 没有正式审批、活动账本或已生效的130分钟窗口。没有加载原模型、GPU测试、扩散训练或完整生成。
++
++## 唯一假设与解释边界
++
++检验同一训练轨迹的参数平滑读出，能否提高PubMed O的生成数量准确性；跨训练seed差异缩小仅为次要描述。既有四格诊断证明了同状态下预测倾向不同，没有证明差异由末期参数噪声造成。
++
++固定公式：`ema_0 = theta_0`；每次完整normal2更新后，`ema_k = 0.99*ema_(k-1) + 0.01*theta_k`。第一次更新也执行这条公式，不直接复制theta1。服务器Torch为2.1.0+cu121，原`AveragedModel.update_parameters`在`n_averaged==0`时直接复制，与本合同不同，因此采用显式实现。
++
++0.99对整个历史指数衰减，并非截取最后100步。长期加权年龄为99更新；1000更新时约98.996更新，theta0仍有约4.32e-5权重。效果可能同时包含平滑和滞后；若各seed长期形成不同倾向，EMA不保证消除它。成功不能唯一解释为消除了末期噪声，失败也不直接否定所有EMA设置；本轮不搜索其他设置。
++
++只平均参数，不平均buffer。EMA不进入原模型的forward、CE、梯度、AdamW或训练随机流。先验、整数状态和其他buffer直接从同检查点原模型复制；不改变噪声核、后验、样本或边数。不是两模型概率平均，不是两seed权重混合，不是角色机制贡献。
++
++## 固定实验提案
++
++- 数据：旧192节点PubMed、926条边；仅基础O，不加CN/ReFeX/RolX。
++- 两条训练轨迹：2026102812、2026102833，分别使用对应已封存原始科学初态，新的AdamW；不使用旧final权重或旧优化器续训。
++- 每条1000次normal2、完整18336槽、原CE/FP32/优化器/学习率；原与EMA两种读出共享同一条轨迹，没有额外训练样本。
++- 保存0/500/1000的原模型、EMA、优化器、计数、RNG及绑定；EMA在首次前向前保存。原固定0/500/1000验证分别评价两读出并保持训练RNG。
++- 仅最终1000更新读出用于科学采样。每训练seed×raw/ema×采样seed2026102821/2026102822，共8条全新T1000链。每个readout使用自己的权重哈希、相同配对采样初态/随机安排；不复用旧图充数，不挑checkpoint或补抽。
++- 无衰减率搜索、预热、学习率变化、额外损失、校准、约束或修图。
++
++## 判断标准
++
++对每训练seed，先逐图计算`abs(edges-926)`，再平均两图。**只有两个训练seed的主要误差都下降，才能称本面板有一致准确性收益。** 只有合并均值下降而一seed变差，报告取舍；两seed一起生成相近但错误的数量不是改善。逐关系误差同时列出，不能以关系间抵消掩盖结构偏差。
++
++两条人为“不推荐采用”红线分别检查每训练seed的两图均值：incident4 W1相对原始读出增加超过10%，或LCC下降超过19.2节点。原始W1为0时，EMA变为任何正值触线。不将红线称为有证据的安全界限，也不将未触线称为结构合格；LCC少约19节点本身是明显代价。尾部/三角等严重退化须明确说明，不能自动宣布整体改善。`assessment.py`即使主要收益一致、红线未触发，也不会自动批准采用。
++
++完整保留joint-degree TV、逐关系数量/误差、类型三角与闭合机会、聚类、LCC/分量/孤立点、度尾部、MP2/MP3和样本差异。W1 incident4主口径、all10兼容口径与原评价相同。缺图或未定义主要量保留不完整，不只平均成功图。两个训练seed只能支持探索判断。
++
++## 已实现的最小接线
++
++`ema.py`：初始化theta0、完整更新后维护、状态保存/恢复、导出EMA权重；参数别名同步覆盖，buffer保持原值。
++
++`integration.py`：围绕既有normal2和验证函数的调用，不另写科学训练/采样算法：
++
++```python
++# 原模型构造、公共参数复制、上GPU和训练随机流重置保持原顺序。
++ema = ParameterEMA(model)       # first forward前创建/保存
++# 继续使用原normal2，两次半损失反向后只step一次。
++rec = complete_normal2(normal2, model, opt, case, inputs, 1000, device, ema, completed)
++completed += 1
++# 原atomic_checkpoint保存checkpoint_payload(...)，含原权重、EMA和原RNG。
++# 原validation本身保存恢复训练RNG，并关闭每个FrozenTypedContext。
++ema_row = ema_validation(validation, model, ema, case, cfg, seed, rng)
++# 最终生成入口仍使用原reverse_step；仅加载选定readout的完整state_dict。
++readouts = final_readouts(model, ema, 1000)
++```
++
++EMA验证采用临时state_dict切换并在finally恢复原模型，参数对象不替换，优化器指向不变；不跨权重切换保留学习输出缓存。原checkpoint路径/哈希/原子落盘继续复用既有实现；新EMA状态增加格式、0.99、参数布局和更新计数验证。正式RNG恢复仍调用原`rng_set`，不改变GPU随机流管理。
++
++完整更新边界包括原normal2和随后的EMA维护。若原参数已经更新而EMA失败，该内存状态不能导出成完整检查点或科学读出；保留异常，使用此前完整检查点的恢复规则，不能把旧计数配上新参数。这里不授权自动恢复。
++
++`review.py plan`仅打印2训练/8采样唯一身份、目录及依赖。`review.py formal`始终非零退出，不导入任何旧worker。
++
++**完整正式launcher、审批绑定和独立采样进程分发尚未接线，也未做实际GPU集成测试。** 本次交付的是EMA内核与明确调用接口，不把小张量通过称为完整运行包已验收。代码审查通过并获正式预算授权后，按既有O运行入口接线；只检查新增EMA调用和身份/保存路径，不重做旧科学模块验收。原始/EMA权重需要独立文件和模型哈希，不能沿用raw的哈希标记EMA采样。
++
++## 成本与队列
++
++历史PubMed O每1000更新约55分钟，每条链约10.3分钟。默认两张获授权的空闲2080Ti各负责一条训练轨迹及四条采样链；包含旧初始化/验证/保存的历史外推约97.8分钟，加EMA/双读出验证、竞争及评价交付余量，130分钟仍只是待确认规划。EMA成本尚未GPU实测，不能保证截止。新增存储约一份FP32参数副本4P字节，验证切换/导出另有临时CPU副本；没有新增Adam状态或网络计算图。
++
++若两条训练完成后有额外获授权空闲卡，可将同一八任务清单分发采样；不增加图数。具体设备及队列应在正式启动前固定并据此核算，不在本轮查询/占用GPU，不创建活动预算起止。
++
++## 复核与停止
++
++使用当前环境，不安装升级：
++
++```bash
++CUDA_VISIBLE_DEVICES='' OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 \
++PYTEST_ADDOPTS='' /data2/lyh/miniconda3/envs/sparse_block/bin/python -m pytest -q -o addopts='' test_ema.py
++python review.py plan
++```
++
++测试仅Tiny张量、合成优化器状态、模拟normal2调用及评估记录。没有真实optimizer.step、反向训练或模型forward；完整网络/GPU检查不在本次范围。CPU Torch/Python/全局NumPy/显式Generator均验证EMA维护不改变随机流；CUDA随机状态未新实测，旧工程证据保留。
++
++测试与源码绑定见`evidence/`、`SOURCE_BINDING.json`及`SHA256SUMS`。完成发布后停止，等待独立审查，不自动进入正式实验。
+diff --git a/experiments/pubmed_o_ema_v1/SOURCE_BINDING.json b/experiments/pubmed_o_ema_v1/SOURCE_BINDING.json
+new file mode 100644
+index 0000000..d6c267a
+--- /dev/null
++++ b/experiments/pubmed_o_ema_v1/SOURCE_BINDING.json
+@@ -0,0 +1,21 @@
++{
++  "base_review_commit": "3303d2ac2439d056cced0b89628cdb10200b139a",
++  "scientific_source": "experiments/typed_structure_192_oabc_formal_v1/package",
++  "prior_result_commits": [
++    "b5b697361e389cd77d2fb09a84e77c0b6915407d",
++    "143e6bf80a9858ec21e512da2f1a03e02e3a5a38"
++  ],
++  "files": {
++    "README.md": "4c53d7f1aa94ad26a2c03cd654a8d80fda6a4bbf5844d24d359f8068087d1a49",
++    "TEST_REPORT.json": "13e6da88d439d454b0a8d410a71af1b573e664ed40acb78655759b769012af42",
++    "assessment.py": "7e9516425a11e4c3951bcfb8aebf9ed62fb68dec2496dce0a0c5a0615c60560a",
++    "ema.py": "b1e5f854b8948ad6ddbaa9f7ef132707ebc44908cd9e0928ec700768cf438305",
++    "integration.py": "ff2444d6357abbdc5627e7bade92c6887bd74358e8a7239e4f1951481db83cf8",
++    "protocol.json": "09d6926eec805d896f7eaef0e808fb21f87cd3fae3fac1d485d6297e3d392232",
++    "review.py": "edfeeb64740837f639b4adc2ddbba163599cb0dcb2e8e66552b1841accfe1015",
++    "review_plan.json": "6aff597f3891f340c8fe80a7996a1f96eab28f90eea92377cff26ed42bfec577",
++    "test_ema.py": "45a905b4b5bfea9472d3c5e4a68f6ca7f870fcc5413470baac00995b7382cfc7"
++  },
++  "prior_source_binding": "evidence/baseline_and_costs.json",
++  "authorization": "minimal review only; no formal launcher or active budget"
++}
+diff --git a/experiments/pubmed_o_ema_v1/TEST_REPORT.json b/experiments/pubmed_o_ema_v1/TEST_REPORT.json
+new file mode 100644
+index 0000000..f6bc04b
+--- /dev/null
++++ b/experiments/pubmed_o_ema_v1/TEST_REPORT.json
+@@ -0,0 +1,21 @@
++{
++  "tests": 22,
++  "failures": 0,
++  "errors": 0,
++  "skipped": 0,
++  "pytest_seconds": 2.551,
++  "scope": "CPU tiny tensors, synthetic optimizer state, mock normal2, readout and assessment contracts",
++  "formal_training": 0,
++  "actual_optimizer_steps": 0,
++  "model_forwards": 0,
++  "GPU_calls": 0,
++  "new_graphs": 0,
++  "not_checked": [
++    "full formal launcher integration",
++    "GPU EMA overhead/integration",
++    "scientific readout effect",
++    "CUDA RNG execution"
++  ],
++  "prepare_started_at": "2026-10-28T19:03:49+08:00",
++  "prior_19_and_21_test_reports": "historical incremental reports retained locally; current frozen result is22"
++}
+diff --git a/experiments/pubmed_o_ema_v1/assessment.py b/experiments/pubmed_o_ema_v1/assessment.py
+new file mode 100644
+index 0000000..9502b80
+--- /dev/null
++++ b/experiments/pubmed_o_ema_v1/assessment.py
+@@ -0,0 +1,54 @@
++"""Frozen per-seed interpretation rules, not a new graph evaluator.
++
++Caller adapts the existing evaluator to edges, W1_incident4, LCC, family_edges.
++All original metrics remain in the returned records; no success-only average.
++"""
++import math
++SEEDS=(2026102812,2026102833)
++SAMPLES=(2026102821,2026102822)
++REFERENCE_FAMILY_EDGES=(39,137,159,17,83,267,27,161,33,3)
++def assess(records):
++    lookup={}
++    for r in records:
++        key=(r['train_seed'],r['readout'],r['sample_seed'])
++        if key in lookup:raise ValueError('duplicate identity')
++        if key[0] not in SEEDS or key[1] not in ('raw','ema') or key[2] not in SAMPLES:raise ValueError('unexpected identity')
++        lookup[key]=r
++    result={'per_seed':[],'original_records':records,'scope':'exploratory two training seeds; no statistical guarantee'}
++    for seed in SEEDS:
++        cell={'train_seed':seed,'status':'complete','raw':None,'ema':None,'redlines':None}
++        for readout in ('raw','ema'):
++            rs=[lookup.get((seed,readout,s)) for s in SAMPLES]
++            if any(r is None or r.get('status')!='complete' for r in rs):
++                cell['status']='incomplete';continue
++            keys=['edges','W1_incident4','LCC']
++            if any(any(r.get(k) is None or not math.isfinite(float(r[k])) for k in keys) or r.get('family_edges') is None for r in rs):
++                cell['status']='incomplete';continue
++            for r in rs:
++                if len(r['family_edges'])!=10 or sum(r['family_edges'])!=r['edges']:raise ValueError('relation counts do not sum to total')
++            cell[readout]=dict(edge_absolute_error=sum(abs(r['edges']-926) for r in rs)/2,
++                              signed_edge_bias=sum(r['edges']-926 for r in rs)/2,
++                              W1_incident4=sum(r['W1_incident4'] for r in rs)/2,
++                              LCC=sum(r['LCC'] for r in rs)/2,
++                              family_absolute_errors=[sum(abs(r['family_edges'][i]-REFERENCE_FAMILY_EDGES[i]) for r in rs)/2 for i in range(10)])
++        if cell['status']=='complete':
++            raw,ema=cell['raw'],cell['ema'];w=raw['W1_incident4']
++            cell['edge_error_difference']=ema['edge_absolute_error']-raw['edge_absolute_error']
++            cell['family_error_differences']=[e-r for e,r in zip(ema['family_absolute_errors'],raw['family_absolute_errors'])]
++            cell['redlines']=dict(W1_exceeds_10_percent=ema['W1_incident4']>1.1*w,
++                                  LCC_drop_exceeds_19_2=raw['LCC']-ema['LCC']>19.2)
++            cell['redline_note']='human-chosen non-adoption warnings; not proven safety or sufficient structural acceptance'
++        result['per_seed'].append(cell)
++    if any(c['status']!='complete' for c in result['per_seed']):
++        result.update(status='incomplete',accuracy_conclusion=None,pooled_error_difference=None,recommend_adoption=False)
++        return result
++    diffs=[c['edge_error_difference'] for c in result['per_seed']]
++    if all(d<0 for d in diffs):conclusion='consistent_accuracy_gain_in_this_panel'
++    elif any(d<0 for d in diffs):conclusion='mixed_or_partial_not_consistent'
++    else:conclusion='accuracy_hypothesis_not_supported_in_this_panel'
++    result.update(status='complete',accuracy_conclusion=conclusion,pooled_error_difference=sum(diffs)/2,
++                  non_adoption_redline=any(any(c['redlines'].values()) for c in result['per_seed']),
++                  recommend_adoption=False,
++                  interpretation='no automatic adoption: inspect tails/triangles/other structure even if accuracy improves and redlines do not fire')
++    result['between_seed_signed_bias_gap']={r:abs(result['per_seed'][0][r]['signed_edge_bias']-result['per_seed'][1][r]['signed_edge_bias']) for r in ('raw','ema')}
++    return result
+diff --git a/experiments/pubmed_o_ema_v1/ema.py b/experiments/pubmed_o_ema_v1/ema.py
+new file mode 100644
+index 0000000..9a8440f
+--- /dev/null
++++ b/experiments/pubmed_o_ema_v1/ema.py
+@@ -0,0 +1,84 @@
++"""Fixed EMA readout. No optimizer, data, model factory or RNG calls.
++
++theta_bar[0] = theta[0]; theta_bar[k] = .99*theta_bar[k-1]+.01*theta[k].
++Call exactly once AFTER each completed normal2 optimizer update.
++"""
++import copy
++import torch
++
++DECAY = 0.99
++FORMAT = 'pubmed_o_ema_from_theta0_v1'
++
++def cpu_copy(value):
++    if torch.is_tensor(value):return value.detach().cpu().clone()
++    if isinstance(value,dict):return {k:cpu_copy(v) for k,v in value.items()}
++    if isinstance(value,list):return [cpu_copy(v) for v in value]
++    if isinstance(value,tuple):return tuple(cpu_copy(v) for v in value)
++    return copy.deepcopy(value)
++
++def parameters(model):
++    # Include serialization aliases, so tied parameters cannot be overwritten
++    # by a raw alias when an exported EMA state_dict is loaded.
++    return dict(model.named_parameters(remove_duplicate=False))
++
++class ParameterEMA:
++    def __init__(self, model):
++        ps=parameters(model)
++        if not ps:raise ValueError('empty parameter set')
++        if any(not p.is_floating_point() or not torch.isfinite(p).all() for p in ps.values()):
++            raise ValueError('EMA requires finite floating parameters')
++        self.shadow={n:p.detach().clone() for n,p in ps.items()}
++        self.updates=0
++        self.at_update_boundary=True
++
++    def _parameters(self,model):
++        ps=parameters(model)
++        if ps.keys()!=self.shadow.keys():raise ValueError('parameter names differ')
++        for n,p in ps.items():
++            q=self.shadow[n]
++            if p.shape!=q.shape or p.dtype!=q.dtype or p.device!=q.device:
++                raise ValueError('parameter shape/dtype/device differ: '+n)
++        return ps
++
++    @torch.no_grad()
++    def update(self,model,completed_updates):
++        if type(completed_updates) is not int or completed_updates!=self.updates+1:
++            raise ValueError('EMA needs the next complete normal2 update, once')
++        ps=self._parameters(model)
++        if any(not torch.isfinite(p).all() for p in ps.values()):
++            raise FloatingPointError('nonfinite raw parameters; EMA not updated')
++        for n,p in ps.items():
++            # Explicit two-operation FP32 implementation; no first-call copy,
++            # warmup, bias correction, scheduler or conditional update.
++            self.shadow[n].mul_(DECAY).add_(p.detach(),alpha=1.0-DECAY)
++        if any(not torch.isfinite(p).all() for p in self.shadow.values()):
++            raise FloatingPointError('nonfinite EMA; stop, do not use readout')
++        self.updates=completed_updates
++
++    def state_dict(self):
++        if not self.at_update_boundary:raise RuntimeError('incomplete raw/EMA update cannot be a resumable checkpoint')
++        return dict(format=FORMAT,decay=DECAY,updates=self.updates,shadow=cpu_copy(self.shadow))
++
++    def load_state_dict(self,state,model,expected_updates):
++        if state.get('format')!=FORMAT or state.get('decay')!=DECAY:
++            raise ValueError('EMA scientific contract mismatch')
++        if type(state.get('updates')) is not int or state['updates']!=expected_updates or expected_updates<0:
++            raise ValueError('EMA update counter mismatch')
++        ps=self._parameters(model);ss=state.get('shadow',{})
++        if ss.keys()!=ps.keys():raise ValueError('EMA saved parameter names differ')
++        for n,p in ps.items():
++            q=ss[n]
++            if not torch.is_tensor(q) or q.shape!=p.shape or q.dtype!=p.dtype or not torch.isfinite(q).all():
++                raise ValueError('invalid saved EMA parameter: '+n)
++        self.shadow={n:ss[n].detach().to(device=p.device).clone() for n,p in ps.items()}
++        self.updates=expected_updates
++        self.at_update_boundary=True
++
++    def readout_state_dict(self,model):
++        if not self.at_update_boundary:raise RuntimeError('incomplete raw/EMA update cannot be evaluated')
++        self._parameters(model)
++        # Buffers (including float priors and integer counters) are COPIED.
++        # This does not modify the live training model, optimizer, mode or RNG.
++        state=cpu_copy(model.state_dict())
++        for n,p in self.shadow.items():state[n]=cpu_copy(p)
++        return state
+diff --git a/experiments/pubmed_o_ema_v1/evidence/baseline_and_costs.json b/experiments/pubmed_o_ema_v1/evidence/baseline_and_costs.json
+new file mode 100644
+index 0000000..60e44c6
+--- /dev/null
++++ b/experiments/pubmed_o_ema_v1/evidence/baseline_and_costs.json
+@@ -0,0 +1,78 @@
++{
++  "records": [
++    {
++      "source_commit": "b5b697361e389cd77d2fb09a84e77c0b6915407d",
++      "train_seed": 2026102812,
++      "initial_path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_192_oabc_formal_v1_20261028T090624/run/PubMed_O/initial.pt",
++      "initial_sha256_from_sealed_receipt": "3b740f4f8770522c29b112145cbf33940cb99de17850d029b02ffe76508cd913",
++      "weight_bytes_rehashed_now": false,
++      "weights_loaded_now": false,
++      "parameters": 6632625,
++      "ema_FP32_shadow_bytes": 26530500,
++      "source_sha256": "6349f816a273679e2f08bb0d887065d23f77b488e68b3a5aca036683d6258429",
++      "dataset": {
++        "file": "assets/PubMed.npz",
++        "sha256": "f6ea8ec461052094dd02c6b07d8ebb69e85fb3e595195007563593b9568914ef",
++        "received_sha256": "42706434557b4b1fa24bdc71dc9d3ebea3a772689002421e77ad3c4b3b827a94",
++        "reference_sha256": "dacff5a392e23fbcfb695076a14a6db5317f4a4382b69af2a7596a1a217163f8",
++        "type_names": [
++          "Gene",
++          "Disease",
++          "Chemical",
++          "Species"
++        ],
++        "basis_kind": "pending complete held-out rank selection; no synthetic fallback"
++      },
++      "training_seconds": 3309.7397272223607,
++      "historical_two_chains_seconds": [
++        616.7752904156223,
++        614.733094627969
++      ],
++      "historical_total_elapsed_seconds": 4602.375922679901,
++      "projected_one_train_plus_four_chains_including_historical_other_costs": 5833.884307723492,
++      "new_ema_validation_or_contention_cost_not_measured": true
++    },
++    {
++      "source_commit": "143e6bf80a9858ec21e512da2f1a03e02e3a5a38",
++      "train_seed": 2026102833,
++      "initial_path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_192_oabc_seed2_v1_20261028T110507/run/PubMed_O/initial.pt",
++      "initial_sha256_from_sealed_receipt": "8aad77b1f9918592e85c40afa574d48d55100e964226b22f225684215a8d9282",
++      "weight_bytes_rehashed_now": false,
++      "weights_loaded_now": false,
++      "parameters": 6632625,
++      "ema_FP32_shadow_bytes": 26530500,
++      "source_sha256": "6349f816a273679e2f08bb0d887065d23f77b488e68b3a5aca036683d6258429",
++      "dataset": {
++        "file": "assets/PubMed.npz",
++        "sha256": "f6ea8ec461052094dd02c6b07d8ebb69e85fb3e595195007563593b9568914ef",
++        "received_sha256": "42706434557b4b1fa24bdc71dc9d3ebea3a772689002421e77ad3c4b3b827a94",
++        "reference_sha256": "dacff5a392e23fbcfb695076a14a6db5317f4a4382b69af2a7596a1a217163f8",
++        "type_names": [
++          "Gene",
++          "Disease",
++          "Chemical",
++          "Species"
++        ],
++        "basis_kind": "pending complete held-out rank selection; no synthetic fallback"
++      },
++      "training_seconds": 3322.5214077681303,
++      "historical_two_chains_seconds": [
++        621.8176114745438,
++        620.2439331673086
++      ],
++      "historical_total_elapsed_seconds": 4625.677054405212,
++      "projected_one_train_plus_four_chains_including_historical_other_costs": 5867.738599047065,
++      "new_ema_validation_or_contention_cost_not_measured": true
++    }
++  ],
++  "science_files_unchanged": {
++    "normal2.py": "b6799b75f787b1e48150ec42dfe815f3d3ac586595d91b7f0a4d86d8c3ae5d81",
++    "model_variants.py": "6ba2ccd1d82a9077579595a36c95cc284e1a1a6ce755681930e1cc416da95fbf",
++    "hsgd/losses.py": "9dc175d9fa591221bb3c7118151f86b86ab679447e509483f611b69a4a56c8b6",
++    "hsgd/runtime.py": "87cdb9c083516fa693acf6877680f667221f1f78e166bb1d967dd36b412c7046",
++    "hsgd/kernel.py": "e398606416f2dd6b58c94c67c423bd81c0f04b938b3144989f6044b69a416c74"
++  },
++  "projected_critical_seconds_before_new_costs": 5867.738599047065,
++  "proposal_seconds": 7800,
++  "status": "proposal_only_not_measured_EMA_throughput"
++}
+diff --git a/experiments/pubmed_o_ema_v1/evidence/environment.json b/experiments/pubmed_o_ema_v1/evidence/environment.json
+new file mode 100644
+index 0000000..c4cecce
+--- /dev/null
++++ b/experiments/pubmed_o_ema_v1/evidence/environment.json
+@@ -0,0 +1,12 @@
++{
++  "python": "3.9.23 | packaged by conda-forge | (main, Jun  4 2025, 17:57:12) \n[GCC 13.3.0]",
++  "torch": "2.1.0+cu121",
++  "CUDA_VISIBLE_DEVICES": "",
++  "CPU_threads": 1,
++  "GPU_calls": 0,
++  "formal_training": 0,
++  "model_forwards": 0,
++  "actual_optimizer_steps": 0,
++  "synthetic_parameter_assignments": "tiny tests only; no diffusion weights",
++  "recorded_at": "2026-10-28T19:23:08.570367+08:00"
++}
+diff --git a/experiments/pubmed_o_ema_v1/evidence/tests_frozen.xml b/experiments/pubmed_o_ema_v1/evidence/tests_frozen.xml
+new file mode 100644
+index 0000000..9b16c5b
+--- /dev/null
++++ b/experiments/pubmed_o_ema_v1/evidence/tests_frozen.xml
+@@ -0,0 +1 @@
++<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="0" skipped="0" tests="22" time="2.551" timestamp="2026-10-28T19:21:54.971839+08:00" hostname="GPU-Node01"><testcase classname="research_branches.pubmed_o_ema_v1.test_ema" name="test_theta0_and_three_steps_match_explicit_formula" time="0.025" /><testcase classname="research_branches.pubmed_o_ema_v1.test_ema" name="test_torch21_first_call_copy_is_not_our_contract" time="0.002" /><testcase classname="research_branches.pubmed_o_ema_v1.test_ema" name="test_buffers_copied_not_averaged_and_live_model_untouched" time="0.001" /><testcase classname="research_branches.pubmed_o_ema_v1.test_ema" name="test_alias_readout_and_snapshot_are_not_raw_aliases" time="0.001" /><testcase classname="research_branches.pubmed_o_ema_v1.test_ema" name="test_rng_and_raw_parameter_stream_unchanged" time="0.004" /><testcase classname="research_branches.pubmed_o_ema_v1.test_ema" name="test_checkpoint_ema_optimizer_rng_exact_load_and_next_ema" time="0.427" /><testcase classname="research_branches.pubmed_o_ema_v1.test_ema" name="test_invalid_ema_checkpoint_rejected[counter]" time="0.001" /><testcase classname="research_branches.pubmed_o_ema_v1.test_ema" name="test_invalid_ema_checkpoint_rejected[decay]" time="0.001" /><testcase classname="research_branches.pubmed_o_ema_v1.test_ema" name="test_invalid_ema_checkpoint_rejected[shape]" time="0.001" /><testcase classname="research_branches.pubmed_o_ema_v1.test_ema" name="test_invalid_ema_checkpoint_rejected[nan]" time="0.001" /><testcase classname="research_branches.pubmed_o_ema_v1.test_ema" name="test_duplicate_skipped_update_and_nonfinite_rejected" time="0.001" /><testcase classname="research_branches.pubmed_o_ema_v1.test_ema" name="test_normal2_hook_only_after_completed_update" time="0.001" /><testcase classname="research_branches.pubmed_o_ema_v1.test_ema" name="test_raw_step_completed_but_ema_fails_cannot_save_completed_checkpoint" time="0.001" /><testcase classname="research_branches.pubmed_o_ema_v1.test_ema" name="test_validation_swap_restores_raw_and_parameter_identity[False]" time="0.003" /><testcase classname="research_branches.pubmed_o_ema_v1.test_ema" name="test_validation_swap_restores_raw_and_parameter_identity[True]" time="0.003" /><testcase classname="research_branches.pubmed_o_ema_v1.test_ema" name="test_final_only_and_review_cli_no_execution" time="0.136" /><testcase classname="research_branches.pubmed_o_ema_v1.test_ema" name="test_consistent_accuracy_requires_both_seeds_and_no_auto_adoption" time="0.001" /><testcase classname="research_branches.pubmed_o_ema_v1.test_ema" name="test_pooled_gain_with_one_seed_worse_is_mixed" time="0.001" /><testcase classname="research_branches.pubmed_o_ema_v1.test_ema" name="test_equal_wrong_numbers_are_not_accuracy_gain" time="0.001" /><testcase classname="research_branches.pubmed_o_ema_v1.test_ema" name="test_redlines_are_per_seed_not_pooled" time="0.001" /><testcase classname="research_branches.pubmed_o_ema_v1.test_ema" name="test_missing_graph_is_not_mean_of_successes" time="0.002" /><testcase classname="research_branches.pubmed_o_ema_v1.test_ema" name="test_per_graph_errors_precede_means_and_relations_retained" time="0.001" /></testsuite></testsuites>
+\ No newline at end of file
+diff --git a/experiments/pubmed_o_ema_v1/evidence/torch21_first_update.json b/experiments/pubmed_o_ema_v1/evidence/torch21_first_update.json
+new file mode 100644
+index 0000000..2e8fda9
+--- /dev/null
++++ b/experiments/pubmed_o_ema_v1/evidence/torch21_first_update.json
+@@ -0,0 +1,7 @@
++{
++  "torch_version": "2.1.0+cu121",
++  "file": "/data2/lyh/miniconda3/envs/sparse_block/lib/python3.9/site-packages/torch/optim/swa_utils.py",
++  "sha256": "af5707ceaa790126a299fe2bbae4b7467675adced6cfab6b4724f4d5660b2b54",
++  "update_parameters_source": "    def update_parameters(self, model):\n        self_param = (\n            itertools.chain(self.module.parameters(), self.module.buffers())\n            if self.use_buffers else self.parameters()\n        )\n        model_param = (\n            itertools.chain(model.parameters(), model.buffers())\n            if self.use_buffers else model.parameters()\n        )\n        self_param_detached = []\n        model_param_detached = []\n        for p_averaged, p_model in zip(self_param, model_param):\n            p_model_ = p_model.detach().to(p_averaged.device)\n            self_param_detached.append(p_averaged.detach())\n            model_param_detached.append(p_model_)\n            if self.n_averaged == 0:\n                p_averaged.detach().copy_(p_model_)\n\n        if self.n_averaged > 0:\n            if self.multi_avg_fn is not None or self.avg_fn is None:\n                grouped_tensors = _group_tensors_by_device_and_dtype([self_param_detached, model_param_detached])\n                for ((device, _), ([self_params, model_params], _)) in grouped_tensors.items():\n                    if self.multi_avg_fn:\n                        self.multi_avg_fn(self_params, model_params, self.n_averaged.to(device))\n                    elif device.type in _get_foreach_kernels_supported_devices():\n                        multi_avg_fn = get_swa_multi_avg_fn()\n                        multi_avg_fn(self_params, model_params, self.n_averaged.to(device))\n                    else:\n                        avg_fn = get_swa_avg_fn()\n                        n_averaged = self.n_averaged.to(device)\n                        for p_averaged, p_model in zip(self_params, model_params):\n                            p_averaged.copy_(avg_fn(p_averaged, p_model, n_averaged))\n            else:\n                for p_averaged, p_model in zip(self_param_detached, model_param_detached):\n                    n_averaged = self.n_averaged.to(p_averaged.device)\n                    p_averaged.detach().copy_(self.avg_fn(p_averaged.detach(), p_model, n_averaged))\n\n        if not self.use_buffers:\n            # If not apply running averages to the buffers,\n            # keep the buffers in sync with the source model.\n            for b_swa, b_model in zip(self.module.buffers(), model.buffers()):\n                b_swa.detach().copy_(b_model.detach().to(b_swa.device))\n        self.n_averaged += 1\n",
++  "finding": "n_averaged==0 copies source; custom avg_fn begins afterwards; explicit EMA used instead"
++}
+diff --git a/experiments/pubmed_o_ema_v1/integration.py b/experiments/pubmed_o_ema_v1/integration.py
+new file mode 100644
+index 0000000..76bd328
+--- /dev/null
++++ b/experiments/pubmed_o_ema_v1/integration.py
+@@ -0,0 +1,54 @@
++"""Small hooks around existing normal2/checkpoint/sampling machinery.
++
++No new scientific training loop, sampler or automatic execution entrypoint.
++The reviewed launcher must supply the existing functions and authorization.
++"""
++from ema import ParameterEMA,cpu_copy
++
++def complete_normal2(normal2_fn,model,opt,case,inputs,T,device,ema,completed_updates):
++    if completed_updates!=ema.updates or not ema.at_update_boundary:raise ValueError('raw/EMA counter or boundary mismatch before update')
++    # Existing function does zero_grad ONCE, two half-loss backwards, one step.
++    # An exception after a raw step must not save an apparently complete old
++    # counter with new raw parameters and old/partial EMA parameters.
++    ema.at_update_boundary=False
++    result=normal2_fn(model,opt,case,inputs,T,device,step=True)
++    if result.get('optimizer_steps')!=1:raise ValueError('normal2 did not report one complete step')
++    ema.update(model,completed_updates+1)
++    ema.at_update_boundary=True
++    return dict(result,ema_updates=ema.updates)
++
++def checkpoint_payload(model,opt,ema,updates,rng,binding):
++    if updates!=ema.updates:raise ValueError('save only at complete raw/EMA boundary')
++    return dict(model=cpu_copy(model.state_dict()),optimizer=cpu_copy(opt.state_dict()),
++                ema=ema.state_dict(),updates=updates,rng=cpu_copy(rng),binding=cpu_copy(binding))
++
++def restore_payload(payload,model,opt,ema,binding,restore_rng):
++    # The existing checkpoint loader still authenticates bytes and paths.
++    if payload['binding']!=binding:raise ValueError('checkpoint binding mismatch')
++    # Validate EMA fully before mutating model/optimizer/RNG.
++    check=ParameterEMA(model)
++    check.load_state_dict(payload['ema'],model,payload['updates'])
++    model.load_state_dict(payload['model'],strict=True)
++    opt.load_state_dict(payload['optimizer'])
++    ema.load_state_dict(payload['ema'],model,payload['updates'])
++    restore_rng(cpu_copy(payload['rng']))
++    return payload['updates']
++
++def final_readouts(model,ema,completed_updates):
++    if completed_updates!=1000 or ema.updates!=1000:
++        raise ValueError('only the final1000 readouts may enter the scientific sample plan')
++    return dict(raw=cpu_copy(model.state_dict()),ema=ema.readout_state_dict(model))
++
++def ema_validation(validation_fn,model,ema,*args,**kwargs):
++    """Call the existing RNG-preserving validation with EMA, restore raw in finally.
++
++    The existing validation closes each FrozenTypedContext. No learned output
++    cache may survive this weight swap. No second model construction is needed.
++    """
++    raw=cpu_copy(model.state_dict());mode=model.training
++    try:
++        model.load_state_dict(ema.readout_state_dict(model),strict=True)
++        return validation_fn(model,*args,**kwargs)
++    finally:
++        model.load_state_dict(raw,strict=True)
++        model.train(mode)
+diff --git a/experiments/pubmed_o_ema_v1/protocol.json b/experiments/pubmed_o_ema_v1/protocol.json
+new file mode 100644
+index 0000000..df53d85
+--- /dev/null
++++ b/experiments/pubmed_o_ema_v1/protocol.json
+@@ -0,0 +1,49 @@
++{
++  "version": "pubmed_o_ema_v1_review_only",
++  "formal_authorized": false,
++  "status": "implementation_review_no_active_ledger",
++  "dataset": "PubMed",
++  "arm": "O",
++  "train_seeds": [2026102812, 2026102833],
++  "sample_seeds": [2026102821, 2026102822],
++  "updates": 1000,
++  "save_updates": [0, 500, 1000],
++  "validation_updates": [0, 500, 1000],
++  "validation_times": [1, 500, 1000],
++  "training_trajectories": 2,
++  "final_readouts_per_trajectory": ["raw", "ema"],
++  "new_full_chains": 8,
++  "T": 1000,
++  "query_rounds": 1,
++  "normal2": "one zero_grad, two sumCE/(2*18336) backwards, one AdamW step",
++  "precision": "unchanged FP32 network; original float64 posterior",
++  "ema": {
++    "decay": 0.99,
++    "initialize": "copy theta0 before first forward/update",
++    "update": "after every complete normal2 step, including step1",
++    "mean_age_asymptotic_updates": 99,
++    "warmup": false,
++    "bias_correction": false,
++    "average_buffers": false,
++    "feedback_to_training": false,
++    "search": false
++  },
++  "optimizer": {"type": "AdamW", "lr": 0.0002, "weight_decay": 1e-12, "betas": [0.9, 0.999], "eps": 1e-08, "amsgrad": false},
++  "accuracy": {
++    "primary": "per-training-seed mean of per-graph absolute total edge error vs926",
++    "consistent_gain": "strictly lower primary error in BOTH training seeds",
++    "pooled_mean_only": "report tradeoff; never call consistent gain",
++    "per_relation_errors": "report alongside total error; no cancellation hidden"
++  },
++  "non_adoption_redlines_per_training_seed": {
++    "mean_incident4_W1_relative_increase_gt": 0.1,
++    "mean_LCC_drop_gt": 19.2,
++    "zero_raw_W1": "any positive EMA W1 crosses the relative redline",
++    "meaning": "human-chosen non-adoption warnings, not proven safety limits; passing is not structural acceptance"
++  },
++  "other_structure": "retain joint degreeTV, typed triangles, closure/opportunities, relation counts, degree tails, MP2/MP3, connectivity and sample differences; severe degradation must be disclosed even below redlines",
++  "proposed_formal_seconds": 7800,
++  "proposed_default_schedule": "two authorized GPUs, one training trajectory each; raw/ema x two seeds sequentially on each GPU",
++  "optional_sample_parallelism": "after both final readouts frozen, extra authorized idle cards may share the same eight jobs; schedule must be fixed before launch, not additional samples",
++  "prohibited": ["training now", "full sampling now", "new features", "new loss", "LR changes", "EMA tuning", "checkpoint selection", "model/probability ensembling", "repair", "extra samples"]
++}
+diff --git a/experiments/pubmed_o_ema_v1/review.py b/experiments/pubmed_o_ema_v1/review.py
+new file mode 100644
+index 0000000..44935a2
+--- /dev/null
++++ b/experiments/pubmed_o_ema_v1/review.py
+@@ -0,0 +1,18 @@
++"""Review-only manifest CLI. It has no formal launcher or worker import."""
++import argparse,json,pathlib
++ROOT=pathlib.Path(__file__).resolve().parent
++def plan():
++    cfg=json.loads((ROOT/'protocol.json').read_text());trains=[];samples=[]
++    for seed in cfg['train_seeds']:
++        task=f'PubMed_s{seed}_O'
++        trains.append(dict(id=task,train_seed=seed,updates=1000,readouts=['raw','ema'],directory=task))
++        for readout in ['raw','ema']:
++            for sample in cfg['sample_seeds']:
++                samples.append(dict(id=f'{task}_{readout}_{sample}',depends_on=task,readout=readout,
++                                    sample_seed=sample,T=1000,directory=f'{task}/{readout}/sample_{sample}'))
++    return dict(status='review_only_not_activated',training=trains,sampling=samples,formal_authorized=False)
++def main():
++    p=argparse.ArgumentParser();p.add_argument('command',choices=['plan','formal']);a=p.parse_args()
++    if a.command=='formal':raise SystemExit('Formal execution is not authorized or wired in this minimal review package.')
++    print(json.dumps(plan(),indent=2))
++if __name__=='__main__':main()
+diff --git a/experiments/pubmed_o_ema_v1/review_plan.json b/experiments/pubmed_o_ema_v1/review_plan.json
+new file mode 100644
+index 0000000..3f57289
+--- /dev/null
++++ b/experiments/pubmed_o_ema_v1/review_plan.json
+@@ -0,0 +1,92 @@
++{
++  "status": "review_only_not_activated",
++  "training": [
++    {
++      "id": "PubMed_s2026102812_O",
++      "train_seed": 2026102812,
++      "updates": 1000,
++      "readouts": [
++        "raw",
++        "ema"
++      ],
++      "directory": "PubMed_s2026102812_O"
++    },
++    {
++      "id": "PubMed_s2026102833_O",
++      "train_seed": 2026102833,
++      "updates": 1000,
++      "readouts": [
++        "raw",
++        "ema"
++      ],
++      "directory": "PubMed_s2026102833_O"
++    }
++  ],
++  "sampling": [
++    {
++      "id": "PubMed_s2026102812_O_raw_2026102821",
++      "depends_on": "PubMed_s2026102812_O",
++      "readout": "raw",
++      "sample_seed": 2026102821,
++      "T": 1000,
++      "directory": "PubMed_s2026102812_O/raw/sample_2026102821"
++    },
++    {
++      "id": "PubMed_s2026102812_O_raw_2026102822",
++      "depends_on": "PubMed_s2026102812_O",
++      "readout": "raw",
++      "sample_seed": 2026102822,
++      "T": 1000,
++      "directory": "PubMed_s2026102812_O/raw/sample_2026102822"
++    },
++    {
++      "id": "PubMed_s2026102812_O_ema_2026102821",
++      "depends_on": "PubMed_s2026102812_O",
++      "readout": "ema",
++      "sample_seed": 2026102821,
++      "T": 1000,
++      "directory": "PubMed_s2026102812_O/ema/sample_2026102821"
++    },
++    {
++      "id": "PubMed_s2026102812_O_ema_2026102822",
++      "depends_on": "PubMed_s2026102812_O",
++      "readout": "ema",
++      "sample_seed": 2026102822,
++      "T": 1000,
++      "directory": "PubMed_s2026102812_O/ema/sample_2026102822"
++    },
++    {
++      "id": "PubMed_s2026102833_O_raw_2026102821",
++      "depends_on": "PubMed_s2026102833_O",
++      "readout": "raw",
++      "sample_seed": 2026102821,
++      "T": 1000,
++      "directory": "PubMed_s2026102833_O/raw/sample_2026102821"
++    },
++    {
++      "id": "PubMed_s2026102833_O_raw_2026102822",
++      "depends_on": "PubMed_s2026102833_O",
++      "readout": "raw",
++      "sample_seed": 2026102822,
++      "T": 1000,
++      "directory": "PubMed_s2026102833_O/raw/sample_2026102822"
++    },
++    {
++      "id": "PubMed_s2026102833_O_ema_2026102821",
++      "depends_on": "PubMed_s2026102833_O",
++      "readout": "ema",
++      "sample_seed": 2026102821,
++      "T": 1000,
++      "directory": "PubMed_s2026102833_O/ema/sample_2026102821"
++    },
++    {
++      "id": "PubMed_s2026102833_O_ema_2026102822",
++      "depends_on": "PubMed_s2026102833_O",
++      "readout": "ema",
++      "sample_seed": 2026102822,
++      "T": 1000,
++      "directory": "PubMed_s2026102833_O/ema/sample_2026102822"
++    }
++  ],
++  "formal_authorized": false
++}
+diff --git a/experiments/pubmed_o_ema_v1/test_ema.py b/experiments/pubmed_o_ema_v1/test_ema.py
+new file mode 100644
+index 0000000..85c5d1d
+--- /dev/null
++++ b/experiments/pubmed_o_ema_v1/test_ema.py
+@@ -0,0 +1,180 @@
++import copy,io,json,pickle,random,subprocess,sys
++import numpy as np
++import pytest
++import torch
++from ema import ParameterEMA,DECAY
++from integration import complete_normal2,checkpoint_payload,restore_payload,final_readouts,ema_validation
++from review import plan
++from assessment import assess,SEEDS,SAMPLES
++
++class Tiny(torch.nn.Module):
++    def __init__(self):
++        super().__init__();self.w=torch.nn.Parameter(torch.tensor([0.,2.]));self.register_buffer('prior',torch.tensor([0.,1.]));self.register_buffer('count',torch.tensor(0))
++
++def rng():return dict(python=random.getstate(),numpy=np.random.get_state(),generator=copy.deepcopy(gen.bit_generator.state),torch=torch.get_rng_state())
++gen=np.random.default_rng(123)
++def restore_rng(x):
++    random.setstate(x['python']);np.random.set_state(x['numpy']);gen.bit_generator.state=copy.deepcopy(x['generator']);torch.set_rng_state(x['torch'])
++def equal(a,b):
++    if torch.is_tensor(a):return torch.equal(a,b)
++    if isinstance(a,np.ndarray):return np.array_equal(a,b)
++    if isinstance(a,dict):return a.keys()==b.keys() and all(equal(a[k],b[k]) for k in a)
++    if isinstance(a,(list,tuple)):return len(a)==len(b) and all(equal(x,y) for x,y in zip(a,b))
++    return a==b
++
++def test_theta0_and_three_steps_match_explicit_formula():
++    m=Tiny();e=ParameterEMA(m);expected=m.w.detach().double().clone()
++    for i,v in enumerate([[10.,4.],[-5.,8.],[3.,0.]],1):
++        with torch.no_grad():m.w.copy_(torch.tensor(v))
++        expected=.99*expected+.01*m.w.detach().double();e.update(m,i)
++        torch.testing.assert_close(e.shadow['w'].double(),expected,atol=2e-6,rtol=1e-5)
++        assert not e.shadow['w'].requires_grad and e.shadow['w'].grad_fn is None
++    assert e.updates==3
++
++def test_torch21_first_call_copy_is_not_our_contract():
++    from torch.optim.swa_utils import AveragedModel
++    m=Tiny();e=ParameterEMA(m);a=AveragedModel(m,avg_fn=lambda old,new,n:DECAY*old+(1-DECAY)*new)
++    with torch.no_grad():m.w.fill_(10)
++    a.update_parameters(m);e.update(m,1)
++    assert torch.equal(a.module.w,m.w)
++    assert abs(e.shadow['w'][0].item()-.1)<2e-6
++    assert not torch.equal(e.shadow['w'],a.module.w)
++
++def test_buffers_copied_not_averaged_and_live_model_untouched():
++    m=Tiny();e=ParameterEMA(m);m.prior.fill_(.25);m.count.fill_(7);m.w.grad=torch.tensor([1.,-2.]);before=copy.deepcopy(m.state_dict());grad=m.w.grad.clone()
++    e.update(m,1);export=e.readout_state_dict(m)
++    assert equal(before,m.state_dict()) and torch.equal(grad,m.w.grad)
++    assert torch.equal(export['prior'],m.prior) and export['count'].dtype==torch.int64
++    assert export['count'].item()==7 and export['prior'][0].item()==.25
++    export['w'].zero_();assert not torch.equal(export['w'],e.shadow['w'])
++
++def test_alias_readout_and_snapshot_are_not_raw_aliases():
++    m=Tiny();m.other=m.w;e=ParameterEMA(m)
++    with torch.no_grad():m.w.add_(3)
++    e.update(m,1);state=e.readout_state_dict(m)
++    assert torch.equal(state['w'],state['other']) and not torch.equal(state['w'],m.w)
++    snap=e.state_dict();snap['shadow']['w'].zero_();assert e.shadow['w'].abs().sum()>0
++
++def test_rng_and_raw_parameter_stream_unchanged():
++    before=rng();initial=Tiny()
++    def run(use):
++        restore_rng(before);m=copy.deepcopy(initial);e=ParameterEMA(m) if use else None;inputs=[]
++        for i in range(1,4):
++            x=torch.rand(2)+float(random.random()+np.random.random()+gen.random());inputs.append(x.clone())
++            with torch.no_grad():m.w.add_(x)
++            if use:e.update(m,i);e.state_dict();e.readout_state_dict(m)
++        return inputs,m.state_dict(),rng()
++    a=run(False);b=run(True);assert equal(a,b);restore_rng(before)
++
++def test_checkpoint_ema_optimizer_rng_exact_load_and_next_ema():
++    m=Tiny();e=ParameterEMA(m);opt=torch.optim.AdamW(m.parameters(),lr=.0002)
++    # Synthetic optimizer state, NOT an actual optimizer update or model training.
++    opt.state[m.w]=dict(step=torch.tensor(2.),exp_avg=torch.tensor([.1,.2]),exp_avg_sq=torch.tensor([.01,.04]))
++    for i in [1,2]:
++        with torch.no_grad():m.w.add_(i)
++        e.update(m,i)
++    random_state=rng();payload=checkpoint_payload(m,opt,e,2,random_state,{'fixture':'tiny'})
++    buf=io.BytesIO();torch.save(payload,buf);buf.seek(0);saved=torch.load(buf,map_location='cpu')
++    m2=Tiny();e2=ParameterEMA(m2);opt2=torch.optim.AdamW(m2.parameters(),lr=.0002)
++    assert restore_payload(saved,m2,opt2,e2,{'fixture':'tiny'},restore_rng)==2
++    assert equal(m.state_dict(),m2.state_dict()) and equal(opt.state_dict(),opt2.state_dict()) and equal(e.state_dict(),e2.state_dict()) and equal(rng(),random_state)
++    for mm,ee in [(m,e),(m2,e2)]:
++        with torch.no_grad():mm.w.add_(7)
++        ee.update(mm,3)
++    assert equal(e.state_dict(),e2.state_dict())
++
++@pytest.mark.parametrize('which',['counter','decay','shape','nan'])
++def test_invalid_ema_checkpoint_rejected(which):
++    m=Tiny();e=ParameterEMA(m);p=e.state_dict()
++    if which=='counter':p['updates']=2
++    if which=='decay':p['decay']=.999
++    if which=='shape':p['shadow']['w']=torch.zeros(3)
++    if which=='nan':p['shadow']['w'][0]=float('nan')
++    with pytest.raises(ValueError):e.load_state_dict(p,m,0)
++
++def test_duplicate_skipped_update_and_nonfinite_rejected():
++    m=Tiny();e=ParameterEMA(m);e.update(m,1);saved=e.state_dict()
++    for step in [1,3]:
++        with pytest.raises(ValueError):e.update(m,step)
++    with torch.no_grad():m.w[0]=float('inf')
++    with pytest.raises(FloatingPointError):e.update(m,2)
++    assert equal(saved,e.state_dict())
++
++def test_normal2_hook_only_after_completed_update():
++    m=Tiny();e=ParameterEMA(m);calls=[]
++    def existing(*args,**kw):
++        calls.append(kw);assert e.updates==0 and kw=={'step':True}
++        with torch.no_grad():m.w.add_(10)
++        return {'optimizer_steps':1,'loss':.5}
++    r=complete_normal2(existing,m,None,None,['first','second'],1000,'cpu',e,0)
++    assert len(calls)==1 and e.updates==1 and r['loss']==.5
++    assert abs(e.shadow['w'][0].item()-.1)<2e-6
++    def fail(*a,**k):raise RuntimeError('normal2 incomplete')
++    with pytest.raises(RuntimeError):complete_normal2(fail,m,None,None,[],1000,'cpu',e,1)
++    assert e.updates==1
++    with pytest.raises(RuntimeError):e.state_dict()
++    with pytest.raises(RuntimeError):e.readout_state_dict(m)
++    with pytest.raises(ValueError):complete_normal2(existing,m,None,None,[],1000,'cpu',e,1)
++
++def test_raw_step_completed_but_ema_fails_cannot_save_completed_checkpoint():
++    m=Tiny();e=ParameterEMA(m);opt=torch.optim.AdamW(m.parameters())
++    def bad_result(*a,**k):
++        with torch.no_grad():m.w.fill_(float('inf'))
++        return {'optimizer_steps':1}
++    with pytest.raises(FloatingPointError):complete_normal2(bad_result,m,opt,None,[],1000,'cpu',e,0)
++    with pytest.raises(RuntimeError):checkpoint_payload(m,opt,e,0,rng(),{})
++
++@pytest.mark.parametrize('fail',[False,True])
++def test_validation_swap_restores_raw_and_parameter_identity(fail):
++    m=Tiny();e=ParameterEMA(m)
++    with torch.no_grad():m.w.add_(10)
++    e.update(m,1);raw=copy.deepcopy(m.state_dict());pid=id(m.w);random_state=rng()
++    def frozen_validation(model):
++        model.eval();assert abs(model.w[0].item()-.1)<2e-6
++        if fail:raise RuntimeError('fixture evaluation error')
++        return {'readout':'ema','value':model.w[0].item()}
++    if fail:
++        with pytest.raises(RuntimeError):ema_validation(frozen_validation,m,e)
++    else:assert ema_validation(frozen_validation,m,e)['readout']=='ema'
++    assert equal(m.state_dict(),raw) and m.training and id(m.w)==pid and equal(rng(),random_state)
++
++def test_final_only_and_review_cli_no_execution():
++    m=Tiny();e=ParameterEMA(m)
++    with pytest.raises(ValueError):final_readouts(m,e,0)
++    p=plan();assert len(p['training'])==2 and len(p['sampling'])==8 and len({s['directory'] for s in p['sampling']})==8
++    import pathlib
++    cli=pathlib.Path(__file__).with_name('review.py');a=subprocess.run([sys.executable,str(cli),'plan'],capture_output=True,text=True);assert a.returncode==0 and json.loads(a.stdout)==p
++    b=subprocess.run([sys.executable,str(cli),'formal'],capture_output=True,text=True);assert b.returncode!=0 and 'not authorized' in b.stderr
++
++def records():
++    return [dict(train_seed=s,readout=r,sample_seed=k,status='complete',edges=1000,W1_incident4=1.,LCC=190.,family_edges=[1000]+[0]*9,other_metrics={'triangle':17}) for s in SEEDS for r in ['raw','ema'] for k in SAMPLES]
++def change(rs,s,readout,edges=None,**kw):
++    for r in rs:
++        if r['train_seed']==s and r['readout']==readout:
++            r.update(kw)
++            if edges is not None:r.update(edges=edges,family_edges=[edges]+[0]*9)
++
++def test_consistent_accuracy_requires_both_seeds_and_no_auto_adoption():
++    rs=records()
++    for s in SEEDS:change(rs,s,'ema',edges=950)
++    a=assess(rs);assert a['accuracy_conclusion']=='consistent_accuracy_gain_in_this_panel' and a['recommend_adoption'] is False
++    assert a['original_records'][0]['other_metrics']=={'triangle':17}
++
++def test_pooled_gain_with_one_seed_worse_is_mixed():
++    rs=records();change(rs,SEEDS[0],'ema',edges=926);change(rs,SEEDS[1],'ema',edges=1020)
++    a=assess(rs);assert a['pooled_error_difference']<0 and a['accuracy_conclusion']=='mixed_or_partial_not_consistent'
++
++def test_equal_wrong_numbers_are_not_accuracy_gain():
++    a=assess(records());assert a['accuracy_conclusion']=='accuracy_hypothesis_not_supported_in_this_panel'
++
++def test_redlines_are_per_seed_not_pooled():
++    rs=records();change(rs,SEEDS[0],'ema',W1_incident4=1.2,LCC=170.);change(rs,SEEDS[1],'ema',W1_incident4=.5,LCC=192.)
++    a=assess(rs);assert all(a['per_seed'][0]['redlines'].values()) and a['non_adoption_redline']
++
++def test_missing_graph_is_not_mean_of_successes():
++    a=assess(records()[:-1]);assert a['status']=='incomplete' and a['pooled_error_difference'] is None and a['accuracy_conclusion'] is None
++
++def test_per_graph_errors_precede_means_and_relations_retained():
++    rs=records();change(rs,SEEDS[0],'raw',edges=900);rs[1].update(edges=952,family_edges=[952]+[0]*9)
++    a=assess(rs);assert a['per_seed'][0]['raw']['signed_edge_bias']==0 and a['per_seed'][0]['raw']['edge_absolute_error']==26
++    assert len(a['per_seed'][0]['family_error_differences'])==10

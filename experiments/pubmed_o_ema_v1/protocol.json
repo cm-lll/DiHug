@@ -1,0 +1,49 @@
+{
+  "version": "pubmed_o_ema_v1_review_only",
+  "formal_authorized": false,
+  "status": "implementation_review_no_active_ledger",
+  "dataset": "PubMed",
+  "arm": "O",
+  "train_seeds": [2026102812, 2026102833],
+  "sample_seeds": [2026102821, 2026102822],
+  "updates": 1000,
+  "save_updates": [0, 500, 1000],
+  "validation_updates": [0, 500, 1000],
+  "validation_times": [1, 500, 1000],
+  "training_trajectories": 2,
+  "final_readouts_per_trajectory": ["raw", "ema"],
+  "new_full_chains": 8,
+  "T": 1000,
+  "query_rounds": 1,
+  "normal2": "one zero_grad, two sumCE/(2*18336) backwards, one AdamW step",
+  "precision": "unchanged FP32 network; original float64 posterior",
+  "ema": {
+    "decay": 0.99,
+    "initialize": "copy theta0 before first forward/update",
+    "update": "after every complete normal2 step, including step1",
+    "mean_age_asymptotic_updates": 99,
+    "warmup": false,
+    "bias_correction": false,
+    "average_buffers": false,
+    "feedback_to_training": false,
+    "search": false
+  },
+  "optimizer": {"type": "AdamW", "lr": 0.0002, "weight_decay": 1e-12, "betas": [0.9, 0.999], "eps": 1e-08, "amsgrad": false},
+  "accuracy": {
+    "primary": "per-training-seed mean of per-graph absolute total edge error vs926",
+    "consistent_gain": "strictly lower primary error in BOTH training seeds",
+    "pooled_mean_only": "report tradeoff; never call consistent gain",
+    "per_relation_errors": "report alongside total error; no cancellation hidden"
+  },
+  "non_adoption_redlines_per_training_seed": {
+    "mean_incident4_W1_relative_increase_gt": 0.1,
+    "mean_LCC_drop_gt": 19.2,
+    "zero_raw_W1": "any positive EMA W1 crosses the relative redline",
+    "meaning": "human-chosen non-adoption warnings, not proven safety limits; passing is not structural acceptance"
+  },
+  "other_structure": "retain joint degreeTV, typed triangles, closure/opportunities, relation counts, degree tails, MP2/MP3, connectivity and sample differences; severe degradation must be disclosed even below redlines",
+  "proposed_formal_seconds": 7800,
+  "proposed_default_schedule": "two authorized GPUs, one training trajectory each; raw/ema x two seeds sequentially on each GPU",
+  "optional_sample_parallelism": "after both final readouts frozen, extra authorized idle cards may share the same eight jobs; schedule must be fixed before launch, not additional samples",
+  "prohibited": ["training now", "full sampling now", "new features", "new loss", "LR changes", "EMA tuning", "checkpoint selection", "model/probability ensembling", "repair", "extra samples"]
+}
