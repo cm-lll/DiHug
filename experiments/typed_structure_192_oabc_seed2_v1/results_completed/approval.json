@@ -1,0 +1,108 @@
+{
+  "independent_review": "passed",
+  "review_basis": "reuse exact reviewed/executed b5b6973 source; current user explicitly authorizes seed-only replication without repeated gates",
+  "user_continue_confirmed": true,
+  "main_W1_definition_confirmed": "type_weighted_incident4",
+  "updates": 1000,
+  "source_sha256": "6349f816a273679e2f08bb0d887065d23f77b488e68b3a5aca036683d6258429",
+  "summarize_sha256": "89066d0f96901e48622e4566b5c9bfca02b3e68e14de08618a691dee6fb38404",
+  "protocol_sha256": "ce4147f838f460853bea44f4a07cced24ee813281f0d3cb7dedc93430765f6cb",
+  "cost_sha256": "c922b86373fe7e918e2a445ff90f29b7811398aaea75659e8bae5e346cdb6e8f",
+  "dictionaries": {
+    "IMDB": {
+      "files": {
+        "final_basis.npz": "3b5d9207c4a1ee0349385e5f30f6268f4a6fc13df70912f62a7f279f9f0bae50",
+        "selection.json": "f4daf29fa57b9deb962c66c40d4d9e4a71db75d066b9ccdd5aedc21d16b69e36",
+        "panel.json": "7b0080817810aa770250501e002de4a5387d88bbbfa0550fc2118956ef1af951",
+        "frozen_splits.json": "1af6534e1fcda03265a499b93d62131c45e56a2fc1dc79f9caf55b2806d927ee"
+      },
+      "K": [
+        5,
+        4,
+        3,
+        2
+      ],
+      "offsets": [
+        0,
+        5,
+        9,
+        12,
+        14
+      ],
+      "dimension": 14
+    },
+    "PubMed": {
+      "files": {
+        "final_basis.npz": "a852a959c41a8d69dce37a0df542d4852e997450843888ba3c5e46a79e62f14e",
+        "selection.json": "a51a6d8a4ed47712a3792fac7acb603660e8aee4dc9ba15afef3c8a7ed19cd0d",
+        "panel.json": "eaf94f3557a87ea76688b20652dfd0e745e0ebc9f877d20f7b6f304750c3413d",
+        "frozen_splits.json": "2f84b8ddaf18b6336d032c6058b7a22951b74f99c8234892d6e04a58e4a69564"
+      },
+      "K": [
+        8,
+        8,
+        8,
+        6
+      ],
+      "offsets": [
+        0,
+        8,
+        16,
+        24,
+        30
+      ],
+      "dimension": 30
+    }
+  },
+  "environment": {
+    "python_version": "3.9.23",
+    "torch_runtime_version": "2.1.0+cu121",
+    "device_name": "NVIDIA GeForce RTX 2080 Ti",
+    "packages": {
+      "torch": "2.1.0+cu121",
+      "torch-geometric": "2.3.1",
+      "numpy": "1.23.0",
+      "scipy": "1.11.0",
+      "pytest": "8.4.2",
+      "networkx": "2.8.7"
+    }
+  },
+  "resource_authorization": {
+    "basis": "explicit_user_eight_card_authorization",
+    "allowed_uuids": [
+      "GPU-12b85b68-69e6-12fa-76ce-986c0b46e8a7",
+      "GPU-cf73267c-774a-dada-fc26-ada91ccc27c1",
+      "GPU-dda1721a-d053-7371-3434-4c3c8502a1d4",
+      "GPU-994be766-a8bd-b90c-bf87-c667dfa8ab4d",
+      "GPU-e2284395-dd00-1e74-3eed-7f406fa69d5c",
+      "GPU-2db6cf6a-a8b5-58af-4e89-22bfc863a0fb",
+      "GPU-cddbf2e5-1af7-7219-ff58-38e6f4c44f69",
+      "GPU-360156ae-7a75-37f4-eaed-9a5500275409"
+    ],
+    "allocation_check_complete": true,
+    "reservation_conflicts": [],
+    "allocation_evidence": "current user explicit eight-card authorization; new resource receipt confirms no scheduler masks/tools, no compute tasks/device handles",
+    "minimum_free_mib": 5556,
+    "minimum_basis": "historical maximum reserved 3508 MiB + 2048 MiB admission margin; not a worst-case chain guarantee",
+    "snapshot_sha256": "e2cf647a12218ba6520d18d12241a49d7aff2028e207a44b391d5b3a7bcbc3f3"
+  },
+  "effective_execution": {
+    "models": 8,
+    "chains": 16,
+    "T": 1000,
+    "updates": 1000,
+    "budget_seconds": 8400,
+    "scientific_protocol_sha256": "ce4147f838f460853bea44f4a07cced24ee813281f0d3cb7dedc93430765f6cb",
+    "note": "second independent training seed; old budgets preserved, new 8400-second activation ledger; no scientific code change",
+    "train_seeds": {
+      "IMDB": 2026102834,
+      "PubMed": 2026102833
+    },
+    "sample_seeds": [
+      2026102821,
+      2026102822
+    ],
+    "basis_commit": "b5b697361e389cd77d2fb09a84e77c0b6915407d"
+  },
+  "ledger_sha256": "ba47234f6556686af335765db072db76e8547ffcb864f7d31292a4124c4404a0"
+}
