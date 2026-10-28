@@ -1,0 +1,1001 @@
+--- a/README.md
++++ b/README.md
+@@ -1,79 +1,68 @@
+-# PubMed O：raw／EMA完整运行接线（等待正式授权）
++# PubMed O：八训练seed、三EMA尺度（准备版）
+ 
+-本版接通两次训练、八条采样链和统一评价。原EMA方案不变；不是新的角色机制。**目前没有正式审批文件、正式起点或活动账本。不得因为本包存在或工程测试通过自行开训。**
++基线：`e42c962f03b83c183c17cee09d948c674f2e69b9`。本包只完成接线和工程验收，**没有正式运行授权，没有激活账本**。旧两seed／单EMA／130分钟方案暂停，不复用其审批。
+ 
+-## 实际数据流与复用边界
++## 固定科学合同
+ 
+-`package/`逐文件复用首轮已封存OABC执行包（58文件），包括模型、normal2、CE、min/max、前向噪声、原后验、`reverse_step`和图评价。历史未用入口保留来源，不是本版正式入口；唯一正式入口为`run.py formal`。
++PubMed attempt02，192节点、926边，O基础网络；package内58份模型、数据、损失、初始化、normal2、后验及评价文件与基线逐文件相同。没有CN、ReFeX或RolX激活路径。完整18336槽查询，FP32，原AdamW及学习率，1000次normal2更新，T1000，不改生成规则。
+ 
+-`ema.py`、`integration.py`、`assessment.py`、`protocol.json`与审查提交`bda747ebb18604d69040ec33ffa36fdbaa0cd46a`逐字节一致。θ̄₀=θ₀，每完整normal2后θ̄ₖ=0.99θ̄ₖ₋₁+0.01θₖ；buffer只复制，EMA不反馈训练或优化器。不搜索衰减率，不修改模型/损失/采样。
++八seed：2026102812、2026102833，以及2026102841—2026102846。本地可用项目记录中未找到新增六seed既往使用；查找范围和限制见seed_manifest.json。旧两seed参与过方案选择，始终与新增六seed分组报告。
+ 
+-`model_io.fresh`核验并加载两轮已封存的**原始0更新科学权重**，只取原model，不取旧优化器或训练后状态。模型构造后重置原配对训练随机流，新建空AdamW，然后在首次前向前保存本轮initial（raw、EMA、空优化器、RNG、计数及绑定）。两份历史初态的实际字节本轮已重新核验。O不读取字典、ReFeX、CN或角色库存。
++旧两seed按initial_assets.json读取并验证封存的0更新科学权重；新建空AdamW。新六seed调用原package/experiment_contract.py的initialization：原anchor构造、独立模块初始化、实际公共参数复制；之后重置原配对Python／NumPy／Torch CPU／所选CUDA／显式Generator随机流。正式入口在首次前向前保存原始初态、全部EMA、空优化器、RNG和绑定。新增初态本票未提前训练或执行前向。
+ 
+-`run_worker.train`调用原`normal2`，仍为一次zero_grad、两份完整查询各sumCE/(2×18336)顺序反向、一次step；随后调用EMA。保存0/500/1000，0/500/1000各用原固定t1/500/1000验证两种读出并恢复训练RNG。完整更新失败不生成虚假的可恢复检查点。
++每条轨迹维护三个独立参数副本，β=0.9、0.97、0.99：
+ 
+-1000更新后从同一完整checkpoint导出`readout_raw.pt`和`readout_ema.pt`，两文件分别保存读出类型、训练seed、原final哈希及各自独立哈希。两次训练全部完成后才启动链。采样worker核对指定文件及元数据、严格加载后比对张量，原`reverse_step`逐步完整覆盖并统一提交；不复用工程权重、不将raw文件误标为EMA、不新增后处理。
++`bar_theta[0]=theta[0]`
+ 
+-每条链目录包含训练seed/读出/采样seed。保存原初态哈希与采样Generator状态、11个原规则状态点、最终图、完整指标及绑定。汇总核对配对初态与随机状态。训练随机流和各链随机流分离；不自动恢复、补抽或重启。
++`bar_theta[k]=beta*bar_theta[k-1]+(1-beta)*theta[k]`
+ 
+-## 冻结任务与实际队列
++第1步也递推，不直接复制theta1。每次完整normal2原参数更新后执行三次独立递推，来源均为同一raw，EMA不进优化器、不参与反向或训练输入。buffer随读出复制当前raw buffer，不做EMA。保存0／500／1000，包括raw、三个EMA及各自计数、优化器与RNG；各读出验证恢复raw与训练随机状态。只导出最终1000更新四个独立文件。
+ 
+-仅PubMed192节点、926边的O，训练seed2026102812、2026102833，各1000更新；每个最终raw/EMA使用采样seed2026102821、2026102822。共两次训练、八张全新T1000图。
++## 队列与结果
+ 
+-本版固定**两张获授权空闲2080Ti**：slot0负责第一个训练seed，slot1负责第二个。两个训练任务完成后，每卡按raw/2821、raw/2822、ema/2821、ema/2822顺序执行四条链。CPU线程1；不DDP。成本文件和launcher调用同一`jobs()`清单。此版本未实现额外卡分发，避免成本与实际队列不一致；如以后改变队列，须明确重新绑定成本和资源，不能运行中临时扩图。
++八卡一卡一seed；所有训练成功封存后，各卡依次执行raw、ema_0.9、ema_0.97、ema_0.99，每种依次采样2026102821／2026102822，共64条链。完整身份为训练seed＋读出＋采样seed。每链验证自己文件的哈希、衰减率、源绑定及最终检查点。原先验、完整查询和逐槽随机消费不变，汇总额外核对各读出的采样初态与RNG一致。队列见evidence/queue.json；dry-run不创建运行目录、不启动worker。
+ 
+-formal入口第一时刻开始累计7800秒，包括启动检查；固定1200秒交付预留。起止用Asia/Shanghai记录。正常或失败退出均尝试统一汇总，保留原始错误和缺项，不用汇总失败覆盖worker失败。STOP、SIGINT/SIGTERM/SIGHUP清理本任务进程组；SIGKILL不可捕获。输出必须新建且不与来源/输入重叠。实际输出卷至少4GiB空闲；当前不是持久性保证。
++主比较仍为ema_0.99−raw；另两种同时完整展示，不事后挑赢家。每图先计算相对926的绝对边数误差，再按训练seed平均两图，分别汇总8个差值、等权均值、中位数及改善／持平／恶化数量；旧2／新6分别报告。跨seed有符号偏差均值、范围、总体标准差仅为次要描述。缺任一必需图不只平均成功项；各类结构指标与null保留。逐seed列出W1增加超过10%、LCC下降超过19.2的预警，不将它们当安全证明或全轮自动否决。两图不重复不等于总体多样性充分。
+ 
+-资源授权、调度预留和其他进程单独检查；1%利用率不是拒绝理由，也不能用无进程推断有权限。本轮工程只使用GPU0一次，正式设备UUID须在新授权时指定。
++## 本票实测
+ 
+-## 本轮实际检查与限制
++- CPU40项通过、0失败、0跳过（旧测试及新增三EMA／队列／统计测试）。最初5项新增测试引用错了内部属性名，修正测试后完整重跑；失败过程保留在evidence/preparation_report.json。
++- GPU0 RTX2080Ti：5次临时normal2更新，2次raw、2次三EMA、1次恢复后重复第2步。工程状态已按用户要求删除，仅保留哈希及核验回执，不进入科学初始化。
++- 本段raw对照与三EMA：输入、训练RNG、模型、梯度、优化器逐位一致；加载模型／优化器／三EMA／RNG／计数精确一致；恢复后续算逐位一致。四种验证后raw、模式、优化器及RNG恢复。
++- 暖normal2含三EMA3.5585秒，其中原更新3.2592秒、三EMA约0.2993秒；一次完整四读出固定验证7.8948秒。检查点写入2.856秒，恢复1.096秒。
++- 三份shadow79,591,500字节，实测新增allocated75.99MiB。峰allocated3267.69MiB，reserved3638MiB，CPU RSS4823.38MiB（含取证副本）。这是单卡短段，不是八卡稳定吞吐或完整链成本。
++- package和科学数据未改；正式训练0、完整链0、新图0。没有八seed GPU复测，没有新跨CPU/GPU等价要求。旧证据不改写。
+ 
+-- 原22项CPU小张量检查，加9项运行接线测试，最终31项零失败/跳过。首次模拟失败路径的测试替身缺少`wait`方法（30通过/1失败），补全替身后完整31通过；保留旧失败XML，没有修改科学实现或容差。
+-- 同一真实PubMed O初态、实际GPU路径，**5次临时normal2 step**：原流程2次、EMA流程2次、恢复第1步后重复第2步1次。正式训练0，完整链0，新图0，未做GPU跨后端或公共算子复验。
+-- 两次更新原参数、梯度、完整优化器状态及输入/RNG均逐位一致；EMA验证后原模型/优化器/RNG/模式恢复一致；checkpoint的raw/EMA/优化器/RNG/计数载入精确，恢复续算也逐位一致。这仅覆盖本次短段，不保证任意长期轨迹逐位一致。
+-- 原FP32比较容差仍为atol=2e-6、rtol=1e-5；精确载入和后续计算的判据分开。本面板结果同时满足更强的逐位一致，不增加为普遍训练门槛。
+-- 真实工程用时约42.77秒（进程内部），峰值allocated3217.03MiB、reserved3472MiB、进程RSS4638.95MiB。RSS包含多份CPU取证快照，不能当正式稳定占用；CUDA峰值也仅是本次状态。
+-- 暖态原normal2约3.224秒，EMA版本内部原normal2约3.261秒，EMA维护约0.0978秒，总计3.358秒。首步含冷成本，单独保存，不将总时间差全归因EMA。约3%是本次组件观测，不是完整训练吞吐保证。
+-- 3时刻raw验证约1.857秒、EMA约1.833秒，连同切换3.863秒；checkpoint保存1.924秒、恢复0.281秒。未新跑采样成本短链，不声称测过EMA自由生成状态。
++## 正式预算建议，尚待确认
+ 
+-## 预算建议
++固定八卡队列：训练关键路径约60.36分钟；八轮链历史最大621.82秒／条，合计82.91分钟。再计初始化／验证／保存约1.49分钟，计算关键路径144.77分钟；10%未实测并发／状态／进程启动余量14.48分钟；评价、审计、导出及交付20分钟，总规划179.24分钟。建议批准**185分钟**，不是完成保证，也不是八条链只算一轮。
+ 
+-历史最慢训练3322.52秒/1000更新、单链621.82秒。用历史与本次暖态更新的较大者，再加EMA维护；两卡并行关键路径含1000更新、每卡四条链、旧初始化/保存成本和新增双读出验证/保存约5980.79秒（99.68分钟）。另加598.08秒**未实测规划余量**，覆盖新的进程初始化/读出加载、竞争和状态变化风险，再加1200秒评价交付预留，合计**7778.87秒＝129.65分钟**。
++三EMA固定验证、写盘和恢复已计入；链成本沿用前两轮O的实测，不新跑完整链。8个同模型任务的CPU／IO竞争、EMA自由生成状态成本仍未实测。实际正式启动须重新核实8卡权限、他人进程、显存和至少12GiB输出卷空闲；少于8卡只报告，不自动缩规模。初态／检查点约3.6GiB，加读出约0.8GiB及日志状态，12GiB是保守存储门，不代表持久性认证。
+ 
+-130分钟可作为这份队列的规划上限，但仅比含余量估算多约21秒；不能承诺完成。真正compute预留门在启动后110分钟触发，达到就保存缺项，不延期。两卡并发与EMA后期自由状态成本尚未实测；若希望更保守预算，应在正式授权时决定，不能本轮自行延长或换队列。
++`initial_assets.json`和`prior_evidence/`保留原两seed历史记录（含130分钟旧提案字段），仅作来源证据；本版有效提案为protocol.json与evidence/cost.json。
+ 
+-磁盘最低4GiB是检查点/双读出/状态/日志的保守工程门，不包含公开包及历史权重。EMA常驻参数副本约25.30MiB；验证、导出和取证还有临时副本。
++## 命令
+ 
+-## 评价
+-
+-复用原`evaluate`及`summary_metrics`。逐图先计算相对固定参考的误差，再按训练seed分别比较EMA−raw；保留incident4/all10、逐关系、jointTV、类型三角、闭合机会、聚类、LCC/孤立/尾部、MP2/MP3和两图差异，null/缺图不只平均成功项。
+-
+-只有两个seed各自的平均绝对边数误差都降低，才称本面板一致数量准确性收益。跨seed差异缩小只是次要结果。每seed的W1+10%或LCC下降19.2是人为“不推荐采用”红线，不是安全证明；严重尾部/三角代价仍须说明，不自动批准采用。EMA平滑同时带来滞后，不保证消除持久偏差。两个训练seed不能证明统计稳定性或角色机制有效。
+-
+-## 命令（正式命令尚未授权执行）
+-
+-运行环境保持`/data2/lyh/miniconda3/envs/sparse_block/bin/python`、Torch2.1.0+cu121，不安装升级。首次使用先核验发布清单。两份0更新初态不打入公开ZIP；`initial_assets.json`给出路径及已封存预期SHA256，搬迁时只能显式修改外部approval的`initial_paths`映射，哈希仍严格核对。
++使用已有sparse_block环境，不安装升级依赖：
+ 
+ ```bash
+-# 仅打印队列，无GPU探测/worker/账本
+-/data2/lyh/miniconda3/envs/sparse_block/bin/python run.py dry-run --output /tmp/ema_future_plan
+-
+-# 仅CPU接线回归，无真实更新
+-CUDA_VISIBLE_DEVICES='' OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 \
+-PYTEST_ADDOPTS='' /data2/lyh/miniconda3/envs/sparse_block/bin/python -m pytest -q -o addopts='' test_ema.py test_runtime.py
+-
+-# 以下须用户正式授权后，填写外部approval模板的真实审查/授权/资源证据。
+-# 不自动创建许可；示例不是本轮执行授权。新目录不得已存在。
+-/data2/lyh/miniconda3/envs/sparse_block/bin/python run.py formal \
+-  --approval /path/to/authorized_approval.json --cost /path/to/bound_cost.json \
+-  --output /path/to/new_run --gpu-uuids GPU-APPROVED-0 GPU-APPROVED-1
+-
+-# 安全停止；不自动恢复或重抽
+-touch /path/to/new_run/STOP
++export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
++CUDA_VISIBLE_DEVICES='' PYTEST_ADDOPTS='' python -m pytest -q test_ema.py test_runtime.py test_multi_ema.py
++CUDA_VISIBLE_DEVICES='' python run.py dry-run --output /绝对路径/尚不存在的新运行目录
+ ```
+ 
+-外部approval须绑定当前源码、protocol、cost、preflight、完整环境、初态及两卡队列；`approval.template.json`明确false，仅是待填格式，不可直接激活。cost中的preflight路径可显式迁移到同哈希文件，重新生成cost哈希后再由审批绑定；不能用新算的未知文件哈希替代预期来源。
++已完成GPU预检不用重复运行。若迁移后必要证据路径变化，只重建cost文件中的证据路径绑定，不改科学设置：
+ 
+-结果位置：`activation.json`、`queue.json`、`launcher_summary.json`、`unified_evaluation.json`；各`PubMed_s…_O/`内为initial/midpoint/final、readout_raw/ema、validation/training；链在`raw|ema/sample_…/`内。`launcher_summary`保留主失败原因，`unified_evaluation`保留逐seed及缺项。正式批准前不执行这些任务。
++```bash
++CUDA_VISIBLE_DEVICES='' python build_cost.py --preflight evidence/gpu_preflight/preflight.json --output /绝对路径/新的cost.json
++```
+ 
+-本轮结束后停止等待运行审查及正式预算授权；不再拆分EMA方案，不新增科学候选。
++以下正式命令**尚未授权执行**；本票不创建审批文件。将来经审查及用户确认185分钟或新预算后，按runtime_contract.approval_gate要求登记真实授权、最终源码／协议／cost哈希、实际8卡UUID及资源归属、预检environment、旧初态路径、全新输出目录。不能把文档或模板当真实审批。预算变更须明确确认并更新绑定，不能私改截止。
++
++```bash
++python run.py formal --output "$NEW_RUN" --approval "$CONFIRMED_APPROVAL" --cost "$BOUND_COST" --gpu-uuids "$GPU0" "$GPU1" "$GPU2" "$GPU3" "$GPU4" "$GPU5" "$GPU6" "$GPU7"
++```
++
++唯一入口run.py通过管道票据启动worker；不直接调用worker。STOP为在NEW_RUN创建STOP文件，已运行任务按边界停止并保留证据；无自动重启、补抽或延时。末20分钟用于停止、统一评价与交付。SIGKILL不能捕获。停止／失败结果汇总保留缺图及原错误。
++
++全部检查支持实现接通，不证明EMA改善生成。参数平滑可能保留持续偏差，也同时引入滞后；需正式结果回答准确性、收益覆盖和结构代价。
+--- a/assessment.py
++++ b/assessment.py
+@@ -1,54 +1,45 @@
+-"""Frozen per-seed interpretation rules, not a new graph evaluator.
+-
+-Caller adapts the existing evaluator to edges, W1_incident4, LCC, family_edges.
+-All original metrics remain in the returned records; no success-only average.
+-"""
+-import math
+-SEEDS=(2026102812,2026102833)
+-SAMPLES=(2026102821,2026102822)
++"""Predeclared decay-specific, equally weighted TRAINING-seed summaries."""
++import math,statistics
++from runtime_contract import SEEDS,OLD_SEEDS,NEW_SEEDS,SAMPLES,READOUTS,DECAYS
+ REFERENCE_FAMILY_EDGES=(39,137,159,17,83,267,27,161,33,3)
++def mean(values):return sum(values)/len(values)
+ def assess(records):
+-    lookup={}
++    index={}
+     for r in records:
+         key=(r['train_seed'],r['readout'],r['sample_seed'])
+-        if key in lookup:raise ValueError('duplicate identity')
+-        if key[0] not in SEEDS or key[1] not in ('raw','ema') or key[2] not in SAMPLES:raise ValueError('unexpected identity')
+-        lookup[key]=r
+-    result={'per_seed':[],'original_records':records,'scope':'exploratory two training seeds; no statistical guarantee'}
+-    for seed in SEEDS:
+-        cell={'train_seed':seed,'status':'complete','raw':None,'ema':None,'redlines':None}
+-        for readout in ('raw','ema'):
+-            rs=[lookup.get((seed,readout,s)) for s in SAMPLES]
+-            if any(r is None or r.get('status')!='complete' for r in rs):
+-                cell['status']='incomplete';continue
+-            keys=['edges','W1_incident4','LCC']
+-            if any(any(r.get(k) is None or not math.isfinite(float(r[k])) for k in keys) or r.get('family_edges') is None for r in rs):
+-                cell['status']='incomplete';continue
+-            for r in rs:
+-                if len(r['family_edges'])!=10 or sum(r['family_edges'])!=r['edges']:raise ValueError('relation counts do not sum to total')
+-            cell[readout]=dict(edge_absolute_error=sum(abs(r['edges']-926) for r in rs)/2,
+-                              signed_edge_bias=sum(r['edges']-926 for r in rs)/2,
+-                              W1_incident4=sum(r['W1_incident4'] for r in rs)/2,
+-                              LCC=sum(r['LCC'] for r in rs)/2,
+-                              family_absolute_errors=[sum(abs(r['family_edges'][i]-REFERENCE_FAMILY_EDGES[i]) for r in rs)/2 for i in range(10)])
+-        if cell['status']=='complete':
+-            raw,ema=cell['raw'],cell['ema'];w=raw['W1_incident4']
+-            cell['edge_error_difference']=ema['edge_absolute_error']-raw['edge_absolute_error']
+-            cell['family_error_differences']=[e-r for e,r in zip(ema['family_absolute_errors'],raw['family_absolute_errors'])]
+-            cell['redlines']=dict(W1_exceeds_10_percent=ema['W1_incident4']>1.1*w,
+-                                  LCC_drop_exceeds_19_2=raw['LCC']-ema['LCC']>19.2)
+-            cell['redline_note']='human-chosen non-adoption warnings; not proven safety or sufficient structural acceptance'
+-        result['per_seed'].append(cell)
+-    if any(c['status']!='complete' for c in result['per_seed']):
+-        result.update(status='incomplete',accuracy_conclusion=None,pooled_error_difference=None,recommend_adoption=False)
+-        return result
+-    diffs=[c['edge_error_difference'] for c in result['per_seed']]
+-    if all(d<0 for d in diffs):conclusion='consistent_accuracy_gain_in_this_panel'
+-    elif any(d<0 for d in diffs):conclusion='mixed_or_partial_not_consistent'
+-    else:conclusion='accuracy_hypothesis_not_supported_in_this_panel'
+-    result.update(status='complete',accuracy_conclusion=conclusion,pooled_error_difference=sum(diffs)/2,
+-                  non_adoption_redline=any(any(c['redlines'].values()) for c in result['per_seed']),
+-                  recommend_adoption=False,
+-                  interpretation='no automatic adoption: inspect tails/triangles/other structure even if accuracy improves and redlines do not fire')
+-    result['between_seed_signed_bias_gap']={r:abs(result['per_seed'][0][r]['signed_edge_bias']-result['per_seed'][1][r]['signed_edge_bias']) for r in ('raw','ema')}
++        if key in index or key[0] not in SEEDS or key[1] not in READOUTS or key[2] not in SAMPLES:raise ValueError('duplicate/unknown identity')
++        index[key]=r
++    cells={}
++    for s in SEEDS:
++        for kind in READOUTS:
++            rows=[index.get((s,kind,k)) for k in SAMPLES];value=None
++            if all(r is not None and r.get('status')=='complete' for r in rows):
++                if all(all(r.get(k) is not None and math.isfinite(float(r[k])) for k in ['edges','W1_incident4','LCC']) and r.get('family_edges') is not None for r in rows):
++                    for r in rows:
++                        if len(r['family_edges'])!=10 or sum(r['family_edges'])!=r['edges']:raise ValueError('family counts')
++                    value=dict(edge_absolute_error=mean([abs(r['edges']-926) for r in rows]),signed_bias=mean([r['edges']-926 for r in rows]),
++                        W1=mean([r['W1_incident4'] for r in rows]),LCC=mean([r['LCC'] for r in rows]),
++                        family_errors=[mean([abs(r['family_edges'][j]-target) for r in rows]) for j,target in enumerate(REFERENCE_FAMILY_EDGES)])
++            cells[s,kind]=value
++    result=dict(status='complete' if all(x is not None for x in cells.values()) else 'incomplete',primary_decay='ema_0.99',decays={},original_records=records,recommend_adoption=False,
++                interpretation='accuracy first; smoothing can lag or preserve bias; warnings are not safety guarantees; no pooled decay selection')
++    for kind,decay in DECAYS.items():
++        pairs=[]
++        for s in SEEDS:
++            raw,ema=cells[s,'raw'],cells[s,kind];pair=dict(train_seed=s,group='old_development' if s in OLD_SEEDS else 'new',raw=raw,ema=ema,status='complete' if raw is not None and ema is not None else 'incomplete',difference=None,warnings=None)
++            if pair['status']=='complete':
++                pair.update(difference=ema['edge_absolute_error']-raw['edge_absolute_error'],family_error_difference=[e-r for e,r in zip(ema['family_errors'],raw['family_errors'])],
++                            warnings={'W1_gt_10_percent':ema['W1']>1.1*raw['W1'],'LCC_drop_gt_19_2':raw['LCC']-ema['LCC']>19.2})
++            pairs.append(pair)
++        groups={}
++        for label,seeds in [('all_eight',SEEDS),('old_two',OLD_SEEDS),('new_six',NEW_SEEDS)]:
++            rows=[x for x in pairs if x['train_seed'] in seeds];complete=all(x['status']=='complete' for x in rows)
++            entry=dict(status='complete' if complete else 'incomplete',expected_seeds=len(seeds),mean_difference=None,median_difference=None,improved=None,tied=None,worsened=None)
++            if complete:
++                d=[x['difference'] for x in rows];bias={k:[x[k]['signed_bias'] for x in rows] for k in ('raw','ema')}
++                entry.update(mean_difference=mean(d),median_difference=statistics.median(d),improved=sum(v<0 for v in d),tied=sum(v==0 for v in d),worsened=sum(v>0 for v in d),
++                             signed_bias={k:dict(values=v,mean=mean(v),range=max(v)-min(v),population_sd=statistics.pstdev(v)) for k,v in bias.items()})
++            groups[label]=entry
++        result['decays'][kind]=dict(decay=decay,primary=kind=='ema_0.99',per_seed=pairs,groups=groups,
++                                    warning_interpretation='report each seed; a warning does not discard all panel information')
+     return result
+--- a/build_cost.py
++++ b/build_cost.py
+@@ -9,10 +9,10 @@
+     # Engineering GPU was exclusive; old8-task measurements include real contention.
+     per_update=max(component,max(x['training_seconds']/1000 for x in history))+ema_overhead
+     chain=max(max(x['historical_two_chains_seconds']) for x in history)
+-    extra_validation=3*p['validation']['ema']['seconds']
++    extra_validation=3*sum(x['seconds'] for x in p['validation']['ema'].values())
+     save_load=3*(p['checkpoint_save_seconds']+p['restore_seconds'])
+     historic_other=max(x['historical_total_elapsed_seconds']-x['training_seconds']-sum(x['historical_two_chains_seconds']) for x in history)
+-    critical=1000*per_update+4*chain+historic_other+extra_validation+save_load
++    critical=1000*per_update+8*chain+historic_other+extra_validation+save_load
+     # Explicit small concurrency/state-cost planning allowance, not a measurement.
+     allowance=.10*critical;planned=critical+allowance+RESERVE
+     return dict(status='passed' if p['status']=='passed' and planned<=BUDGET else 'not_admitted',
+@@ -22,7 +22,7 @@
+                 historical_initialization_validation_save_seconds=historic_other,critical_compute_seconds=critical,
+                 unmeasured_planning_allowance_seconds=allowance,delivery_seconds=RESERVE,planned_seconds=planned,
+                 proposed_budget_seconds=BUDGET,source_sha256=source_binding()[1],
+-                limits='five engineering updates; no new chain measured. State-dependent cost and two-task contention remain estimates; no completion guarantee.')
++                limits='five engineering updates; no new chain measured. State-dependent cost and eight-task contention remain estimates; no completion guarantee.')
+ def main():
+     p=argparse.ArgumentParser();p.add_argument('--preflight',required=True);p.add_argument('--output',required=True);a=p.parse_args()
+     out=pathlib.Path(a.output)
+--- a/ema.py
++++ b/ema.py
+@@ -1,6 +1,6 @@
+ """Fixed EMA readout. No optimizer, data, model factory or RNG calls.
+ 
+-theta_bar[0] = theta[0]; theta_bar[k] = .99*theta_bar[k-1]+.01*theta[k].
++theta_bar[0] = theta[0]; theta_bar[k] = beta*theta_bar[k-1]+(1-beta)*theta[k].
+ Call exactly once AFTER each completed normal2 optimizer update.
+ """
+ import copy
+@@ -22,7 +22,9 @@
+     return dict(model.named_parameters(remove_duplicate=False))
+ 
+ class ParameterEMA:
+-    def __init__(self, model):
++    def __init__(self, model, decay=DECAY):
++        if decay not in (0.9,0.97,0.99):raise ValueError('only frozen EMA decays')
++        self.decay=decay
+         ps=parameters(model)
+         if not ps:raise ValueError('empty parameter set')
+         if any(not p.is_floating_point() or not torch.isfinite(p).all() for p in ps.values()):
+@@ -50,17 +52,17 @@
+         for n,p in ps.items():
+             # Explicit two-operation FP32 implementation; no first-call copy,
+             # warmup, bias correction, scheduler or conditional update.
+-            self.shadow[n].mul_(DECAY).add_(p.detach(),alpha=1.0-DECAY)
++            self.shadow[n].mul_(self.decay).add_(p.detach(),alpha=1.0-self.decay)
+         if any(not torch.isfinite(p).all() for p in self.shadow.values()):
+             raise FloatingPointError('nonfinite EMA; stop, do not use readout')
+         self.updates=completed_updates
+ 
+     def state_dict(self):
+         if not self.at_update_boundary:raise RuntimeError('incomplete raw/EMA update cannot be a resumable checkpoint')
+-        return dict(format=FORMAT,decay=DECAY,updates=self.updates,shadow=cpu_copy(self.shadow))
++        return dict(format=FORMAT,decay=self.decay,updates=self.updates,shadow=cpu_copy(self.shadow))
+ 
+     def load_state_dict(self,state,model,expected_updates):
+-        if state.get('format')!=FORMAT or state.get('decay')!=DECAY:
++        if state.get('format')!=FORMAT or state.get('decay')!=self.decay:
+             raise ValueError('EMA scientific contract mismatch')
+         if type(state.get('updates')) is not int or state['updates']!=expected_updates or expected_updates<0:
+             raise ValueError('EMA update counter mismatch')
+--- a/integration.py
++++ b/integration.py
+@@ -26,7 +26,7 @@
+     # The existing checkpoint loader still authenticates bytes and paths.
+     if payload['binding']!=binding:raise ValueError('checkpoint binding mismatch')
+     # Validate EMA fully before mutating model/optimizer/RNG.
+-    check=ParameterEMA(model)
++    check=type(ema)(model)
+     check.load_state_dict(payload['ema'],model,payload['updates'])
+     model.load_state_dict(payload['model'],strict=True)
+     opt.load_state_dict(payload['optimizer'])
+@@ -37,6 +37,7 @@
+ def final_readouts(model,ema,completed_updates):
+     if completed_updates!=1000 or ema.updates!=1000:
+         raise ValueError('only the final1000 readouts may enter the scientific sample plan')
++    if hasattr(ema,'readouts'):return dict(raw=cpu_copy(model.state_dict()),**ema.readouts(model))
+     return dict(raw=cpu_copy(model.state_dict()),ema=ema.readout_state_dict(model))
+ 
+ def ema_validation(validation_fn,model,ema,*args,**kwargs):
+--- /dev/null
++++ b/legacy_assessment.py
+@@ -0,0 +1,54 @@
++"""Frozen per-seed interpretation rules, not a new graph evaluator.
++
++Caller adapts the existing evaluator to edges, W1_incident4, LCC, family_edges.
++All original metrics remain in the returned records; no success-only average.
++"""
++import math
++SEEDS=(2026102812,2026102833)
++SAMPLES=(2026102821,2026102822)
++REFERENCE_FAMILY_EDGES=(39,137,159,17,83,267,27,161,33,3)
++def assess(records):
++    lookup={}
++    for r in records:
++        key=(r['train_seed'],r['readout'],r['sample_seed'])
++        if key in lookup:raise ValueError('duplicate identity')
++        if key[0] not in SEEDS or key[1] not in ('raw','ema') or key[2] not in SAMPLES:raise ValueError('unexpected identity')
++        lookup[key]=r
++    result={'per_seed':[],'original_records':records,'scope':'exploratory two training seeds; no statistical guarantee'}
++    for seed in SEEDS:
++        cell={'train_seed':seed,'status':'complete','raw':None,'ema':None,'redlines':None}
++        for readout in ('raw','ema'):
++            rs=[lookup.get((seed,readout,s)) for s in SAMPLES]
++            if any(r is None or r.get('status')!='complete' for r in rs):
++                cell['status']='incomplete';continue
++            keys=['edges','W1_incident4','LCC']
++            if any(any(r.get(k) is None or not math.isfinite(float(r[k])) for k in keys) or r.get('family_edges') is None for r in rs):
++                cell['status']='incomplete';continue
++            for r in rs:
++                if len(r['family_edges'])!=10 or sum(r['family_edges'])!=r['edges']:raise ValueError('relation counts do not sum to total')
++            cell[readout]=dict(edge_absolute_error=sum(abs(r['edges']-926) for r in rs)/2,
++                              signed_edge_bias=sum(r['edges']-926 for r in rs)/2,
++                              W1_incident4=sum(r['W1_incident4'] for r in rs)/2,
++                              LCC=sum(r['LCC'] for r in rs)/2,
++                              family_absolute_errors=[sum(abs(r['family_edges'][i]-REFERENCE_FAMILY_EDGES[i]) for r in rs)/2 for i in range(10)])
++        if cell['status']=='complete':
++            raw,ema=cell['raw'],cell['ema'];w=raw['W1_incident4']
++            cell['edge_error_difference']=ema['edge_absolute_error']-raw['edge_absolute_error']
++            cell['family_error_differences']=[e-r for e,r in zip(ema['family_absolute_errors'],raw['family_absolute_errors'])]
++            cell['redlines']=dict(W1_exceeds_10_percent=ema['W1_incident4']>1.1*w,
++                                  LCC_drop_exceeds_19_2=raw['LCC']-ema['LCC']>19.2)
++            cell['redline_note']='human-chosen non-adoption warnings; not proven safety or sufficient structural acceptance'
++        result['per_seed'].append(cell)
++    if any(c['status']!='complete' for c in result['per_seed']):
++        result.update(status='incomplete',accuracy_conclusion=None,pooled_error_difference=None,recommend_adoption=False)
++        return result
++    diffs=[c['edge_error_difference'] for c in result['per_seed']]
++    if all(d<0 for d in diffs):conclusion='consistent_accuracy_gain_in_this_panel'
++    elif any(d<0 for d in diffs):conclusion='mixed_or_partial_not_consistent'
++    else:conclusion='accuracy_hypothesis_not_supported_in_this_panel'
++    result.update(status='complete',accuracy_conclusion=conclusion,pooled_error_difference=sum(diffs)/2,
++                  non_adoption_redline=any(any(c['redlines'].values()) for c in result['per_seed']),
++                  recommend_adoption=False,
++                  interpretation='no automatic adoption: inspect tails/triangles/other structure even if accuracy improves and redlines do not fire')
++    result['between_seed_signed_bias_gap']={r:abs(result['per_seed'][0][r]['signed_edge_bias']-result['per_seed'][1][r]['signed_edge_bias']) for r in ('raw','ema')}
++    return result
+--- a/model_io.py
++++ b/model_io.py
+@@ -5,8 +5,8 @@
+ import torch
+ from prepare import load_case
+ from model_variants import StructuralDenoiser
+-from experiment_contract import reset_training_streams
+-from runtime_contract import initial_path,asset
++from experiment_contract import reset_training_streams,initialization
++from runtime_contract import initial_path,asset,OLD_SEEDS,NEW_SEEDS
+ from probe import equal
+ from hsgd.bw_preflight.common import environment
+ 
+@@ -17,6 +17,12 @@
+     if not torch.cuda.is_available() or torch.cuda.device_count()!=1 or '2080 Ti' not in torch.cuda.get_device_name(0):raise RuntimeError('one RTX2080Ti required')
+     return environment('cuda')
+ def fresh(seed,overrides=None):
++    if seed in NEW_SEEDS:
++        model,case,cfg,proof=initialization('PubMed','O',seed,None)
++        model=model.cuda();rng,rng_receipt=reset_training_streams(seed,'PubMed','cuda')
++        opt=torch.optim.AdamW(model.parameters(),**{k:v for k,v in cfg['optimizer'].items() if k!='type'})
++        return model,opt,case,dict(cfg,seed=seed),rng,dict(new_scientific_initial=True,construction=proof,rng_reset=rng_receipt,optimizer='new empty AdamW')
++    if seed not in OLD_SEEDS:raise ValueError('unfrozen seed')
+     path=initial_path(seed,overrides);p=torch.load(path,map_location='cpu');case,cfg=load_case('PubMed')
+     if p['updates']!=0 or p['binding']['arm']!='O' or p['binding']['config']['seed']!=seed:raise ValueError('not the bound O scientific initial')
+     if p['binding']['dataset']['sha256']!=cfg['datasets']['PubMed']['sha256']:raise ValueError('initial data binding')
+--- /dev/null
++++ b/multi_ema.py
+@@ -0,0 +1,34 @@
++"""Three independent recurrences, all reading the same live raw parameters."""
++from ema import ParameterEMA
++from runtime_contract import DECAYS,READOUTS
++class MultiEMA:
++    def __init__(self,model):
++        self.members={name:ParameterEMA(model,decay) for name,decay in DECAYS.items()}
++    @property
++    def updates(self):
++        counts={x.updates for x in self.members.values()}
++        if len(counts)!=1:raise RuntimeError('partial multi EMA update')
++        return next(iter(counts))
++    @property
++    def at_update_boundary(self):return all(x.at_update_boundary for x in self.members.values())
++    @at_update_boundary.setter
++    def at_update_boundary(self,value):
++        for e in self.members.values():e.at_update_boundary=value
++    def update(self,model,completed_updates):
++        if self.updates+1!=completed_updates:raise ValueError('next complete raw update required')
++        self.at_update_boundary=False
++        for e in self.members.values():e.update(model,completed_updates)
++        self.at_update_boundary=True
++    def state_dict(self):
++        if not self.at_update_boundary:raise RuntimeError('partial bank cannot be checkpointed')
++        return dict(format='multi_ema_theta0_v1',updates=self.updates,members={k:e.state_dict() for k,e in self.members.items()})
++    def load_state_dict(self,state,model,expected_updates):
++        if state.get('format')!='multi_ema_theta0_v1' or state.get('updates')!=expected_updates or set(state.get('members',{}))!=set(DECAYS):raise ValueError('multi EMA identities/count')
++        # All members validate into independent temporaries before any bank mutation.
++        new={}
++        for k,d in DECAYS.items():
++            e=ParameterEMA(model,d);e.load_state_dict(state['members'][k],model,expected_updates);new[k]=e
++        self.members=new
++    def readouts(self,model):
++        if not self.at_update_boundary:raise RuntimeError('partial bank cannot be evaluated')
++        return {k:e.readout_state_dict(model) for k,e in self.members.items()}
+--- a/preflight.py
++++ b/preflight.py
+@@ -12,7 +12,7 @@
+ from probe import equal,rng_get,rng_set,input_hash,flatten,metric
+ from hsgd.bw_preflight.common import cpu_tree
+ from worker import validation,atomic_checkpoint
+-from ema import ParameterEMA
++from multi_ema import MultiEMA
+ from integration import complete_normal2,checkpoint_payload,restore_payload,ema_validation
+ 
+ def compare(a,b):
+@@ -49,7 +49,10 @@
+             inp=pair_inputs(case,cfg,u,rng);rec=normal2(model,opt,case,inp,1000,'cuda',True)
+             raw.append(dict(input_hash=input_hash(inp),rng=rng_get(rng,'cuda'),model=cpu_tree(model.state_dict()),optimizer=cpu_tree(opt.state_dict()),gradients={n:cpu_tree(p.grad) for n,p in model.named_parameters()},record=rec))
+         del model,opt;gc.collect();torch.cuda.empty_cache()
+-        model,opt,case,cfg,rng,proof=build();ema=ParameterEMA(model);enhanced=[];binding=dict(source_sha256=result['source_sha256'],purpose='isolated engineering',seed=2026102812)
++        model,opt,case,cfg,rng,proof=build();sync('cuda');before_alloc=torch.cuda.memory_allocated()
++        ema=MultiEMA(model);sync('cuda')
++        result['ema_storage']=dict(three_shadow_bytes=sum(p.numel()*p.element_size() for e in ema.members.values() for p in e.shadow.values()),allocated_delta_mib=(torch.cuda.memory_allocated()-before_alloc)/2**20)
++        enhanced=[];binding=dict(source_sha256=result['source_sha256'],purpose='isolated engineering',seed=2026102812)
+         for u in (1,2):
+             check();inp=pair_inputs(case,cfg,u,rng);sync('cuda');begin=time.perf_counter()
+             rec=complete_normal2(normal2,model,opt,case,inp,1000,'cuda',ema,u-1);sync('cuda');wall=time.perf_counter()-begin
+@@ -63,12 +66,13 @@
+                 begin=time.perf_counter();atomic_checkpoint(out/'engineering_u1.pt',checkpoint_payload(model,opt,ema,1,rng_get(rng,'cuda'),binding));result['checkpoint_save_seconds']=time.perf_counter()-begin
+         expected=checkpoint_payload(model,opt,ema,2,rng_get(rng,'cuda'),binding)
+         before=(cpu_tree(model.state_dict()),cpu_tree(opt.state_dict()),rng_get(rng,'cuda'),model.training)
+-        check();begin=time.perf_counter();vraw=validation(model,case,cfg,2026102812,rng);vema=ema_validation(validation,model,ema,case,cfg,2026102812,rng)
++        check();begin=time.perf_counter();vraw=validation(model,case,cfg,2026102812,rng)
++        vema={name:ema_validation(validation,model,e,case,cfg,2026102812,rng) for name,e in ema.members.items()}
+         result['validation']=dict(raw=vraw,ema=vema,total_seconds=time.perf_counter()-begin,
+                                   raw_model_exact=equal(before[0],model.state_dict()),optimizer_exact=equal(before[1],opt.state_dict()),
+                                   rng_exact=equal(before[2],rng_get(rng,'cuda')),mode_exact=before[3]==model.training)
+         del model,opt,ema;gc.collect();torch.cuda.empty_cache()
+-        model,opt,case,cfg,rng,proof=build();ema=ParameterEMA(model)
++        model,opt,case,cfg,rng,proof=build();ema=MultiEMA(model)
+         loaded=torch.load(out/'engineering_u1.pt',map_location='cpu');begin=time.perf_counter()
+         u=restore_payload(loaded,model,opt,ema,binding,lambda s:rng_set(s,rng,'cuda'))
+         result['restore_seconds']=time.perf_counter()-begin
+--- a/protocol.json
++++ b/protocol.json
+@@ -1,49 +1,29 @@
+ {
+-  "version": "pubmed_o_ema_v1_review_only",
++  "version": "pubmed_o_multi_ema_v1_preparation_only",
+   "formal_authorized": false,
+-  "status": "implementation_review_no_active_ledger",
+   "dataset": "PubMed",
+   "arm": "O",
+-  "train_seeds": [2026102812, 2026102833],
++  "train_seeds": [2026102812, 2026102833, 2026102841, 2026102842, 2026102843, 2026102844, 2026102845, 2026102846],
++  "original_development_seeds": [2026102812, 2026102833],
++  "new_seeds": [2026102841, 2026102842, 2026102843, 2026102844, 2026102845, 2026102846],
+   "sample_seeds": [2026102821, 2026102822],
+   "updates": 1000,
+   "save_updates": [0, 500, 1000],
+   "validation_updates": [0, 500, 1000],
+   "validation_times": [1, 500, 1000],
+-  "training_trajectories": 2,
+-  "final_readouts_per_trajectory": ["raw", "ema"],
+-  "new_full_chains": 8,
++  "training_trajectories": 8,
++  "final_readouts_per_trajectory": ["raw", "ema_0.9", "ema_0.97", "ema_0.99"],
++  "new_full_chains": 64,
+   "T": 1000,
+   "query_rounds": 1,
+   "normal2": "one zero_grad, two sumCE/(2*18336) backwards, one AdamW step",
+   "precision": "unchanged FP32 network; original float64 posterior",
+-  "ema": {
+-    "decay": 0.99,
+-    "initialize": "copy theta0 before first forward/update",
+-    "update": "after every complete normal2 step, including step1",
+-    "mean_age_asymptotic_updates": 99,
+-    "warmup": false,
+-    "bias_correction": false,
+-    "average_buffers": false,
+-    "feedback_to_training": false,
+-    "search": false
+-  },
++  "ema": {"decays": [0.9, 0.97, 0.99], "primary_comparison": "ema_0.99-raw", "initialize": "independent theta0 copies", "update": "every complete normal2 step from RAW parameters, including step1", "warmup": false, "bias_correction": false, "average_buffers": false, "feedback_to_training": false, "search": false},
+   "optimizer": {"type": "AdamW", "lr": 0.0002, "weight_decay": 1e-12, "betas": [0.9, 0.999], "eps": 1e-08, "amsgrad": false},
+-  "accuracy": {
+-    "primary": "per-training-seed mean of per-graph absolute total edge error vs926",
+-    "consistent_gain": "strictly lower primary error in BOTH training seeds",
+-    "pooled_mean_only": "report tradeoff; never call consistent gain",
+-    "per_relation_errors": "report alongside total error; no cancellation hidden"
+-  },
+-  "non_adoption_redlines_per_training_seed": {
+-    "mean_incident4_W1_relative_increase_gt": 0.1,
+-    "mean_LCC_drop_gt": 19.2,
+-    "zero_raw_W1": "any positive EMA W1 crosses the relative redline",
+-    "meaning": "human-chosen non-adoption warnings, not proven safety limits; passing is not structural acceptance"
+-  },
+-  "other_structure": "retain joint degreeTV, typed triangles, closure/opportunities, relation counts, degree tails, MP2/MP3, connectivity and sample differences; severe degradation must be disclosed even below redlines",
+-  "proposed_formal_seconds": 7800,
+-  "proposed_default_schedule": "two authorized GPUs, one training trajectory each; raw/ema x two seeds sequentially on each GPU",
+-  "optional_sample_parallelism": "after both final readouts frozen, extra authorized idle cards may share the same eight jobs; schedule must be fixed before launch, not additional samples",
+-  "prohibited": ["training now", "full sampling now", "new features", "new loss", "LR changes", "EMA tuning", "checkpoint selection", "model/probability ensembling", "repair", "extra samples"]
++  "primary": "per-training-seed mean of per-graph absolute total edge error vs926",
++  "reporting": "for EACH decay: eight paired differences, equal-seed mean/median/counts, old2 and new6 separately; no selecting best decay; all structural metrics retained",
++  "structural_warnings_per_seed": {"W1_relative_increase_gt": 0.1, "LCC_drop_gt": 19.2, "meaning": "human warnings, not safety proof or automatic whole-panel rejection"},
++  "proposed_formal_seconds": 11100,
++  "queue": "eight GPUs one training seed each; after all finals frozen, eight serial chains per seed GPU",
++  "prohibited": ["formal training now", "full sampling now", "extra decays", "new features", "new losses", "LR search", "changing inputs", "checkpoint selection", "graph repair", "extra samples"]
+ }
+--- a/review.py
++++ b/review.py
+@@ -5,8 +5,8 @@
+     cfg=json.loads((ROOT/'protocol.json').read_text());trains=[];samples=[]
+     for seed in cfg['train_seeds']:
+         task=f'PubMed_s{seed}_O'
+-        trains.append(dict(id=task,train_seed=seed,updates=1000,readouts=['raw','ema'],directory=task))
+-        for readout in ['raw','ema']:
++        trains.append(dict(id=task,train_seed=seed,updates=1000,readouts=cfg['final_readouts_per_trajectory'],directory=task))
++        for readout in cfg['final_readouts_per_trajectory']:
+             for sample in cfg['sample_seeds']:
+                 samples.append(dict(id=f'{task}_{readout}_{sample}',depends_on=task,readout=readout,
+                                     sample_seed=sample,T=1000,directory=f'{task}/{readout}/sample_{sample}'))
+--- a/run.py
++++ b/run.py
+@@ -1,9 +1,9 @@
+-"""Two training trajectories, then eight existing-kernel chains; no auto approval."""
++"""Eight training trajectories, then64 existing-kernel chains; no auto approval."""
+ import argparse,os,pathlib,json,time,subprocess,signal,sys,shutil
+-from runtime_contract import ROOT,jobs,source_binding,sha,read,save,approval_gate,output_check,BUDGET,RESERVE,SEEDS,asset
++from runtime_contract import ROOT,jobs,source_binding,sha,read,save,approval_gate,output_check,BUDGET,RESERVE,OLD_SEEDS,asset
+ 
+ def resources(devices,authority,rows,processes,handles):
+-    if len(devices)!=2 or len(set(devices))!=2:raise ValueError('frozen default queue requires two distinct GPUs')
++    if len(devices)!=8 or len(set(devices))!=8:raise ValueError('frozen queue requires eight distinct GPUs; report shortages, do not shrink')
+     if not authority.get('allocation_check_complete') or authority.get('reservation_conflicts') or not set(devices)<=set(authority.get('allowed_uuids',[])):raise PermissionError('GPU allocation not explicitly verified')
+     if handles.strip() or any(x.split(',')[0].strip() in devices for x in processes.splitlines() if x.strip()):raise RuntimeError('selected device has another process')
+     selected=[]
+@@ -57,7 +57,7 @@
+                     if code!=0 or r.get('status')!='complete' or (j['mode']=='train' and r.get('completed_updates')!=1000) or (j['mode']=='sample' and r.get('completed_chains')!=1):
+                         failures.append(item);raise RuntimeError('worker failed/incomplete '+j['id'])
+             if not pending and not running and stage=='training':
+-                # Both final checkpoints must exist before any independent test chain.
++                # All eight final checkpoints must exist before any test chain.
+                 stage='sampling';pending=jobs()['sampling'].copy()
+             save(out/'launcher_progress.json',dict(stage=stage,finished=finished,pending=pending,running=[x[2] for x in running.values()]))
+             if pending or running:time.sleep(poll)
+@@ -80,7 +80,7 @@
+         save(out/'execution_receipt.json',receipt)
+         try:receipt['evaluation']=summarizer(out,ledger['deadline_epoch'],ledger['source_sha256'])
+         except BaseException as e:receipt['evaluation']=dict(status='failed',error=repr(e))
+-        if not failures and len(finished)==10 and receipt['evaluation']['status']=='complete':receipt['status']='complete'
++        if not failures and len(finished)==72 and receipt['evaluation']['status']=='complete':receipt['status']='complete'
+         receipt.update(finished_epoch=time.time(),elapsed_seconds=time.time()-ledger['start_epoch']);save(out/'launcher_summary.json',receipt)
+         for s,h in handlers.items():signal.signal(s,h)
+     return 0 if receipt['status']=='complete' else 2
+@@ -89,9 +89,9 @@
+     entered=time.time();p=argparse.ArgumentParser();p.add_argument('mode',choices=['dry-run','formal']);p.add_argument('--output',required=True)
+     p.add_argument('--approval');p.add_argument('--cost');p.add_argument('--gpu-uuids',nargs='+');a=p.parse_args()
+     if a.mode=='dry-run':print(json.dumps(dict(**jobs(),source_sha256=source_binding()[1],formal_activated=False),indent=2));return 0
+-    if not a.approval or not a.cost or not a.gpu_uuids:p.error('formal requires approved cost, authorization and two GPU UUIDs')
++    if not a.approval or not a.cost or not a.gpu_uuids:p.error('formal requires new approved cost, authorization and eight GPU UUIDs')
+     approval,cost=approval_gate(a.approval,a.cost,a.output)
+-    protected=[ROOT]+[pathlib.Path(approval.get('initial_paths',{}).get(str(s),asset(s)['initial_path'])).parent for s in SEEDS]
++    protected=[ROOT]+[pathlib.Path(approval.get('initial_paths',{}).get(str(s),asset(s)['initial_path'])).parent for s in OLD_SEEDS]
+     out=output_check(a.output,protected);devices=a.gpu_uuids
+     if devices!=approval['gpu_uuids']:raise ValueError('approved GPU/queue identity differs')
+     visibility=os.environ.get('CUDA_VISIBLE_DEVICES')
+@@ -103,7 +103,7 @@
+     resource=resources(devices,approval['resource_authorization'],rows,processes,handles.stdout)
+     existing=out.parent
+     while not existing.exists():existing=existing.parent
+-    if shutil.disk_usage(existing).free<4*2**30:raise RuntimeError('less than4GiB free on actual output filesystem')
++    if shutil.disk_usage(existing).free<12*2**30:raise RuntimeError('less than12GiB free on actual output filesystem')
+     if cost['planned_seconds']>BUDGET-(time.time()-entered):raise TimeoutError('approved queue no longer fits')
+     # Formal entry time includes all launch checks, never reset after admission.
+     ledger=dict(start_epoch=entered,deadline_epoch=entered+BUDGET,timezone='Asia/Shanghai',budget_seconds=BUDGET,output=str(out),
+--- a/run_worker.py
++++ b/run_worker.py
+@@ -1,6 +1,6 @@
+ """Adapted frozen O worker: same normal2/validation/reverse_step/evaluate calls.
+ 
+-Train once, export two independent final readouts; each chain authenticates and
++Train once, export four independent final readouts; each chain authenticates and
+ loads exactly its selected file. Only launcher-issued pipes admit formal jobs.
+ """
+ import argparse,json,os,pathlib,signal,time,traceback,resource,copy,sys
+@@ -16,24 +16,25 @@
+ from hsgd.kernel import MarginalKernel
+ from hsgd.runtime import reverse_step
+ from evaluation import evaluate
+-from ema import ParameterEMA
++from multi_ema import MultiEMA
++from runtime_contract import DECAYS
+ from integration import complete_normal2,checkpoint_payload,ema_validation,final_readouts
+ 
+ def paired_validation(model,ema,case,cfg,seed,rng):
+-    return dict(raw=validation(model,case,cfg,seed,rng),ema=ema_validation(validation,model,ema,case,cfg,seed,rng))
++    return dict(raw=validation(model,case,cfg,seed,rng),**{name:ema_validation(validation,model,e,case,cfg,seed,rng) for name,e in ema.members.items()})
+ 
+ def export_readouts(out,model,ema,updates,binding):
+     states=final_readouts(model,ema,updates);receipt=dict(train_seed=binding['train_seed'],updates=updates,
+         checkpoint_sha256=sha(out/'final.pt'),files={},binding=binding)
+     for kind,state in states.items():
+         path=out/('readout_'+kind+'.pt')
+-        atomic_checkpoint(path,dict(model=state,readout=kind,updates=updates,train_seed=binding['train_seed'],
++        atomic_checkpoint(path,dict(model=state,readout=kind,decay=DECAYS.get(kind),updates=updates,train_seed=binding['train_seed'],
+                                    binding=binding,checkpoint_sha256=receipt['checkpoint_sha256']))
+         receipt['files'][kind]=dict(file=path.name,sha256=sha(path))
+     save(out/'readouts.json',receipt)
+ 
+ def train(job,out,approval,ledger,check,progress):
+-    model,opt,case,cfg,rng,proof=fresh(job['train_seed'],approval.get('initial_paths'));ema=ParameterEMA(model)
++    model,opt,case,cfg,rng,proof=fresh(job['train_seed'],approval.get('initial_paths'));ema=MultiEMA(model)
+     binding=dict(source_sha256=source_binding()[1],protocol_sha256=sha(ROOT/'protocol.json'),train_seed=job['train_seed'],
+                  dataset='PubMed',arm='O',config=cfg,initial=proof,updates=1000,approval_sha256=ledger['approval_sha256'])
+     save(out/'binding.json',binding)
+@@ -64,6 +65,7 @@
+     path,receipt=verify_readout(run,job)
+     payload=torch.load(path,map_location='cpu')
+     if (payload['train_seed'],payload['readout'],payload['updates'],payload['checkpoint_sha256'])!=(job['train_seed'],job['readout'],1000,receipt['checkpoint_sha256']):raise ValueError('selected readout metadata mismatch')
++    if payload.get('decay')!=DECAYS.get(job['readout']):raise ValueError('selected decay identity mismatch')
+     if payload['binding']!=receipt['binding'] or payload['binding']['source_sha256']!=source_binding()[1]:raise ValueError('selected readout source')
+     model,opt,case,cfg,unused,proof=fresh(job['train_seed'],approval.get('initial_paths'));del opt,unused
+     model.load_state_dict(payload['model'],strict=True);model.eval()
+--- a/runtime_contract.py
++++ b/runtime_contract.py
+@@ -1,9 +1,14 @@
+ """EMA runtime identities and bindings; deliberately no torch/GPU import."""
+ import hashlib,json,pathlib,os
+ ROOT=pathlib.Path(__file__).resolve().parent
+-SEEDS=(2026102812,2026102833)
++SEED_RECORD=json.loads((ROOT/'seed_manifest.json').read_text())
++SEEDS=tuple(SEED_RECORD['all_seeds'])
++OLD_SEEDS=tuple(SEED_RECORD['original_development_seeds'])
++NEW_SEEDS=tuple(SEED_RECORD['new_seeds'])
++DECAYS={'ema_0.9':0.9,'ema_0.97':0.97,'ema_0.99':0.99}
++READOUTS=('raw',*DECAYS)
+ SAMPLES=(2026102821,2026102822)
+-BUDGET=7800
++BUDGET=11100  # 185-minute proposal only; still requires new explicit approval.
+ RESERVE=1200
+ def sha(path):return hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest()
+ def read(path):return json.loads(pathlib.Path(path).read_text())
+@@ -17,15 +22,15 @@
+     train=[];sample=[]
+     for slot,seed in enumerate(SEEDS):
+         train.append(dict(id=cell(seed),mode='train',train_seed=seed,slot=slot,directory=cell(seed),updates=1000))
+-        for r in ('raw','ema'):
++        for r in READOUTS:
+             for s in SAMPLES:
+                 sample.append(dict(id=f'{cell(seed)}_{r}_{s}',mode='sample',train_seed=seed,readout=r,sample_seed=s,
+                                    slot=slot,directory=f'{cell(seed)}/{r}/sample_{s}',T=1000,depends_on=cell(seed)))
+-    return dict(training=train,sampling=sample,policy='two GPUs; both training jobs finish before sampling; four serial chains per GPU')
++    return dict(training=train,sampling=sample,policy='eight GPUs; all training jobs finish before sampling; eight serial chains on the same seed GPU')
+ def source_binding():
+     files={str(p.relative_to(ROOT)):sha(p) for p in sorted(ROOT.rglob('*')) if p.is_file()
+            and '__pycache__' not in str(p) and '.pytest_cache' not in str(p)
+-           and ((p.suffix=='.py') or p==ROOT/'protocol.json' or p==ROOT/'initial_assets.json'
++           and ((p.suffix=='.py') or p==ROOT/'protocol.json' or p==ROOT/'initial_assets.json' or p==ROOT/'seed_manifest.json'
+                 or p==ROOT/'reference.json' or (ROOT/'package' in p.parents and p.suffix in ('.json','.npz')))}
+     return files,hashlib.sha256(json.dumps(files,sort_keys=True).encode()).hexdigest()
+ def asset(seed):
+@@ -35,7 +40,7 @@
+     if sha(p)!=a['initial_sha256_from_sealed_receipt']:raise ValueError('initial checkpoint hash differs')
+     return p
+ def readout_path(run,seed,kind):
+-    if kind not in ('raw','ema'):raise ValueError('readout')
++    if kind not in READOUTS:raise ValueError('readout')
+     return pathlib.Path(run)/cell(seed)/('readout_'+kind+'.pt')
+ def verify_readout(run,job):
+     folder=pathlib.Path(run)/cell(job['train_seed']);receipt=read(folder/'readouts.json')
+@@ -55,7 +60,7 @@
+     if c['planned_seconds']>BUDGET:raise ValueError('budget insufficient')
+     evidence=read(c['preflight_path'])
+     if sha(c['preflight_path'])!=c['preflight_sha256'] or evidence['status']!='passed' or evidence['source_sha256']!=a['source_sha256']:raise ValueError('preflight evidence binding')
+-    for seed in SEEDS:initial_path(seed,a.get('initial_paths'))
++    for seed in OLD_SEEDS:initial_path(seed,a.get('initial_paths'))
+     return a,c
+ def verify_ticket(ticket,job,approval,ledger,device,parent):
+     if ticket.get('parent_pid')!=parent or ticket.get('job')!=job or ticket.get('device')!=device:raise PermissionError('launcher ticket mismatch')
+--- /dev/null
++++ b/seed_manifest.json
+@@ -0,0 +1,18 @@
++{
++  "version": "pubmed_o_multi_ema_seeds_v1",
++  "original_development_seeds": [2026102812, 2026102833],
++  "new_seeds": [2026102841, 2026102842, 2026102843, 2026102844, 2026102845, 2026102846],
++  "all_seeds": [2026102812, 2026102833, 2026102841, 2026102842, 2026102843, 2026102844, 2026102845, 2026102846],
++  "selection": "proposed integers in order; if prior same-kind scientific use found, take first unused increasing integer",
++  "prior_use_check": {
++    "completed_before_new_seed_code_or_scientific_initialization": true,
++    "roots": ["results", "research_branches", "docs", "configs", "scripts"],
++    "method": "rg -l 202610284[1-6]; JSON/JSONL/Python/Markdown source and records; no candidate effect values displayed",
++    "excluded": ["training.jsonl", "steps.jsonl", "preflight.json", "metrics.json", "changes*", "*.patch"],
++    "matched_paths": [],
++    "conflicts_found": false,
++    "scope_limit": "available local project text records; no remote or unavailable unrecorded jobs asserted",
++    "frozen_date": "2026-10-28 Asia/Shanghai"
++  },
++  "interpretation": "old two participated in proposal selection; new six reported separately, not cross-dataset generalization"
++}
+--- a/summarize.py
++++ b/summarize.py
+@@ -1,7 +1,7 @@
+ """Identity-based raw/EMA comparison using unchanged graph metric definitions."""
+ import argparse,pathlib,time,json
+ import numpy as np
+-from runtime_contract import ROOT,SEEDS,SAMPLES,jobs,cell,read,sha,save,source_binding,verify_readout
++from runtime_contract import ROOT,SEEDS,SAMPLES,READOUTS,DECAYS,jobs,cell,read,sha,save,source_binding,verify_readout
+ from summary_metrics import graph_summary,paired,strict_mean
+ from assessment import assess
+ 
+@@ -12,10 +12,10 @@
+         k=(row['train_seed'],row['readout'],row['sample_seed'])
+         if k in index:raise ValueError('duplicate identity')
+         index[k]=row
+-    expected={(s,r,k) for s in SEEDS for r in ('raw','ema') for k in SAMPLES}
+-    if set(index)!=expected:raise ValueError('must explicitly record all eight results, including missing ones')
++    expected={(s,r,k) for s in SEEDS for r in READOUTS for k in SAMPLES}
++    if set(index)!=expected:raise ValueError('must explicitly record all64 results, including missing ones')
+     for seed in SEEDS:
+-        for r in ('raw','ema'):
++        for r in READOUTS:
+             rows=[index[seed,r,k] for k in SAMPLES];ready=all(x['status']=='complete' for x in rows)
+             diversity=None
+             if ready:
+@@ -23,19 +23,20 @@
+                 diversity=dict(labelled_graphs_equal=a==b,edge_symmetric_difference=len(a^b),edge_jaccard=len(a&b)/union if union else 1.,scope='two labelled samples only; no topology/population diversity guarantee')
+             cells[f'{cell(seed)}_{r}']=dict(graphs=rows,mean=strict_mean([x['values'] for x in rows]) if ready else None,
+                                           mean_reason=None if ready else 'required_graph_missing_or_failed',diversity=diversity)
+-        diffs=[]
+-        for k in SAMPLES:
+-            left,right=index[seed,'ema',k],index[seed,'raw',k]
+-            ready=left['status']==right['status']=='complete'
+-            diffs.append(dict(sample_seed=k,status='complete' if ready else 'incomplete',difference=paired(left.get('values'),right.get('values'),template)))
+-        contrasts.append(dict(train_seed=seed,contrast='ema-raw',per_sample=diffs,mean=strict_mean([x['difference'] for x in diffs]) if all(x['status']=='complete' for x in diffs) else None))
++        for kind in DECAYS:
++            diffs=[]
++            for k in SAMPLES:
++                left,right=index[seed,kind,k],index[seed,'raw',k]
++                ready=left['status']==right['status']=='complete'
++                diffs.append(dict(sample_seed=k,status='complete' if ready else 'incomplete',difference=paired(left.get('values'),right.get('values'),template)))
++            contrasts.append(dict(train_seed=seed,contrast=kind+'-raw',per_sample=diffs,mean=strict_mean([x['difference'] for x in diffs]) if all(x['status']=='complete' for x in diffs) else None))
+     for row in records:
+         a={k:row[k] for k in ['train_seed','readout','sample_seed','status']}
+         if row['status']=='complete':
+             m=row['metrics'];a.update(edges=m['edges'],W1_incident4=m['W1_definitions']['incident4'],LCC=m['lcc'],family_edges=m['family_edges'],other_metrics=m)
+         assessment_rows.append(a)
+     return dict(status='complete' if all(x['status']=='complete' for x in records) else 'incomplete',cells=cells,contrasts=contrasts,
+-                assessment=assess(assessment_rows),scope='one trajectory per training seed, raw and EMA readouts; two training seeds exploratory, not new role contribution')
++                assessment=assess(assessment_rows),scope='one trajectory per training seed; old2 and new6 separately; three EMA scales are repeated readouts, not independent trainings or cross-dataset evidence')
+ 
+ def collect(run,check=lambda:None):
+     reference=read(ROOT/'reference.json');records=[]
+--- a/test_ema.py
++++ b/test_ema.py
+@@ -5,7 +5,7 @@
+ from ema import ParameterEMA,DECAY
+ from integration import complete_normal2,checkpoint_payload,restore_payload,final_readouts,ema_validation
+ from review import plan
+-from assessment import assess,SEEDS,SAMPLES
++from legacy_assessment import assess,SEEDS,SAMPLES
+ 
+ class Tiny(torch.nn.Module):
+     def __init__(self):
+@@ -141,7 +141,7 @@
+ def test_final_only_and_review_cli_no_execution():
+     m=Tiny();e=ParameterEMA(m)
+     with pytest.raises(ValueError):final_readouts(m,e,0)
+-    p=plan();assert len(p['training'])==2 and len(p['sampling'])==8 and len({s['directory'] for s in p['sampling']})==8
++    p=plan();assert len(p['training'])==8 and len(p['sampling'])==64 and len({s['directory'] for s in p['sampling']})==64
+     import pathlib
+     cli=pathlib.Path(__file__).with_name('review.py');a=subprocess.run([sys.executable,str(cli),'plan'],capture_output=True,text=True);assert a.returncode==0 and json.loads(a.stdout)==p
+     b=subprocess.run([sys.executable,str(cli),'formal'],capture_output=True,text=True);assert b.returncode!=0 and 'not authorized' in b.stderr
+--- /dev/null
++++ b/test_multi_ema.py
+@@ -0,0 +1,89 @@
++import copy
++import pytest
++import torch
++from multi_ema import MultiEMA
++from runtime_contract import DECAYS,SEEDS,OLD_SEEDS,NEW_SEEDS,SAMPLES
++from integration import checkpoint_payload,restore_payload,ema_validation
++from assessment import assess,REFERENCE_FAMILY_EDGES
++
++def test_three_recurrences_from_theta0_raw_source_and_rng():
++    model=torch.nn.Linear(1,1,bias=False);model.weight.data.fill_(2.)
++    rng=torch.get_rng_state().clone();bank=MultiEMA(model)
++    assert torch.equal(rng,torch.get_rng_state())
++    expected={k:torch.tensor([[2.]]) for k in DECAYS}
++    assert len({x.shadow['weight'].data_ptr() for x in bank.members.values()})==3
++    for u,value in enumerate([4.,-3.,8.],1):
++        model.weight.data.fill_(value)
++        bank.update(model,u)
++        for k,d in DECAYS.items():
++            expected[k].mul_(d).add_(model.weight.detach(),alpha=1-d)
++            assert torch.equal(bank.members[k].shadow['weight'],expected[k])
++        assert model.weight.item()==value and torch.equal(rng,torch.get_rng_state())
++    assert bank.updates==3
++
++def test_bank_save_restore_continue_and_decay_identity():
++    model=torch.nn.Linear(1,1);opt=torch.optim.AdamW(model.parameters());bank=MultiEMA(model)
++    bank.update(model,1);state=checkpoint_payload(model,opt,bank,1,{'fixture':1},{'source':'test'})
++    new=MultiEMA(model);seen=[]
++    assert restore_payload(state,model,opt,new,{'source':'test'},seen.append)==1
++    assert seen==[{'fixture':1}]
++    model.weight.data.add_(4);bank.update(model,2);new.update(model,2)
++    for k in DECAYS:assert torch.equal(bank.members[k].shadow['weight'],new.members[k].shadow['weight'])
++    bad=copy.deepcopy(state);bad['ema']['members']['ema_0.9']['decay']=.99
++    with pytest.raises(ValueError):restore_payload(bad,model,opt,new,{'source':'test'},seen.append)
++
++@pytest.mark.parametrize('name',list(DECAYS))
++def test_each_validation_readout_restores_raw_on_exception(name):
++    model=torch.nn.Linear(1,1);bank=MultiEMA(model);model.weight.data.add_(2)
++    raw={k:v.clone() for k,v in model.state_dict().items()};model.train()
++    def validate(m):
++        assert torch.equal(m.weight,bank.members[name].shadow['weight'])
++        m.eval();raise RuntimeError('test exception')
++    with pytest.raises(RuntimeError):ema_validation(validate,model,bank.members[name])
++    assert model.training and all(torch.equal(v,raw[k]) for k,v in model.state_dict().items())
++
++def test_partial_bank_update_cannot_export_checkpoint(monkeypatch):
++    model=torch.nn.Linear(1,1);bank=MultiEMA(model)
++    def fail(*a):raise RuntimeError('partial bank')
++    monkeypatch.setattr(bank.members['ema_0.97'],'update',fail)
++    with pytest.raises(RuntimeError):bank.update(model,1)
++    assert not bank.at_update_boundary
++    with pytest.raises(RuntimeError):bank.state_dict()
++    with pytest.raises(RuntimeError):bank.readouts(model)
++
++def records():
++    rows=[]
++    for seed in SEEDS:
++        for kind,change in [('raw',20),('ema_0.9',30),('ema_0.97',20),('ema_0.99',10)]:
++            for sample in SAMPLES:
++                f=list(REFERENCE_FAMILY_EDGES);f[0]+=change
++                rows.append(dict(train_seed=seed,readout=kind,sample_seed=sample,status='complete',edges=926+change,family_edges=f,W1_incident4=1.,LCC=192))
++    return rows
++
++def test_decay_identity_groups_primary_and_no_best_selection():
++    report=assess(records());assert report['status']=='complete'
++    for k,delta in [('ema_0.9',10),('ema_0.97',0),('ema_0.99',-10)]:
++        d=report['decays'][k]
++        for group,n in [('all_eight',8),('old_two',2),('new_six',6)]:
++            g=d['groups'][group];assert g['mean_difference']==delta==g['median_difference']
++            assert g['expected_seeds']==n
++        assert d['primary']==(k=='ema_0.99')
++    assert report['decays']['ema_0.9']['groups']['all_eight']['worsened']==8
++    assert report['decays']['ema_0.97']['groups']['all_eight']['tied']==8
++    assert report['decays']['ema_0.99']['groups']['all_eight']['improved']==8
++    assert not report['recommend_adoption']
++
++def test_missing_new_seed_does_not_average_successes_or_poison_old_group():
++    rows=records();rows=[r for r in rows if not (r['train_seed']==NEW_SEEDS[0] and r['readout']=='ema_0.99' and r['sample_seed']==SAMPLES[0])]
++    d=assess(rows)['decays']['ema_0.99']
++    assert d['groups']['all_eight']['mean_difference'] is None
++    assert d['groups']['new_six']['mean_difference'] is None
++    assert d['groups']['old_two']['mean_difference']==-10
++
++def test_warning_is_per_seed_not_automatic_panel_veto():
++    rows=records()
++    for r in rows:
++        if r['train_seed']==OLD_SEEDS[0] and r['readout']=='ema_0.99':r.update(W1_incident4=1.2,LCC=170)
++    d=assess(rows)['decays']['ema_0.99']
++    assert all(d['per_seed'][0]['warnings'].values()) and not any(d['per_seed'][1]['warnings'].values())
++    assert d['groups']['all_eight']['status']=='complete' and d['groups']['all_eight']['improved']==8
+--- a/test_runtime.py
++++ b/test_runtime.py
+@@ -1,16 +1,16 @@
+ import json,pathlib,sys,time,copy,os,subprocess
+ import pytest
+-from runtime_contract import jobs,cell,save,sha,read,verify_readout,verify_ticket,output_check,BUDGET,ROOT
++from runtime_contract import jobs,cell,save,sha,read,verify_readout,verify_ticket,output_check,BUDGET,ROOT,READOUTS
+ from run import supervise,resources
+ from summarize import assemble
+ from summary_metrics import graph_summary
+ from assessment import SEEDS,SAMPLES
+ 
+ def test_two_trajectories_eight_correct_chains_and_cli():
+-    p=jobs();assert len(p['training'])==2 and len(p['sampling'])==8
+-    assert len({j['directory'] for j in p['training']+p['sampling']})==10
++    p=jobs();assert len(p['training'])==8 and len(p['sampling'])==64
++    assert len({j['directory'] for j in p['training']+p['sampling']})==72
+     assert all(j['updates']==1000 for j in p['training']) and all(j['T']==1000 for j in p['sampling'])
+-    assert all(j['depends_on']==cell(j['train_seed']) and j['readout'] in ('raw','ema') for j in p['sampling'])
++    assert all(j['depends_on']==cell(j['train_seed']) and j['readout'] in READOUTS for j in p['sampling'])
+     r=subprocess.run([sys.executable,str(ROOT/'run.py'),'dry-run','--output','/tmp/not_created_ema_dryrun'],capture_output=True,text=True)
+     assert r.returncode==0 and json.loads(r.stdout)['formal_activated'] is False
+     r=subprocess.run([sys.executable,str(ROOT/'run.py'),'formal','--output','/tmp/not_created_ema_dryrun'],capture_output=True,text=True)
+@@ -18,21 +18,22 @@
+ 
+ def test_real_export_files_and_readout_tampering(tmp_path):
+     import torch
+-    from ema import ParameterEMA
++    from multi_ema import MultiEMA
+     from run_worker import export_readouts
+     from worker import atomic_checkpoint
+-    m=torch.nn.Linear(2,2);e=ParameterEMA(m)
++    m=torch.nn.Linear(2,2);e=MultiEMA(m)
+     with torch.no_grad():m.weight.add_(2)
+-    e.updates=1000;folder=tmp_path/cell(SEEDS[0]);folder.mkdir()
++    for member in e.members.values():member.updates=1000
++    folder=tmp_path/cell(SEEDS[0]);folder.mkdir()
+     atomic_checkpoint(folder/'final.pt',dict(updates=1000));export_readouts(folder,m,e,1000,dict(train_seed=SEEDS[0]))
+     save(folder/'summary.json',dict(status='complete'))
+     actual={}
+-    for r in ('raw','ema'):
++    for r in READOUTS:
+         j=next(j for j in jobs()['sampling'] if j['train_seed']==SEEDS[0] and j['readout']==r)
+         p,_=verify_readout(tmp_path,j);actual[r]=torch.load(p,map_location='cpu')
+         assert actual[r]['readout']==r
+-    assert not torch.equal(actual['raw']['model']['weight'],actual['ema']['model']['weight'])
+-    (folder/'readout_ema.pt').write_bytes((folder/'readout_raw.pt').read_bytes())
++    assert not torch.equal(actual['raw']['model']['weight'],actual['ema_0.99']['model']['weight'])
++    (folder/'readout_ema_0.99.pt').write_bytes((folder/'readout_raw.pt').read_bytes())
+     with pytest.raises(ValueError):verify_readout(tmp_path,j)
+ 
+ def setup_launcher(tmp_path):
+@@ -51,28 +52,28 @@
+     return Process
+ def test_schedule_barrier_success(tmp_path):
+     out,a,l=setup_launcher(tmp_path);seen=[]
+-    rc=supervise(out,a,l,['gpu0','gpu1'],spawn=fake_spawner(out,seen),summarizer=lambda *a:dict(status='complete'),poll=0)
+-    assert rc==0 and len(seen)==10 and [j['mode'] for j in seen[:2]]==['train','train']
+-    for slot in (0,1):assert [j['readout'] for j in seen if j['mode']=='sample' and j['slot']==slot]==['raw','raw','ema','ema']
++    rc=supervise(out,a,l,['gpu'+str(i) for i in range(8)],spawn=fake_spawner(out,seen),summarizer=lambda *a:dict(status='complete'),poll=0)
++    assert rc==0 and len(seen)==72 and [j['mode'] for j in seen[:8]]==['train']*8
++    for slot in range(8):assert [j['readout'] for j in seen if j['mode']=='sample' and j['slot']==slot]==[r for r in READOUTS for _ in range(2)]
+ def test_failure_preserves_cause_and_does_not_sample(tmp_path):
+     out,a,l=setup_launcher(tmp_path);seen=[]
+     def bad_summary(*a):raise RuntimeError('summary failure')
+-    rc=supervise(out,a,l,['gpu0','gpu1'],spawn=fake_spawner(out,seen,cell(SEEDS[0])),summarizer=bad_summary,poll=0)
++    rc=supervise(out,a,l,['gpu'+str(i) for i in range(8)],spawn=fake_spawner(out,seen,cell(SEEDS[0])),summarizer=bad_summary,poll=0)
+     r=read(out/'launcher_summary.json');assert rc==2 and r['primary_failures'] and r['evaluation']['status']=='failed'
+-    assert all(j['mode']=='train' for j in seen) and len(r['unstarted'])==8
++    assert all(j['mode']=='train' for j in seen) and len(r['unstarted'])==64
+ @pytest.mark.parametrize('why',['STOP','deadline'])
+ def test_stop_never_restarts_or_launches(tmp_path,why):
+     out,a,l=setup_launcher(tmp_path);seen=[]
+     if why=='STOP':(out/'STOP').touch()
+     else:
+         x=read(l);x['deadline_epoch']=time.time()+1100;save(l,x)
+-    assert supervise(out,a,l,['gpu0','gpu1'],spawn=fake_spawner(out,seen),summarizer=lambda *a:dict(status='incomplete'),poll=0)==2
+-    assert seen==[] and len(read(out/'launcher_summary.json')['unstarted'])==10
++    assert supervise(out,a,l,['gpu'+str(i) for i in range(8)],spawn=fake_spawner(out,seen),summarizer=lambda *a:dict(status='incomplete'),poll=0)==2
++    assert seen==[] and len(read(out/'launcher_summary.json')['unstarted'])==72
+ 
+ def fixture_records():
+     ref=read(ROOT/'reference.json');rs=[]
+     for seed in SEEDS:
+-        for r in ('raw','ema'):
++        for r in READOUTS:
+             for s in SAMPLES:
+                 m=copy.deepcopy(ref);m.update(W1_definitions={'incident4':1.,'all10_compat':.4},primary={'type_weighted_joint_degree_TV':.4,'typed_triangle_composition_TV':.1},comparison={'mp_frequency_TV':[.1,.2,.3]})
+                 change=10 if r=='raw' else 5
+@@ -83,17 +84,17 @@
+ def test_pairing_mean_and_missing_propagation():
+     rs,ref=fixture_records();r=assemble(list(reversed(rs)),ref)
+     assert r['status']=='complete'
+-    assert [c['mean']['absolute_error_difference']['edges'] for c in r['contrasts']]==[-5.,-10.]
+-    assert r['assessment']['accuracy_conclusion']=='consistent_accuracy_gain_in_this_panel'
++    assert [c['mean']['absolute_error_difference']['edges'] for c in r['contrasts']][:6]==[-5.]*3+[-10.]*3
++    assert all(x['groups']['all_eight']['improved']==8 for x in r['assessment']['decays'].values())
+     rs[0]=dict(train_seed=SEEDS[0],readout='raw',sample_seed=SAMPLES[0],status='incomplete',reason='fixture missing')
+     r=assemble(rs,ref);assert r['status']=='incomplete' and r['contrasts'][0]['mean'] is None and r['cells'][cell(SEEDS[0])+'_raw']['mean'] is None
+-    assert r['assessment']['pooled_error_difference'] is None
++    assert all(x['groups']['all_eight']['mean_difference'] is None for x in r['assessment']['decays'].values())
+ def test_resource_utilization_is_not_authority_or_failure():
+-    ds=['GPU-a','GPU-b'];rows={d:[str(i),d,'RTX 2080 Ti','11000','0','1'] for i,d in enumerate(ds)}
++    ds=['GPU-'+str(i) for i in range(8)];rows={d:[str(i),d,'RTX 2080 Ti','11000','0','1'] for i,d in enumerate(ds)}
+     a=dict(allocation_check_complete=True,allowed_uuids=ds,minimum_free_mib=9000)
+-    assert len(resources(ds,a,rows,'',''))==2
++    assert len(resources(ds,a,rows,'',''))==8
+     with pytest.raises(PermissionError):resources(ds,dict(a,allocation_check_complete=False),rows,'','')
+-    with pytest.raises(RuntimeError):resources(ds,a,rows,'GPU-a, 123, 100','')
++    with pytest.raises(RuntimeError):resources(ds,a,rows,'GPU-0, 123, 100','')
+ def test_output_overlap_rejected_before_mkdir(tmp_path):
+     src=tmp_path/'source';src.mkdir();before=list(src.iterdir())
+     with pytest.raises(ValueError):output_check(src/'bad',[src])

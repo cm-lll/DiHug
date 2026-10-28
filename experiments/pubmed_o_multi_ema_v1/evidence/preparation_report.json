@@ -1,0 +1,65 @@
+{
+  "status": "preparation_checks_passed_formal_not_authorized",
+  "base_commit": "e42c962f03b83c183c17cee09d948c674f2e69b9",
+  "source_sha256": "18528be54a690851d99784dcc968b98034eb297b3d0581b8419f316a2eef0597",
+  "cpu_tests": {
+    "passed": 40,
+    "failed": 0,
+    "skipped": 0,
+    "initial_attempt": "31 inherited tests passed; added tests initially35pass5fail from test typo .parameters vs .shadow; corrected tests only then full40 pass"
+  },
+  "gpu": {
+    "status": "passed",
+    "temporary_optimizer_steps": 5,
+    "same_raw_parameters_gradients_optimizer_inputs_rng_exact": true,
+    "loaded_exact": {
+      "model": true,
+      "optimizer": true,
+      "ema": true,
+      "rng": true,
+      "updates": true
+    },
+    "validation_restore": {
+      "total_seconds": 7.89484746940434,
+      "raw_model_exact": true,
+      "optimizer_exact": true,
+      "rng_exact": true,
+      "mode_exact": true
+    },
+    "continuation_exact": {
+      "model": true,
+      "optimizer": true,
+      "ema": true
+    },
+    "continuation_rng_exact": true,
+    "total_seconds": 51.068849086761475,
+    "peak_allocated_mib": 3267.69189453125,
+    "peak_reserved_mib": 3638.0,
+    "peak_rss_mib": 4823.3828125,
+    "ema_storage": {
+      "three_shadow_bytes": 79591500,
+      "allocated_delta_mib": 75.990234375
+    },
+    "released": true,
+    "gpu_index": 0,
+    "gpu_uuid": "GPU-12b85b68-69e6-12fa-76ce-986c0b46e8a7"
+  },
+  "formal_training_updates": 0,
+  "full_chains": 0,
+  "new_graphs": 0,
+  "formal_authorization_created": false,
+  "proposed_seconds": 11100,
+  "estimated_seconds": 10754.616048813332,
+  "scientific_package_unchanged_files": 58,
+  "unverified": [
+    "eight-seed final training/generation effectiveness",
+    "eight concurrent three-EMA trajectories throughput",
+    "new EMA-chain state-dependent cost",
+    "new-six-seed GPU initializations (same frozen constructor, formal deferred)"
+  ],
+  "preparation_failures": [
+    "initial new CPU test attribute typo, fixed; no EMA formula change",
+    "root repository lacked e42c962f object; created independent branch in existing published repository containing exact base instead"
+  ],
+  "engineering_weights": "deleted after successful audit; hashes retained; no scientific reuse"
+}
