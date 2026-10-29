@@ -1,0 +1,102 @@
+{
+  "update": 250,
+  "input_sha256": "c6e57c2642e7875fa425f09033b815594a12096b42784fe886bc26b1442c273e",
+  "t": [
+    879,
+    854
+  ],
+  "actual_lambda": 0.001,
+  "scope": "actual two inputs, sum of half-input gradients; weighted auxiliary lambda=.001, including CE-arm shadow observation",
+  "all_parameters": {
+    "ce_l2": 0.017879541023070118,
+    "weighted_aux_l2": 0.058318556902286225,
+    "dot": 0.0009553042149470144,
+    "cosine": 0.9161752578777042,
+    "auxiliary_to_ce_l2": 3.2617479848636672,
+    "combined_l2": 0.07504225807006924,
+    "parameter_tensors": 477,
+    "ce_connected": 475,
+    "aux_connected": 475
+  },
+  "disjoint_groups": {
+    "backbone": {
+      "ce_l2": 0.01241825000743778,
+      "weighted_aux_l2": 0.035151926509789835,
+      "dot": 0.0003678144036179173,
+      "cosine": 0.8425956285904873,
+      "auxiliary_to_ce_l2": 2.830666679180719,
+      "combined_l2": 0.04610314173494827,
+      "parameter_tensors": 460,
+      "ce_connected": 458,
+      "aux_connected": 458
+    },
+    "joint_head": {
+      "ce_l2": 0.012824892413473813,
+      "weighted_aux_l2": 0.04651121239359349,
+      "dot": 0.0005863854616724998,
+      "cosine": 0.9830413892125613,
+      "auxiliary_to_ce_l2": 3.6266356780294604,
+      "combined_l2": 0.05916537557629582,
+      "parameter_tensors": 4,
+      "ce_connected": 4,
+      "aux_connected": 4
+    },
+    "common_neighbor": {
+      "ce_l2": 0.00028684135823471113,
+      "weighted_aux_l2": 0.0004208417257664943,
+      "dot": 8.70214374283131e-08,
+      "cosine": 0.7208845031313401,
+      "auxiliary_to_ce_l2": 1.4671584612360393,
+      "combined_l2": 0.0006583529431822123,
+      "parameter_tensors": 4,
+      "ce_connected": 4,
+      "aux_connected": 4
+    },
+    "branch": {
+      "ce_l2": 0.00015366134724936916,
+      "weighted_aux_l2": 0.00047027733596515593,
+      "dot": 6.801687285720177e-08,
+      "cosine": 0.9412347981541196,
+      "auxiliary_to_ce_l2": 3.0604790624539224,
+      "combined_l2": 0.0006170950721528887,
+      "parameter_tensors": 6,
+      "ce_connected": 6,
+      "aux_connected": 6
+    },
+    "refex_projection": {
+      "ce_l2": 0.00014832549240922005,
+      "weighted_aux_l2": 0.00036395339527212024,
+      "dot": 4.600634005164565e-08,
+      "cosine": 0.852228612830011,
+      "auxiliary_to_ce_l2": 2.4537481006164295,
+      "combined_l2": 0.0004964626931923819,
+      "parameter_tensors": 1,
+      "ce_connected": 1,
+      "aux_connected": 1
+    },
+    "role_projection": {
+      "ce_l2": 0.0001450761513009539,
+      "weighted_aux_l2": 0.0003528971089266023,
+      "dot": 4.481439430270428e-08,
+      "cosine": 0.875333207915352,
+      "auxiliary_to_ce_l2": 2.432495663567289,
+      "combined_l2": 0.00048498685319342424,
+      "parameter_tensors": 1,
+      "ce_connected": 1,
+      "aux_connected": 1
+    },
+    "cn_edge_projection": {
+      "ce_l2": 0.0009155606017263033,
+      "weighted_aux_l2": 0.001203327270230156,
+      "dot": 8.584906119574814e-07,
+      "cosine": 0.7792282615582421,
+      "auxiliary_to_ce_l2": 1.3143065221037957,
+      "combined_l2": 0.0020008070768137423,
+      "parameter_tensors": 1,
+      "ce_connected": 1,
+      "aux_connected": 1
+    }
+  },
+  "named_parameter_count": 477,
+  "unique_parameter_ids": 477
+}

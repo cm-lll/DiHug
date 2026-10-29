@@ -1,5 +1,7 @@
 # 本分支确认状态
 
+2026-10-29 21:40:30：stage500八任务全部完成500，正式4000次normal2、工程6次、生成0，运行提交974e5dca8cbdd05ffddc53fd599ae815828d8b56。数量项参数梯度参与优化且有限；PubMed EMA/t500关系误差和89.61→77.22、25.00→22.94，但raw第二seed过冲，IMDB第一seedEMA/t500 15.00→30.37。结果混合，不宣称生成改善。32检查点哈希、8最终状态计数/有限性、四对500输入和初态配对均通过；科学失败0。CPU载荷审计曾把日志误计为目录，修正后通过且保留初版。八卡已释放，等待是否八任务整体继续3000的新授权，不自动续训。完整证据results/count_aux_stage500_20261029T205144，固定总票截止不变。
+
 2026-10-29 500步有界数量项配对票已获明确授权：起点20:51:44、科学停止22:16:44、交付22:31:44（Asia/Shanghai）。3be64f7的公式及lambda=.001未变；独立实现experiments/typed_structure_count_aux_stage500_v1。六项新增CPU测试通过；IMDB/PubMed各3次临时更新，观察不改变实际梯度/RNG、精确加载与续算均通过，科学初态不继承工程更新。准备按固定八卡启动八任务×500；不生成、不自动续训，旧票时钟与失败保留。
 
 2026-10-29 新增六任务准备已通过定向检查，独立目录 experiments/typed_structure_early_cn_expansion_v1（review worktree typed_structure_early_cn_expansion_review）。新增seed IMDB2026102931、PubMed2026102932；原seed D早融合、新seed E早/晚各两数据集，共拟6训练12链。D GPU工程各3次normal2、总6次；CPU16项通过，新seed早晚初态/完整随机流/训练与采样输入合同一致，原seed D/E公共初态一致。只把已审early install扩展到真实D，训练/采样循环及字典/核/EMA/指标未改。建议独立280分钟，尚未授权，不存在新增formal审批/起止/科学更新或完整链。原dbe96f5 GPU0/1两任务仍运行，源码与审批未改，原15:46:47/16:06:47截止不变。准备11:54:11起、12:39:11硬截止，证据results/typed_structure_early_cn_expansion_prepare_v1；发布回执另记。
