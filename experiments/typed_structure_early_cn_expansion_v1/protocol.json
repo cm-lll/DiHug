@@ -1,0 +1,128 @@
+{
+  "version": "typed_structure_early_cn_expansion_v1",
+  "formal_authorized": false,
+  "train_seeds": {
+    "IMDB": 2026102911,
+    "PubMed": 2026102912
+  },
+  "arms": [
+    "D_earlyCN",
+    "E_earlyCN",
+    "E_lateCN"
+  ],
+  "sample_seeds": [
+    2026102821,
+    2026102822
+  ],
+  "updates": 3000,
+  "checkpoints": [
+    0,
+    1000,
+    2000,
+    3000
+  ],
+  "sample_readout": "ema_0.99",
+  "ema_decay": 0.99,
+  "T": 1000,
+  "rounds": 1,
+  "S": 18336,
+  "normal2": "two sequential sumCE/(2*S) backwards, one optimizer step",
+  "validation_times": [
+    1,
+    500,
+    1000
+  ],
+  "contrasts": {
+    "old_seed": [
+      "E_earlyCN-E_lateCN",
+      "D_earlyCN-D_lateCN",
+      "E_earlyCN-D_earlyCN",
+      "E_lateCN-D_lateCN"
+    ],
+    "new_seed": [
+      "E_earlyCN-E_lateCN"
+    ],
+    "PubMed_old_seed_reference": [
+      "E_earlyCN-C",
+      "D_earlyCN-C"
+    ]
+  },
+  "delivery_reserve_seconds": 1200,
+  "budget_seconds": null,
+  "K": {
+    "IMDB": [
+      5,
+      4,
+      3,
+      2
+    ],
+    "PubMed": [
+      8,
+      8,
+      8,
+      6
+    ]
+  },
+  "primary": "two-seed E early-vs-late; original-seed D/E x early/late; original primary, LCC secondary; RolX early increment only one seed",
+  "raw_generation": false,
+  "candidate": "D/E early and E late: six-task extension only",
+  "cn_injection": "early D/E: zero bias-free37->64 before main layer0, terminal37 removed; late E: unchanged terminal37, no early residual; no dropout",
+  "new_train_seeds": {
+    "IMDB": 2026102931,
+    "PubMed": 2026102932
+  },
+  "protected_gpu_uuids": [
+    "GPU-12b85b68-69e6-12fa-76ce-986c0b46e8a7",
+    "GPU-cf73267c-774a-dada-fc26-ada91ccc27c1"
+  ],
+  "tasks": [
+    {
+      "dataset": "PubMed",
+      "model": "D",
+      "fusion": "early",
+      "arm": "D_earlyCN",
+      "train_seed": 2026102912,
+      "slot": 0
+    },
+    {
+      "dataset": "PubMed",
+      "model": "E",
+      "fusion": "early",
+      "arm": "E_earlyCN",
+      "train_seed": 2026102932,
+      "slot": 1
+    },
+    {
+      "dataset": "PubMed",
+      "model": "E",
+      "fusion": "late",
+      "arm": "E_lateCN",
+      "train_seed": 2026102932,
+      "slot": 2
+    },
+    {
+      "dataset": "IMDB",
+      "model": "D",
+      "fusion": "early",
+      "arm": "D_earlyCN",
+      "train_seed": 2026102911,
+      "slot": 3
+    },
+    {
+      "dataset": "IMDB",
+      "model": "E",
+      "fusion": "early",
+      "arm": "E_earlyCN",
+      "train_seed": 2026102931,
+      "slot": 4
+    },
+    {
+      "dataset": "IMDB",
+      "model": "E",
+      "fusion": "late",
+      "arm": "E_lateCN",
+      "train_seed": 2026102931,
+      "slot": 5
+    }
+  ]
+}

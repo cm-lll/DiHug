@@ -1,0 +1,1004 @@
+--- a/experiments/typed_structure_early_cn_v1/baseline_bindings.json
++++ b/experiments/typed_structure_early_cn_expansion_v1/baseline_bindings.json
+@@ -3,18 +3,23 @@
+   "result_commit": "aa4227b9727ca6853ba7e26412ce6d438a0fa971",
+   "initial": {
+     "IMDB": {
+-      "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_final_screen_formal_v1_20261029T0325/run/IMDB_s2026102911_E/initial.pt",
+-      "sha256": "cf2476f0e1f8ba4847ca504d36ae16b438da72fe8cab041d8451b91e35c0353c",
+-      "source_sha256": "8b81b023888ea4c68a33b78736b93154e08a1a56978516f6de1030e282ae9484"
++      "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_final_screen_formal_v1_20261029T0325/run/IMDB_s2026102911_D/initial.pt",
++      "sha256": "129ee0428d4c0bfc98329acc84c53025085ffeb7918958818e9e67d96be14566",
++      "source_sha256": "8b81b023888ea4c68a33b78736b93154e08a1a56978516f6de1030e282ae9484",
++      "arm": "D",
++      "train_seed": 2026102911
+     },
+     "PubMed": {
+-      "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_final_screen_formal_v1_20261029T0325/run/PubMed_s2026102912_E/initial.pt",
+-      "sha256": "c84315078a035e09a7edf247d6572d23b2eb5e107e766df907abbc89ac60f335",
+-      "source_sha256": "8b81b023888ea4c68a33b78736b93154e08a1a56978516f6de1030e282ae9484"
++      "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_final_screen_formal_v1_20261029T0325/run/PubMed_s2026102912_D/initial.pt",
++      "sha256": "f78e53fc631390e047271729d3a6f32a6b57e110b6bf961fa697a7cb885334e5",
++      "source_sha256": "8b81b023888ea4c68a33b78736b93154e08a1a56978516f6de1030e282ae9484",
++      "arm": "D",
++      "train_seed": 2026102912
+     }
+   },
+   "old_evaluation": {
+     "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_final_screen_formal_v1_20261029T0325/run/unified_evaluation.json",
+     "sha256": "9de1a1a04198cacdb571d28f4273f1248ee425c05b8aa322e44618d2273c1e39"
+-  }
++  },
++  "reviewed_early_source_commit": "dbe96f519443e8f8937d43cd191803658bf83464"
+ }--- a/experiments/typed_structure_early_cn_v1/check_extension.py
++++ b/experiments/typed_structure_early_cn_expansion_v1/check_extension.py
+@@ -0,0 +1,125 @@
++"""Bounded disposable engineering only: three optimizer calls per dataset."""
++import os,time,pathlib,json,traceback,resource,copy,argparse
++os.environ.setdefault('CUBLAS_WORKSPACE_CONFIG',':4096:8')
++from model_io import fresh,configure,sealed,tensor_hash,ROOT
++import torch,numpy as np
++from model_variants import StructuralDenoiser
++from experiment_contract import read_dictionary
++from runtime_contract import dictionary_expected,source_binding,sha,save
++from probe import rng_get,rng_set,equal,metric,flatten,input_hash
++from normal2 import pair_inputs,normal2,sync
++from integration import complete_normal2,checkpoint_payload,restore_payload,ema_validation
++from ema import ParameterEMA,cpu_copy
++from hsgd.computational import FrozenTypedContext
++from hsgd.kernel import MarginalKernel
++from hsgd.bw_preflight.common import schedule
++
++def compare_tree(a,b):
++    aa,bb=flatten(a),flatten(b)
++    rows={k:metric(v,bb[k]) for k,v in aa.items()}
++    return dict(exact=equal(a,b),passes=set(aa)==set(bb) and all(r['passes'] for r in rows.values()),tensors=rows)
++
++def prediction(m,case,inp,mask=False,reverse=False):
++    token=('engineering',id(inp));c=FrozenTypedContext(m,case['space'].types,inp['edges'],inp['edge_families'],token)
++    try:
++        if mask or reverse:
++            g=c.assemble(c.transfer_query(c.prepare_query(inp['query'],inp['f'],token),token),token)
++            if reverse:
++                keys=g.edges[0]*len(c.types)+g.edges[1]
++                target=g.edges[1,g.query_index]*len(c.types)+g.edges[0,g.query_index]
++                g.query_index=torch.searchsorted(keys,target)
++            logits=m.joint_predict(c,g,inp['t']/1000,mask_cn=mask)
++            return logits.detach().cpu(),None
++        g,l,p=c.predict(inp['query'],inp['f'],inp['t']/1000,token,details=True)
++        return l.detach().cpu(),p.detach().cpu()
++    finally:c.close()
++
++def main():
++    ap=argparse.ArgumentParser();ap.add_argument('--dataset',required=True,choices=['IMDB','PubMed']);ap.add_argument('--output',required=True);a=ap.parse_args()
++    out=pathlib.Path(a.output);out.mkdir(parents=True,exist_ok=False)
++    started=time.time();r=dict(dataset=a.dataset,status='running',optimizer_step_calls=0,formal_updates=0,generated_graphs=0)
++    def check():
++        if time.time()>=1793248140:raise TimeoutError('engineering stop 12:29 Asia/Shanghai')
++    try:
++        check();r['environment']=configure();seed={'IMDB':2026102911,'PubMed':2026102912}[a.dataset]
++        m,opt,case,cfg,rng,proof=fresh(a.dataset,'D_earlyCN',seed);ema=ParameterEMA(m)
++        binding=dict(source_sha256=source_binding()[1],dataset=a.dataset,config=cfg,proof=proof,engineering_only=True)
++        initial=checkpoint_payload(m,opt,ema,0,rng_get(rng,'cuda'),binding)
++        torch.save(initial,out/'initial.pt');save(out/'initial_binding.json',dict(binding=binding,sha256=sha(out/'initial.pt')))
++        r['parameters']=proof['construction']['parameters'];r['parameter_delta']=proof['construction']['parameter_delta']
++        r['no_RolX']=not any('role_' in k for k in m.state_dict())
++        if not r['no_RolX']:raise AssertionError('D contains role branch')
++        import model_variants
++        def forbidden_role(*args,**kwargs):raise AssertionError('D invoked RolX encoding')
++        model_variants.encode_typed=forbidden_role
++        old=StructuralDenoiser(case,cfg,'D').cuda();old.load_state_dict(sealed(a.dataset)[0]['model']);old.eval();m.eval()
++        fixed=pair_inputs(case,cfg,1,np.random.default_rng(2026102901),500)
++        r['fixed_input_sha256']=input_hash(fixed)
++        np.savez_compressed(out/'fixed_inputs.npz',**{str(i)+'_'+k:v for i,x in enumerate(fixed) for k,v in x.items() if isinstance(v,np.ndarray)})
++        torch.cuda.reset_peak_memory_stats()
++        with torch.no_grad():
++            before=rng_get(rng,'cuda');st=time.perf_counter();a0,_=prediction(old,case,fixed[0],True);sync('cuda');r['old_off_forward_seconds']=time.perf_counter()-st
++            st=time.perf_counter();b0,_=prediction(m,case,fixed[0]);sync('cuda');r['early_zero_forward_seconds']=time.perf_counter()-st
++            r['zero_projection_vs_old_off']=metric(b0,a0)
++            r['forward_rng_unchanged']=equal(before,rng_get(rng,'cuda'))
++            if not r['zero_projection_vs_old_off']['passes'] or not r['forward_rng_unchanged']:raise AssertionError('zero projection or random operator audit')
++        del old
++        rng_set(initial['rng'],rng,'cuda')
++        records=[];continuous=None;second_input=None
++        for call,position in enumerate([1,2,2]):
++            check()
++            if call==2:
++                m,opt,case,cfg,rng,_=fresh(a.dataset,'D_earlyCN',seed);ema=ParameterEMA(m)
++                p=torch.load(out/'after1.pt',map_location='cpu')
++                restore_payload(p,m,opt,ema,binding,lambda s:rng_set(s,rng,'cuda'))
++                r['loaded_exact']=dict(model=equal(m.state_dict(),p['model']),optimizer=equal(opt.state_dict(),p['optimizer']),ema=equal(ema.state_dict(),p['ema']),rng=equal(rng_get(rng,'cuda'),p['rng']))
++                if not all(r['loaded_exact'].values()):raise AssertionError('load not exact')
++            inputs=pair_inputs(case,cfg,position,rng);ih=input_hash(inputs)
++            # Account before step: even an exception cannot hide a possible call.
++            r['optimizer_step_calls']+=1;save(out/'summary.json',r)
++            st=time.perf_counter();rec=complete_normal2(normal2,m,opt,case,inputs,1000,'cuda',ema,position-1);sync('cuda')
++            rec.update(wall_seconds=time.perf_counter()-st,input_sha256=ih,projection_grad_norm=float(m.cn_edge_projection.weight.grad.norm()),
++                cn_encoder_grad_norm=float(sum(p.grad.norm() for p in m.common_neighbor.parameters() if p.grad is not None)))
++            records.append(rec)
++            payload=checkpoint_payload(m,opt,ema,position,rng_get(rng,'cuda'),binding)
++            if call==0:
++                st=time.perf_counter();torch.save(payload,out/'after1.pt');r['checkpoint_save_seconds']=time.perf_counter()-st
++                if rec['projection_grad_norm']<=0:raise AssertionError('projection gradient missing')
++            if call==1:continuous=payload;second_input=ih;gradients=cpu_copy({k:p.grad for k,p in m.named_parameters()})
++            if call==2:
++                r['continuation']={k:compare_tree(continuous[k],payload[k]) for k in ('model','optimizer','ema')}
++                r['continuation']['gradients']=compare_tree(gradients,{k:p.grad for k,p in m.named_parameters()})
++                r['continuation_discrete_exact']=ih==second_input and equal(continuous['rng'],payload['rng']) and payload['updates']==2
++                if not all(x['passes'] for x in r['continuation'].values()) or not r['continuation_discrete_exact']:raise AssertionError('continuation tolerance')
++        r['updates']=records
++        if records[1]['cn_encoder_grad_norm']<=0:raise AssertionError('CN learned upstream after projection update absent')
++        m.eval();rng_before=rng_get(rng,'cuda');r['inference']=[]
++        with torch.no_grad():
++            for t in (1,500,1000):
++                check();inp=pair_inputs(case,cfg,1,np.random.default_rng(2026102901),t)[0]
++                begin=time.perf_counter();logits,p=prediction(m,case,inp);sync('cuda');sec=time.perf_counter()-begin
++                keys=inp['edges'][0]*192+inp['edges'][1];query=inp['query'][0]*192+inp['query'][1]
++                xt=np.isin(query,keys).astype(np.uint8);begin=time.perf_counter()
++                q=MarginalKernel(case['prior'],schedule(1000)).reverse(p.numpy().astype(np.float64),xt,inp['f'],t-1,t)
++                r['inference'].append(dict(t=t,full_slots=len(inp['ids']),seconds=sec,posterior_seconds=time.perf_counter()-begin,finite=bool(torch.isfinite(logits).all() and torch.isfinite(p).all() and np.isfinite(q).all()),no_sampling_or_commit=True))
++            # Endpoint reversal with nonzero learned projection, same pair order.
++            inp=copy.deepcopy(fixed[0]);l,_=prediction(m,case,inp)
++            lr,_=prediction(m,case,inp,reverse=True);r['endpoint_reversal']=metric(lr,l)
++            # Type-preserving arbitrary relabeling, graph/query rows correspond.
++            perm=np.arange(192);pr=np.random.default_rng(2026102903)
++            for typ in range(4):
++                ids=np.flatnonzero(case['space'].types==typ);perm[ids]=pr.permutation(ids)
++            inp=copy.deepcopy(fixed[0]);inp['edges']=np.sort(perm[inp['edges']],axis=0);inp['query']=np.sort(perm[inp['query']],axis=0)
++            lp,_=prediction(m,case,inp);r['node_relabeling']=metric(lp,l)
++        raw=cpu_copy(m.state_dict());mode=m.training
++        ema_validation(lambda model: prediction(model,case,fixed[0]),m,ema)
++        r['ema_switch_restores']=equal(raw,m.state_dict()) and m.training==mode and equal(rng_before,rng_get(rng,'cuda'))
++        if not r['ema_switch_restores'] or not r['endpoint_reversal']['passes'] or not r['node_relabeling']['passes']:raise AssertionError('symmetry/switch')
++        r['status']='passed'
++    except BaseException as e:r.update(status='failed',error=repr(e),traceback=traceback.format_exc())
++    finally:
++        r.update(seconds=time.time()-started,finished_epoch=time.time(),rss_peak_mib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024)
++        if torch.cuda.is_initialized():r.update(peak_allocated_mib=torch.cuda.max_memory_allocated()/2**20,peak_reserved_mib=torch.cuda.max_memory_reserved()/2**20)
++        save(out/'summary.json',r)
++    return 0 if r['status']=='passed' else 2
++if __name__=='__main__':raise SystemExit(main())
+--- a/experiments/typed_structure_early_cn_v1/check_pairing.py
++++ b/experiments/typed_structure_early_cn_expansion_v1/check_pairing.py
+@@ -0,0 +1,41 @@
++"""Initialization/input contract only; no forward, backward, step or chain."""
++import argparse,pathlib,copy,hashlib,json,gc
++from model_io import configure,fresh,tensor_hash
++import torch,numpy as np
++from runtime_contract import PROTOCOL,save,sha,source_binding
++from probe import rng_get,equal,input_hash
++from normal2 import pair_inputs
++from ema import ParameterEMA
++from integration import checkpoint_payload
++
++def main():
++    ap=argparse.ArgumentParser();ap.add_argument('--output',required=True);a=ap.parse_args()
++    out=pathlib.Path(a.output);out.mkdir(parents=True,exist_ok=False)
++    env=configure();rows=[]
++    for dataset,seed in PROTOCOL['new_train_seeds'].items():
++        pair=[]
++        for arm in ('E_lateCN','E_earlyCN'):
++            m,opt,case,cfg,rng,proof=fresh(dataset,arm,seed);ema=ParameterEMA(m)
++            initial=checkpoint_payload(m,opt,ema,0,rng_get(rng,'cuda'),dict(dataset=dataset,arm=arm,seed=seed,source_sha256=source_binding()[1],proof=proof,engineering_only=True))
++            path=out/(dataset+'_'+arm+'_initial.pt');torch.save(initial,path)
++            fingerprints=[input_hash(pair_inputs(case,cfg,position,rng)) for position in (1,2,3)]
++            sample=[]
++            for ss in PROTOCOL['sample_seeds']:
++                gen=np.random.default_rng(ss);families=np.repeat(np.arange(case['n_families']),case['space'].counts)
++                prior=(gen.random(case['space'].total)<case['prior'][families]).astype(np.uint8)
++                # No network/reverse step; record paired initial noise and random draws only.
++                draws=gen.random(case['space'].total)
++                sample.append(dict(sample_seed=ss,prior_sha256=hashlib.sha256(prior.tobytes()).hexdigest(),next_draw_sha256=hashlib.sha256(draws.tobytes()).hexdigest()))
++            pair.append(dict(arm=arm,state={k:v.detach().cpu().clone() for k,v in m.state_dict().items()},rng=initial['rng'],proof=proof,training_input_hashes=fingerprints,sample_contract=sample,path=str(path),sha256=sha(path)))
++            del m,opt,ema,initial;gc.collect();torch.cuda.empty_cache()
++        late,early=pair;checks={}
++        for k,v in early['state'].items():
++            if k=='cn_edge_projection.weight':checks[k]=bool(torch.count_nonzero(v)==0)
++            else:checks[k]=torch.equal(v,late['state'][k][:,:739] if k=='joint_head.0.weight' else late['state'][k])
++        ok=all(checks.values()) and equal(late['rng'],early['rng']) and late['training_input_hashes']==early['training_input_hashes'] and late['sample_contract']==early['sample_contract'] and late['proof']['construction']['late_initial_content_sha256']==early['proof']['construction']['late_initial_content_sha256']
++        row=dict(dataset=dataset,seed=seed,passed=ok,common_tensors_exact=checks,all_rng_exact=equal(late['rng'],early['rng']),training_inputs_equal=late['training_input_hashes']==early['training_input_hashes'],sampling_contract_equal=late['sample_contract']==early['sample_contract'],arms=[])
++        for x in pair:row['arms'].append({k:v for k,v in x.items() if k not in ('state','rng')})
++        rows.append(row);save(out/'receipt.json',dict(status='passed' if all(x['passed'] for x in rows) else 'failed',environment=env,rows=rows,optimizer_steps=0,forwards=0,complete_chains=0))
++        if not ok:raise AssertionError('early/late paired initial/input mismatch')
++    return 0
++if __name__=='__main__':raise SystemExit(main())
+--- a/experiments/typed_structure_early_cn_v1/cross_batch.py
++++ b/experiments/typed_structure_early_cn_expansion_v1/cross_batch.py
+@@ -0,0 +1,95 @@
++"""Read-only union, identity-aware comparison. Never loads a model or graph."""
++import json,math,pathlib,argparse,copy
++from runtime_contract import ROOT,PROTOCOL,read,sha,source_binding
++
++def mean(x):return sum(x)/len(x) if x and all(v is not None and math.isfinite(float(v)) for v in x) else None
++def difference(a,b):return a-b if a is not None and b is not None else None
++def key(r):return (r['dataset'],r['train_seed'],r['arm'],r['sample_seed'],r['version'])
++def cells():
++    out=[]
++    for d in PROTOCOL['train_seeds']:
++        old=PROTOCOL['train_seeds'][d];new=PROTOCOL['new_train_seeds'][d]
++        out.extend((d,old,a) for a in ('D_earlyCN','E_earlyCN','D_lateCN','E_lateCN'))
++        out.extend((d,new,a) for a in ('E_earlyCN','E_lateCN'))
++        if d=='PubMed':out.append((d,old,'C'))
++    return out
++def comparisons():
++    out=[]
++    for d,old in PROTOCOL['train_seeds'].items():
++        for a,b in [('E_earlyCN','E_lateCN'),('D_earlyCN','D_lateCN'),('E_earlyCN','D_earlyCN'),('E_lateCN','D_lateCN')]:
++            out.append((d,old,a,b))
++        out.append((d,PROTOCOL['new_train_seeds'][d],'E_earlyCN','E_lateCN'))
++        if d=='PubMed':
++            out.extend((d,old,a,'C') for a in ('E_earlyCN','D_earlyCN'))
++    return out
++def normalize(r,arm,batch):
++    value=copy.deepcopy(r);value.update(arm=arm,batch=batch,model=arm.split('_')[0],fusion='early' if 'early' in arm else 'late' if 'late' in arm else 'none')
++    return value
++def external_records():
++    result=[];inventory=[]
++    b=read(ROOT/'baseline_bindings.json')['old_evaluation']
++    if sha(b['path'])!=b['sha256']:raise ValueError('old frozen evaluation bytes')
++    for r in read(b['path'])['records']:
++        d=r['dataset']
++        allowed=('D','E','C') if d=='PubMed' else ('D','E')
++        if r['train_seed']==PROTOCOL['train_seeds'][d] and r['arm'] in allowed:
++            result.append(normalize(r,r['arm']+'_lateCN' if r['arm'] in ('D','E') else 'C','old_final_screen'))
++    if len(result)!=20:raise ValueError('old controls missing/duplicated')
++    inventory.append(dict(batch='old_final_screen',status='sealed',records=len(result),sha256=b['sha256']))
++    a=read(ROOT/'cross_batch_binding.json');run=pathlib.Path(a['run'])
++    if sha(run/'activation.json')!=a['activation_sha256'] or sha(a['approval_path'])!=a['approval_sha256']:raise ValueError('protected original run binding changed')
++    q=run/'unified_evaluation.json';receipt=run/'launcher_summary.json'
++    if not q.exists() or not receipt.exists() or read(receipt).get('status')!='complete':
++        inventory.append(dict(batch='protected_two_E_early',status='not_sealed_or_incomplete',reason='running/failed/unpublished; do not import live partial metrics',summary_exists=q.exists(),launcher_status=read(receipt).get('status') if receipt.exists() else None))
++        return result,inventory
++    value=read(q)
++    if value.get('source_sha256')!=a['source_sha256'] or value.get('status')!='complete':raise ValueError('protected evaluation identity')
++    selected=[normalize(r,'E_earlyCN','protected_two_E_early') for r in value['records'] if r['arm']=='E_earlyCN' and r['train_seed']==PROTOCOL['train_seeds'][r['dataset']]]
++    expected={(d,s,'E_earlyCN',sample,v) for d,s in PROTOCOL['train_seeds'].items() for sample in PROTOCOL['sample_seeds'] for v in ('original','lcc')}
++    if len(selected)!=8 or {key(r) for r in selected}!=expected:raise ValueError('protected record coverage')
++    result.extend(selected);inventory.append(dict(batch='protected_two_E_early',status='sealed',records=8,sha256=sha(q)))
++    return result,inventory
++def aggregate(records,templates):
++    index={}
++    expected={(d,s,a,sample,v) for d,s,a in cells() for sample in PROTOCOL['sample_seeds'] for v in ('original','lcc')}
++    for r in records:
++        k=key(r)
++        if k not in expected:raise ValueError('unexpected identity '+str(k))
++        if k in index:raise ValueError('duplicate identity '+str(k))
++        index[k]=r
++    means=[];paired=[];paired_means=[];cleanup=[];missing=[dict(dataset=d,train_seed=s,arm=a,sample_seed=sample,version=v,reason='not_present_or_failed') for d,s,a,sample,v in sorted(expected-set(index))]
++    for d in PROTOCOL['train_seeds']:
++        for version in ('original','lcc'):
++            for group in ('raw','absolute_error','distribution_error'):
++                metrics=set(templates.get(d,{}).get(group,{}))
++                for r in records:
++                    if r['dataset']==d:metrics.update(r.get(group,{}))
++                for metric in sorted(metrics):
++                    def value(seed,arm,sample,v=version):return index.get((d,seed,arm,sample,v),{}).get(group,{}).get(metric)
++                    for dd,seed,arm in cells():
++                        if dd!=d:continue
++                        vals=[value(seed,arm,s) for s in PROTOCOL['sample_seeds']];m=mean(vals)
++                        means.append(dict(dataset=d,train_seed=seed,arm=arm,version=version,group=group,metric=metric,value=m,reason=None if m is not None else 'both_samples_required_and_defined'))
++                        if version=='lcc':
++                            for s in PROTOCOL['sample_seeds']:cleanup.append(dict(dataset=d,train_seed=seed,arm=arm,sample_seed=s,group=group,metric=metric,difference=difference(value(seed,arm,s),value(seed,arm,s,'original'))))
++                    for dd,seed,left,right in comparisons():
++                        if dd!=d:continue
++                        vals=[]
++                        for s in PROTOCOL['sample_seeds']:
++                            delta=difference(value(seed,left,s),value(seed,right,s));vals.append(delta)
++                            paired.append(dict(dataset=d,train_seed=seed,sample_seed=s,contrast=left+'-'+right,version=version,group=group,metric=metric,difference=delta,reason=None if delta is not None else 'missing_or_undefined_pair'))
++                        m=mean(vals);paired_means.append(dict(dataset=d,train_seed=seed,contrast=left+'-'+right,version=version,group=group,metric=metric,difference=m,reason=None if m is not None else 'both_pairs_required_and_defined'))
++    return dict(cell_means=means,paired=paired,paired_means=paired_means,lcc_minus_original=cleanup,missing_identities=missing,comparison_status='complete' if not missing else 'incomplete')
++def main():
++    ap=argparse.ArgumentParser();ap.add_argument('--new-summary',required=True);ap.add_argument('--output',required=True);a=ap.parse_args()
++    target=pathlib.Path(a.output)
++    if target.exists():raise FileExistsError('new report only')
++    new=read(a.new_summary)
++    if new.get('source_sha256')!=source_binding()[1]:raise ValueError('new summary source binding')
++    local=[r for r in new['records'] if r.get('batch')=='new_six']
++    external,inventory=external_records();records=local+external
++    templates={}
++    for r in records:templates.setdefault(r['dataset'],{g:r.get(g,{}) for g in ('raw','absolute_error','distribution_error')})
++    report=dict(new_batch_status=new['status'],records=records,external_inventory=inventory,new_summary_sha256=sha(a.new_summary),**aggregate(records,templates))
++    target.write_text(json.dumps(report,indent=2,allow_nan=False));return 0
++if __name__=='__main__':raise SystemExit(main())
+--- a/experiments/typed_structure_early_cn_v1/cross_batch_binding.json
++++ b/experiments/typed_structure_early_cn_expansion_v1/cross_batch_binding.json
+@@ -0,0 +1,26 @@
++{
++  "run": "/data2/lyh/gnn_project/DiHug/results/typed_structure_early_cn_formal_v1_20261029T1145/run",
++  "commit": "dbe96f519443e8f8937d43cd191803658bf83464",
++  "source_sha256": "60209ec2d5a789fc057230cc120b8d97f63fd2074a8a8c11196d10d0a4bc64d5",
++  "activation_sha256": "1b9c5d3eeb79c32ee045c1d4cf5f3c2192fa19797f4bec22c1469aa47803ad7d",
++  "approval_sha256": "a13a1e94dca3c6c7e9e787b8dc25d47421ea8bd58151ceae6096d9acc82b9463",
++  "approval_path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_early_cn_formal_v1_20261029T1145/approval.json",
++  "read_only": true,
++  "expected_tasks": [
++    [
++      "IMDB",
++      2026102911,
++      "E"
++    ],
++    [
++      "PubMed",
++      2026102912,
++      "E"
++    ]
++  ],
++  "worker_path": "/data2/lyh/gnn_project/DiHug/research_branches/typed_structure_final_screen_review/experiments/typed_structure_early_cn_v1/run_worker.py",
++  "protected_gpu_uuids": [
++    "GPU-12b85b68-69e6-12fa-76ce-986c0b46e8a7",
++    "GPU-cf73267c-774a-dada-fc26-ada91ccc27c1"
++  ]
++}--- a/experiments/typed_structure_early_cn_v1/model_io.py
++++ b/experiments/typed_structure_early_cn_expansion_v1/model_io.py
+@@ -1,5 +1,5 @@
+-"""Strict theta0 migration from the sealed, non-Dropout E run."""
+-import sys,pathlib,hashlib
++"""Sealed D theta0 migration and paired fresh E early/late initialization."""
++import sys,pathlib,hashlib,json
+ ROOT=pathlib.Path(__file__).resolve().parent
+ sys.path.insert(0,str(ROOT/'package'))
+ import torch
+@@ -7,10 +7,9 @@
+ from model_variants import StructuralDenoiser,copy_common
+ from experiment_contract import reset_training_streams,read_dictionary
+ from role_dictionary import seed32
+-from runtime_contract import dictionary_expected,TRAIN_SEEDS,ARMS,verify_assets
++from runtime_contract import dictionary_expected,TRAIN_SEEDS,verify_assets,read,sha,PROTOCOL
+ from hsgd.bw_preflight.common import environment
+ from early_cn import install
+-from runtime_contract import read,sha
+ def configure():
+     torch.set_num_threads(1);torch.set_num_interop_threads(1)
+     torch.use_deterministic_algorithms(True,warn_only=False)
+@@ -18,41 +17,59 @@
+     if not torch.cuda.is_available() or torch.cuda.device_count()!=1 or '2080 Ti' not in torch.cuda.get_device_name(0):raise RuntimeError('one RTX2080Ti required')
+     return environment('cuda')
+ def tensor_hash(x):return hashlib.sha256(x.detach().cpu().contiguous().numpy().tobytes()).hexdigest()
++def identity(dataset,arm,seed):
++    matches=[t for t in PROTOCOL['tasks'] if (t['dataset'],t['arm'],t['train_seed'])==(dataset,arm,seed)]
++    if len(matches)!=1:raise ValueError('unfrozen identity')
++    return matches[0]
+ def sealed(dataset):
+     b=read(ROOT/'baseline_bindings.json')['initial'][dataset]
+-    if sha(b['path'])!=b['sha256']:raise ValueError('sealed theta0 hash')
++    if sha(b['path'])!=b['sha256']:raise ValueError('sealed D theta0 hash')
+     p=torch.load(b['path'],map_location='cpu')
+     if p['updates']!=0 or p['ema']['updates']!=0 or p['optimizer']['state']:raise ValueError('theta0 only')
+-    if (p['binding']['dataset'],p['binding']['arm'],p['binding']['train_seed'],p['binding']['source_sha256'])!=(dataset,'E',TRAIN_SEEDS[dataset],b['source_sha256']):raise ValueError('sealed identity/source')
++    if (p['binding']['dataset'],p['binding']['arm'],p['binding']['train_seed'],p['binding']['source_sha256'])!=(dataset,'D',b['train_seed'],b['source_sha256']):raise ValueError('sealed D identity/source')
+     return p,b
++def new_late(dataset,seed,case,cfg,basis):
++    # Same construction sequence as reviewed 472e533 model_io.construct(E).
++    torch.manual_seed(seed);anchor=StructuralDenoiser(case,cfg,'A')
++    module_seed=seed32(seed,dataset=dataset,arm='E',purpose='new_module_initialization')
++    torch.manual_seed(module_seed);donor=StructuralDenoiser(case,cfg,'E',basis);copy_common(anchor,donor)
++    torch.manual_seed(module_seed);late=StructuralDenoiser(case,cfg,'E',basis);copy_common(donor,late)
++    return late,dict(anchor_seed=seed,donor_and_target_module_seed=module_seed,sequence='A anchor -> E donor copied from A -> E target copied from donor')
+ def construct(dataset,arm,seed):
+-    if TRAIN_SEEDS.get(dataset)!=seed or arm!='E':raise ValueError('unfrozen initialization identity')
+-    verify_assets();case,cfg=load_case(dataset);cfg=dict(cfg,seed=seed)
+-    basis,receipt=read_dictionary(ROOT/'dictionaries',dataset,dictionary_expected(dataset))
+-    p,b=sealed(dataset)
+-    if cfg!=p['binding']['config']:raise ValueError('scientific config differs')
+-    torch.manual_seed(seed);model=StructuralDenoiser(case,cfg,'E',basis)
+-    for k in ('prior','role_basis','role_offsets'):
+-        if not torch.equal(model.state_dict()[k],p['model'][k]):raise ValueError('asset tensor '+k)
+-    model.load_state_dict(p['model'],strict=True)
+-    old_count=sum(x.numel() for x in model.parameters());install(model)
++    task=identity(dataset,arm,seed);verify_assets();case,cfg=load_case(dataset);cfg=dict(cfg,seed=seed)
++    if task['model']=='D':
++        p,b=sealed(dataset)
++        if cfg!=p['binding']['config']:raise ValueError('D scientific config differs')
++        torch.manual_seed(seed);model=StructuralDenoiser(case,cfg,'D')
++        if not torch.equal(model.prior,p['model']['prior']):raise ValueError('D prior')
++        model.load_state_dict(p['model'],strict=True);source=dict(sealed_D=b)
++    else:
++        basis,receipt=read_dictionary(ROOT/'dictionaries',dataset,dictionary_expected(dataset))
++        model,source=new_late(dataset,seed,case,cfg,basis)
++        source.update(fresh=True,old_training_weights_used=False,basis_sha256=receipt['basis_sha256'])
++    original={k:v.detach().cpu().clone() for k,v in model.state_dict().items()}
++    original_hashes={k:tensor_hash(v) for k,v in original.items()}
++    old_count=sum(x.numel() for x in model.parameters())
++    if task['fusion']=='early':install(model)
+     proof={}
+     for k,v in model.state_dict().items():
+-        ref=p['model'].get(k)
+-        proof[k]=bool(torch.equal(v,ref[:,:739] if k=='joint_head.0.weight' else ref)) if ref is not None else bool(k=='cn_edge_projection.weight' and torch.count_nonzero(v)==0)
+-    if not all(proof.values()):raise ValueError('initial tensor migration mismatch')
+-    count=sum(x.numel() for x in model.parameters())
+-    if count-old_count!=-2368:raise ValueError('parameter delta differs')
+-    return model,case,cfg,dict(sealed_initial=b,copied_exact=proof,parameters=count,original_parameters=old_count,parameter_delta=count-old_count,
+-        tensor_sha256={k:tensor_hash(v) for k,v in model.state_dict().items()},engineering_weights_used=False,head_columns='original [:,:739]; removed [739:776]')
++        ref=original.get(k)
++        proof[k]=bool(torch.equal(v.cpu(),ref[:,:739] if k=='joint_head.0.weight' and task['fusion']=='early' else ref)) if ref is not None else bool(k=='cn_edge_projection.weight' and torch.count_nonzero(v)==0)
++    if not all(proof.values()):raise ValueError('actual tensor copy mismatch')
++    count=sum(x.numel() for x in model.parameters());delta=-2368 if task['fusion']=='early' else 0
++    if count-old_count!=delta:raise ValueError('parameter delta')
++    if task['model']=='D' and any('role_' in k for k in model.state_dict()):raise ValueError('D must have no role parameters/buffers')
++    if task['fusion']=='late' and hasattr(model,'cn_edge_projection'):raise ValueError('late must have no early projection')
++    return model,case,cfg,dict(task=task,source=source,late_initial_tensor_sha256=original_hashes,late_initial_content_sha256=hashlib.sha256(json.dumps(original_hashes,sort_keys=True).encode()).hexdigest(),copied_exact=proof,parameters=count,original_parameters=old_count,parameter_delta=delta,tensor_sha256={k:tensor_hash(v) for k,v in model.state_dict().items()},engineering_weights_used=False)
+ def fresh(dataset,arm,seed,device='cuda'):
++    from probe import rng_get,equal
+     model,case,cfg,proof=construct(dataset,arm,seed);model=model.to(device)
+     opt=torch.optim.AdamW(model.parameters(),**{k:v for k,v in cfg['optimizer'].items() if k!='type'})
+     if {id(p) for g in opt.param_groups for p in g['params']}!={id(p) for p in model.parameters() if p.requires_grad}:raise AssertionError('optimizer coverage')
+     rng,rr=reset_training_streams(seed,dataset,device)
+-    from probe import rng_get,equal
+-    original,_=sealed(dataset);current=rng_get(rng,device)
+-    for key in current:
+-        if key=='device' and device=='cpu':continue
+-        if not equal(current[key],original['rng'][key]):raise ValueError('paired initial RNG '+key)
+-    return model,opt,case,cfg,rng,dict(construction=proof,rng_reset=rr,optimizer='new empty AdamW',original_training_rng_exact=True)
++    if proof['task']['model']=='D':
++        old,_=sealed(dataset);now=rng_get(rng,device)
++        for key in now:
++            if key=='device' and device=='cpu':continue
++            if not equal(now[key],old['rng'][key]):raise ValueError('D paired RNG '+key)
++    return model,opt,case,cfg,rng,dict(construction=proof,rng_reset=rr,optimizer='new empty AdamW')
+--- a/experiments/typed_structure_early_cn_v1/package/early_cn.py
++++ b/experiments/typed_structure_early_cn_expansion_v1/package/early_cn.py
+@@ -20,7 +20,7 @@
+             torch.as_tensor(inverse,dtype=torch.long,device=edges.device))
+ 
+ def install(model):
+-    if model.arm!='E' or model.common_neighbor is None:raise ValueError('E only')
++    if model.arm not in ('D','E') or model.common_neighbor is None:raise ValueError('D/E only')
+     first=model.joint_head[0];s=model.joint_slices['CN']
+     if (first.in_features,first.out_features,s.start,s.stop,model.cn_feature_width)!=(776,128,739,776,37):
+         raise ValueError('reviewed head layout differs')
+@@ -30,7 +30,7 @@
+     model.cn_edge_projection=nn.Linear(37,64,bias=False,device=first.weight.device,dtype=first.weight.dtype)
+     nn.init.zeros_(model.cn_edge_projection.weight)
+     model.cn_feature_width=0;model.joint_slices['CN']=slice(739,739)
+-    model.architecture_version='E_earlyCN_v1'
++    model.architecture_version=model.arm+'_earlyCN_v1'
+     return model
+ 
+ def edge_cn_residual(model,ctx,graph,time,mask_cn=False):
+--- a/experiments/typed_structure_early_cn_v1/protocol.json
++++ b/experiments/typed_structure_early_cn_expansion_v1/protocol.json
+@@ -1,12 +1,14 @@
+ {
+-  "version": "typed_structure_early_cn_v1",
++  "version": "typed_structure_early_cn_expansion_v1",
+   "formal_authorized": false,
+   "train_seeds": {
+     "IMDB": 2026102911,
+     "PubMed": 2026102912
+   },
+   "arms": [
+-    "E"
++    "D_earlyCN",
++    "E_earlyCN",
++    "E_lateCN"
+   ],
+   "sample_seeds": [
+     2026102821,
+@@ -31,25 +33,18 @@
+     1000
+   ],
+   "contrasts": {
+-    "IMDB": [
+-      [
+-        "E_earlyCN",
+-        "E"
+-      ],
+-      [
+-        "E_earlyCN",
+-        "D"
+-      ]
++    "old_seed": [
++      "E_earlyCN-E_lateCN",
++      "D_earlyCN-D_lateCN",
++      "E_earlyCN-D_earlyCN",
++      "E_lateCN-D_lateCN"
+     ],
+-    "PubMed": [
+-      [
+-        "E_earlyCN",
+-        "E"
+-      ],
+-      [
+-        "E_earlyCN",
+-        "C"
+-      ]
++    "new_seed": [
++      "E_earlyCN-E_lateCN"
++    ],
++    "PubMed_old_seed_reference": [
++      "E_earlyCN-C",
++      "D_earlyCN-C"
+     ]
+   },
+   "delivery_reserve_seconds": 1200,
+@@ -68,20 +63,66 @@
+       6
+     ]
+   },
+-  "primary": "early fusion vs old E; IMDB D and PubMed C context references; original primary, LCC secondary",
++  "primary": "two-seed E early-vs-late; original-seed D/E x early/late; original primary, LCC secondary; RolX early increment only one seed",
+   "raw_generation": false,
+-  "candidate": "E_earlyCN",
+-  "evaluation_arms": {
+-    "IMDB": [
+-      "E_earlyCN",
+-      "E",
+-      "D"
+-    ],
+-    "PubMed": [
+-      "E_earlyCN",
+-      "E",
+-      "C"
+-    ]
++  "candidate": "D/E early and E late: six-task extension only",
++  "cn_injection": "early D/E: zero bias-free37->64 before main layer0, terminal37 removed; late E: unchanged terminal37, no early residual; no dropout",
++  "new_train_seeds": {
++    "IMDB": 2026102931,
++    "PubMed": 2026102932
+   },
+-  "cn_injection": "37->64 zero bias-free residual after lin_in_E, once before main layer0; no terminal CN; no dropout"
+-}+  "protected_gpu_uuids": [
++    "GPU-12b85b68-69e6-12fa-76ce-986c0b46e8a7",
++    "GPU-cf73267c-774a-dada-fc26-ada91ccc27c1"
++  ],
++  "tasks": [
++    {
++      "dataset": "PubMed",
++      "model": "D",
++      "fusion": "early",
++      "arm": "D_earlyCN",
++      "train_seed": 2026102912,
++      "slot": 0
++    },
++    {
++      "dataset": "PubMed",
++      "model": "E",
++      "fusion": "early",
++      "arm": "E_earlyCN",
++      "train_seed": 2026102932,
++      "slot": 1
++    },
++    {
++      "dataset": "PubMed",
++      "model": "E",
++      "fusion": "late",
++      "arm": "E_lateCN",
++      "train_seed": 2026102932,
++      "slot": 2
++    },
++    {
++      "dataset": "IMDB",
++      "model": "D",
++      "fusion": "early",
++      "arm": "D_earlyCN",
++      "train_seed": 2026102911,
++      "slot": 3
++    },
++    {
++      "dataset": "IMDB",
++      "model": "E",
++      "fusion": "early",
++      "arm": "E_earlyCN",
++      "train_seed": 2026102931,
++      "slot": 4
++    },
++    {
++      "dataset": "IMDB",
++      "model": "E",
++      "fusion": "late",
++      "arm": "E_lateCN",
++      "train_seed": 2026102931,
++      "slot": 5
++    }
++  ]
++}
+--- a/experiments/typed_structure_early_cn_v1/resource_handles.py
++++ b/experiments/typed_structure_early_cn_expansion_v1/resource_handles.py
+@@ -0,0 +1,27 @@
++"""Distinguish protected CUDA0/1 workers' passive handles from GPU compute use."""
++import os,pathlib
++from runtime_contract import ROOT,read,sha
++def allowed_owner(args,visible,uid,devices,b):
++    return (uid==os.getuid() and b['worker_path'] in args
++        and '--ledger' in args and args[args.index('--ledger')+1]==str(pathlib.Path(b['run'])/'activation.json')
++        and '--approval' in args and args[args.index('--approval')+1]==b['approval_path']
++        and visible in b['protected_gpu_uuids'] and visible not in devices)
++def filter_passive(handles,devices):
++    if not handles.strip():return '',[]
++    b=read(ROOT/'cross_batch_binding.json');ledger=pathlib.Path(b['run'])/'activation.json'
++    if sha(ledger)!=b['activation_sha256'] or sha(b['approval_path'])!=b['approval_sha256']:raise ValueError('protected run binding changed')
++    allowed=[];unresolved=[]
++    for pid in sorted(set(handles.split())):
++        if not pid.isdecimal():raise ValueError('unexpected fuser output')
++        p=pathlib.Path('/proc')/pid
++        try:
++            args=[x.decode() for x in (p/'cmdline').read_bytes().split(b'\0') if x]
++            env=(p/'environ').read_bytes().split(b'\0')
++            v=[x.decode().split('=',1)[1] for x in env if x.startswith(b'CUDA_VISIBLE_DEVICES=')]
++            ok=len(v)==1 and allowed_owner(args,v[0],p.stat().st_uid,devices,b)
++        except FileNotFoundError:
++            # Process exited between queries; no live handle remains.
++            allowed.append(dict(pid=int(pid),reason='exited_before_inspection'));continue
++        if ok:allowed.append(dict(pid=int(pid),visible_device=v[0],reason='bound protected worker passive handle; selected devices separately checked for compute and memory'))
++        else:unresolved.append(pid)
++    return ' '.join(unresolved),allowed
+--- a/experiments/typed_structure_early_cn_v1/run.py
++++ b/experiments/typed_structure_early_cn_expansion_v1/run.py
+@@ -1,9 +1,11 @@
+-"""Two E-earlyCN models, then four final EMA chains; no automatic approval."""
++"""Six independent model queues, twelve final EMA chains; new approval required."""
+ import argparse,os,pathlib,json,time,subprocess,signal,sys,shutil
+ from runtime_contract import ROOT,jobs,source_binding,sha,read,save,approval_gate,output_check,RESERVE,UPDATES
+ 
+ def resources(devices,authority,rows,processes,handles):
+-    if len(devices)!=2 or len(set(devices))!=2:raise ValueError('frozen queue requires two distinct GPUs; report shortages, do not shrink')
++    if len(devices)!=6 or len(set(devices))!=6:raise ValueError('six distinct non-protected GPUs required')
++    from runtime_contract import PROTOCOL
++    if set(devices)&set(PROTOCOL['protected_gpu_uuids']):raise PermissionError('GPU0/1 are protected')
+     if not authority.get('allocation_check_complete') or authority.get('reservation_conflicts') or not set(devices)<=set(authority.get('allowed_uuids',[])):raise PermissionError('GPU allocation not explicitly verified')
+     if handles.strip() or any(x.split(',')[0].strip() in devices for x in processes.splitlines() if x.strip()):raise RuntimeError('selected device has another process')
+     selected=[]
+@@ -29,7 +31,7 @@
+     return receipt
+ 
+ def supervise(out,approval_path,ledger_path,devices,spawn=subprocess.Popen,summarizer=summary_process,poll=.25):
+-    ledger=read(ledger_path);stop=[False];running={};finished=[];failures=[];pending=jobs()['training'].copy();stage='training'
++    ledger=read(ledger_path);stop=[False];running={};finished=[];failures=[];pending=jobs()['training'].copy();stage='independent_train_then_sample'
+     (out/'tmp').mkdir(exist_ok=True)  # same checked output filesystem, never system /tmp
+     handlers={s:signal.signal(s,lambda s,f:stop.__setitem__(0,True)) for s in [signal.SIGINT,signal.SIGTERM,signal.SIGHUP]}
+     try:
+@@ -57,9 +59,8 @@
+                     r=item.get('receipt',{})
+                     if code!=0 or r.get('status')!='complete' or (j['mode']=='train' and r.get('completed_updates')!=UPDATES) or (j['mode']=='sample' and r.get('completed_chains')!=1):
+                         failures.append(item);raise RuntimeError('worker failed/incomplete '+j['id'])
+-            if not pending and not running and stage=='training':
+-                # Both final checkpoints must exist before either test chain.
+-                stage='sampling';pending=jobs()['sampling'].copy()
++                    if j['mode']=='train':
++                        pending.extend(x for x in jobs()['sampling'] if x['depends_on']==j['id'])
+             save(out/'launcher_progress.json',dict(stage=stage,finished=finished,pending=pending,running=[x[2] for x in running.values()]))
+             if pending or running:time.sleep(poll)
+     except BaseException as e:failures.append(dict(stage=stage,error=repr(e)))
+@@ -81,7 +82,7 @@
+         save(out/'execution_receipt.json',receipt)
+         try:receipt['evaluation']=summarizer(out,ledger['deadline_epoch'],ledger['source_sha256'])
+         except BaseException as e:receipt['evaluation']=dict(status='failed',error=repr(e))
+-        if not failures and len(finished)==6 and receipt['evaluation']['status']=='complete':receipt['status']='complete'
++        if not failures and len(finished)==18 and receipt['evaluation']['status']=='complete':receipt['status']='complete'
+         receipt.update(finished_epoch=time.time(),elapsed_seconds=time.time()-ledger['start_epoch']);save(out/'launcher_summary.json',receipt)
+         for s,h in handlers.items():signal.signal(s,h)
+     return 0 if receipt['status']=='complete' else 2
+@@ -90,7 +91,7 @@
+     entered=time.time();p=argparse.ArgumentParser();p.add_argument('mode',choices=['dry-run','formal']);p.add_argument('--output',required=True)
+     p.add_argument('--approval');p.add_argument('--cost');p.add_argument('--gpu-uuids',nargs='+');a=p.parse_args()
+     if a.mode=='dry-run':print(json.dumps(dict(**jobs(),source_sha256=source_binding()[1],formal_activated=False),indent=2));return 0
+-    if not a.approval or not a.cost or not a.gpu_uuids:p.error('formal requires new approved cost, authorization and two GPU UUIDs')
++    if not a.approval or not a.cost or not a.gpu_uuids:p.error('formal requires new approved cost, authorization and six non-protected GPU UUIDs')
+     approval,cost=approval_gate(a.approval,a.cost,a.output)
+     protected=[ROOT];BUDGET=approval['budget_seconds']
+     out=output_check(a.output,protected);devices=a.gpu_uuids
+@@ -101,7 +102,9 @@
+     processes=subprocess.check_output(['nvidia-smi','--query-compute-apps=gpu_uuid,pid,used_memory','--format=csv,noheader,nounits'],text=True)
+     handles=subprocess.run(['fuser']+['/dev/nvidia'+rows[d][0] for d in devices],capture_output=True,text=True)
+     if handles.returncode not in (0,1) or (handles.returncode==1 and handles.stderr.strip()):raise RuntimeError('device owner check unavailable')
+-    resource=resources(devices,approval['resource_authorization'],rows,processes,handles.stdout)
++    from resource_handles import filter_passive
++    unresolved,passive=filter_passive(handles.stdout,devices)
++    resource=resources(devices,approval['resource_authorization'],rows,processes,unresolved)
+     existing=out.parent
+     while not existing.exists():existing=existing.parent
+     if shutil.disk_usage(existing).free<12*2**30:raise RuntimeError('less than12GiB free on actual output filesystem')
+@@ -109,6 +112,6 @@
+     # Formal entry time includes all launch checks, never reset after admission.
+     ledger=dict(start_epoch=entered,deadline_epoch=entered+BUDGET,timezone='Asia/Shanghai',budget_seconds=BUDGET,output=str(out),
+                 source_sha256=source_binding()[1],approval_sha256=sha(a.approval),cost_sha256=sha(a.cost))
+-    out.mkdir(parents=True);save(out/'activation.json',ledger);save(out/'resources.json',resource);save(out/'queue.json',jobs())
++    out.mkdir(parents=True);save(out/'activation.json',ledger);save(out/'resources.json',resource);save(out/'passive_handles.json',passive);save(out/'queue.json',jobs())
+     return supervise(out,pathlib.Path(a.approval),out/'activation.json',devices)
+ if __name__=='__main__':raise SystemExit(main())
+--- a/experiments/typed_structure_early_cn_v1/runtime_contract.py
++++ b/experiments/typed_structure_early_cn_expansion_v1/runtime_contract.py
+@@ -11,17 +11,18 @@
+     path=pathlib.Path(path);tmp=path.with_suffix(path.suffix+'.tmp')
+     tmp.write_text(json.dumps(value,indent=2,allow_nan=False));os.replace(tmp,path)
+ def cell(dataset,seed,arm):
+-    if TRAIN_SEEDS.get(dataset)!=seed or arm not in ARMS:raise ValueError('unfrozen task')
++    if (dataset,seed,arm) not in [(x['dataset'],x['train_seed'],x['arm']) for x in PROTOCOL['tasks']]:raise ValueError('unfrozen task')
+     return f'{dataset}_s{seed}_{arm}'
+ def jobs():
+     train=[];sample=[]
+-    for slot,(dataset,arm) in enumerate((d,'E') for d in ('PubMed','IMDB')):
+-        seed=TRAIN_SEEDS[dataset];identity=cell(dataset,seed,arm)
+-        common=dict(dataset=dataset,arm=arm,train_seed=seed,slot=slot)
++    for task in PROTOCOL['tasks']:
++        dataset,arm,seed,slot=(task[k] for k in ('dataset','arm','train_seed','slot'))
++        identity=cell(dataset,seed,arm)
++        common=dict(dataset=dataset,arm=arm,train_seed=seed,slot=slot,model=task['model'],fusion=task['fusion'])
+         train.append(dict(**common,id=identity,mode='train',directory=identity,updates=UPDATES))
+         for s in SAMPLES:
+             sample.append(dict(**common,id=f'{identity}_ema_0.99_{s}',mode='sample',readout='ema_0.99',sample_seed=s,directory=f'{identity}/ema_0.99/sample_{s}',T=1000,depends_on=identity))
+-    return dict(training=train,sampling=sample,policy='two cards: slot0 PubMed E-earlyCN, slot1 IMDB E-earlyCN; then two serial final EMA chains per card')
++    return dict(training=train,sampling=sample,policy='six non-0/1 GPUs; each slot trains its model then immediately runs its own two serial EMA chains; no global training barrier')
+ def source_binding():
+     files={str(p.relative_to(ROOT)):sha(p) for p in sorted(ROOT.rglob('*')) if p.is_file()
+            and not any(x in p.parts for x in ('__pycache__','.pytest_cache','historical_multi_ema','evidence','tests'))
+@@ -52,6 +53,7 @@
+     if a['updates']!=UPDATES or a['cost_sha256']!=sha(cost_path) or a['budget_seconds']!=c['requested_budget_seconds']:raise ValueError('budget/count/cost binding')
+     if pathlib.Path(a['output']).resolve()!=pathlib.Path(output).resolve():raise ValueError('output binding')
+     if c['source_sha256']!=a['source_sha256'] or c['schedule']!=jobs() or c['status']!='passed':raise ValueError('cost/source/queue mismatch')
++    if a['gpu_uuids']!=c['proposed_gpu_uuids']:raise ValueError('cost and actual physical queue differ')
+     if c['planned_seconds']>a['budget_seconds']:raise ValueError('budget insufficient')
+     if a['asset_bindings_sha256']!=sha(ROOT/'asset_bindings.json'):raise ValueError('external asset approval binding')
+     return a,c
+--- a/experiments/typed_structure_early_cn_v1/seed_audit.json
++++ b/experiments/typed_structure_early_cn_expansion_v1/seed_audit.json
+@@ -0,0 +1,12 @@
++{
++  "frozen_at": "2026-10-29T11:56:12.590898+08:00",
++  "selected": {
++    "IMDB": 2026102931,
++    "PubMed": 2026102932
++  },
++  "query": "2026102931|2026102932",
++  "scope": "local results JSON/JSONL/Markdown/Python and published experiment files; exclude redundant unpack/tmp and training iteration logs",
++  "matches": [],
++  "selection_rule": "predeclared 2026102931 IMDB, 2026102932 PubMed; increment only if used; no effect outputs inspected",
++  "limitation": "local recorded project usage, not external unrecorded runs"
++}--- a/experiments/typed_structure_early_cn_v1/summarize.py
++++ b/experiments/typed_structure_early_cn_expansion_v1/summarize.py
+@@ -28,29 +28,8 @@
+     value['undefined']={group:{k:'undefined_zero_denominator_missing_type_or_unimplemented_metric' for k,v in value[group].items() if v is None} for group in ('raw','reference','absolute_error','distribution_error')}
+     return value
+ def aggregate(records,templates):
+-    index={(r['dataset'],r['arm'],r['sample_seed'],r['version']):r for r in records};means=[];pairs=[];pairmeans=[];clean=[]
+-    protocol=read(ROOT/'protocol.json');samples=protocol['sample_seeds']
+-    for dataset in protocol['train_seeds']:
+-        seed=protocol['train_seeds'][dataset]
+-        for version in ('original','lcc'):
+-            for group in ('raw','absolute_error','distribution_error'):
+-                keys=set(templates[dataset][group])
+-                for r in records:
+-                    if r['dataset']==dataset:keys.update(r.get(group,{}))
+-                for metric in sorted(keys):
+-                    def value(arm,sample,v=version):return index.get((dataset,arm,sample,v),{}).get(group,{}).get(metric)
+-                    for arm in protocol['evaluation_arms'][dataset]:
+-                        vals=[value(arm,s) for s in samples];m=mean(vals)
+-                        means.append(dict(dataset=dataset,train_seed=seed,arm=arm,version=version,group=group,metric=metric,value=m,reason=None if m is not None else 'both_samples_required_and_defined'))
+-                        if version=='lcc':
+-                            for s in samples:clean.append(dict(dataset=dataset,train_seed=seed,arm=arm,sample_seed=s,group=group,metric=metric,difference=delta(value(arm,s),value(arm,s,'original'))))
+-                    for left,right in protocol['contrasts'][dataset]:
+-                        vals=[]
+-                        for s in samples:
+-                            d=delta(value(left,s),value(right,s));vals.append(d)
+-                            pairs.append(dict(dataset=dataset,train_seed=seed,sample_seed=s,contrast=left+'-'+right,version=version,group=group,metric=metric,difference=d,reason=None if d is not None else 'missing_or_undefined_required_pair'))
+-                        pairmeans.append(dict(dataset=dataset,train_seed=seed,contrast=left+'-'+right,version=version,group=group,metric=metric,difference=mean(vals),reason=None if mean(vals) is not None else 'both_pairs_required_and_defined'))
+-    return dict(cell_means=means,paired=pairs,paired_means=pairmeans,lcc_minus_original=clean)
++    from cross_batch import aggregate as combine
++    return combine(records,templates)
+ def diversity(a,b,sa=None,sb=None,F=None):
+     x=set(map(tuple,a['original_ids'][a['edges']].T));y=set(map(tuple,b['original_ids'][b['edges']].T))
+     na,nb=set(a['original_ids']),set(b['original_ids'])
+@@ -88,8 +67,8 @@
+             np.savez_compressed(target/'lcc.npz',types=kept['types'],edges=kept['edges'],families=kept['families'],schema=kept['schema'],new_to_original=kept['original_ids'],old_to_new=np.array(mapping['old_to_new']))
+             mapping['derived_sha256']=sha(target/'lcc.npz');write_json(target/'mapping.json',mapping)
+             for version,graph in [('original',g),('lcc',kept)]:
+-                check();value=evaluate_graph(graph,ref,rs,F,names,check);value.update(dataset=job['dataset'],arm='E_earlyCN',train_seed=job['train_seed'],sample_seed=job['sample_seed'],version=version)
+-                records.append(value);write_json(target/(version+'.json'),value);graphs[job['dataset'],'E_earlyCN',job['sample_seed'],version]=graph
++                check();value=evaluate_graph(graph,ref,rs,F,names,check);value.update(dataset=job['dataset'],arm=job['arm'],model=job['model'],fusion=job['fusion'],batch='new_six',train_seed=job['train_seed'],sample_seed=job['sample_seed'],version=version)
++                records.append(value);write_json(target/(version+'.json'),value);graphs[job['dataset'],job['train_seed'],job['arm'],job['sample_seed'],version]=graph
+             type_counts=np.bincount(g['types'],minlength=4);kept_counts=np.bincount(kept['types'],minlength=4)
+             before=np.bincount(g['families'],minlength=10);after=np.bincount(kept['families'],minlength=10)
+             item.update(status='complete',reason=None,node_retention=len(kept['types'])/len(g['types']),edge_retention=kept['edges'].shape[1]/g['edges'].shape[1] if g['edges'].shape[1] else None,mapping=str(target/'mapping.json'),
+@@ -100,33 +79,24 @@
+     seen={x['job']['id'] for x in inventory}
+     inventory.extend(dict(job=j,status='not_evaluated',reason='earlier_failure_or_deadline') for j in jobs()['sampling'] if j['id'] not in seen)
+     new_record_count=len(records)
+-    try:records.extend(old_records())
+-    except BaseException as e:errors.append('old controls: '+repr(e))
++    external_inventory=[];cross_errors=[]
++    try:
++        from cross_batch import external_records
++        external,external_inventory=external_records();records.extend(external)
++    except BaseException as e:cross_errors.append('external controls: '+repr(e))
+     aggregation=aggregate(records,templates) if len(templates)==2 else dict(reason='reference evaluation incomplete')
+-    ds=[];record_index={(r['dataset'],r['arm'],r['sample_seed'],r['version']):r for r in records}
++    ds=[];record_index={(r['dataset'],r['train_seed'],r['arm'],r['sample_seed'],r['version']):r for r in records}
+     for job in jobs()['training']:
+         for version in ('original','lcc'):
+-            x=[graphs.get((job['dataset'],'E_earlyCN',s,version)) for s in (2026102821,2026102822)]
+-            keys=[(job['dataset'],'E_earlyCN',s,version) for s in (2026102821,2026102822)]
+-            valid=all(k in record_index for k in keys)
++            x=[graphs.get((job['dataset'],job['train_seed'],job['arm'],s,version)) for s in (2026102821,2026102822)]
++            keys=[(job['dataset'],job['train_seed'],job['arm'],s,version) for s in (2026102821,2026102822)]
++            valid=all(k in record_index for k in keys) and all(g is not None for g in x)
+             ds.append(dict(job=job,version=version,metrics=diversity(*x,record_index[keys[0]]['statistics'],record_index[keys[1]]['statistics'],F) if valid else None,reason=None if valid else 'both_graphs_required'))
+-    result=dict(status='complete' if new_record_count==8 and not errors and all(x['status']=='complete' for x in inventory) else 'incomplete',records=records,inventory=inventory,diversity=ds,errors=errors,seconds=time.time()-started,source_sha256=source_binding()[1],**aggregation)
++    result=dict(status='complete' if new_record_count==24 and not errors and all(x['status']=='complete' for x in inventory) else 'incomplete',records=records,inventory=inventory,external_inventory=external_inventory,cross_batch_errors=cross_errors,diversity=ds,errors=errors,seconds=time.time()-started,source_sha256=source_binding()[1],**aggregation)
+     write_json(out,result)
+     for name in ('cell_means','paired','paired_means','lcc_minus_original'):
+         rows=result.get(name,[])
+         if rows:
+             with (derived/(name+'.csv')).open('w',newline='') as f:w=csv.DictWriter(f,fieldnames=list(rows[0]));w.writeheader();w.writerows(rows)
+     return 0 if result['status']=='complete' else 2
+-def old_records():
+-    b=read(ROOT/'baseline_bindings.json')['old_evaluation']
+-    if sha(b['path'])!=b['sha256']:raise ValueError('old result hash')
+-    p=read(ROOT/'protocol.json');result=[]
+-    for r in read(b['path'])['records']:
+-        d=r['dataset']
+-        if r['train_seed']==p['train_seeds'][d] and r['arm'] in p['evaluation_arms'][d] and r['sample_seed'] in p['sample_seeds']:
+-            result.append(dict(r,source='sealed old control',source_sha256=b['sha256']))
+-    expected={(d,a,s,v) for d in p['train_seeds'] for a in p['evaluation_arms'][d] if a!='E_earlyCN' for s in p['sample_seeds'] for v in ('original','lcc')}
+-    actual=[(r['dataset'],r['arm'],r['sample_seed'],r['version']) for r in result]
+-    if set(actual)!=expected or len(actual)!=len(expected):raise ValueError('missing/duplicate old controls')
+-    return result
+ if __name__=='__main__':raise SystemExit(main())
+--- a/experiments/typed_structure_early_cn_v1/test_extension.py
++++ b/experiments/typed_structure_early_cn_expansion_v1/test_extension.py
+@@ -0,0 +1,166 @@
++"""New runtime-only CPU checks; no optimizer, CUDA, forward or chain."""
++import pathlib,json,time,os,copy
++import pytest
++import runtime_contract as rc
++import cross_batch as cb
++import run
++
++def test_queue_exact_scope():
++    q=rc.jobs();t=q['training'];s=q['sampling']
++    assert len(t)==6 and len(s)==12
++    assert len({j['id'] for j in t+s})==18
++    assert len({j['directory'] for j in t+s})==18
++    assert {j['slot'] for j in t}==set(range(6))
++    assert all(j['updates']==3000 for j in t)
++    assert all(j['T']==1000 and j['readout']=='ema_0.99' for j in s)
++    for j in t:
++        children=[x for x in s if x['depends_on']==j['id']]
++        assert len(children)==2 and {x['sample_seed'] for x in children}==set(rc.SAMPLES)
++        assert all(x['slot']==j['slot'] and x['train_seed']==j['train_seed'] and x['arm']==j['arm'] for x in children)
++        assert not (j['arm']=='E_earlyCN' and j['train_seed']==rc.TRAIN_SEEDS[j['dataset']])
++
++def simulate(tmp_path,monkeypatch,fail=False,stop=False):
++    out=tmp_path/'run';out.mkdir();approval=tmp_path/'fake.json';rc.save(approval,{'not_authorized_test_only':True})
++    ledger=out/'activation.json';rc.save(ledger,dict(start_epoch=time.time(),deadline_epoch=time.time()+2000,source_sha256='mock'))
++    if stop:(out/'STOP').touch()
++    starts=[];finished=[]
++    class Process:
++        pid=999999999
++        def __init__(self,job):self.job=job;self.returncode=None;self.count=0
++        def poll(self):
++            self.count+=1
++            if self.job['slot']==1 and self.job['mode']=='train' and self.count<4:return None
++            if self.returncode is None:
++                self.returncode=3 if fail and self.job['slot']==0 else 0
++                folder=out/self.job['directory'];folder.mkdir(parents=True,exist_ok=True)
++                rc.save(folder/'summary.json',dict(status='failed' if self.returncode else 'complete',completed_updates=3000,completed_chains=1,error='sentinel_original_failure' if self.returncode else None))
++                finished.append(self.job['id'])
++            return self.returncode
++        def wait(self,timeout=None):self.returncode=-15;return self.returncode
++    def spawn(args,**kw):
++        assert 'run_worker.py' in args[1]
++        ticket=json.loads(os.read(kw['pass_fds'][0],100000));job=ticket['job']
++        starts.append((job,finished.copy()));return Process(job)
++    monkeypatch.setattr(run.os,'killpg',lambda *a:None)
++    code=run.supervise(out,approval,ledger,[str(x) for x in range(6)],spawn=spawn,summarizer=lambda *a:dict(status='complete'),poll=0)
++    return code,starts,rc.read(out/'launcher_summary.json')
++
++def test_per_slot_no_global_barrier(tmp_path,monkeypatch):
++    code,starts,r=simulate(tmp_path,monkeypatch)
++    assert code==0 and len(starts)==18 and r['status']=='complete'
++    slow=next(j['id'] for j in rc.jobs()['training'] if j['slot']==1)
++    first=next((j,done) for j,done in starts if j['mode']=='sample' and j['slot']==0)
++    assert slow not in first[1]
++    for j,done in starts:
++        if j['mode']=='sample':assert j['depends_on'] in done
++
++def test_failure_no_restart_and_original_reason(tmp_path,monkeypatch):
++    code,starts,r=simulate(tmp_path,monkeypatch,fail=True)
++    assert code==2 and r['status']=='incomplete' and r['primary_failures']
++    assert len({j['id'] for j,_ in starts})==len(starts)==6
++    assert 'sentinel_original_failure' in json.dumps(r)
++    assert len(r['unstarted'])==12
++
++def test_stop_no_spawn(tmp_path,monkeypatch):
++    code,starts,r=simulate(tmp_path,monkeypatch,stop=True)
++    assert code==2 and not starts and len(r['unstarted'])==18
++
++def records():
++    rows=[]
++    for d,seed,arm in cb.cells():
++        # Seed-dependent offsets make accidental cross-seed pairing visible.
++        offset=100 if seed==rc.PROTOCOL['new_train_seeds'][d] else 0
++        val={'D_earlyCN':8,'D_lateCN':10,'E_earlyCN':6,'E_lateCN':11,'C':7}[arm]+offset
++        for sample in rc.SAMPLES:
++            for version in ('original','lcc'):
++                raw=val+(1 if sample==rc.SAMPLES[1] else 0)
++                rows.append(dict(dataset=d,train_seed=seed,arm=arm,sample_seed=sample,version=version,raw={'edge':raw},absolute_error={'edge':abs(raw-9)},distribution_error={'W1':val/100,'null':None}))
++    return rows
++
++def test_cross_batch_seed_matching_and_direction():
++    r=cb.aggregate(records(),{})
++    assert r['comparison_status']=='complete' and len(r['missing_identities'])==0
++    for x in r['paired']:
++        if x['group']=='raw' and x['contrast']=='E_earlyCN-E_lateCN':assert x['difference']==-5
++    means=[x for x in r['cell_means'] if x['dataset']=='IMDB' and x['arm']=='E_earlyCN' and x['version']=='original' and x['group']=='absolute_error']
++    assert {x['train_seed']:x['value'] for x in means}=={2026102911:2.5,2026102931:97.5}
++
++def test_missing_no_partial_mean_and_null():
++    rows=records();gone=rows.pop(0);r=cb.aggregate(rows,{})
++    assert r['comparison_status']=='incomplete' and len(r['missing_identities'])==1
++    target=[x for x in r['cell_means'] if (x['dataset'],x['train_seed'],x['arm'],x['version'])==(gone['dataset'],gone['train_seed'],gone['arm'],gone['version'])]
++    assert all(x['value'] is None for x in target)
++    assert all(x['difference'] is None for x in r['paired'] if x['metric']=='null')
++
++def test_duplicate_and_wrong_seed_rejected():
++    rows=records()
++    with pytest.raises(ValueError):cb.aggregate(rows+[rows[0]],{})
++    rows[0]['train_seed']=123
++    with pytest.raises(ValueError):cb.aggregate(rows,{})
++
++def test_readout_identity_hash_and_completion(tmp_path):
++    j=rc.jobs()['sampling'][0];p=rc.readout_path(tmp_path,j);p.parent.mkdir(parents=True)
++    p.write_bytes(b'CPU identity fixture, not scientific weights');(p.parent/'final.pt').write_bytes(b'checkpoint')
++    r=dict(dataset=j['dataset'],arm=j['arm'],train_seed=j['train_seed'],updates=3000,files={'ema_0.99':{'sha256':rc.sha(p)}},checkpoint_sha256=rc.sha(p.parent/'final.pt'))
++    rc.save(p.parent/'readouts.json',r);rc.save(p.parent/'summary.json',{'status':'complete'})
++    assert rc.verify_readout(tmp_path,j)[0]==p
++    r['arm']='E_lateCN';rc.save(p.parent/'readouts.json',r)
++    with pytest.raises(ValueError):rc.verify_readout(tmp_path,j)
++    r['arm']=j['arm'];rc.save(p.parent/'readouts.json',r);p.write_bytes(b'tampered')
++    with pytest.raises(ValueError):rc.verify_readout(tmp_path,j)
++
++def test_resource_handles_only_bound_protected_workers():
++    from resource_handles import allowed_owner
++    b=rc.read(rc.ROOT/'cross_batch_binding.json');args=['python',b['worker_path'],'--approval',b['approval_path'],'--ledger',str(pathlib.Path(b['run'])/'activation.json')]
++    assert allowed_owner(args,b['protected_gpu_uuids'][0],os.getuid(),['newGPU'],b)
++    assert not allowed_owner(args,'newGPU',os.getuid(),['newGPU'],b)
++    args[1]='unknown_worker.py'
++    assert not allowed_owner(args,b['protected_gpu_uuids'][0],os.getuid(),['newGPU'],b)
++
++def test_gpu_resource_permission_and_low_utilization():
++    devices=['GPU-'+str(i) for i in range(6)];rows={d:[str(i),d,'RTX 2080 Ti','11000','0','1'] for i,d in enumerate(devices)}
++    a=dict(allocation_check_complete=True,reservation_conflicts=[],allowed_uuids=devices,minimum_free_mib=6000)
++    assert len(run.resources(devices,a,rows,'',''))==6
++    with pytest.raises(RuntimeError):run.resources(devices,a,rows,devices[0]+',1,100','')
++    with pytest.raises(PermissionError):run.resources(devices,dict(a,allocation_check_complete=False),rows,'','')
++    with pytest.raises(PermissionError):run.resources([rc.PROTOCOL['protected_gpu_uuids'][0]]+devices[1:],a,rows,'','')
++
++def test_no_activation_in_dry_run(tmp_path,monkeypatch,capsys):
++    monkeypatch.setattr('sys.argv',['run.py','dry-run','--output',str(tmp_path/'does_not_exist')])
++    monkeypatch.setattr(run,'supervise',lambda *a:pytest.fail('dry run launched supervisor'))
++    assert run.main()==0 and not (tmp_path/'does_not_exist').exists()
++    assert json.loads(capsys.readouterr().out)['formal_activated'] is False
++
++def test_bound_summary_and_protocol():
++    f,h=rc.source_binding()
++    assert all(x in f for x in ['summarize.py','cross_batch.py','run_worker.py','run.py','model_io.py','protocol.json','cross_batch_binding.json'])
++    assert rc.PROTOCOL['formal_authorized'] is False and rc.PROTOCOL['budget_seconds'] is None
++
++def test_external_sealed_controls_only():
++    r,inv=cb.external_records()
++    assert len(r) in (20,28) and len({cb.key(x) for x in r})==len(r)
++    assert {x['train_seed'] for x in r}<={2026102911,2026102912}
++
++def test_summary_missing_outputs_preserves_all_identities(tmp_path,monkeypatch):
++    import summarize as s
++    out=tmp_path/'empty_run';out.mkdir();target=out/'unified_evaluation.json'
++    monkeypatch.setattr(s,'factory',lambda:{})
++    monkeypatch.setattr(s,'load_graph',lambda *a,**k:{})
++    monkeypatch.setattr(s.M,'stats',lambda *a,**k:{})
++    monkeypatch.setattr(s,'evaluate_graph',lambda *a,**k:dict(raw={'edges':926},reference={'edges':926},absolute_error={'edges':0},distribution_error={'W1':0}))
++    monkeypatch.setattr('sys.argv',['summarize.py','--run',str(out),'--output',str(target),'--deadline',str(time.time()+20)])
++    assert s.main()==2
++    r=rc.read(target)
++    assert r['status']=='incomplete' and len(r['inventory'])==12
++    assert all(x['status']=='missing' for x in r['inventory'])
++    assert len([x for x in r['missing_identities'] if x['arm']=='D_earlyCN'])==8
++    assert all(x['difference'] is None for x in r['paired_means'] if 'early' in x['contrast'])
++
++def test_cross_batch_rejects_unbound_new_summary(tmp_path,monkeypatch):
++    p=tmp_path/'wrong.json';rc.save(p,dict(source_sha256='wrong',records=[]))
++    monkeypatch.setattr('sys.argv',['cross_batch.py','--new-summary',str(p),'--output',str(tmp_path/'new.json')])
++    with pytest.raises(ValueError,match='source binding'):cb.main()
++
++def test_formal_requires_real_authorization(tmp_path):
++    a=tmp_path/'not_approval.json';c=tmp_path/'not_cost.json';rc.save(a,{'user_formal_authorized':False});rc.save(c,{})
++    with pytest.raises(PermissionError):rc.approval_gate(a,c,tmp_path/'never_activated')
