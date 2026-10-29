@@ -1,5 +1,7 @@
 # 本分支确认状态
 
+2026-10-29 500步有界数量项配对票已获明确授权：起点20:51:44、科学停止22:16:44、交付22:31:44（Asia/Shanghai）。3be64f7的公式及lambda=.001未变；独立实现experiments/typed_structure_count_aux_stage500_v1。六项新增CPU测试通过；IMDB/PubMed各3次临时更新，观察不改变实际梯度/RNG、精确加载与续算均通过，科学初态不继承工程更新。准备按固定八卡启动八任务×500；不生成、不自动续训，旧票时钟与失败保留。
+
 2026-10-29 新增六任务准备已通过定向检查，独立目录 experiments/typed_structure_early_cn_expansion_v1（review worktree typed_structure_early_cn_expansion_review）。新增seed IMDB2026102931、PubMed2026102932；原seed D早融合、新seed E早/晚各两数据集，共拟6训练12链。D GPU工程各3次normal2、总6次；CPU16项通过，新seed早晚初态/完整随机流/训练与采样输入合同一致，原seed D/E公共初态一致。只把已审early install扩展到真实D，训练/采样循环及字典/核/EMA/指标未改。建议独立280分钟，尚未授权，不存在新增formal审批/起止/科学更新或完整链。原dbe96f5 GPU0/1两任务仍运行，源码与审批未改，原15:46:47/16:06:47截止不变。准备11:54:11起、12:39:11硬截止，证据results/typed_structure_early_cn_expansion_prepare_v1；发布回执另记。
 
 2026-10-29 E-earlyCN独立准备：源472e533/result aa4227，独立experiments/typed_structure_early_cn_v1；CN37→64零初始化边残差在lin_in_E后/主首层前注入，末端CN移除，净少2368参数。CPU10项通过；IMDB/PubMed各3次临时normal2（总6），零投影对照、非零梯度、对称性/类型内重编号、完整模型/优化器/EMA/RNG恢复与续算均通过。科学训练0、完整生成0，GPU已释放。原Dropout草稿与停止回执保留且未合并。拟两卡2模型/4链3000更新，规划255.71分钟，建议正式预算260分钟，未授权。完整图暂停；等待独立源码审查。准备票11:00:10起、11:40:10截止，不重置。

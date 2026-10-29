@@ -1,0 +1,26 @@
+{
+  "candidate": "sqrt_target_pseudo_huber_count_v2",
+  "parent_commit": "1665ff3acc2fa3d76e116e498cbd2b9475453927",
+  "formal_authorized": false,
+  "lambda_count": 0.001,
+  "prediction": "mu_r = fixed_present_r + sum of p0 over each unique movable unordered slot once",
+  "target": "m_r = count of relation r in training X0 including fixed present support",
+  "scale": "s_r = sqrt(max(m_r,1))",
+  "standardized_residual": "u_r = (mu_r-m_r)/s_r",
+  "penalty": "rho(u) = sqrt(1+u^2)-1; stable evaluation (u/(hypot(1,u)+1))*u",
+  "transition": "|mu_r-m_r| = s_r gives 1/sqrt(2) of asymptotic residual slope; smooth, no hard cutoff",
+  "average": "ordinary mean over R relations with movable_count>0; exclude fixed-only after support-consistency validation",
+  "empty_average": "differentiable zero",
+  "zero_target": "scale1; legal movable slots remain legal, no hard prohibition",
+  "input_loss": "sumCE/18336 + 0.001*mean_r rho(u_r)",
+  "normal2": "one zero_grad; each independent input loss divided by2 and backward; one AdamW then one EMA0.99",
+  "bounded_quantity_derivative": "|d(lambda*L_count)/d mu_r| <= lambda/(R*s_r); no network-gradient bound claimed",
+  "initialization_and_science": "unchanged E-earlyCN; fresh paired sealed theta0; no trained-state inheritance",
+  "search_performed": false,
+  "notes": [
+    "sqrt count is a deterministic scale heuristic, not a claim of independent edges, Poisson noise or calibrated uncertainty",
+    "lambda chosen once at0.001 before scanning new table; no per-dataset or per-family coefficients",
+    "no K in loss scaling; K remains in valid support and capacity checks",
+    "actual effect on shared parameter gradients, Adam and generated structure untested"
+  ]
+}
