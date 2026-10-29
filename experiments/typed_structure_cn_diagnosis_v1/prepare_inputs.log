@@ -1,0 +1,70 @@
+[
+  {
+    "name": "ordinary_t1",
+    "t": 1,
+    "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_cn_diagnosis_v1_20261029T100704/inputs/ordinary_t1.npz",
+    "sha256": "06719aa2b02282e66b8f2ec410a162d2456a5e1cfbfd503cef060722cffe41c6",
+    "source": {
+      "kind": "frozen ordinary forward-noise validation",
+      "original_array_file_persisted": false,
+      "recovered_by_original_recipe": true,
+      "matching_original_input_sha256": "be22238f4b01ac76112390fe72efe88bb24f1356c401c48a9d9b7551df1de6d3",
+      "comparisons": 4,
+      "recipe": "worker.validation -> seed32(train_seed,purpose=fixed_validation_noise,time=t), pair_inputs(case,cfg,10000+t,private,t)[0]"
+    },
+    "edges": 926,
+    "slots": 18336
+  },
+  {
+    "name": "ordinary_t500",
+    "t": 500,
+    "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_cn_diagnosis_v1_20261029T100704/inputs/ordinary_t500.npz",
+    "sha256": "3bee01e369f7c2fa4c2c3327f36c72f69deb250bf0bc07570a764b84029b1755",
+    "source": {
+      "kind": "frozen ordinary forward-noise validation",
+      "original_array_file_persisted": false,
+      "recovered_by_original_recipe": true,
+      "matching_original_input_sha256": "d89e54943400d224efa6f6ab7c8073a07a8292fe23afa1a7ac70140a3f1a4998",
+      "comparisons": 4,
+      "recipe": "worker.validation -> seed32(train_seed,purpose=fixed_validation_noise,time=t), pair_inputs(case,cfg,10000+t,private,t)[0]"
+    },
+    "edges": 932,
+    "slots": 18336
+  },
+  {
+    "name": "chain_C_X499",
+    "t": 499,
+    "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_cn_diagnosis_v1_20261029T100704/inputs/chain_C_X499.npz",
+    "sha256": "374587cd69e64b1511f01a089ec20447e86dd4f57bebb9a842843a7f2ab434e7",
+    "source": {
+      "kind": "sealed free-generation state after t500 transition",
+      "state_file": "/data2/lyh/gnn_project/DiHug/results/typed_structure_final_screen_formal_v1_20261029T0325/run/PubMed_s2026102912_C/ema_0.99/sample_2026102821/complete_t0499.pt",
+      "state_file_sha256": "29254ef5dbc88a1efbd282396992bb58b2e89803618b8e1799e4b2cd3ddae933",
+      "payload_next_t": 499,
+      "preceding_log_time": 500,
+      "preceding_log_remaining_time": 499,
+      "model_sha256": "689b5ed3552fd26ba3a267db7888aff94f6fed3cbf782bf920a5be81e33ea323",
+      "no_chain_replay": true
+    },
+    "edges": 913,
+    "slots": 18336
+  },
+  {
+    "name": "chain_E_X499",
+    "t": 499,
+    "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_cn_diagnosis_v1_20261029T100704/inputs/chain_E_X499.npz",
+    "sha256": "dd19daa49d0427a58496e234b3ffa01be65f11f7b10fe939fe07be71ebdbd7ce",
+    "source": {
+      "kind": "sealed free-generation state after t500 transition",
+      "state_file": "/data2/lyh/gnn_project/DiHug/results/typed_structure_final_screen_formal_v1_20261029T0325/run/PubMed_s2026102912_E/ema_0.99/sample_2026102821/complete_t0499.pt",
+      "state_file_sha256": "8081652140778f9ddfb8c622f2894a196820ac6d2baeeff15cc744c9924c5a79",
+      "payload_next_t": 499,
+      "preceding_log_time": 500,
+      "preceding_log_remaining_time": 499,
+      "model_sha256": "095f03019688091e482d053899d315683ac50862f144c8a303846bbc1edcb6b4",
+      "no_chain_replay": true
+    },
+    "edges": 896,
+    "slots": 18336
+  }
+]
