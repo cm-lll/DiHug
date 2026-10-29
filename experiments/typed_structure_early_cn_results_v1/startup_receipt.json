@@ -1,0 +1,217 @@
+{
+  "status": "started_and_advancing",
+  "recorded_at": "2026-10-29T11:48:34.530685+08:00",
+  "commit": "dbe96f519443e8f8937d43cd191803658bf83464",
+  "source_sha256": "60209ec2d5a789fc057230cc120b8d97f63fd2074a8a8c11196d10d0a4bc64d5",
+  "start": "2026-10-29T11:46:47.481317+08:00",
+  "science_stop": "2026-10-29T15:46:47.481317+08:00",
+  "final_deadline": "2026-10-29T16:06:47.481317+08:00",
+  "budget_seconds": 15600,
+  "output": "/data2/lyh/gnn_project/DiHug/results/typed_structure_early_cn_formal_v1_20261029T1145/run",
+  "launcher_pid": 2410537,
+  "gpu_mapping": [
+    {
+      "index": "0",
+      "uuid": "GPU-12b85b68-69e6-12fa-76ce-986c0b46e8a7",
+      "name": "NVIDIA GeForce RTX 2080 Ti",
+      "free_mib": 11011.0,
+      "used_mib": 0.0,
+      "utilization_percent": 0.0
+    },
+    {
+      "index": "1",
+      "uuid": "GPU-cf73267c-774a-dada-fc26-ada91ccc27c1",
+      "name": "NVIDIA GeForce RTX 2080 Ti",
+      "free_mib": 11011.0,
+      "used_mib": 0.0,
+      "utilization_percent": 0.0
+    }
+  ],
+  "jobs": {
+    "training": [
+      {
+        "dataset": "PubMed",
+        "arm": "E",
+        "train_seed": 2026102912,
+        "slot": 0,
+        "id": "PubMed_s2026102912_E",
+        "mode": "train",
+        "directory": "PubMed_s2026102912_E",
+        "updates": 3000
+      },
+      {
+        "dataset": "IMDB",
+        "arm": "E",
+        "train_seed": 2026102911,
+        "slot": 1,
+        "id": "IMDB_s2026102911_E",
+        "mode": "train",
+        "directory": "IMDB_s2026102911_E",
+        "updates": 3000
+      }
+    ],
+    "sampling": [
+      {
+        "dataset": "PubMed",
+        "arm": "E",
+        "train_seed": 2026102912,
+        "slot": 0,
+        "id": "PubMed_s2026102912_E_ema_0.99_2026102821",
+        "mode": "sample",
+        "readout": "ema_0.99",
+        "sample_seed": 2026102821,
+        "directory": "PubMed_s2026102912_E/ema_0.99/sample_2026102821",
+        "T": 1000,
+        "depends_on": "PubMed_s2026102912_E"
+      },
+      {
+        "dataset": "PubMed",
+        "arm": "E",
+        "train_seed": 2026102912,
+        "slot": 0,
+        "id": "PubMed_s2026102912_E_ema_0.99_2026102822",
+        "mode": "sample",
+        "readout": "ema_0.99",
+        "sample_seed": 2026102822,
+        "directory": "PubMed_s2026102912_E/ema_0.99/sample_2026102822",
+        "T": 1000,
+        "depends_on": "PubMed_s2026102912_E"
+      },
+      {
+        "dataset": "IMDB",
+        "arm": "E",
+        "train_seed": 2026102911,
+        "slot": 1,
+        "id": "IMDB_s2026102911_E_ema_0.99_2026102821",
+        "mode": "sample",
+        "readout": "ema_0.99",
+        "sample_seed": 2026102821,
+        "directory": "IMDB_s2026102911_E/ema_0.99/sample_2026102821",
+        "T": 1000,
+        "depends_on": "IMDB_s2026102911_E"
+      },
+      {
+        "dataset": "IMDB",
+        "arm": "E",
+        "train_seed": 2026102911,
+        "slot": 1,
+        "id": "IMDB_s2026102911_E_ema_0.99_2026102822",
+        "mode": "sample",
+        "readout": "ema_0.99",
+        "sample_seed": 2026102822,
+        "directory": "IMDB_s2026102911_E/ema_0.99/sample_2026102822",
+        "T": 1000,
+        "depends_on": "IMDB_s2026102911_E"
+      }
+    ],
+    "policy": "two cards: slot0 PubMed E-earlyCN, slot1 IMDB E-earlyCN; then two serial final EMA chains per card"
+  },
+  "initial_progress": {
+    "PubMed_s2026102912_E": {
+      "progress": {
+        "status": "running",
+        "job": {
+          "dataset": "PubMed",
+          "arm": "E",
+          "train_seed": 2026102912,
+          "slot": 0,
+          "id": "PubMed_s2026102912_E",
+          "mode": "train",
+          "directory": "PubMed_s2026102912_E",
+          "updates": 3000
+        },
+        "completed_updates": 19,
+        "completed_chains": 0,
+        "started_epoch": 1793245629.9618516,
+        "ema_updates": 19
+      },
+      "initial_checkpoint": {
+        "sha256": "f31a922ed04009f88b6eb5c2a0ae856b642f105921a860c1c5331306ebe79e86",
+        "updates": 0
+      },
+      "validation_saved": true,
+      "environment": {
+        "python": "3.9.23 | packaged by conda-forge | (main, Jun  4 2025, 17:57:12) \n[GCC 13.3.0]",
+        "python_version": "3.9.23",
+        "executable": "/data2/lyh/miniconda3/envs/sparse_block/bin/python",
+        "system": "Linux-5.4.0-216-generic-x86_64-with-glibc2.31",
+        "machine": "x86_64",
+        "packages": {
+          "torch": "2.1.0+cu121",
+          "torch-geometric": "2.3.1",
+          "numpy": "1.23.0",
+          "scipy": "1.11.0",
+          "pytest": "8.4.2",
+          "networkx": "2.8.7"
+        },
+        "hip": null,
+        "cuda": "12.1",
+        "requested_device": "cuda",
+        "torch_runtime_version": "2.1.0+cu121",
+        "float32_matmul_precision": "highest",
+        "matmul_allow_tf32": false,
+        "deterministic_algorithms": true,
+        "deterministic_warn_only": false,
+        "torch_threads": 1,
+        "utc": "2026-10-29T03:47:15Z",
+        "device_name": "NVIDIA GeForce RTX 2080 Ti",
+        "visible_devices": 1,
+        "device_memory_bytes": 11546394624,
+        "device_type": "CUDA"
+      }
+    },
+    "IMDB_s2026102911_E": {
+      "progress": {
+        "status": "running",
+        "job": {
+          "dataset": "IMDB",
+          "arm": "E",
+          "train_seed": 2026102911,
+          "slot": 1,
+          "id": "IMDB_s2026102911_E",
+          "mode": "train",
+          "directory": "IMDB_s2026102911_E",
+          "updates": 3000
+        },
+        "completed_updates": 26,
+        "completed_chains": 0,
+        "started_epoch": 1793245629.6324484,
+        "ema_updates": 26
+      },
+      "initial_checkpoint": {
+        "sha256": "f331f1c4f5036366d1cc96763f0dca69d56aa56a2693a69769c4e0faf7aeb2ca",
+        "updates": 0
+      },
+      "validation_saved": true,
+      "environment": {
+        "python": "3.9.23 | packaged by conda-forge | (main, Jun  4 2025, 17:57:12) \n[GCC 13.3.0]",
+        "python_version": "3.9.23",
+        "executable": "/data2/lyh/miniconda3/envs/sparse_block/bin/python",
+        "system": "Linux-5.4.0-216-generic-x86_64-with-glibc2.31",
+        "machine": "x86_64",
+        "packages": {
+          "torch": "2.1.0+cu121",
+          "torch-geometric": "2.3.1",
+          "numpy": "1.23.0",
+          "scipy": "1.11.0",
+          "pytest": "8.4.2",
+          "networkx": "2.8.7"
+        },
+        "hip": null,
+        "cuda": "12.1",
+        "requested_device": "cuda",
+        "torch_runtime_version": "2.1.0+cu121",
+        "float32_matmul_precision": "highest",
+        "matmul_allow_tf32": false,
+        "deterministic_algorithms": true,
+        "deterministic_warn_only": false,
+        "torch_threads": 1,
+        "utc": "2026-10-29T03:47:15Z",
+        "device_name": "NVIDIA GeForce RTX 2080 Ti",
+        "visible_devices": 1,
+        "device_memory_bytes": 11546394624,
+        "device_type": "CUDA"
+      }
+    }
+  }
+}

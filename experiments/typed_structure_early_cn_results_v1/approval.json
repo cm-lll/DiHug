@@ -1,0 +1,126 @@
+{
+  "user_formal_authorized": true,
+  "independent_review": "passed",
+  "authorization_reference": "Current conversation: user accepted review of dbe96f519443e8f8937d43cd191803658bf83464 and 260-minute two-model/four-chain plan, then explicitly said 启动吧 on 2026-10-29.",
+  "authorization_recorded_at": "2026-10-29T11:46:43.967462+08:00",
+  "review_scope": "E-earlyCN source, sealed theta0 migration, runtime wiring and saved engineering evidence; user reviewer did not rerun GPU",
+  "commit": "dbe96f519443e8f8937d43cd191803658bf83464",
+  "source_sha256": "60209ec2d5a789fc057230cc120b8d97f63fd2074a8a8c11196d10d0a4bc64d5",
+  "protocol_sha256": "67daf4006f4d11b65dd2069ecedd031046593c21d3dfab24a89866b2b41616f5",
+  "asset_bindings_sha256": "89fcee2eee0a825407cae1288637136eb2627ad8e1738a66895bf384ddcaf6cd",
+  "baseline_bindings_sha256": "ea9f635dbe945d8deed85518156b8b2e23e92dda050f19eff75a508823168448",
+  "cost_sha256": "4fd71a075f9ce9564ad80dc81ca3557414c22abdc56102ec794753f53923f8a7",
+  "updates": 3000,
+  "budget_seconds": 15600,
+  "science_stop_after_seconds": 14400,
+  "output": "/data2/lyh/gnn_project/DiHug/results/typed_structure_early_cn_formal_v1_20261029T1145/run",
+  "gpu_uuids": [
+    "GPU-12b85b68-69e6-12fa-76ce-986c0b46e8a7",
+    "GPU-cf73267c-774a-dada-fc26-ada91ccc27c1"
+  ],
+  "environment": {
+    "python_version": "3.9.23",
+    "torch_runtime_version": "2.1.0+cu121",
+    "packages": {
+      "torch": "2.1.0+cu121",
+      "torch-geometric": "2.3.1",
+      "numpy": "1.23.0",
+      "scipy": "1.11.0",
+      "pytest": "8.4.2",
+      "networkx": "2.8.7"
+    },
+    "device_name": "NVIDIA GeForce RTX 2080 Ti"
+  },
+  "resource_authorization": {
+    "allocation_check_complete": true,
+    "allowed_uuids": [
+      "GPU-12b85b68-69e6-12fa-76ce-986c0b46e8a7",
+      "GPU-cf73267c-774a-dada-fc26-ada91ccc27c1"
+    ],
+    "reservation_conflicts": [],
+    "minimum_free_mib": 8192,
+    "authorization_source": "User-approved local two-GPU scope; selected GPU0/1 currently idle; no scheduler present in this environment",
+    "precheck_path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_early_cn_formal_v1_20261029T1145/resource_precheck.json"
+  },
+  "schedule": {
+    "training": [
+      {
+        "dataset": "PubMed",
+        "arm": "E",
+        "train_seed": 2026102912,
+        "slot": 0,
+        "id": "PubMed_s2026102912_E",
+        "mode": "train",
+        "directory": "PubMed_s2026102912_E",
+        "updates": 3000
+      },
+      {
+        "dataset": "IMDB",
+        "arm": "E",
+        "train_seed": 2026102911,
+        "slot": 1,
+        "id": "IMDB_s2026102911_E",
+        "mode": "train",
+        "directory": "IMDB_s2026102911_E",
+        "updates": 3000
+      }
+    ],
+    "sampling": [
+      {
+        "dataset": "PubMed",
+        "arm": "E",
+        "train_seed": 2026102912,
+        "slot": 0,
+        "id": "PubMed_s2026102912_E_ema_0.99_2026102821",
+        "mode": "sample",
+        "readout": "ema_0.99",
+        "sample_seed": 2026102821,
+        "directory": "PubMed_s2026102912_E/ema_0.99/sample_2026102821",
+        "T": 1000,
+        "depends_on": "PubMed_s2026102912_E"
+      },
+      {
+        "dataset": "PubMed",
+        "arm": "E",
+        "train_seed": 2026102912,
+        "slot": 0,
+        "id": "PubMed_s2026102912_E_ema_0.99_2026102822",
+        "mode": "sample",
+        "readout": "ema_0.99",
+        "sample_seed": 2026102822,
+        "directory": "PubMed_s2026102912_E/ema_0.99/sample_2026102822",
+        "T": 1000,
+        "depends_on": "PubMed_s2026102912_E"
+      },
+      {
+        "dataset": "IMDB",
+        "arm": "E",
+        "train_seed": 2026102911,
+        "slot": 1,
+        "id": "IMDB_s2026102911_E_ema_0.99_2026102821",
+        "mode": "sample",
+        "readout": "ema_0.99",
+        "sample_seed": 2026102821,
+        "directory": "IMDB_s2026102911_E/ema_0.99/sample_2026102821",
+        "T": 1000,
+        "depends_on": "IMDB_s2026102911_E"
+      },
+      {
+        "dataset": "IMDB",
+        "arm": "E",
+        "train_seed": 2026102911,
+        "slot": 1,
+        "id": "IMDB_s2026102911_E_ema_0.99_2026102822",
+        "mode": "sample",
+        "readout": "ema_0.99",
+        "sample_seed": 2026102822,
+        "directory": "IMDB_s2026102911_E/ema_0.99/sample_2026102822",
+        "T": 1000,
+        "depends_on": "IMDB_s2026102911_E"
+      }
+    ],
+    "policy": "two cards: slot0 PubMed E-earlyCN, slot1 IMDB E-earlyCN; then two serial final EMA chains per card"
+  },
+  "no_automatic_restart": true,
+  "no_extra_experiments": true
+}

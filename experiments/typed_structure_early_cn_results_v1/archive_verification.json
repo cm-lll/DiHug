@@ -1,0 +1,347 @@
+{
+  "status": "passed",
+  "files": 154,
+  "zip_sha256": "ef6c4f2277346cfd97bf5ce6914bc70477292671bccef72c05b64418fedae90d",
+  "zip_bytes": 4030498,
+  "zip_path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_early_cn_formal_v1_20261029T1145/typed_structure_early_cn_results_v1.zip",
+  "independent_extraction": true,
+  "public_audit": {
+    "status": "passed",
+    "started_epoch": 1793260472.7769558,
+    "finished_epoch": 1793260474.3563397,
+    "seconds": 1.5793840885162354,
+    "public_only": true,
+    "models": 2,
+    "updates": 6000,
+    "chains": 4,
+    "new_graph_versions": 8,
+    "all_records_with_controls": 24,
+    "weights": [],
+    "training": [
+      {
+        "job": {
+          "dataset": "IMDB",
+          "arm": "E",
+          "train_seed": 2026102911,
+          "slot": 1,
+          "id": "IMDB_s2026102911_E",
+          "mode": "train",
+          "directory": "IMDB_s2026102911_E",
+          "updates": 3000
+        },
+        "seconds": 7940.626755237579,
+        "peak_rss_mib": 4112.4453125,
+        "peak_allocated_mib": 2387.07177734375,
+        "peak_reserved_mib": 2518.0
+      },
+      {
+        "job": {
+          "dataset": "PubMed",
+          "arm": "E",
+          "train_seed": 2026102912,
+          "slot": 0,
+          "id": "PubMed_s2026102912_E",
+          "mode": "train",
+          "directory": "PubMed_s2026102912_E",
+          "updates": 3000
+        },
+        "seconds": 10549.685485839844,
+        "peak_rss_mib": 4105.39453125,
+        "peak_allocated_mib": 3283.0107421875,
+        "peak_reserved_mib": 3458.0
+      }
+    ],
+    "graphs": [
+      {
+        "job": {
+          "dataset": "IMDB",
+          "arm": "E",
+          "train_seed": 2026102911,
+          "slot": 1,
+          "id": "IMDB_s2026102911_E_ema_0.99_2026102821",
+          "mode": "sample",
+          "readout": "ema_0.99",
+          "sample_seed": 2026102821,
+          "directory": "IMDB_s2026102911_E/ema_0.99/sample_2026102821",
+          "T": 1000,
+          "depends_on": "IMDB_s2026102911_E"
+        },
+        "sha256": "60504974e1befefb3e77afc08433dd59d25bf4ae88d5a50c4be462ddbcddcc74",
+        "seconds": 501.9302463941276,
+        "lcc_nodes": 186,
+        "lcc_edges": 324
+      },
+      {
+        "job": {
+          "dataset": "PubMed",
+          "arm": "E",
+          "train_seed": 2026102912,
+          "slot": 0,
+          "id": "PubMed_s2026102912_E_ema_0.99_2026102821",
+          "mode": "sample",
+          "readout": "ema_0.99",
+          "sample_seed": 2026102821,
+          "directory": "PubMed_s2026102912_E/ema_0.99/sample_2026102821",
+          "T": 1000,
+          "depends_on": "PubMed_s2026102912_E"
+        },
+        "sha256": "b776880d67b90e2fd2e168454d9c3442582f1ed89d83301f103af4022aa62dba",
+        "seconds": 668.7460369318724,
+        "lcc_nodes": 192,
+        "lcc_edges": 949
+      },
+      {
+        "job": {
+          "dataset": "IMDB",
+          "arm": "E",
+          "train_seed": 2026102911,
+          "slot": 1,
+          "id": "IMDB_s2026102911_E_ema_0.99_2026102822",
+          "mode": "sample",
+          "readout": "ema_0.99",
+          "sample_seed": 2026102822,
+          "directory": "IMDB_s2026102911_E/ema_0.99/sample_2026102822",
+          "T": 1000,
+          "depends_on": "IMDB_s2026102911_E"
+        },
+        "sha256": "fa8987e369b0398125cc18896bc251264059c41636213173666e7ecb610add3a",
+        "seconds": 502.80768333002925,
+        "lcc_nodes": 188,
+        "lcc_edges": 314
+      },
+      {
+        "job": {
+          "dataset": "PubMed",
+          "arm": "E",
+          "train_seed": 2026102912,
+          "slot": 0,
+          "id": "PubMed_s2026102912_E_ema_0.99_2026102822",
+          "mode": "sample",
+          "readout": "ema_0.99",
+          "sample_seed": 2026102822,
+          "directory": "PubMed_s2026102912_E/ema_0.99/sample_2026102822",
+          "T": 1000,
+          "depends_on": "PubMed_s2026102912_E"
+        },
+        "sha256": "5eff59d740e3a477c090046c228e545b14fa34174c2099bdedf68bc317ead325",
+        "seconds": 665.5928588807583,
+        "lcc_nodes": 186,
+        "lcc_edges": 696
+      }
+    ],
+    "input_contracts": {
+      "IMDB": {
+        "training_inputs": 3000,
+        "validation_inputs": [
+          [
+            1,
+            "ea0511a3051ad4937006e6ad53a5b4c071e8708ce5c75f88bd5d584295f952ca"
+          ],
+          [
+            500,
+            "db005ef1277307f575169c735b729fba369e284071f3175d1a6452131d47be61"
+          ],
+          [
+            1000,
+            "477bb1e72f9ca4c537ff73caf2f1a02aadfa5d3b5af0cbe1bfc5ee9492636490"
+          ],
+          [
+            1,
+            "ea0511a3051ad4937006e6ad53a5b4c071e8708ce5c75f88bd5d584295f952ca"
+          ],
+          [
+            500,
+            "db005ef1277307f575169c735b729fba369e284071f3175d1a6452131d47be61"
+          ],
+          [
+            1000,
+            "477bb1e72f9ca4c537ff73caf2f1a02aadfa5d3b5af0cbe1bfc5ee9492636490"
+          ],
+          [
+            1,
+            "ea0511a3051ad4937006e6ad53a5b4c071e8708ce5c75f88bd5d584295f952ca"
+          ],
+          [
+            500,
+            "db005ef1277307f575169c735b729fba369e284071f3175d1a6452131d47be61"
+          ],
+          [
+            1000,
+            "477bb1e72f9ca4c537ff73caf2f1a02aadfa5d3b5af0cbe1bfc5ee9492636490"
+          ],
+          [
+            1,
+            "ea0511a3051ad4937006e6ad53a5b4c071e8708ce5c75f88bd5d584295f952ca"
+          ],
+          [
+            500,
+            "db005ef1277307f575169c735b729fba369e284071f3175d1a6452131d47be61"
+          ],
+          [
+            1000,
+            "477bb1e72f9ca4c537ff73caf2f1a02aadfa5d3b5af0cbe1bfc5ee9492636490"
+          ],
+          [
+            1,
+            "ea0511a3051ad4937006e6ad53a5b4c071e8708ce5c75f88bd5d584295f952ca"
+          ],
+          [
+            500,
+            "db005ef1277307f575169c735b729fba369e284071f3175d1a6452131d47be61"
+          ],
+          [
+            1000,
+            "477bb1e72f9ca4c537ff73caf2f1a02aadfa5d3b5af0cbe1bfc5ee9492636490"
+          ],
+          [
+            1,
+            "ea0511a3051ad4937006e6ad53a5b4c071e8708ce5c75f88bd5d584295f952ca"
+          ],
+          [
+            500,
+            "db005ef1277307f575169c735b729fba369e284071f3175d1a6452131d47be61"
+          ],
+          [
+            1000,
+            "477bb1e72f9ca4c537ff73caf2f1a02aadfa5d3b5af0cbe1bfc5ee9492636490"
+          ],
+          [
+            1,
+            "ea0511a3051ad4937006e6ad53a5b4c071e8708ce5c75f88bd5d584295f952ca"
+          ],
+          [
+            500,
+            "db005ef1277307f575169c735b729fba369e284071f3175d1a6452131d47be61"
+          ],
+          [
+            1000,
+            "477bb1e72f9ca4c537ff73caf2f1a02aadfa5d3b5af0cbe1bfc5ee9492636490"
+          ],
+          [
+            1,
+            "ea0511a3051ad4937006e6ad53a5b4c071e8708ce5c75f88bd5d584295f952ca"
+          ],
+          [
+            500,
+            "db005ef1277307f575169c735b729fba369e284071f3175d1a6452131d47be61"
+          ],
+          [
+            1000,
+            "477bb1e72f9ca4c537ff73caf2f1a02aadfa5d3b5af0cbe1bfc5ee9492636490"
+          ]
+        ]
+      },
+      "PubMed": {
+        "training_inputs": 3000,
+        "validation_inputs": [
+          [
+            1,
+            "be22238f4b01ac76112390fe72efe88bb24f1356c401c48a9d9b7551df1de6d3"
+          ],
+          [
+            500,
+            "d89e54943400d224efa6f6ab7c8073a07a8292fe23afa1a7ac70140a3f1a4998"
+          ],
+          [
+            1000,
+            "b97d33ad6a985631307395bcfa2e295c180ba6c58e00c4f65a91d816fd96df12"
+          ],
+          [
+            1,
+            "be22238f4b01ac76112390fe72efe88bb24f1356c401c48a9d9b7551df1de6d3"
+          ],
+          [
+            500,
+            "d89e54943400d224efa6f6ab7c8073a07a8292fe23afa1a7ac70140a3f1a4998"
+          ],
+          [
+            1000,
+            "b97d33ad6a985631307395bcfa2e295c180ba6c58e00c4f65a91d816fd96df12"
+          ],
+          [
+            1,
+            "be22238f4b01ac76112390fe72efe88bb24f1356c401c48a9d9b7551df1de6d3"
+          ],
+          [
+            500,
+            "d89e54943400d224efa6f6ab7c8073a07a8292fe23afa1a7ac70140a3f1a4998"
+          ],
+          [
+            1000,
+            "b97d33ad6a985631307395bcfa2e295c180ba6c58e00c4f65a91d816fd96df12"
+          ],
+          [
+            1,
+            "be22238f4b01ac76112390fe72efe88bb24f1356c401c48a9d9b7551df1de6d3"
+          ],
+          [
+            500,
+            "d89e54943400d224efa6f6ab7c8073a07a8292fe23afa1a7ac70140a3f1a4998"
+          ],
+          [
+            1000,
+            "b97d33ad6a985631307395bcfa2e295c180ba6c58e00c4f65a91d816fd96df12"
+          ],
+          [
+            1,
+            "be22238f4b01ac76112390fe72efe88bb24f1356c401c48a9d9b7551df1de6d3"
+          ],
+          [
+            500,
+            "d89e54943400d224efa6f6ab7c8073a07a8292fe23afa1a7ac70140a3f1a4998"
+          ],
+          [
+            1000,
+            "b97d33ad6a985631307395bcfa2e295c180ba6c58e00c4f65a91d816fd96df12"
+          ],
+          [
+            1,
+            "be22238f4b01ac76112390fe72efe88bb24f1356c401c48a9d9b7551df1de6d3"
+          ],
+          [
+            500,
+            "d89e54943400d224efa6f6ab7c8073a07a8292fe23afa1a7ac70140a3f1a4998"
+          ],
+          [
+            1000,
+            "b97d33ad6a985631307395bcfa2e295c180ba6c58e00c4f65a91d816fd96df12"
+          ],
+          [
+            1,
+            "be22238f4b01ac76112390fe72efe88bb24f1356c401c48a9d9b7551df1de6d3"
+          ],
+          [
+            500,
+            "d89e54943400d224efa6f6ab7c8073a07a8292fe23afa1a7ac70140a3f1a4998"
+          ],
+          [
+            1000,
+            "b97d33ad6a985631307395bcfa2e295c180ba6c58e00c4f65a91d816fd96df12"
+          ],
+          [
+            1,
+            "be22238f4b01ac76112390fe72efe88bb24f1356c401c48a9d9b7551df1de6d3"
+          ],
+          [
+            500,
+            "d89e54943400d224efa6f6ab7c8073a07a8292fe23afa1a7ac70140a3f1a4998"
+          ],
+          [
+            1000,
+            "b97d33ad6a985631307395bcfa2e295c180ba6c58e00c4f65a91d816fd96df12"
+          ]
+        ]
+      }
+    },
+    "numeric_aggregate_checks": 64464,
+    "source_sha256": "60209ec2d5a789fc057230cc120b8d97f63fd2074a8a8c11196d10d0a4bc64d5",
+    "scientific_complete_epoch": 1793257541.3980281,
+    "limits": [
+      "One training seed per dataset and two samples; new-seed replication still running in separate batch",
+      "MP/closure composition inherited from frozen evaluator, not independently enumerated in this audit",
+      "CPU/GPU equivalence not asserted; no model constructed, forward or sampling invoked"
+    ]
+  },
+  "seconds": 3.947066068649292,
+  "finished_epoch": 1793260474.457485
+}
