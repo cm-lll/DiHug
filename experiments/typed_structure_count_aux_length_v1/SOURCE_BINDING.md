@@ -1,0 +1,9 @@
+当前公式审查来源：3be64f7d188985e3d55a7c74a6984a0be42d716e。
+
+本票实际运行提交：974e5dca8cbdd05ffddc53fd599ae815828d8b56。
+
+实际运行源码SHA256：5e81a49ae1d6afebbae7fed54e4898f4f29a05e02e9cb67637a802af89b82636。source_manifest.json及结果目录同名文件记录全部绑定文件。正式审批、成本、协议、公式、初态、数据与字典绑定保存在结果目录，所有worker使用同一源码哈希。
+
+公式count_aux.py与formula.json逐字节复用已审有界版本；相对父runtime有60份package文件未变，改动集中在normal2的稀疏观察和验证记录、新观察模块及已审损失替换。source_delta_audit.json和runtime_minimal.patch记录范围。独立审查结论指先前公式审查；新运行接线依用户明确条件授权及本票定向检查启动，没有冒称获得另一次外部代码审查。
+
+历史CPU/GPU跨后端不等价记录未修改；本票只验证同GPU观察隔离和状态恢复。后续结果发布提交仅新增证据、文档和原已绑定二进制资产的Git登记，不替换运行科学实现。

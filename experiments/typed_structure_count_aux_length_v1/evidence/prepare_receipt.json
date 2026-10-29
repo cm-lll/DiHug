@@ -1,0 +1,33 @@
+{
+  "status": "ready_for_independent_review_not_formal_authorization",
+  "start": "2026-10-29T18:55:58+08:00",
+  "preparation_deadline": "2026-10-29T19:40:58+08:00",
+  "checks_finished_at": "2026-10-29T19:30:24.232806+08:00",
+  "elapsed_to_checks_seconds": 2066.2328176498413,
+  "formal_training_updates": 0,
+  "complete_generation_chains": 0,
+  "temporary_optimizer_steps": 8,
+  "temporary_steps_by_dataset": {
+    "IMDB": 4,
+    "PubMed": 4
+  },
+  "temporary_update_loss": "rejected pure-relative normalization; archived",
+  "final_loss_update_steps": 0,
+  "final_loss_checks": {
+    "cpu_regression_passed": 20,
+    "cpu_regression_failed": 0,
+    "cpu_regression_skipped": 0,
+    "IMDB": "CPU full normal2 backward, scale, RNG; no step",
+    "PubMed": "GPU full normal2 backward, scale, RNG; no step"
+  },
+  "retained_limitations": [
+    "final-form optimizer update and numerical continuation not measured; old-form mechanism evidence explicitly separate",
+    "no new 8-card throughput or complete chain timing; historical extrapolation",
+    "IMDB initial AA dominates 71.5% of auxiliary; shared lambda not scale-invariant across datasets",
+    "IMDB GPU follow-up rejected by automatic review; CPU fallback completed, no bypass"
+  ],
+  "science_unchanged_manifest": "frozen_science_bindings.json",
+  "resources_released": "resource_release.json",
+  "formal_approval_created": false,
+  "formal_results": null
+}

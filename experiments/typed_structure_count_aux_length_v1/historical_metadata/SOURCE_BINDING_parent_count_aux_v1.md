@@ -1,0 +1,1 @@
+Historical parent-only provenance: source base 89320ada4d58b133884f62360e9662e713d872f2; E-early scientific architecture inherits dbe96f519443e8f8937d43cd191803658bf83464 / 472e533fd28cfc067702b1b75082ac5105140a2d. This paragraph describes the old preparation, not the stage500 authorization or run.
