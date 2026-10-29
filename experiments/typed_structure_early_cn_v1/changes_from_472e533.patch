@@ -1,0 +1,681 @@
+--- a/package/hsgd/model.py
++++ b/package/hsgd/model.py
+@@ -65,14 +65,19 @@
+         finally:context.close()
+ 
+     def joint_predict(self,ctx,graph,time,mask_cn=False,return_features=False):
++        early = hasattr(self, 'cn_edge_projection')
++        edge_residual = None
++        if early:
++            from early_cn import edge_cn_residual
++            edge_residual = edge_cn_residual(self,ctx,graph,time,mask_cn)
+         result,hidden=self.backbone(ctx.x,graph.attrs,graph.edges,
+             ctx.x.new_tensor([[float(time)]]),ctx.batch,return_hidden=True,
+-            node_residual=getattr(ctx,'node_residual',None))
++            node_residual=getattr(ctx,'node_residual',None),edge_residual=edge_residual)
+         index=graph.query_index;family=graph.query_families
+         query=graph.edges[:,index];left,right=hidden["node"][query[0]],hidden["node"][query[1]]
+         old_logits=torch.stack([result.edge_attr[index,0],result.edge_attr[index,family+1]],-1)
+         cn=ctx.x.new_zeros((len(index),self.cn_feature_width))
+-        if self.common_neighbor is not None and not mask_cn:
++        if self.common_neighbor is not None and not mask_cn and not early:
+             cn=self.common_neighbor.aggregate(ctx,query,family,time)
+         state=(graph.states[index]>0).long()
+         fields=[hidden["edge"][index],(left+right)*.5,(left-right).abs(),
+--- a/package/hsgd/vendor/conv_transformer_model.py
++++ b/package/hsgd/vendor/conv_transformer_model.py
+@@ -164,7 +164,7 @@
+             self.out_ln_y = nn.LayerNorm(hidden_dims["dy"])
+             self.lin_out_y = nn.Linear(hidden_dims["dy"], output_dims.y)
+ 
+-    def forward(self, X, edge_attr, edge_index, y, batch, return_hidden=False, node_residual=None):
++    def forward(self, X, edge_attr, edge_index, y, batch, return_hidden=False, node_residual=None, edge_residual=None):
+         # Save for residual connection
+         X0 = X.clone()
+         edge_attr0 = edge_attr.clone()
+@@ -176,6 +176,12 @@
+             if node_residual.shape != X.shape:raise ValueError('node residual shape mismatch')
+             X = X + node_residual
+         edge_attr = self.lin_in_E(edge_attr)
++        if edge_residual is not None:
++            if edge_residual.shape != edge_attr.shape or edge_residual.dtype != edge_attr.dtype or edge_residual.device != edge_attr.device:
++                raise ValueError("edge residual shape/dtype/device")
++            if not torch.isfinite(edge_residual).all():
++                raise FloatingPointError("nonfinite early CN residual")
++            edge_attr = edge_attr + edge_residual
+         y = self.lin_in_y(y)
+ 
+         # Transformer layers
+--- a/package/early_cn.py
++++ b/package/early_cn.py
+@@ -0,0 +1,43 @@
++"""Single early CN injection; topology always comes from the frozen real Xt.
++
++Metadata canonicalization is not learned. Learned CN and the projection retain
++autograd. No persistent cache or fallback is introduced here.
++"""
++import numpy as np
++import torch
++from torch import nn
++
++def canonical_pairs(edges,families,n):
++    e=edges.detach().cpu().numpy();f=families.detach().cpu().numpy()
++    if e.shape!=(2,len(f)):raise ValueError('edge/family rows')
++    if e.size and ((e<0).any() or (e>=n).any() or (e[0]==e[1]).any()):raise ValueError('invalid endpoints')
++    lo=np.minimum(e[0],e[1]);hi=np.maximum(e[0],e[1])
++    keys,first,inverse=np.unique(lo*n+hi,return_index=True,return_inverse=True)
++    if not np.array_equal(f,f[first][inverse]):raise ValueError('same pair has conflicting families')
++    pairs=np.stack([keys//n,keys%n])
++    return (torch.as_tensor(pairs,dtype=torch.long,device=edges.device),
++            torch.as_tensor(f[first],dtype=torch.long,device=edges.device),
++            torch.as_tensor(inverse,dtype=torch.long,device=edges.device))
++
++def install(model):
++    if model.arm!='E' or model.common_neighbor is None:raise ValueError('E only')
++    first=model.joint_head[0];s=model.joint_slices['CN']
++    if (first.in_features,first.out_features,s.start,s.stop,model.cn_feature_width)!=(776,128,739,776,37):
++        raise ValueError('reviewed head layout differs')
++    new=nn.Linear(739,128,device=first.weight.device,dtype=first.weight.dtype)
++    with torch.no_grad():new.weight.copy_(first.weight[:,:739]);new.bias.copy_(first.bias)
++    model.joint_head[0]=new
++    model.cn_edge_projection=nn.Linear(37,64,bias=False,device=first.weight.device,dtype=first.weight.dtype)
++    nn.init.zeros_(model.cn_edge_projection.weight)
++    model.cn_feature_width=0;model.joint_slices['CN']=slice(739,739)
++    model.architecture_version='E_earlyCN_v1'
++    return model
++
++def edge_cn_residual(model,ctx,graph,time,mask_cn=False):
++    pairs,families,inverse=canonical_pairs(graph.edges,graph.families,len(ctx.types))
++    if mask_cn or pairs.shape[1]==0:return ctx.x.new_zeros((graph.edges.shape[1],64))
++    # contextual_nodes inside aggregate calls lin_in_E + shared first layer
++    # on ctx.directed REAL edges, never the main path or this residual.
++    cn=model.common_neighbor.aggregate(ctx,pairs,families,time)
++    if cn.shape!=(pairs.shape[1],37):raise ValueError('CN feature layout')
++    return model.cn_edge_projection(cn)[inverse]
+--- a/model_io.py
++++ b/model_io.py
+@@ -1,4 +1,4 @@
+-"""Paired fresh A anchor and E feature donor; no trained checkpoint is used."""
++"""Strict theta0 migration from the sealed, non-Dropout E run."""
+ import sys,pathlib,hashlib
+ ROOT=pathlib.Path(__file__).resolve().parent
+ sys.path.insert(0,str(ROOT/'package'))
+@@ -9,6 +9,8 @@
+ from role_dictionary import seed32
+ from runtime_contract import dictionary_expected,TRAIN_SEEDS,ARMS,verify_assets
+ from hsgd.bw_preflight.common import environment
++from early_cn import install
++from runtime_contract import read,sha
+ def configure():
+     torch.set_num_threads(1);torch.set_num_interop_threads(1)
+     torch.use_deterministic_algorithms(True,warn_only=False)
+@@ -16,23 +18,41 @@
+     if not torch.cuda.is_available() or torch.cuda.device_count()!=1 or '2080 Ti' not in torch.cuda.get_device_name(0):raise RuntimeError('one RTX2080Ti required')
+     return environment('cuda')
+ def tensor_hash(x):return hashlib.sha256(x.detach().cpu().contiguous().numpy().tobytes()).hexdigest()
++def sealed(dataset):
++    b=read(ROOT/'baseline_bindings.json')['initial'][dataset]
++    if sha(b['path'])!=b['sha256']:raise ValueError('sealed theta0 hash')
++    p=torch.load(b['path'],map_location='cpu')
++    if p['updates']!=0 or p['ema']['updates']!=0 or p['optimizer']['state']:raise ValueError('theta0 only')
++    if (p['binding']['dataset'],p['binding']['arm'],p['binding']['train_seed'],p['binding']['source_sha256'])!=(dataset,'E',TRAIN_SEEDS[dataset],b['source_sha256']):raise ValueError('sealed identity/source')
++    return p,b
+ def construct(dataset,arm,seed):
+-    if TRAIN_SEEDS.get(dataset)!=seed or arm not in ARMS:raise ValueError('unfrozen initialization identity')
+-    verify_assets();case,cfg=load_case(dataset)
++    if TRAIN_SEEDS.get(dataset)!=seed or arm!='E':raise ValueError('unfrozen initialization identity')
++    verify_assets();case,cfg=load_case(dataset);cfg=dict(cfg,seed=seed)
+     basis,receipt=read_dictionary(ROOT/'dictionaries',dataset,dictionary_expected(dataset))
+-    torch.manual_seed(seed);anchor=StructuralDenoiser(case,cfg,'A')
+-    donor_seed=seed32(seed,dataset=dataset,arm='E',purpose='new_module_initialization')
+-    torch.manual_seed(donor_seed);donor=StructuralDenoiser(case,cfg,'E',basis);copy_common(anchor,donor)
+-    module_seed=seed32(seed,dataset=dataset,arm=arm,purpose='new_module_initialization')
+-    torch.manual_seed(module_seed);model=StructuralDenoiser(case,cfg,arm,basis if arm in ('C','E') else None)
+-    copied=copy_common(donor,model)
+-    proof=dict(seed=seed,module_seed=module_seed,donor_seed=donor_seed,anchor='fresh A',donor='fresh E with A common tensors copied',copied=copied,
+-        tensor_sha256={k:tensor_hash(v) for k,v in model.state_dict().items()},parameters=sum(p.numel() for p in model.parameters()),
+-        dictionary_sha256=receipt['basis_sha256'],K=receipt['K'],copied_exact=True,engineering_weights_used=False)
+-    return model,case,dict(cfg,seed=seed),proof
++    p,b=sealed(dataset)
++    if cfg!=p['binding']['config']:raise ValueError('scientific config differs')
++    torch.manual_seed(seed);model=StructuralDenoiser(case,cfg,'E',basis)
++    for k in ('prior','role_basis','role_offsets'):
++        if not torch.equal(model.state_dict()[k],p['model'][k]):raise ValueError('asset tensor '+k)
++    model.load_state_dict(p['model'],strict=True)
++    old_count=sum(x.numel() for x in model.parameters());install(model)
++    proof={}
++    for k,v in model.state_dict().items():
++        ref=p['model'].get(k)
++        proof[k]=bool(torch.equal(v,ref[:,:739] if k=='joint_head.0.weight' else ref)) if ref is not None else bool(k=='cn_edge_projection.weight' and torch.count_nonzero(v)==0)
++    if not all(proof.values()):raise ValueError('initial tensor migration mismatch')
++    count=sum(x.numel() for x in model.parameters())
++    if count-old_count!=-2368:raise ValueError('parameter delta differs')
++    return model,case,cfg,dict(sealed_initial=b,copied_exact=proof,parameters=count,original_parameters=old_count,parameter_delta=count-old_count,
++        tensor_sha256={k:tensor_hash(v) for k,v in model.state_dict().items()},engineering_weights_used=False,head_columns='original [:,:739]; removed [739:776]')
+ def fresh(dataset,arm,seed,device='cuda'):
+     model,case,cfg,proof=construct(dataset,arm,seed);model=model.to(device)
+-    rng,rr=reset_training_streams(seed,dataset,device)
+     opt=torch.optim.AdamW(model.parameters(),**{k:v for k,v in cfg['optimizer'].items() if k!='type'})
+     if {id(p) for g in opt.param_groups for p in g['params']}!={id(p) for p in model.parameters() if p.requires_grad}:raise AssertionError('optimizer coverage')
+-    return model,opt,case,cfg,rng,dict(construction=proof,rng_reset=rr,optimizer='new empty AdamW')
++    rng,rr=reset_training_streams(seed,dataset,device)
++    from probe import rng_get,equal
++    original,_=sealed(dataset);current=rng_get(rng,device)
++    for key in current:
++        if key=='device' and device=='cpu':continue
++        if not equal(current[key],original['rng'][key]):raise ValueError('paired initial RNG '+key)
++    return model,opt,case,cfg,rng,dict(construction=proof,rng_reset=rr,optimizer='new empty AdamW',original_training_rng_exact=True)
+--- a/runtime_contract.py
++++ b/runtime_contract.py
+@@ -15,13 +15,13 @@
+     return f'{dataset}_s{seed}_{arm}'
+ def jobs():
+     train=[];sample=[]
+-    for slot,(dataset,arm) in enumerate((d,a) for d in ('PubMed','IMDB') for a in ('E','D','A','C')):
++    for slot,(dataset,arm) in enumerate((d,'E') for d in ('PubMed','IMDB')):
+         seed=TRAIN_SEEDS[dataset];identity=cell(dataset,seed,arm)
+         common=dict(dataset=dataset,arm=arm,train_seed=seed,slot=slot)
+         train.append(dict(**common,id=identity,mode='train',directory=identity,updates=UPDATES))
+         for s in SAMPLES:
+             sample.append(dict(**common,id=f'{identity}_ema_0.99_{s}',mode='sample',readout='ema_0.99',sample_seed=s,directory=f'{identity}/ema_0.99/sample_{s}',T=1000,depends_on=identity))
+-    return dict(training=train,sampling=sample,policy='eight cards one model per card; all training finish then two serial EMA chains per card')
++    return dict(training=train,sampling=sample,policy='two cards: slot0 PubMed E-earlyCN, slot1 IMDB E-earlyCN; then two serial final EMA chains per card')
+ def source_binding():
+     files={str(p.relative_to(ROOT)):sha(p) for p in sorted(ROOT.rglob('*')) if p.is_file()
+            and not any(x in p.parts for x in ('__pycache__','.pytest_cache','historical_multi_ema','evidence','tests'))
+@@ -32,6 +32,9 @@
+ def verify_assets():
+     for name,h in read(ROOT/'asset_bindings.json')['files'].items():
+         if sha(ROOT/name)!=h:raise ValueError('frozen asset changed: '+name)
++    bindings=read(ROOT/'baseline_bindings.json')
++    for b in list(bindings['initial'].values())+[bindings['old_evaluation']]:
++        if sha(b['path'])!=b['sha256']:raise ValueError('sealed external baseline changed')
+ def readout_path(run,job):
+     if job['readout']!='ema_0.99':raise ValueError('only final EMA generates')
+     return pathlib.Path(run)/cell(job['dataset'],job['train_seed'],job['arm'])/'readout_ema_0.99.pt'
+--- a/run.py
++++ b/run.py
+@@ -1,9 +1,9 @@
+-"""Eight paired architecture models, then16 EMA-only existing-kernel chains; no auto approval."""
++"""Two E-earlyCN models, then four final EMA chains; no automatic approval."""
+ import argparse,os,pathlib,json,time,subprocess,signal,sys,shutil
+ from runtime_contract import ROOT,jobs,source_binding,sha,read,save,approval_gate,output_check,RESERVE,UPDATES
+ 
+ def resources(devices,authority,rows,processes,handles):
+-    if len(devices)!=8 or len(set(devices))!=8:raise ValueError('frozen queue requires eight distinct GPUs; report shortages, do not shrink')
++    if len(devices)!=2 or len(set(devices))!=2:raise ValueError('frozen queue requires two distinct GPUs; report shortages, do not shrink')
+     if not authority.get('allocation_check_complete') or authority.get('reservation_conflicts') or not set(devices)<=set(authority.get('allowed_uuids',[])):raise PermissionError('GPU allocation not explicitly verified')
+     if handles.strip() or any(x.split(',')[0].strip() in devices for x in processes.splitlines() if x.strip()):raise RuntimeError('selected device has another process')
+     selected=[]
+@@ -58,7 +58,7 @@
+                     if code!=0 or r.get('status')!='complete' or (j['mode']=='train' and r.get('completed_updates')!=UPDATES) or (j['mode']=='sample' and r.get('completed_chains')!=1):
+                         failures.append(item);raise RuntimeError('worker failed/incomplete '+j['id'])
+             if not pending and not running and stage=='training':
+-                # All eight final checkpoints must exist before any test chain.
++                # Both final checkpoints must exist before either test chain.
+                 stage='sampling';pending=jobs()['sampling'].copy()
+             save(out/'launcher_progress.json',dict(stage=stage,finished=finished,pending=pending,running=[x[2] for x in running.values()]))
+             if pending or running:time.sleep(poll)
+@@ -81,7 +81,7 @@
+         save(out/'execution_receipt.json',receipt)
+         try:receipt['evaluation']=summarizer(out,ledger['deadline_epoch'],ledger['source_sha256'])
+         except BaseException as e:receipt['evaluation']=dict(status='failed',error=repr(e))
+-        if not failures and len(finished)==24 and receipt['evaluation']['status']=='complete':receipt['status']='complete'
++        if not failures and len(finished)==6 and receipt['evaluation']['status']=='complete':receipt['status']='complete'
+         receipt.update(finished_epoch=time.time(),elapsed_seconds=time.time()-ledger['start_epoch']);save(out/'launcher_summary.json',receipt)
+         for s,h in handlers.items():signal.signal(s,h)
+     return 0 if receipt['status']=='complete' else 2
+@@ -90,7 +90,7 @@
+     entered=time.time();p=argparse.ArgumentParser();p.add_argument('mode',choices=['dry-run','formal']);p.add_argument('--output',required=True)
+     p.add_argument('--approval');p.add_argument('--cost');p.add_argument('--gpu-uuids',nargs='+');a=p.parse_args()
+     if a.mode=='dry-run':print(json.dumps(dict(**jobs(),source_sha256=source_binding()[1],formal_activated=False),indent=2));return 0
+-    if not a.approval or not a.cost or not a.gpu_uuids:p.error('formal requires new approved cost, authorization and eight GPU UUIDs')
++    if not a.approval or not a.cost or not a.gpu_uuids:p.error('formal requires new approved cost, authorization and two GPU UUIDs')
+     approval,cost=approval_gate(a.approval,a.cost,a.output)
+     protected=[ROOT];BUDGET=approval['budget_seconds']
+     out=output_check(a.output,protected);devices=a.gpu_uuids
+--- a/summarize.py
++++ b/summarize.py
+@@ -39,12 +39,12 @@
+                     if r['dataset']==dataset:keys.update(r.get(group,{}))
+                 for metric in sorted(keys):
+                     def value(arm,sample,v=version):return index.get((dataset,arm,sample,v),{}).get(group,{}).get(metric)
+-                    for arm in protocol['arms']:
++                    for arm in protocol['evaluation_arms'][dataset]:
+                         vals=[value(arm,s) for s in samples];m=mean(vals)
+                         means.append(dict(dataset=dataset,train_seed=seed,arm=arm,version=version,group=group,metric=metric,value=m,reason=None if m is not None else 'both_samples_required_and_defined'))
+                         if version=='lcc':
+                             for s in samples:clean.append(dict(dataset=dataset,train_seed=seed,arm=arm,sample_seed=s,group=group,metric=metric,difference=delta(value(arm,s),value(arm,s,'original'))))
+-                    for left,right in protocol['contrasts']:
++                    for left,right in protocol['contrasts'][dataset]:
+                         vals=[]
+                         for s in samples:
+                             d=delta(value(left,s),value(right,s));vals.append(d)
+@@ -88,8 +88,8 @@
+             np.savez_compressed(target/'lcc.npz',types=kept['types'],edges=kept['edges'],families=kept['families'],schema=kept['schema'],new_to_original=kept['original_ids'],old_to_new=np.array(mapping['old_to_new']))
+             mapping['derived_sha256']=sha(target/'lcc.npz');write_json(target/'mapping.json',mapping)
+             for version,graph in [('original',g),('lcc',kept)]:
+-                check();value=evaluate_graph(graph,ref,rs,F,names,check);value.update(dataset=job['dataset'],arm=job['arm'],train_seed=job['train_seed'],sample_seed=job['sample_seed'],version=version)
+-                records.append(value);write_json(target/(version+'.json'),value);graphs[job['dataset'],job['arm'],job['sample_seed'],version]=graph
++                check();value=evaluate_graph(graph,ref,rs,F,names,check);value.update(dataset=job['dataset'],arm='E_earlyCN',train_seed=job['train_seed'],sample_seed=job['sample_seed'],version=version)
++                records.append(value);write_json(target/(version+'.json'),value);graphs[job['dataset'],'E_earlyCN',job['sample_seed'],version]=graph
+             type_counts=np.bincount(g['types'],minlength=4);kept_counts=np.bincount(kept['types'],minlength=4)
+             before=np.bincount(g['families'],minlength=10);after=np.bincount(kept['families'],minlength=10)
+             item.update(status='complete',reason=None,node_retention=len(kept['types'])/len(g['types']),edge_retention=kept['edges'].shape[1]/g['edges'].shape[1] if g['edges'].shape[1] else None,mapping=str(target/'mapping.json'),
+@@ -99,19 +99,34 @@
+     except BaseException as e:errors.append(repr(e))
+     seen={x['job']['id'] for x in inventory}
+     inventory.extend(dict(job=j,status='not_evaluated',reason='earlier_failure_or_deadline') for j in jobs()['sampling'] if j['id'] not in seen)
++    new_record_count=len(records)
++    try:records.extend(old_records())
++    except BaseException as e:errors.append('old controls: '+repr(e))
+     aggregation=aggregate(records,templates) if len(templates)==2 else dict(reason='reference evaluation incomplete')
+     ds=[];record_index={(r['dataset'],r['arm'],r['sample_seed'],r['version']):r for r in records}
+     for job in jobs()['training']:
+         for version in ('original','lcc'):
+-            x=[graphs.get((job['dataset'],job['arm'],s,version)) for s in (2026102821,2026102822)]
+-            keys=[(job['dataset'],job['arm'],s,version) for s in (2026102821,2026102822)]
++            x=[graphs.get((job['dataset'],'E_earlyCN',s,version)) for s in (2026102821,2026102822)]
++            keys=[(job['dataset'],'E_earlyCN',s,version) for s in (2026102821,2026102822)]
+             valid=all(k in record_index for k in keys)
+             ds.append(dict(job=job,version=version,metrics=diversity(*x,record_index[keys[0]]['statistics'],record_index[keys[1]]['statistics'],F) if valid else None,reason=None if valid else 'both_graphs_required'))
+-    result=dict(status='complete' if len(records)==32 and not errors and all(x['status']=='complete' for x in inventory) else 'incomplete',records=records,inventory=inventory,diversity=ds,errors=errors,seconds=time.time()-started,source_sha256=source_binding()[1],**aggregation)
++    result=dict(status='complete' if new_record_count==8 and not errors and all(x['status']=='complete' for x in inventory) else 'incomplete',records=records,inventory=inventory,diversity=ds,errors=errors,seconds=time.time()-started,source_sha256=source_binding()[1],**aggregation)
+     write_json(out,result)
+     for name in ('cell_means','paired','paired_means','lcc_minus_original'):
+         rows=result.get(name,[])
+         if rows:
+             with (derived/(name+'.csv')).open('w',newline='') as f:w=csv.DictWriter(f,fieldnames=list(rows[0]));w.writeheader();w.writerows(rows)
+     return 0 if result['status']=='complete' else 2
++def old_records():
++    b=read(ROOT/'baseline_bindings.json')['old_evaluation']
++    if sha(b['path'])!=b['sha256']:raise ValueError('old result hash')
++    p=read(ROOT/'protocol.json');result=[]
++    for r in read(b['path'])['records']:
++        d=r['dataset']
++        if r['train_seed']==p['train_seeds'][d] and r['arm'] in p['evaluation_arms'][d] and r['sample_seed'] in p['sample_seeds']:
++            result.append(dict(r,source='sealed old control',source_sha256=b['sha256']))
++    expected={(d,a,s,v) for d in p['train_seeds'] for a in p['evaluation_arms'][d] if a!='E_earlyCN' for s in p['sample_seeds'] for v in ('original','lcc')}
++    actual=[(r['dataset'],r['arm'],r['sample_seed'],r['version']) for r in result]
++    if set(actual)!=expected or len(actual)!=len(expected):raise ValueError('missing/duplicate old controls')
++    return result
+ if __name__=='__main__':raise SystemExit(main())
+--- a/protocol.json
++++ b/protocol.json
+@@ -1,14 +1,11 @@
+ {
+-  "version": "typed_structure_final_screen_v1",
++  "version": "typed_structure_early_cn_v1",
+   "formal_authorized": false,
+   "train_seeds": {
+     "IMDB": 2026102911,
+     "PubMed": 2026102912
+   },
+   "arms": [
+-    "A",
+-    "C",
+-    "D",
+     "E"
+   ],
+   "sample_seeds": [
+@@ -33,28 +30,28 @@
+     500,
+     1000
+   ],
+-  "contrasts": [
+-    [
+-      "D",
+-      "A"
++  "contrasts": {
++    "IMDB": [
++      [
++        "E_earlyCN",
++        "E"
++      ],
++      [
++        "E_earlyCN",
++        "D"
++      ]
+     ],
+-    [
+-      "E",
+-      "D"
+-    ],
+-    [
+-      "E",
+-      "C"
+-    ],
+-    [
+-      "C",
+-      "A"
+-    ],
+-    [
+-      "E",
+-      "A"
++    "PubMed": [
++      [
++        "E_earlyCN",
++        "E"
++      ],
++      [
++        "E_earlyCN",
++        "C"
++      ]
+     ]
+-  ],
++  },
+   "delivery_reserve_seconds": 1200,
+   "budget_seconds": null,
+   "K": {
+@@ -71,6 +68,20 @@
+       6
+     ]
+   },
+-  "primary": "per-dataset screen, no cross-dataset composite score; quantities/degrees,typed closure/paths,type coverage,cost; prefer simplicity if comparable; at most two finalists",
+-  "raw_generation": false
+-}
++  "primary": "early fusion vs old E; IMDB D and PubMed C context references; original primary, LCC secondary",
++  "raw_generation": false,
++  "candidate": "E_earlyCN",
++  "evaluation_arms": {
++    "IMDB": [
++      "E_earlyCN",
++      "E",
++      "D"
++    ],
++    "PubMed": [
++      "E_earlyCN",
++      "E",
++      "C"
++    ]
++  },
++  "cn_injection": "37->64 zero bias-free residual after lin_in_E, once before main layer0; no terminal CN; no dropout"
++}--- a/baseline_bindings.json
++++ b/baseline_bindings.json
+@@ -0,0 +1,20 @@
++{
++  "source_commit": "472e533fd28cfc067702b1b75082ac5105140a2d",
++  "result_commit": "aa4227b9727ca6853ba7e26412ce6d438a0fa971",
++  "initial": {
++    "IMDB": {
++      "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_final_screen_formal_v1_20261029T0325/run/IMDB_s2026102911_E/initial.pt",
++      "sha256": "cf2476f0e1f8ba4847ca504d36ae16b438da72fe8cab041d8451b91e35c0353c",
++      "source_sha256": "8b81b023888ea4c68a33b78736b93154e08a1a56978516f6de1030e282ae9484"
++    },
++    "PubMed": {
++      "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_final_screen_formal_v1_20261029T0325/run/PubMed_s2026102912_E/initial.pt",
++      "sha256": "c84315078a035e09a7edf247d6572d23b2eb5e107e766df907abbc89ac60f335",
++      "source_sha256": "8b81b023888ea4c68a33b78736b93154e08a1a56978516f6de1030e282ae9484"
++    }
++  },
++  "old_evaluation": {
++    "path": "/data2/lyh/gnn_project/DiHug/results/typed_structure_final_screen_formal_v1_20261029T0325/run/unified_evaluation.json",
++    "sha256": "9de1a1a04198cacdb571d28f4273f1248ee425c05b8aa322e44618d2273c1e39"
++  }
++}--- a/check_early.py
++++ b/check_early.py
+@@ -0,0 +1,121 @@
++"""Bounded disposable engineering only: three optimizer calls per dataset."""
++import os,time,pathlib,json,traceback,resource,copy,argparse
++os.environ.setdefault('CUBLAS_WORKSPACE_CONFIG',':4096:8')
++from model_io import fresh,configure,sealed,tensor_hash,ROOT
++import torch,numpy as np
++from model_variants import StructuralDenoiser
++from experiment_contract import read_dictionary
++from runtime_contract import dictionary_expected,source_binding,sha,save
++from probe import rng_get,rng_set,equal,metric,flatten,input_hash
++from normal2 import pair_inputs,normal2,sync
++from integration import complete_normal2,checkpoint_payload,restore_payload,ema_validation
++from ema import ParameterEMA,cpu_copy
++from hsgd.computational import FrozenTypedContext
++from hsgd.kernel import MarginalKernel
++from hsgd.bw_preflight.common import schedule
++
++def compare_tree(a,b):
++    aa,bb=flatten(a),flatten(b)
++    rows={k:metric(v,bb[k]) for k,v in aa.items()}
++    return dict(exact=equal(a,b),passes=set(aa)==set(bb) and all(r['passes'] for r in rows.values()),tensors=rows)
++
++def prediction(m,case,inp,mask=False,reverse=False):
++    token=('engineering',id(inp));c=FrozenTypedContext(m,case['space'].types,inp['edges'],inp['edge_families'],token)
++    try:
++        if mask or reverse:
++            g=c.assemble(c.transfer_query(c.prepare_query(inp['query'],inp['f'],token),token),token)
++            if reverse:
++                keys=g.edges[0]*len(c.types)+g.edges[1]
++                target=g.edges[1,g.query_index]*len(c.types)+g.edges[0,g.query_index]
++                g.query_index=torch.searchsorted(keys,target)
++            logits=m.joint_predict(c,g,inp['t']/1000,mask_cn=mask)
++            return logits.detach().cpu(),None
++        g,l,p=c.predict(inp['query'],inp['f'],inp['t']/1000,token,details=True)
++        return l.detach().cpu(),p.detach().cpu()
++    finally:c.close()
++
++def main():
++    ap=argparse.ArgumentParser();ap.add_argument('--dataset',required=True,choices=['IMDB','PubMed']);ap.add_argument('--output',required=True);a=ap.parse_args()
++    out=pathlib.Path(a.output);out.mkdir(parents=True,exist_ok=False)
++    started=time.time();r=dict(dataset=a.dataset,status='running',optimizer_step_calls=0,formal_updates=0,generated_graphs=0)
++    def check():
++        if time.time()>=1793244900:raise TimeoutError('engineering deadline 11:35 Asia/Shanghai')
++    try:
++        check();r['environment']=configure();seed={'IMDB':2026102911,'PubMed':2026102912}[a.dataset]
++        m,opt,case,cfg,rng,proof=fresh(a.dataset,'E',seed);ema=ParameterEMA(m)
++        binding=dict(source_sha256=source_binding()[1],dataset=a.dataset,config=cfg,proof=proof,engineering_only=True)
++        initial=checkpoint_payload(m,opt,ema,0,rng_get(rng,'cuda'),binding)
++        torch.save(initial,out/'initial.pt');save(out/'initial_binding.json',dict(binding=binding,sha256=sha(out/'initial.pt')))
++        r['parameters']=proof['construction']['parameters'];r['parameter_delta']=proof['construction']['parameter_delta'];r['initial_rng_exact']=proof['original_training_rng_exact']
++        basis,_=read_dictionary(ROOT/'dictionaries',a.dataset,dictionary_expected(a.dataset))
++        old=StructuralDenoiser(case,cfg,'E',basis).cuda();old.load_state_dict(sealed(a.dataset)[0]['model']);old.eval();m.eval()
++        fixed=pair_inputs(case,cfg,1,np.random.default_rng(2026102901),500)
++        r['fixed_input_sha256']=input_hash(fixed)
++        np.savez_compressed(out/'fixed_inputs.npz',**{str(i)+'_'+k:v for i,x in enumerate(fixed) for k,v in x.items() if isinstance(v,np.ndarray)})
++        torch.cuda.reset_peak_memory_stats()
++        with torch.no_grad():
++            before=rng_get(rng,'cuda');st=time.perf_counter();a0,_=prediction(old,case,fixed[0],True);sync('cuda');r['old_off_forward_seconds']=time.perf_counter()-st
++            st=time.perf_counter();b0,_=prediction(m,case,fixed[0]);sync('cuda');r['early_zero_forward_seconds']=time.perf_counter()-st
++            r['zero_projection_vs_old_off']=metric(b0,a0)
++            r['forward_rng_unchanged']=equal(before,rng_get(rng,'cuda'))
++            if not r['zero_projection_vs_old_off']['passes'] or not r['forward_rng_unchanged']:raise AssertionError('zero projection or random operator audit')
++        del old
++        rng_set(initial['rng'],rng,'cuda')
++        records=[];continuous=None;second_input=None
++        for call,position in enumerate([1,2,2]):
++            check()
++            if call==2:
++                m,opt,case,cfg,rng,_=fresh(a.dataset,'E',seed);ema=ParameterEMA(m)
++                p=torch.load(out/'after1.pt',map_location='cpu')
++                restore_payload(p,m,opt,ema,binding,lambda s:rng_set(s,rng,'cuda'))
++                r['loaded_exact']=dict(model=equal(m.state_dict(),p['model']),optimizer=equal(opt.state_dict(),p['optimizer']),ema=equal(ema.state_dict(),p['ema']),rng=equal(rng_get(rng,'cuda'),p['rng']))
++                if not all(r['loaded_exact'].values()):raise AssertionError('load not exact')
++            inputs=pair_inputs(case,cfg,position,rng);ih=input_hash(inputs)
++            # Account before step: even an exception cannot hide a possible call.
++            r['optimizer_step_calls']+=1;save(out/'summary.json',r)
++            st=time.perf_counter();rec=complete_normal2(normal2,m,opt,case,inputs,1000,'cuda',ema,position-1);sync('cuda')
++            rec.update(wall_seconds=time.perf_counter()-st,input_sha256=ih,projection_grad_norm=float(m.cn_edge_projection.weight.grad.norm()),
++                cn_encoder_grad_norm=float(sum(p.grad.norm() for p in m.common_neighbor.parameters() if p.grad is not None)))
++            records.append(rec)
++            payload=checkpoint_payload(m,opt,ema,position,rng_get(rng,'cuda'),binding)
++            if call==0:
++                st=time.perf_counter();torch.save(payload,out/'after1.pt');r['checkpoint_save_seconds']=time.perf_counter()-st
++                if rec['projection_grad_norm']<=0:raise AssertionError('projection gradient missing')
++            if call==1:continuous=payload;second_input=ih;gradients=cpu_copy({k:p.grad for k,p in m.named_parameters()})
++            if call==2:
++                r['continuation']={k:compare_tree(continuous[k],payload[k]) for k in ('model','optimizer','ema')}
++                r['continuation']['gradients']=compare_tree(gradients,{k:p.grad for k,p in m.named_parameters()})
++                r['continuation_discrete_exact']=ih==second_input and equal(continuous['rng'],payload['rng']) and payload['updates']==2
++                if not all(x['passes'] for x in r['continuation'].values()) or not r['continuation_discrete_exact']:raise AssertionError('continuation tolerance')
++        r['updates']=records
++        if records[1]['cn_encoder_grad_norm']<=0:raise AssertionError('CN learned upstream after projection update absent')
++        m.eval();rng_before=rng_get(rng,'cuda');r['inference']=[]
++        with torch.no_grad():
++            for t in (1,500,1000):
++                check();inp=pair_inputs(case,cfg,1,np.random.default_rng(2026102901),t)[0]
++                begin=time.perf_counter();logits,p=prediction(m,case,inp);sync('cuda');sec=time.perf_counter()-begin
++                keys=inp['edges'][0]*192+inp['edges'][1];query=inp['query'][0]*192+inp['query'][1]
++                xt=np.isin(query,keys).astype(np.uint8);begin=time.perf_counter()
++                q=MarginalKernel(case['prior'],schedule(1000)).reverse(p.numpy().astype(np.float64),xt,inp['f'],t-1,t)
++                r['inference'].append(dict(t=t,full_slots=len(inp['ids']),seconds=sec,posterior_seconds=time.perf_counter()-begin,finite=bool(torch.isfinite(logits).all() and torch.isfinite(p).all() and np.isfinite(q).all()),no_sampling_or_commit=True))
++            # Endpoint reversal with nonzero learned projection, same pair order.
++            inp=copy.deepcopy(fixed[0]);l,_=prediction(m,case,inp)
++            lr,_=prediction(m,case,inp,reverse=True);r['endpoint_reversal']=metric(lr,l)
++            # Type-preserving arbitrary relabeling, graph/query rows correspond.
++            perm=np.arange(192);pr=np.random.default_rng(2026102903)
++            for typ in range(4):
++                ids=np.flatnonzero(case['space'].types==typ);perm[ids]=pr.permutation(ids)
++            inp=copy.deepcopy(fixed[0]);inp['edges']=np.sort(perm[inp['edges']],axis=0);inp['query']=np.sort(perm[inp['query']],axis=0)
++            lp,_=prediction(m,case,inp);r['node_relabeling']=metric(lp,l)
++        raw=cpu_copy(m.state_dict());mode=m.training
++        ema_validation(lambda model: prediction(model,case,fixed[0]),m,ema)
++        r['ema_switch_restores']=equal(raw,m.state_dict()) and m.training==mode and equal(rng_before,rng_get(rng,'cuda'))
++        if not r['ema_switch_restores'] or not r['endpoint_reversal']['passes'] or not r['node_relabeling']['passes']:raise AssertionError('symmetry/switch')
++        r['status']='passed'
++    except BaseException as e:r.update(status='failed',error=repr(e),traceback=traceback.format_exc())
++    finally:
++        r.update(seconds=time.time()-started,finished_epoch=time.time(),rss_peak_mib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024)
++        if torch.cuda.is_initialized():r.update(peak_allocated_mib=torch.cuda.max_memory_allocated()/2**20,peak_reserved_mib=torch.cuda.max_memory_reserved()/2**20)
++        save(out/'summary.json',r)
++    return 0 if r['status']=='passed' else 2
++if __name__=='__main__':raise SystemExit(main())
+--- a/test_early.py
++++ b/test_early.py
+@@ -0,0 +1,140 @@
++import sys,pathlib,copy,types,importlib.util
++import numpy as np
++import pytest,torch
++ROOT=pathlib.Path(__file__).resolve().parent;sys.path.insert(0,str(ROOT/'package'))
++torch.set_num_threads(1)
++from early_cn import canonical_pairs,edge_cn_residual,install
++from runtime_contract import jobs,source_binding,read,ROOT
++from summarize import aggregate,old_records
++
++def test_queue():
++    q=jobs();assert len(q['training'])==2 and len(q['sampling'])==4
++    alljobs=q['training']+q['sampling'];assert len({x['directory'] for x in alljobs})==6
++    assert all(j['updates']==3000 for j in q['training'])
++    assert all(j['readout']=='ema_0.99' and j['T']==1000 for j in q['sampling'])
++    assert {j['depends_on'] for j in q['sampling']}=={j['id'] for j in q['training']}
++
++def test_pair_mapping():
++    e=torch.tensor([[2,0,1,0,2,1],[0,2,2,2,1,2]]);f=torch.tensor([1,1,3,1,3,3])
++    q,g,i=canonical_pairs(e,f,4)
++    assert q.tolist()==[[0,1],[2,2]] and g.tolist()==[1,3] and i.tolist()==[0,0,1,0,1,1]
++    values=torch.arange(2*37,dtype=torch.float32).reshape(2,37).requires_grad_()
++    projection=torch.nn.Linear(37,64,bias=False)
++    fake=types.SimpleNamespace(cn_edge_projection=projection,common_neighbor=types.SimpleNamespace(aggregate=lambda *args:values))
++    ctx=types.SimpleNamespace(types=np.zeros(4),x=torch.zeros(4,4))
++    graph=types.SimpleNamespace(edges=e,families=f)
++    out=edge_cn_residual(fake,ctx,graph,.5)
++    assert torch.equal(out,projection(values)[i])
++    assert torch.equal(out[0],out[1]) and torch.equal(out[0],out[3])
++    out.sum().backward();assert values.grad is not None and torch.isfinite(values.grad).all()
++    assert torch.equal(edge_cn_residual(fake,ctx,graph,.5,True),torch.zeros(6,64))
++
++def test_empty_and_conflicting():
++    q,f,i=canonical_pairs(torch.empty(2,0,dtype=torch.long),torch.empty(0,dtype=torch.long),4)
++    assert q.shape==(2,0) and i.numel()==0
++    with pytest.raises(ValueError):canonical_pairs(torch.tensor([[0,1],[1,0]]),torch.tensor([0,1]),3)
++    with pytest.raises(ValueError):canonical_pairs(torch.tensor([[0],[0]]),torch.tensor([0]),3)
++
++def small():
++    from hsgd.model import TypedSparseDenoiser
++    m=TypedSparseDenoiser(4,10,layers=1,width=256,edge_width=64,heads=8,global_width=128,cn_hidden=32,prior=np.full(10,.2))
++    m.arm='E';return m
++
++def test_real_xt_support_and_nonzero_early():
++    from hsgd.computational import FrozenTypedContext
++    m=install(small());m.eval()
++    with torch.no_grad():m.cn_edge_projection.weight.fill_(.01)
++    typ=np.zeros(4,dtype=np.int64);e=np.array([[0,1],[2,2]]);f=np.zeros(2,dtype=np.int64)
++    query=np.array([[0,0,1],[1,3,3]]);qf=np.zeros(3,dtype=np.int64)
++    c=FrozenTypedContext(m,typ,e,f,'x')
++    try:
++        g=c.assemble(c.transfer_query(c.prepare_query(query,qf,'x'),'x'),'x')
++        cn=m.common_neighbor.aggregate(c,torch.tensor(query),torch.tensor(qf),.5)
++        assert cn[0,-1]==1 and cn[0,-5].item()==pytest.approx(np.log(2),abs=1e-7)
++        assert torch.equal(cn[1:],torch.zeros_like(cn[1:])) # query edges cannot create paths
++        residual=edge_cn_residual(m,c,g,.5);assert residual.shape==(g.edges.shape[1],64)
++        assert residual.abs().sum()>0
++        # Exactly two shared first-layer calls: real Xt context, then main.
++        c.close()
++    finally:c.close()
++    seen=[];h=m.backbone.tf_layers[0].register_forward_pre_hook(lambda mod,args:seen.append(args[1].shape[1]))
++    c=FrozenTypedContext(m,typ,e,f,'y')
++    try:
++        _,l,p=c.predict(query,qf,.5,'y',details=True)
++        assert len(seen)==2 and seen[0]==4 and seen[1]==10
++        assert l.shape==(3,2);assert m.joint_head[0].in_features==739
++        l.sum().backward()
++        assert m.cn_edge_projection.weight.grad is not None
++    finally:h.remove();c.close()
++
++def test_backbone_absent_residual_unchanged():
++    from hsgd.holders import PlaceHolder
++    src=ROOT/'tests/fixtures/original_conv_transformer_model.py'
++    spec=importlib.util.spec_from_file_location('sealed_backbone',src);mod=importlib.util.module_from_spec(spec);spec.loader.exec_module(mod)
++    m=small();new=m.backbone
++    old=mod.GraphTransformerConv(1,PlaceHolder(X=4,E=21,y=1,charge=0),dict(dx=256,de=64,dy=128,n_head=8,dim_ffX=512,dim_ffE=128),PlaceHolder(X=4,E=11,y=0,charge=0),dropout=0.,sn_hidden_dim=0)
++    old.load_state_dict(new.state_dict());old.eval();new.eval()
++    x=torch.eye(4);edges=torch.tensor([[0,1],[1,0]]);attr=torch.zeros(2,21);attr[:,0]=1;attr[:,11]=1
++    args=(x,attr,edges,torch.tensor([[.5]]),torch.zeros(4,dtype=torch.long))
++    with torch.no_grad():
++        a,ah=old(*args,return_hidden=True);b,bh=new(*args,return_hidden=True)
++        for k in ah:assert torch.equal(ah[k],bh[k])
++        assert torch.equal(a.edge_attr,b.edge_attr)
++        _,ch=new(*args,return_hidden=True,edge_residual=torch.zeros(2,64))
++        for k in bh:assert torch.equal(bh[k],ch[k])
++
++def test_old_controls_and_comparisons():
++    old=old_records();assert len(old)==16
++    rec=[];templates={d:{g:{'test':0} for g in ('raw','absolute_error','distribution_error')} for d in ('IMDB','PubMed')}
++    for d,seed in read(ROOT/'protocol.json')['train_seeds'].items():
++        for s in (2026102821,2026102822):
++            for v in ('original','lcc'):
++                for arm,val in [('E_earlyCN',3),('E',7),('C' if d=='PubMed' else 'D',2)]:
++                    rec.append(dict(dataset=d,train_seed=seed,arm=arm,sample_seed=s,version=v,**{g:{'test':val} for g in templates[d]}))
++    a=aggregate(rec,templates)
++    assert all(r['difference']==(-4 if r['contrast']=='E_earlyCN-E' else 1) for r in a['paired'])
++    rec=[r for r in rec if not(r['dataset']=='IMDB' and r['arm']=='E_earlyCN' and r['sample_seed']==2026102822)]
++    a=aggregate(rec,templates)
++    assert all(r['difference'] is None for r in a['paired_means'] if r['dataset']=='IMDB')
++
++def test_bindings_and_no_dropout():
++    files,_=source_binding()
++    for p in ('run.py','run_worker.py','summarize.py','model_io.py','protocol.json','baseline_bindings.json','package/early_cn.py'):
++        assert p in files
++    assert not (ROOT/'cn_dropout.py').exists()
++    assert 'cn_dropout' not in (ROOT/'package/hsgd/model.py').read_text()
++
++@pytest.mark.parametrize('fail',[False,True])
++def test_mock_supervisor_no_real_worker(tmp_path,fail):
++    import os,time,json
++    from run import supervise
++    out=tmp_path/'run';out.mkdir()
++    approval=tmp_path/'not_authorized.json';approval.write_text(json.dumps({'test_only':True,'user_formal_authorized':False}))
++    ledger=tmp_path/'ledger.json';ledger.write_text(json.dumps(dict(start_epoch=time.time(),deadline_epoch=time.time()+3600,source_sha256='mock')))
++    launched=[];summaries=[]
++    class Dummy:
++        def __init__(self,job):self.job=job;self.returncode=2 if fail else 0
++        def poll(self):return self.returncode
++        def wait(self,timeout=None):return self.returncode
++    def spawn(cmd,**kwargs):
++        # Consume the actual ticket, but never execute cmd or import worker.
++        fd=kwargs['pass_fds'][0];ticket=json.loads(os.read(fd,32768));j=ticket['job'];launched.append(j)
++        p=out/j['directory'];p.mkdir(parents=True,exist_ok=True)
++        (p/'summary.json').write_text(json.dumps(dict(status='failed' if fail else 'complete',completed_updates=3000,completed_chains=1)))
++        return Dummy(j)
++    def summary(*args):summaries.append(args);return {'status':'incomplete' if fail else 'complete'}
++    code=supervise(out,approval,ledger,['mock0','mock1'],spawn=spawn,summarizer=summary,poll=0)
++    r=read(out/'launcher_summary.json')
++    if not fail:
++        assert code==0 and len(launched)==6
++        assert [j['mode'] for j in launched[:2]]==['train','train']
++        assert all(j['mode']=='sample' for j in launched[2:])
++    else:
++        assert code==2 and len(launched)==2 and r['primary_failures'] and r['unstarted']
++    assert len(summaries)==1
++
++def test_formal_not_authorized(tmp_path):
++    from runtime_contract import approval_gate
++    p=tmp_path/'unapproved.json';p.write_text('{"user_formal_authorized":false}')
++    c=tmp_path/'cost.json';c.write_text('{}')
++    with pytest.raises(PermissionError):approval_gate(p,c,tmp_path/'unused')

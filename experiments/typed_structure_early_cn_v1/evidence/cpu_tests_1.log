@@ -1,0 +1,19 @@
+...F...                                                                  [100%]
+=================================== FAILURES ===================================
+____________________ test_real_xt_support_and_nonzero_early ____________________
+
+    def test_real_xt_support_and_nonzero_early():
+        from hsgd.computational import FrozenTypedContext
+        m=install(small());m.eval()
+        with torch.no_grad():m.cn_edge_projection.weight.fill_(.01)
+        typ=np.zeros(4,dtype=np.int64);e=np.array([[0,1],[2,2]]);f=np.zeros(2,dtype=np.int64)
+        query=np.array([[0,0,1],[1,3,3]]);qf=np.zeros(3,dtype=np.int64)
+        c=FrozenTypedContext(m,typ,e,f,'x')
+        try:
+>           g=c.assemble(c.transfer_query(c.prepare_query(query,qf,'x'),'x'))
+E           TypeError: assemble() missing 1 required positional argument: 'state_version'
+
+test_early.py:51: TypeError
+=========================== short test summary info ============================
+FAILED test_early.py::test_real_xt_support_and_nonzero_early - TypeError: ass...
+1 failed, 6 passed in 3.36s

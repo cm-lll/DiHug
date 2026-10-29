@@ -1,0 +1,81 @@
+{
+  "training": [
+    {
+      "dataset": "PubMed",
+      "arm": "E",
+      "train_seed": 2026102912,
+      "slot": 0,
+      "id": "PubMed_s2026102912_E",
+      "mode": "train",
+      "directory": "PubMed_s2026102912_E",
+      "updates": 3000
+    },
+    {
+      "dataset": "IMDB",
+      "arm": "E",
+      "train_seed": 2026102911,
+      "slot": 1,
+      "id": "IMDB_s2026102911_E",
+      "mode": "train",
+      "directory": "IMDB_s2026102911_E",
+      "updates": 3000
+    }
+  ],
+  "sampling": [
+    {
+      "dataset": "PubMed",
+      "arm": "E",
+      "train_seed": 2026102912,
+      "slot": 0,
+      "id": "PubMed_s2026102912_E_ema_0.99_2026102821",
+      "mode": "sample",
+      "readout": "ema_0.99",
+      "sample_seed": 2026102821,
+      "directory": "PubMed_s2026102912_E/ema_0.99/sample_2026102821",
+      "T": 1000,
+      "depends_on": "PubMed_s2026102912_E"
+    },
+    {
+      "dataset": "PubMed",
+      "arm": "E",
+      "train_seed": 2026102912,
+      "slot": 0,
+      "id": "PubMed_s2026102912_E_ema_0.99_2026102822",
+      "mode": "sample",
+      "readout": "ema_0.99",
+      "sample_seed": 2026102822,
+      "directory": "PubMed_s2026102912_E/ema_0.99/sample_2026102822",
+      "T": 1000,
+      "depends_on": "PubMed_s2026102912_E"
+    },
+    {
+      "dataset": "IMDB",
+      "arm": "E",
+      "train_seed": 2026102911,
+      "slot": 1,
+      "id": "IMDB_s2026102911_E_ema_0.99_2026102821",
+      "mode": "sample",
+      "readout": "ema_0.99",
+      "sample_seed": 2026102821,
+      "directory": "IMDB_s2026102911_E/ema_0.99/sample_2026102821",
+      "T": 1000,
+      "depends_on": "IMDB_s2026102911_E"
+    },
+    {
+      "dataset": "IMDB",
+      "arm": "E",
+      "train_seed": 2026102911,
+      "slot": 1,
+      "id": "IMDB_s2026102911_E_ema_0.99_2026102822",
+      "mode": "sample",
+      "readout": "ema_0.99",
+      "sample_seed": 2026102822,
+      "directory": "IMDB_s2026102911_E/ema_0.99/sample_2026102822",
+      "T": 1000,
+      "depends_on": "IMDB_s2026102911_E"
+    }
+  ],
+  "policy": "two cards: slot0 PubMed E-earlyCN, slot1 IMDB E-earlyCN; then two serial final EMA chains per card",
+  "source_sha256": "666e9897027d14b97f32d998e761300958f758cfcb23a75896124cbf8ede5327",
+  "formal_activated": false
+}

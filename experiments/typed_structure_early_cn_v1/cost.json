@@ -1,0 +1,201 @@
+{
+  "status": "passed",
+  "formal_authorized": false,
+  "requested_budget_seconds": 15600,
+  "planned_seconds": 15343,
+  "body_seconds": 12311.333312744275,
+  "concurrency_planning_factor": 1.1,
+  "delivery_evaluation_seconds": 1200,
+  "contingency_seconds": 600,
+  "measurements": [
+    {
+      "dataset": "PubMed",
+      "train_seed": 2026102912,
+      "normal2_max_measured_seconds": 3.4931271579116583,
+      "updates": 3000,
+      "train_extrapolation_seconds": 10479.381473734975,
+      "validation_save_setup_allowance_from_history_seconds": 401.23263429664075,
+      "two_chains_extrapolation_seconds": 1430.7192047126591,
+      "per_model_scientific_seconds": 12311.333312744275,
+      "measurements": [
+        {
+          "t": 1,
+          "full_slots": 18336,
+          "seconds": 0.6759598515927792,
+          "posterior_seconds": 0.005335007794201374,
+          "finite": true,
+          "no_sampling_or_commit": true
+        },
+        {
+          "t": 500,
+          "full_slots": 18336,
+          "seconds": 0.6446096822619438,
+          "posterior_seconds": 0.005263113416731358,
+          "finite": true,
+          "no_sampling_or_commit": true
+        },
+        {
+          "t": 1000,
+          "full_slots": 18336,
+          "seconds": 0.6425174819305539,
+          "posterior_seconds": 0.00533696822822094,
+          "finite": true,
+          "no_sampling_or_commit": true
+        }
+      ],
+      "peak_allocated_mib": 3300.044921875,
+      "peak_reserved_mib": 3470.0,
+      "history": {
+        "dataset": "PubMed",
+        "arm": "E",
+        "train_seed": "2026102912",
+        "train_worker_seconds": "10612.285232067108",
+        "normal2_seconds": "10211.052597770467",
+        "total_update_seconds": "10524.282172634266",
+        "chain_seconds": "1316.7478244733065",
+        "peak_allocated_mib": "3222.8564453125",
+        "peak_reserved_mib": "3440.0",
+        "peak_rss_mib": "4117.80078125"
+      }
+    },
+    {
+      "dataset": "IMDB",
+      "train_seed": 2026102911,
+      "normal2_max_measured_seconds": 2.6736352257430553,
+      "updates": 3000,
+      "train_extrapolation_seconds": 8020.905677229166,
+      "validation_save_setup_allowance_from_history_seconds": 389.34838703274727,
+      "two_chains_extrapolation_seconds": 1132.341121416539,
+      "per_model_scientific_seconds": 9542.595185678452,
+      "measurements": [
+        {
+          "t": 1,
+          "full_slots": 13120,
+          "seconds": 0.5345319164916873,
+          "posterior_seconds": 0.004678141325712204,
+          "finite": true,
+          "no_sampling_or_commit": true
+        },
+        {
+          "t": 500,
+          "full_slots": 13120,
+          "seconds": 0.48902370780706406,
+          "posterior_seconds": 0.003940875642001629,
+          "finite": true,
+          "no_sampling_or_commit": true
+        },
+        {
+          "t": 1000,
+          "full_slots": 13120,
+          "seconds": 0.48727469332516193,
+          "posterior_seconds": 0.0040183402597904205,
+          "finite": true,
+          "no_sampling_or_commit": true
+        }
+      ],
+      "peak_allocated_mib": 2423.70947265625,
+      "peak_reserved_mib": 2536.0,
+      "history": {
+        "dataset": "IMDB",
+        "arm": "E",
+        "train_seed": "2026102911",
+        "train_worker_seconds": "8099.317805051804",
+        "normal2_seconds": "7709.969418019056",
+        "total_update_seconds": "8022.694247172214",
+        "chain_seconds": "1002.9052521502599",
+        "peak_allocated_mib": "2372.76904296875",
+        "peak_reserved_mib": "2504.0",
+        "peak_rss_mib": "4093.25390625"
+      }
+    }
+  ],
+  "scope": "two 3000 normal2 E-earlyCN models; four new T1000 final EMA chains",
+  "limitations": [
+    "three temporary optimizer calls per dataset, including repeated update2, not steady throughput",
+    "forward timings use ordinary noisy engineering states, not free generation",
+    "two concurrent GPU processes measured; no new complete chain timed",
+    "10% planning factor is not a measured guarantee; 5% chain allowance includes unmeasured bookkeeping/state-commit variation",
+    "new queue barrier exactly matches launcher; 20min final delivery reserve"
+  ],
+  "binding_pending": false,
+  "source_sha256": "60209ec2d5a789fc057230cc120b8d97f63fd2074a8a8c11196d10d0a4bc64d5",
+  "schedule": {
+    "training": [
+      {
+        "dataset": "PubMed",
+        "arm": "E",
+        "train_seed": 2026102912,
+        "slot": 0,
+        "id": "PubMed_s2026102912_E",
+        "mode": "train",
+        "directory": "PubMed_s2026102912_E",
+        "updates": 3000
+      },
+      {
+        "dataset": "IMDB",
+        "arm": "E",
+        "train_seed": 2026102911,
+        "slot": 1,
+        "id": "IMDB_s2026102911_E",
+        "mode": "train",
+        "directory": "IMDB_s2026102911_E",
+        "updates": 3000
+      }
+    ],
+    "sampling": [
+      {
+        "dataset": "PubMed",
+        "arm": "E",
+        "train_seed": 2026102912,
+        "slot": 0,
+        "id": "PubMed_s2026102912_E_ema_0.99_2026102821",
+        "mode": "sample",
+        "readout": "ema_0.99",
+        "sample_seed": 2026102821,
+        "directory": "PubMed_s2026102912_E/ema_0.99/sample_2026102821",
+        "T": 1000,
+        "depends_on": "PubMed_s2026102912_E"
+      },
+      {
+        "dataset": "PubMed",
+        "arm": "E",
+        "train_seed": 2026102912,
+        "slot": 0,
+        "id": "PubMed_s2026102912_E_ema_0.99_2026102822",
+        "mode": "sample",
+        "readout": "ema_0.99",
+        "sample_seed": 2026102822,
+        "directory": "PubMed_s2026102912_E/ema_0.99/sample_2026102822",
+        "T": 1000,
+        "depends_on": "PubMed_s2026102912_E"
+      },
+      {
+        "dataset": "IMDB",
+        "arm": "E",
+        "train_seed": 2026102911,
+        "slot": 1,
+        "id": "IMDB_s2026102911_E_ema_0.99_2026102821",
+        "mode": "sample",
+        "readout": "ema_0.99",
+        "sample_seed": 2026102821,
+        "directory": "IMDB_s2026102911_E/ema_0.99/sample_2026102821",
+        "T": 1000,
+        "depends_on": "IMDB_s2026102911_E"
+      },
+      {
+        "dataset": "IMDB",
+        "arm": "E",
+        "train_seed": 2026102911,
+        "slot": 1,
+        "id": "IMDB_s2026102911_E_ema_0.99_2026102822",
+        "mode": "sample",
+        "readout": "ema_0.99",
+        "sample_seed": 2026102822,
+        "directory": "IMDB_s2026102911_E/ema_0.99/sample_2026102822",
+        "T": 1000,
+        "depends_on": "IMDB_s2026102911_E"
+      }
+    ],
+    "policy": "two cards: slot0 PubMed E-earlyCN, slot1 IMDB E-earlyCN; then two serial final EMA chains per card"
+  }
+}

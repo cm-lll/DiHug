@@ -1,0 +1,87 @@
+........F.                                                               [100%]
+=================================== FAILURES ===================================
+__________________ test_mock_supervisor_no_real_worker[True] ___________________
+
+tmp_path = PosixPath('/data2/lyh/gnn_project/DiHug/results/typed_structure_early_cn_prepare_v1/tmp/pytest_final/test_mock_supervisor_no_real_w1')
+fail = True
+
+    @pytest.mark.parametrize('fail',[False,True])
+    def test_mock_supervisor_no_real_worker(tmp_path,fail):
+        import os,time,json
+        from run import supervise
+        out=tmp_path/'run';out.mkdir()
+        approval=tmp_path/'not_authorized.json';approval.write_text(json.dumps({'test_only':True,'user_formal_authorized':False}))
+        ledger=tmp_path/'ledger.json';ledger.write_text(json.dumps(dict(start_epoch=time.time(),deadline_epoch=time.time()+3600,source_sha256='mock')))
+        launched=[];summaries=[]
+        class Dummy:
+            def __init__(self,job):self.job=job;self.returncode=2 if fail else 0
+            def poll(self):return self.returncode
+        def spawn(cmd,**kwargs):
+            # Consume the actual ticket, but never execute cmd or import worker.
+            fd=kwargs['pass_fds'][0];ticket=json.loads(os.read(fd,32768));j=ticket['job'];launched.append(j)
+            p=out/j['directory'];p.mkdir(parents=True,exist_ok=True)
+            (p/'summary.json').write_text(json.dumps(dict(status='failed' if fail else 'complete',completed_updates=3000,completed_chains=1)))
+            return Dummy(j)
+        def summary(*args):summaries.append(args);return {'status':'incomplete' if fail else 'complete'}
+>       code=supervise(out,approval,ledger,['mock0','mock1'],spawn=spawn,summarizer=summary,poll=0)
+
+test_early.py:125: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+out = PosixPath('/data2/lyh/gnn_project/DiHug/results/typed_structure_early_cn_prepare_v1/tmp/pytest_final/test_mock_supervisor_no_real_w1/run')
+approval_path = PosixPath('/data2/lyh/gnn_project/DiHug/results/typed_structure_early_cn_prepare_v1/tmp/pytest_final/test_mock_supervisor_no_real_w1/not_authorized.json')
+ledger_path = PosixPath('/data2/lyh/gnn_project/DiHug/results/typed_structure_early_cn_prepare_v1/tmp/pytest_final/test_mock_supervisor_no_real_w1/ledger.json')
+devices = ['mock0', 'mock1']
+spawn = <function test_mock_supervisor_no_real_worker.<locals>.spawn at 0x7f1fc3217ee0>
+summarizer = <function test_mock_supervisor_no_real_worker.<locals>.summary at 0x7f1fc39d6940>
+poll = 0
+
+    def supervise(out,approval_path,ledger_path,devices,spawn=subprocess.Popen,summarizer=summary_process,poll=.25):
+        ledger=read(ledger_path);stop=[False];running={};finished=[];failures=[];pending=jobs()['training'].copy();stage='training'
+        (out/'tmp').mkdir(exist_ok=True)  # same checked output filesystem, never system /tmp
+        handlers={s:signal.signal(s,lambda s,f:stop.__setitem__(0,True)) for s in [signal.SIGINT,signal.SIGTERM,signal.SIGHUP]}
+        try:
+            while pending or running:
+                if stop[0] or (out/'STOP').exists() or time.time()>=ledger['deadline_epoch']-RESERVE:raise InterruptedError('signal/STOP/delivery reserve')
+                for slot,device in enumerate(devices):
+                    if slot in running:continue
+                    job=next((j for j in pending if j['slot']==slot),None)
+                    if job is None:continue
+                    pending.remove(job);log=(out/(job['id']+'.log')).open('xb');rd,wr=os.pipe()
+                    ticket=dict(parent_pid=os.getpid(),job=job,device=device,approval_sha256=sha(approval_path),ledger_sha256=sha(ledger_path))
+                    os.write(wr,json.dumps(ticket).encode());os.close(wr)
+                    env=dict(os.environ,CUDA_VISIBLE_DEVICES=device,OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1',MKL_NUM_THREADS='1',CUBLAS_WORKSPACE_CONFIG=':4096:8',TMPDIR=str(out/'tmp'))
+                    try:process=spawn([sys.executable,str(ROOT/'run_worker.py'),'--approval',str(approval_path),'--ledger',str(ledger_path),'--launch-fd',str(rd)],
+                                      env=env,stdout=log,stderr=subprocess.STDOUT,pass_fds=(rd,),start_new_session=True)
+                    except BaseException:log.close();pending.insert(0,job);raise
+                    finally:os.close(rd)
+                    running[slot]=(process,log,job)
+                for slot,(p,log,j) in list(running.items()):
+                    code=p.poll()
+                    if code is not None:
+                        log.close();del running[slot];item=dict(job=j,exit_code=code);finished.append(item)
+                        try:item['receipt']=read(out/j['directory']/'summary.json')
+                        except Exception as e:item['receipt_error']=repr(e)
+                        r=item.get('receipt',{})
+                        if code!=0 or r.get('status')!='complete' or (j['mode']=='train' and r.get('completed_updates')!=UPDATES) or (j['mode']=='sample' and r.get('completed_chains')!=1):
+                            failures.append(item);raise RuntimeError('worker failed/incomplete '+j['id'])
+                if not pending and not running and stage=='training':
+                    # Both final checkpoints must exist before either test chain.
+                    stage='sampling';pending=jobs()['sampling'].copy()
+                save(out/'launcher_progress.json',dict(stage=stage,finished=finished,pending=pending,running=[x[2] for x in running.values()]))
+                if pending or running:time.sleep(poll)
+        except BaseException as e:failures.append(dict(stage=stage,error=repr(e)))
+        finally:
+            for p,log,j in running.values():
+                try:
+                    if p.poll() is None:os.killpg(p.pid,signal.SIGTERM)
+                except ProcessLookupError:pass
+            cleanup_deadline=min(time.time()+30,ledger['deadline_epoch'])
+            for p,log,j in running.values():
+>               try:p.wait(timeout=max(.01,cleanup_deadline-time.time()))
+E               AttributeError: 'Dummy' object has no attribute 'wait'
+
+run.py:73: AttributeError
+=========================== short test summary info ============================
+FAILED test_early.py::test_mock_supervisor_no_real_worker[True] - AttributeEr...
+1 failed, 9 passed in 3.81s
