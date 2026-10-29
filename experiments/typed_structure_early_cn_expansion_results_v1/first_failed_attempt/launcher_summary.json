@@ -1,0 +1,358 @@
+{
+  "status": "incomplete",
+  "jobs": [
+    {
+      "job": {
+        "dataset": "PubMed",
+        "arm": "E_earlyCN",
+        "train_seed": 2026102932,
+        "slot": 1,
+        "model": "E",
+        "fusion": "early",
+        "id": "PubMed_s2026102932_E_earlyCN",
+        "mode": "train",
+        "directory": "PubMed_s2026102932_E_earlyCN",
+        "updates": 3000
+      },
+      "exit_code": 2,
+      "receipt": {
+        "status": "incomplete",
+        "job": {
+          "dataset": "PubMed",
+          "arm": "E_earlyCN",
+          "train_seed": 2026102932,
+          "slot": 1,
+          "model": "E",
+          "fusion": "early",
+          "id": "PubMed_s2026102932_E_earlyCN",
+          "mode": "train",
+          "directory": "PubMed_s2026102932_E_earlyCN",
+          "updates": 3000
+        },
+        "completed_updates": 0,
+        "completed_chains": 0,
+        "started_epoch": 1793248911.3016284,
+        "error": "KeyError('environment')",
+        "traceback": "Traceback (most recent call last):\n  File \"/data2/lyh/gnn_project/DiHug/research_branches/typed_structure_early_cn_expansion_review/experiments/typed_structure_early_cn_expansion_v1/run_worker.py\", line 115, in main\n    if env[k]!=approval['environment'][k]:raise ValueError('environment mismatch '+k)\nKeyError: 'environment'\n",
+        "finished_epoch": 1793248913.6276212,
+        "peak_rss_mib": 1407.6484375,
+        "peak_allocated_mib": 0.0,
+        "peak_reserved_mib": 0.0
+      }
+    },
+    {
+      "job": {
+        "dataset": "PubMed",
+        "arm": "D_earlyCN",
+        "train_seed": 2026102912,
+        "slot": 0,
+        "model": "D",
+        "fusion": "early",
+        "id": "PubMed_s2026102912_D_earlyCN",
+        "mode": "train",
+        "directory": "PubMed_s2026102912_D_earlyCN",
+        "updates": 3000
+      },
+      "exit_code": -15,
+      "terminated": true
+    },
+    {
+      "job": {
+        "dataset": "PubMed",
+        "arm": "E_lateCN",
+        "train_seed": 2026102932,
+        "slot": 2,
+        "model": "E",
+        "fusion": "late",
+        "id": "PubMed_s2026102932_E_lateCN",
+        "mode": "train",
+        "directory": "PubMed_s2026102932_E_lateCN",
+        "updates": 3000
+      },
+      "exit_code": 2,
+      "terminated": true
+    },
+    {
+      "job": {
+        "dataset": "IMDB",
+        "arm": "D_earlyCN",
+        "train_seed": 2026102911,
+        "slot": 3,
+        "model": "D",
+        "fusion": "early",
+        "id": "IMDB_s2026102911_D_earlyCN",
+        "mode": "train",
+        "directory": "IMDB_s2026102911_D_earlyCN",
+        "updates": 3000
+      },
+      "exit_code": 2,
+      "terminated": true
+    },
+    {
+      "job": {
+        "dataset": "IMDB",
+        "arm": "E_earlyCN",
+        "train_seed": 2026102931,
+        "slot": 4,
+        "model": "E",
+        "fusion": "early",
+        "id": "IMDB_s2026102931_E_earlyCN",
+        "mode": "train",
+        "directory": "IMDB_s2026102931_E_earlyCN",
+        "updates": 3000
+      },
+      "exit_code": 2,
+      "terminated": true
+    },
+    {
+      "job": {
+        "dataset": "IMDB",
+        "arm": "E_lateCN",
+        "train_seed": 2026102931,
+        "slot": 5,
+        "model": "E",
+        "fusion": "late",
+        "id": "IMDB_s2026102931_E_lateCN",
+        "mode": "train",
+        "directory": "IMDB_s2026102931_E_lateCN",
+        "updates": 3000
+      },
+      "exit_code": 2,
+      "terminated": true
+    }
+  ],
+  "unstarted": [
+    {
+      "dataset": "PubMed",
+      "arm": "D_earlyCN",
+      "train_seed": 2026102912,
+      "slot": 0,
+      "model": "D",
+      "fusion": "early",
+      "id": "PubMed_s2026102912_D_earlyCN_ema_0.99_2026102821",
+      "mode": "sample",
+      "readout": "ema_0.99",
+      "sample_seed": 2026102821,
+      "directory": "PubMed_s2026102912_D_earlyCN/ema_0.99/sample_2026102821",
+      "T": 1000,
+      "depends_on": "PubMed_s2026102912_D_earlyCN"
+    },
+    {
+      "dataset": "PubMed",
+      "arm": "D_earlyCN",
+      "train_seed": 2026102912,
+      "slot": 0,
+      "model": "D",
+      "fusion": "early",
+      "id": "PubMed_s2026102912_D_earlyCN_ema_0.99_2026102822",
+      "mode": "sample",
+      "readout": "ema_0.99",
+      "sample_seed": 2026102822,
+      "directory": "PubMed_s2026102912_D_earlyCN/ema_0.99/sample_2026102822",
+      "T": 1000,
+      "depends_on": "PubMed_s2026102912_D_earlyCN"
+    },
+    {
+      "dataset": "PubMed",
+      "arm": "E_earlyCN",
+      "train_seed": 2026102932,
+      "slot": 1,
+      "model": "E",
+      "fusion": "early",
+      "id": "PubMed_s2026102932_E_earlyCN_ema_0.99_2026102821",
+      "mode": "sample",
+      "readout": "ema_0.99",
+      "sample_seed": 2026102821,
+      "directory": "PubMed_s2026102932_E_earlyCN/ema_0.99/sample_2026102821",
+      "T": 1000,
+      "depends_on": "PubMed_s2026102932_E_earlyCN"
+    },
+    {
+      "dataset": "PubMed",
+      "arm": "E_earlyCN",
+      "train_seed": 2026102932,
+      "slot": 1,
+      "model": "E",
+      "fusion": "early",
+      "id": "PubMed_s2026102932_E_earlyCN_ema_0.99_2026102822",
+      "mode": "sample",
+      "readout": "ema_0.99",
+      "sample_seed": 2026102822,
+      "directory": "PubMed_s2026102932_E_earlyCN/ema_0.99/sample_2026102822",
+      "T": 1000,
+      "depends_on": "PubMed_s2026102932_E_earlyCN"
+    },
+    {
+      "dataset": "PubMed",
+      "arm": "E_lateCN",
+      "train_seed": 2026102932,
+      "slot": 2,
+      "model": "E",
+      "fusion": "late",
+      "id": "PubMed_s2026102932_E_lateCN_ema_0.99_2026102821",
+      "mode": "sample",
+      "readout": "ema_0.99",
+      "sample_seed": 2026102821,
+      "directory": "PubMed_s2026102932_E_lateCN/ema_0.99/sample_2026102821",
+      "T": 1000,
+      "depends_on": "PubMed_s2026102932_E_lateCN"
+    },
+    {
+      "dataset": "PubMed",
+      "arm": "E_lateCN",
+      "train_seed": 2026102932,
+      "slot": 2,
+      "model": "E",
+      "fusion": "late",
+      "id": "PubMed_s2026102932_E_lateCN_ema_0.99_2026102822",
+      "mode": "sample",
+      "readout": "ema_0.99",
+      "sample_seed": 2026102822,
+      "directory": "PubMed_s2026102932_E_lateCN/ema_0.99/sample_2026102822",
+      "T": 1000,
+      "depends_on": "PubMed_s2026102932_E_lateCN"
+    },
+    {
+      "dataset": "IMDB",
+      "arm": "D_earlyCN",
+      "train_seed": 2026102911,
+      "slot": 3,
+      "model": "D",
+      "fusion": "early",
+      "id": "IMDB_s2026102911_D_earlyCN_ema_0.99_2026102821",
+      "mode": "sample",
+      "readout": "ema_0.99",
+      "sample_seed": 2026102821,
+      "directory": "IMDB_s2026102911_D_earlyCN/ema_0.99/sample_2026102821",
+      "T": 1000,
+      "depends_on": "IMDB_s2026102911_D_earlyCN"
+    },
+    {
+      "dataset": "IMDB",
+      "arm": "D_earlyCN",
+      "train_seed": 2026102911,
+      "slot": 3,
+      "model": "D",
+      "fusion": "early",
+      "id": "IMDB_s2026102911_D_earlyCN_ema_0.99_2026102822",
+      "mode": "sample",
+      "readout": "ema_0.99",
+      "sample_seed": 2026102822,
+      "directory": "IMDB_s2026102911_D_earlyCN/ema_0.99/sample_2026102822",
+      "T": 1000,
+      "depends_on": "IMDB_s2026102911_D_earlyCN"
+    },
+    {
+      "dataset": "IMDB",
+      "arm": "E_earlyCN",
+      "train_seed": 2026102931,
+      "slot": 4,
+      "model": "E",
+      "fusion": "early",
+      "id": "IMDB_s2026102931_E_earlyCN_ema_0.99_2026102821",
+      "mode": "sample",
+      "readout": "ema_0.99",
+      "sample_seed": 2026102821,
+      "directory": "IMDB_s2026102931_E_earlyCN/ema_0.99/sample_2026102821",
+      "T": 1000,
+      "depends_on": "IMDB_s2026102931_E_earlyCN"
+    },
+    {
+      "dataset": "IMDB",
+      "arm": "E_earlyCN",
+      "train_seed": 2026102931,
+      "slot": 4,
+      "model": "E",
+      "fusion": "early",
+      "id": "IMDB_s2026102931_E_earlyCN_ema_0.99_2026102822",
+      "mode": "sample",
+      "readout": "ema_0.99",
+      "sample_seed": 2026102822,
+      "directory": "IMDB_s2026102931_E_earlyCN/ema_0.99/sample_2026102822",
+      "T": 1000,
+      "depends_on": "IMDB_s2026102931_E_earlyCN"
+    },
+    {
+      "dataset": "IMDB",
+      "arm": "E_lateCN",
+      "train_seed": 2026102931,
+      "slot": 5,
+      "model": "E",
+      "fusion": "late",
+      "id": "IMDB_s2026102931_E_lateCN_ema_0.99_2026102821",
+      "mode": "sample",
+      "readout": "ema_0.99",
+      "sample_seed": 2026102821,
+      "directory": "IMDB_s2026102931_E_lateCN/ema_0.99/sample_2026102821",
+      "T": 1000,
+      "depends_on": "IMDB_s2026102931_E_lateCN"
+    },
+    {
+      "dataset": "IMDB",
+      "arm": "E_lateCN",
+      "train_seed": 2026102931,
+      "slot": 5,
+      "model": "E",
+      "fusion": "late",
+      "id": "IMDB_s2026102931_E_lateCN_ema_0.99_2026102822",
+      "mode": "sample",
+      "readout": "ema_0.99",
+      "sample_seed": 2026102822,
+      "directory": "IMDB_s2026102931_E_lateCN/ema_0.99/sample_2026102822",
+      "T": 1000,
+      "depends_on": "IMDB_s2026102931_E_lateCN"
+    }
+  ],
+  "primary_failures": [
+    {
+      "job": {
+        "dataset": "PubMed",
+        "arm": "E_earlyCN",
+        "train_seed": 2026102932,
+        "slot": 1,
+        "model": "E",
+        "fusion": "early",
+        "id": "PubMed_s2026102932_E_earlyCN",
+        "mode": "train",
+        "directory": "PubMed_s2026102932_E_earlyCN",
+        "updates": 3000
+      },
+      "exit_code": 2,
+      "receipt": {
+        "status": "incomplete",
+        "job": {
+          "dataset": "PubMed",
+          "arm": "E_earlyCN",
+          "train_seed": 2026102932,
+          "slot": 1,
+          "model": "E",
+          "fusion": "early",
+          "id": "PubMed_s2026102932_E_earlyCN",
+          "mode": "train",
+          "directory": "PubMed_s2026102932_E_earlyCN",
+          "updates": 3000
+        },
+        "completed_updates": 0,
+        "completed_chains": 0,
+        "started_epoch": 1793248911.3016284,
+        "error": "KeyError('environment')",
+        "traceback": "Traceback (most recent call last):\n  File \"/data2/lyh/gnn_project/DiHug/research_branches/typed_structure_early_cn_expansion_review/experiments/typed_structure_early_cn_expansion_v1/run_worker.py\", line 115, in main\n    if env[k]!=approval['environment'][k]:raise ValueError('environment mismatch '+k)\nKeyError: 'environment'\n",
+        "finished_epoch": 1793248913.6276212,
+        "peak_rss_mib": 1407.6484375,
+        "peak_allocated_mib": 0.0,
+        "peak_reserved_mib": 0.0
+      }
+    },
+    {
+      "stage": "independent_train_then_sample",
+      "error": "RuntimeError('worker failed/incomplete PubMed_s2026102932_E_earlyCN')"
+    }
+  ],
+  "evaluation": {
+    "status": "incomplete",
+    "exit_code": 2,
+    "sha256": "9cb0fc85c27fd6dd22072b8ff4841e818532856f1528d0c2437516f82433d522"
+  },
+  "finished_epoch": 1793248919.5860293,
+  "elapsed_seconds": 11.639031410217285
+}

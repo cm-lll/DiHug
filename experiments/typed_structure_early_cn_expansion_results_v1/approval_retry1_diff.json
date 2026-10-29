@@ -1,0 +1,123 @@
+{
+  "original_sha256": "3e847c427e480ca3a1efa4f14b2684ede82349829b86a6a6a2483b577b9648a2",
+  "revision_sha256": "a5b47011e36fdbf90d19b9126774ff94effdd92a82ffc430b0f0d109481bee41",
+  "changed_fields": {
+    "authorization_reference": {
+      "old": "2026-10-29 user: \u6279\u51c6\u6309\u56fa\u5b9a\u63d0\u4ea489320ada4d58b133884f62360e9662e713d872f2\u542f\u52a8\u65b0\u589e\u516d\u4efb\u52a1\uff0c\u72ec\u7acb\u9884\u7b97280\u5206\u949f\uff1b\u7b2c260\u5206\u949f\u505c\u6b62\u79d1\u5b66\u8ba1\u7b97\uff0c\u7b2c280\u5206\u949f\u5b8c\u6210\u4ea4\u4ed8\uff1b\u539fGPU0/1\u4e0d\u53d8",
+      "new": "2026-10-29 user explicitly authorizes one startup configuration retry, real environment, complete mandatory field checks without model loading, unchanged original12:41:47.947/17:01:47.947/17:21:47.947 clock, same six jobs and GPU mapping; stop if retry fails"
+    },
+    "output": {
+      "old": "/data2/lyh/gnn_project/DiHug/results/typed_structure_early_cn_expansion_formal_v1_20261029T1242/run",
+      "new": "/data2/lyh/gnn_project/DiHug/results/typed_structure_early_cn_expansion_formal_v1_20261029T1242/run_retry1"
+    },
+    "resource_authorization": {
+      "old": {
+        "allocation_check_complete": true,
+        "reservation_conflicts": [],
+        "allowed_uuids": [
+          "GPU-dda1721a-d053-7371-3434-4c3c8502a1d4",
+          "GPU-994be766-a8bd-b90c-bf87-c667dfa8ab4d",
+          "GPU-e2284395-dd00-1e74-3eed-7f406fa69d5c",
+          "GPU-2db6cf6a-a8b5-58af-4e89-22bfc863a0fb",
+          "GPU-cddbf2e5-1af7-7219-ff58-38e6f4c44f69",
+          "GPU-360156ae-7a75-37f4-eaed-9a5500275409"
+        ],
+        "minimum_free_mib": 6000,
+        "basis": "User explicitly authorizes node1 GPU2-7 for this fixed six-task experiment; current compute, memory and passive owner checks; no other process on selected devices",
+        "checked_at": "2026-10-29T12:41:08.367948+08:00"
+      },
+      "new": {
+        "allocation_check_complete": true,
+        "reservation_conflicts": [],
+        "allowed_uuids": [
+          "GPU-dda1721a-d053-7371-3434-4c3c8502a1d4",
+          "GPU-994be766-a8bd-b90c-bf87-c667dfa8ab4d",
+          "GPU-e2284395-dd00-1e74-3eed-7f406fa69d5c",
+          "GPU-2db6cf6a-a8b5-58af-4e89-22bfc863a0fb",
+          "GPU-cddbf2e5-1af7-7219-ff58-38e6f4c44f69",
+          "GPU-360156ae-7a75-37f4-eaed-9a5500275409"
+        ],
+        "minimum_free_mib": 6000,
+        "basis": "User explicitly authorizes node1 GPU2-7 for this fixed six-task experiment; current compute, memory and passive owner checks; no other process on selected devices",
+        "checked_at": "2026-10-29T12:41:08.367948+08:00",
+        "retry_authorization": "same user-approved GPU2-7; recheck actual processes/memory in retry launcher"
+      }
+    },
+    "environment": {
+      "old": null,
+      "new": {
+        "python": "3.9.23 | packaged by conda-forge | (main, Jun  4 2025, 17:57:12) \n[GCC 13.3.0]",
+        "python_version": "3.9.23",
+        "executable": "/data2/lyh/miniconda3/envs/sparse_block/bin/python",
+        "system": "Linux-5.4.0-216-generic-x86_64-with-glibc2.31",
+        "machine": "x86_64",
+        "packages": {
+          "torch": "2.1.0+cu121",
+          "torch-geometric": "2.3.1",
+          "numpy": "1.23.0",
+          "scipy": "1.11.0",
+          "pytest": "8.4.2",
+          "networkx": "2.8.7"
+        },
+        "hip": null,
+        "cuda": "12.1",
+        "requested_device": "cuda",
+        "torch_runtime_version": "2.1.0+cu121",
+        "float32_matmul_precision": "highest",
+        "matmul_allow_tf32": false,
+        "deterministic_algorithms": true,
+        "deterministic_warn_only": false,
+        "torch_threads": 1,
+        "utc": "2026-10-29T04:47:17Z",
+        "device_name": "NVIDIA GeForce RTX 2080 Ti",
+        "visible_devices": 1,
+        "device_memory_bytes": 11546394624,
+        "device_type": "CUDA"
+      }
+    },
+    "retry_authorized": {
+      "old": null,
+      "new": true
+    },
+    "retry_adapter_sha256": {
+      "old": null,
+      "new": "f93c4e5f331a1811b3f49fe1306401764a9a5e4f4682b312f7c310d11b90be70"
+    },
+    "original_activation_sha256": {
+      "old": null,
+      "new": "21c99f891107f12ef52e5b273521e82f1a689e012d3633a714e12efa9ac1d360"
+    },
+    "original_approval_sha256": {
+      "old": null,
+      "new": "3e847c427e480ca3a1efa4f14b2684ede82349829b86a6a6a2483b577b9648a2"
+    },
+    "retry_approval_created_at": {
+      "old": null,
+      "new": "2026-10-29T12:48:41.189757+08:00"
+    }
+  },
+  "required_field_scan": {
+    "run_worker.py": [
+      "environment"
+    ],
+    "runtime_contract.py": [
+      "asset_bindings_sha256",
+      "budget_seconds",
+      "cost_sha256",
+      "gpu_uuids",
+      "output",
+      "protocol_sha256",
+      "source_sha256",
+      "updates"
+    ],
+    "run.py": [
+      "budget_seconds",
+      "gpu_uuids",
+      "resource_authorization"
+    ]
+  },
+  "model_loaded": false,
+  "scientific_source_changed": false,
+  "seed_queue_gpu_unchanged": true,
+  "original_evidence_overwritten": false
+}
