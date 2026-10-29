@@ -1,0 +1,1486 @@
+diff --git a/docs/NEXT_EXECUTION_TASK.md b/docs/NEXT_EXECUTION_TASK.md
+index 7ff2574..c671419 100644
+--- a/docs/NEXT_EXECUTION_TASK.md
++++ b/docs/NEXT_EXECUTION_TASK.md
+@@ -1,5 +1,7 @@
+ # 下一决定
+ 
++2026-10-29 当前诊断8次授权前向已用完，CPU归档后停止。只等待experiments/typed_structure_cn_diagnosis_v1结果/唯一修正建议审查，不自动开训、遮蔽、生成或进入完整图。候选最小验证为PubMed E与IMDB D各一修正版、各3000步/2链，复用封存对照，拟两卡240分钟，尚未授权；不得把建议当运行指令。当前45分钟票10:07:04至10:52:04 Asia/Shanghai，旧账本不变。下方旧待批提案不再作为运行授权。
++
+ - [x] A/C/D/E接入单EMA0.99、3000更新、固定验证/检查点及最终16链。
+ - [x] 公共初始化实际复制、随机流重置、字典/数据/来源绑定。
+ - [x] 八格16次临时更新；CPU21测试及独立解包21测试通过。
+diff --git a/docs/PROJECT_STATUS.md b/docs/PROJECT_STATUS.md
+index 15aae22..229ea34 100644
+--- a/docs/PROJECT_STATUS.md
++++ b/docs/PROJECT_STATUS.md
+@@ -1,5 +1,7 @@
+ # 本分支确认状态
+ 
++2026-10-29 aa4227后的C→E固定权重定位：PubMed8次完整查询、0反向/更新/新图；普通t500净变化差+0.001013，两个封存X499差−0.057228/−0.074274。E无CN现有边更易删除，但末图GD/DC缺口不能由单时刻完整解释。CN已有32学习均值+4log1p计数+1存在标记，未发现本票可确认的错位；未捕获学习向量尺度，不额外前向。成果experiments/typed_structure_cn_diagnosis_v1。唯一待审候选为10%训练期CN整段dropout，未实现，未授权训练。完整图暂停，原图主分析、LCC独立，旧记录不改。下方旧准备状态为历史记录。
++
+ 2026-10-29：完成最后一轮192节点A/C/D/E架构筛选的准备审查包。冻结3000次normal2、EMA0.99、八模型/十六条T1000链的运行与评价接线，但未授权、未启动正式任务。
+ 
+ 八格各2次临时normal2，共16次；新增GPU工程检查通过。CPU当前21项通过、零跳过；独立ZIP解包179份载荷哈希通过，21项再次通过。78份模型、EMA、字典、指标来源文件与固定Git对象一致。工程初态及检查点本地保留、哈希公开，不进入正式初始化。旧CPU/GPU等价失败不改写。
+diff --git a/experiments/typed_structure_cn_diagnosis_v1/CN_DATAFLOW.md b/experiments/typed_structure_cn_diagnosis_v1/CN_DATAFLOW.md
+new file mode 100644
+index 0000000..5351925
+--- /dev/null
++++ b/experiments/typed_structure_cn_diagnosis_v1/CN_DATAFLOW.md
+@@ -0,0 +1,39 @@
++# 当前CN实际数据流（只读源码核对）
++
++来源为本票绑定的 `package/hsgd/common_neighbor.py`、`model.py`、`computational.py`、`vendor/sample_edges_utils_typed.py` 及 `model_variants.py`。逐文件SHA见audit.json；这些科学文件没有修改。下面维数是实际width256、4类型、10关系、edge64、global128、joint128配置，不是泛指模型。
++
++## 1. 一条候选边对应哪份CN
++
++完整冻结Xt的物理边先镜像为双向索引；Wedges按中心w枚举无序邻居对u<v，键为u×N+v，并保存w及两条真实边的关系编号。只统计Xt已有边，不把临时查询边当成存在；恰好被查询的真实边仍保留。
++
++查询的规范端点键通过searchsorted找出全部匹配楔形。qid始终是输入查询行编号；每条共同邻居路径通过index_add累积回qid，不把不同候选对合成图级CN。路径65536分段只控制内存，不截断。两个200万资源门保留。
++
++计算图可能排序/合并边，但get_computational_graph再次用候选端点键找query_index并检查键相等；联合头的edge、左右端点、关系、当前状态、旧logits和CN都按这份query_index/查询顺序排列。诊断输出再按完整槽ID写回。本票8输出的ids/query/family/state映射通过，四输入73344槽的类型CN与独立邻居集合交完全一致。该CPU检查不冒充重新跑过旧端点交换/重编号网络验收；旧验收直接复用。
++
++## 2. 两种CN信息如何变换
++
++|信息|实际变换|进入联合头的维数/尺度|
++|---|---|---|
++|每类型共同邻居个数n_k|FP32计数→log1p(n_k)|4维、非负；不是原整数，也没有除以类型容量|
++|是否至少一个共同邻居|1[Σn_k>0]|1维、0或1|
++|共同邻居学习表示|每个w的281维输入→Linear(281,32)→SiLU→Linear(32,32)→SiLU；随后按同一候选对所有w取平均|32维连续向量，可含负值；不是概率，没有softmax或单位范数归一化|
++
++281维输入=共同邻居h_w(256)+类型one-hot(4)+两段关系one-hot之和(10)+目标候选关系one-hot(10)+t/T(1)。两段关系之和是无序多重集，值0/1/2，保留关系类别而不保留端点方向。该schema一类型对对应一个关系族；不能据此宣称适用任意多关系同类型对schema。
++
++h_w来自**共享主干第一层Transformer在完整Xt真实边上的输出**，不是独立新编码器，也不是整张查询计算图的最终节点表示。其输入已加当前度分支；D/E再加ReFeX投影，E再加RolX投影。因此E的CN内容随ReFeX/RolX及共同训练而变化，不是把A训练好的CN原封接入。零真实边时按实现返回输入隐藏表示；无任何共同邻居的候选对整段37维返回零。
++
++已有连续编码包括：计数的log1p连续变换、关系/类型条件下的可学习phi MLP、共同邻居上下文Transformer、最终联合MLP。**“把整数CN嵌入”并非尚未实现的新机制。** 原始4维计数并没有独立embedding查表，但已被联合头学习线性混合并非原样决定概率。
++
++## 3. 联合头位置及缓存
++
++联合输入按顺序为edge64、端点均值256、端点绝对差256、全局128、时间1、Xt统计20、关系10、当前边状态2、原主干logits2、CN37，共776维。CN32位于[739,771)，计数4位于[771,775)，存在位于[775,776)。再经Linear(776,128)→SiLU→Linear(128,2)，softmax给p0、原支持覆盖和原Bayes核给q。C关闭全部CN路径及37列，输入739维。没有CN分数直接加到输出概率的捷径。
++
++每份Xt独立FrozenTypedContext，状态token、时间、参数版本及缓存张量版本有检查；context.close清掉CN节点/楔形。固定ReFeX/RolX数组可在一个Xt上下文复用，学习投影在joint_predict计算，不跨优化器更新缓存。科学源文件未见本票可确认的候选错位或查询边污染错误。
++
++## 4. 实际尺度与缺项
++
++从已保存Xt仅CPU计数得到 `cn_count_scales.csv`。普通t1四类型log1p最大值为2.7726/2.4849/3.2189/1.3863；普通t500为1.6094/1.6094/2.4849/1.0986；C-X499为2.0794/2.0794/2.3979/1.0986；E-X499为1.7918/1.7918/2.0794/1.0986。各列均值/RMS完整保留。数字是数学log1p的CPU FP64统计，GPU接口会转FP32，不伪称已捕获逐位GPU特征。
++
++32维phi均值、其他头输入、各块乘头权重后的实际RMS/峰值**未保存**。追加指示到达时8次前向已结束；因此不补跑，不声称CN数值支配头，也不从最终logit反推内部贡献。两种模型的参数不同，E−C最终logit差并不能单独归给37维CN。
++
++本票据此不建议再加编码MLP或先改归一化。训练时CN特征随机丢弃只是一个待检验的依赖稳健性假设；与“整数未编码”无关。本文件没有新增模型、遮蔽运行或前向。
+diff --git a/experiments/typed_structure_cn_diagnosis_v1/DETAILS.md b/experiments/typed_structure_cn_diagnosis_v1/DETAILS.md
+new file mode 100644
+index 0000000..f9a3b02
+--- /dev/null
++++ b/experiments/typed_structure_cn_diagnosis_v1/DETAILS.md
+@@ -0,0 +1,64 @@
++# 对照细节与解释边界
++
++## 关系误差：数量下降不都等于退化
++
++以下原图两样本均值，绝对误差差是先逐图取绝对值再平均。正值为E比C差。
++
++|PubMed关系|参考边数|C|E|E−C数量|E−C绝对误差|
++|---|---:|---:|---:|---:|---:|
++|Gene–Gene|39|48|43.5|−4.5|−4.5|
++|Gene–Disease|137|124|97.5|−26.5|+26.5|
++|Gene–Chemical|159|172.5|156.5|−16|−6|
++|Gene–Species|17|17.5|16|−1.5|−0.5|
++|Disease–Disease|83|66.5|64|−2.5|+2.5|
++|Disease–Chemical|267|247.5|231.5|−16|+16|
++|Disease–Species|27|28|24|−4|0|
++|Chemical–Chemical|161|153.5|144|−9.5|−5.5|
++|Chemical–Species|33|29|25.5|−3.5|+3.5|
++|Species–Species|3|2.5|2|−0.5|+0.5|
++
++PubMed主W1 C0.473958→E0.588542，联合TV0.695313→0.718750；类型总度W1/逐关系度/类型jointTV见typed_degrees_and_joint.csv。Species联合TV反而改善，不能把所有类型合称退化。各分量和LCC记录完整保留在evidence/run/unified_evaluation.json，未以LCC替代原图结论。
++
++## 普通验证：存在正负类别取舍，没有同等整体缺口
++
++最终EMA t500的Gene–Disease：C正边CE1.36913、非边CE0.026370，E为1.34492/0.029107；对应137正边/2823非边。Disease–Chemical：C1.38625/0.032246，E1.35224/0.032655，对应267/4617。E在这两族正边CE改善、非边CE略坏，p0和分别133.577→140.509、254.887→258.703。这不支持“在普通t500同样普遍压低这些关系概率”。t1 E的两族正负CE均更低；t1000又有取舍，完整面板不删除。
++
++原验证同一数据集/时刻的输入哈希在各组/检查点复用，两个普通新诊断输入严格复现原recipe与哈希。没有原逐槽数组，所以只能将新输出的总CE和族概率和对照历史；4格均通过。新8格p0/q、原始logits已保存，未来无需为这批槽重跑。
++
++## 生成状态：模型差异、状态差异都存在
++
++|输入|E−C出生|E−C消失|E−C净值|
++|---|---:|---:|---:|
++|C-X499|−0.001471|+0.055757|−0.057228|
++|E-X499|−0.059979|+0.014295|−0.074274|
++
++E在两状态都更稀，但具体是“少生”还是“多删”不同。普通t500同样存在无CN现有边的低保留倾向，被其他槽抵消；不能说这种偏好只在生成态才出现。
++
++无CN槽：C-X499无边10406槽的Δq和−0.026733，现有343槽−0.062686；E-X499无边10675槽−0.029646，现有363槽−0.035066。普通t500对应−0.016260/−0.037569。计数和量级不能证明每条边都同向；cross_slot_strata还保存正/负变化和、分位数、范围，逐槽差也在paired文件。
++
++端点总度按事前0/2/5/10/20/40界分箱。C-X499现有边中，较小端点度5–9和10–19的Δq和分别−0.026851、−0.025410，是该状态主要删除差；E-X499无边中，较小端点度10–19的Δq和−0.034059，是主要出生差。不能从最终低度节点增多，反推本次t499变化必然集中于度0/1节点。左右端点、端点最小/最大度及关系度全部按同一预定界完整列出。
++
++族差方向并非统一：两个X499的Chemical–Chemical净差−0.035372/−0.035431，Gene–Chemical−0.022840/−0.028243；Disease–Disease为+0.010711/+0.028650；Disease–Chemical为+0.019011/−0.007535。因此这8格只缩小解释范围，不定位全链缺口起因，也不能要求每步向926移动。
++
++## 类型闭合：机会与比例必须分别看
++
++路径标签(a,b,c)中b为中心类型。以下都是先逐图统计再平均；均值闭合率不是均值分子除均值分母。
++
++- Gene–Gene–Chemical：C机会904.5/闭合366/率0.407717，E785/244/0.311358，参考636/210/0.330189。减少不全是损失：C过闭合，E比率更接近参考，但机会仍过多。闭合数量Δ−122的对称代数拆分：机会−42.497、比率−79.503。
++- Disease–Chemical–Chemical：C机会2882/闭合902/率0.306506，E2641.5/968/0.365650，参考2842/826/0.290640。E机会更少却更易闭合，不能解释为统一闭合不足。
++- Chemical–Chemical–Chemical：C2044/601.5/0.286717，E1787.5/654/0.365872，参考1884/534/0.283439。E在该类存在过闭合代价。
++- IMDB Actor–Director–Movie：D机会52/闭合41/率0.788148，参考66/44/0.666667；Director–Movie–Actor：D43/41/0.954891，参考44/44/1。总三角接近不能代替中心类型闭合正确。
++
++unique_pair去重对口径和全部40类模式另列；零机会的null及原因保留。关系边数、度数、机会和比率互相相关，代数分解不把任何项升级为训练因果。
++
++## 已证明 / 支持但未定因果 / 未知
++
++- 已证明本面板：完整加载与输入对应正确；普通聚合复现；同状态C/E仍有差异；CN已有连续编码与候选对应；8次额度内保存完整槽记录。
++- 支持但未定因果：E在这两生成状态有更强稀疏倾向，无CN现有边是共同特征，支持检验CN依赖的稳健性。不能分离即时CN贡献与共同参数学习，不能宣称分支冲突。
++- 未知：早晚其他生成时刻、其他训练/采样seed、32维学习向量和其他头输入的实际相对幅值、哪一训练因素形成该偏好。当前没有明确实现错误可修；下一步仅提出一项正则化假设，不继续无限定位或自动训练。
++
++## 成本与未完成项
++
++8格GPU取证进程38.008秒（含载入/环境/IO），峰RSS3867.996MiB、allocated1001.881MiB、reserved1238MiB；单前向0.615–1.551秒是本票固定状态工程数，不外推训练/全链。便携CPU复算约16秒，明细portable_reproduction.json。GPU释放回执独立保存；总45分钟预算以ledger与publication实际时间为准。
++
++缺项仅为上述未授权/未捕获的内部尺度及更广状态证据，不能补造。没有训练、优化器、模型修改、下一状态采样或新生成图。一次apply_patch文档标题不匹配曾被拒绝，未落盘修改；随后按实际标题更新，见工作日志，不影响科学结果。
+diff --git a/experiments/typed_structure_cn_diagnosis_v1/ONE_CANDIDATE.md b/experiments/typed_structure_cn_diagnosis_v1/ONE_CANDIDATE.md
+new file mode 100644
+index 0000000..eea1a18
+--- /dev/null
++++ b/experiments/typed_structure_cn_diagnosis_v1/ONE_CANDIDATE.md
+@@ -0,0 +1,33 @@
++# 唯一候选及最小验证方案——尚未实施、未授权训练
++
++## 假设与唯一改动
++
++假设：联合预测对CN条件形成的依赖，在生成状态中的连接支持不足时不够稳健。依据是同状态E−C差异仍存在，且三份中噪声状态中，无CN现有边的E保留概率均更低；不过没有证明是CN即时贡献而非共同参数学习造成，也没有证明它解释所有关系/末图缺口。
++
++唯一候选为**训练时CN输入整块dropout**，不改架构或表示定义。在现有 `TypedSparseDenoiser.joint_predict` 得到候选对37维CN向量c之后、拼接联合输入之前，仅训练态用：
++
++`c_train = m * c / 0.9,  m ~ Bernoulli(0.9)`
++
++一个候选对共享一个标量m，37维一起保留或丢弃；所有关系同一规则。推理和验证保持c原样。p=0.1是本方案预先指定的保守单值，不是从本面板搜索出的最优值，也不追加概率搜索。零CN仍零；不增学到的门控、MLP、归一化、损失项或直接p0/q调整。对实际Xt、标签、噪声核不做额外扰动。期望输入相同不代表期望CE或梯度相同：这是新增训练正则化，必须如实披露。
++
++候选对掩码独立于边标签/类型/度/CN值；用独立随机流，不消耗原训练输入、时间、查询、采样流。双向表示若重复使用同对，必须共用掩码；重编号测试需将掩码随候选对应置换，分布意义下不能依赖原节点ID。每份normal2输入独立上下文与掩码；两个输入各反向1/2损失，只有一次optimizer.step。该规则是建议，尚未写入科学源码。
++
++预期：允许网络在部分CN信息缺失时仍利用节点、关系及图级证据，减少对有无闭合线索的过度依赖；并不保证增加/减少特定边。风险：零向量同时表示“无CN”和“被丢弃”，可能削弱真正有用的闭合信息，可能增多无支持假边，或扩大hub/关系数量偏差；它也不能修复一个未被发现的实现错误。未捕获学习向量尺度，不把本候选包装成数值尺度修复。
++
++## 最小配对范围
++
++仅新跑两模型：PubMed E修正版（seed2026102912）和IMDB D修正版（seed2026102911）。相应原E/D作为对照使用aa4227封存结果、原科学0步初态、原输入合同；无需重复A/C或全六组。若未来核对发现无法准确复用初态/随机流，应先报告，不宣称严格配对。
++
++两个修正版从各自封存0步模型完整加载，新建空AdamW，保持3000次normal2、EMA0.99、完整查询、固定验证0/1000/2000/3000、相同数据/字典及所有科学设置。只最终EMA用2026102821/2026102822生成，每模型2图，共4条新T1000链；原始图主评价，LCC附表。无训练后权重拼接、无续训、无挑点/补抽。保存掩码RNG、原训练流和完整检查点。只需新增dropout公式、独立RNG/恢复、端点掩码对应及有限成本工程检查，不重做历史全验收。
++
++## 主要收益、保护项和否证
++
++PubMed主收益：逐图后平均的总边数绝对误差和incident4度W1；Gene–Disease/Disease–Chemical逐族误差必须并列，不能靠关系间抵消。联合度TV、Disease/Chemical低度堆积、各类型max/second及hub集中度完整报告；W1和精确联合TV意义不同，不把任一改善直接称为语义角色学得更好。
++
++IMDB保护：D相对A的既有度分布优势及DAM闭合证据；具体报告DAM三种中心的机会/闭合率、DAA/AAM增生、Genre完整度谱（尤其首图5个度1及最大度过大）、连通/类型覆盖。不要只保总三角。两数据集仍完整报告MP2/MP3组成、其他关系、类型覆盖、LCC与两样本差异。
++
++否证/不采纳情形：实际末图主要数量和度误差没有减少，则不以普通CE或同状态响应变好宣称成功；只改善总数而GD/DC或尾部更坏，视为取舍而非解决；若IMDB的DAM闭合/度优势退回A附近或更差，或通过新hub集中、DAA/AAM过量换取数量改善，不推荐作为公共默认。细节需逐图与参考误差表审查，不要求所有指标零退化，也不新增事后总分。1训练seed/数据集、2图仍只能探索，不能宣布跨seed稳定收益。
++
++## 成本建议（不是启动授权）
++
++原8卡并发实际单任务：PubMed E训练176.87分钟、两链合计21.95分钟；IMDB D训练132.71分钟、两链16.33分钟。两卡各跑一模型的主体粗估为198.82分钟；总设备任务时间约347.86分钟，不把二者混为墙钟。固定验证/训练保存已计入原train_worker；新mask维护未实测，追加约20分钟运行不确定性余量及20分钟独立评价/审计/交付，提出**独立240分钟**待审预算。若只能一张卡，该预算不成立。未申请/占用未来资源，不以本次短前向吞吐替代训练测量；完整图仍暂停。
+diff --git a/experiments/typed_structure_cn_diagnosis_v1/README.md b/experiments/typed_structure_cn_diagnosis_v1/README.md
+new file mode 100644
+index 0000000..b147f79
+--- /dev/null
++++ b/experiments/typed_structure_cn_diagnosis_v1/README.md
+@@ -0,0 +1,35 @@
++# PubMed C/E固定权重退化定位
++
++先读[一页结论](RESULTS.md)、[CN实际数据流](CN_DATAFLOW.md)、[唯一待审候选](ONE_CANDIDATE.md)。原始结果来源aa4227b9727ca6853ba7e26412ce6d438a0fa971。未修改科学模型；原45分钟账本保留，所有新临时材料位于data2。
++
++本包包含已完成8次完整查询的输入、逐槽p0/q/raw logits、模型/源码/输入SHA、CPU汇总及必要旧评价/验证副本。不包含大体积权重；路径和哈希在frozen_panel.json。没有新图、反向、训练、optimizer.step或分支遮蔽。
++
++## 无模型的CPU复算
++
++在独立解包目录，使用现有含NumPy的环境，限定CPU线程：
++
++```bash
++export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
++python analyze_existing.py
++python analyze_panel.py
++python audit_and_cn.py
++```
++
++以上三脚本只读随包证据并重新生成诊断表，不导入模型、不访问GPU。原实际执行脚本完整保存在execution_sources，路径适配只发生于上述便携复算入口。prepare_inputs.py和forward_panel.py是已执行取证脚本，不是继续运行授权；本票8次额度已用完，禁止再次运行。其原账本已结束时会拒绝执行。
++
++## 文件口径
++
++- graph_totals/graph_relations/typed_degrees_and_joint/degree_spectra/typed_closure：直接整理已审计图记录，original和LCC分别列示，不重新评价所有图。
++- fixed_validation：raw与EMA、0/1000/2000/3000、t1/500/1000；总CE为sum/S（S=18336），正负CE为该族该类别样本均值，样本数同时保存。不是normal2半份损失。历史只存聚合p0，没有q/logits/中间向量。
++- cross_relations/cross_totals：8格新前向，同一输入/完整查询，原q的出生、消失及净值。
++- cross_slot_strata/strata_all_relations：分组规则在frozen_panel.json先冻结；每轴内分箱互斥，不同轴不可相加。空分组均值/分位数为空，即null含义，不填0；和为0只是空集合求和。
++- forward/*.npz：完整槽ID布局，p0/q和state/query/family对应；paired_*只作CPU差值和CN/端点度描述。logit差用有边减无边，不从概率反推。
++- closure_decomposition：闭合机会和闭合率的对称精确代数分解，非因果归因；平均为先逐图计算后平均，未定义保留reason。三元标签(a,middle,c)中间项为共同邻居类型，端点类型无序。
++- cn_count_scales、CN_DATAFLOW：源码/拓扑证据；未捕获32维学习向量尺度，不冒称已测。
++- evidence：只复制判断所需已封存JSON/配置/五个源码文件/成本表，manifest标SHA，不覆盖原件。
++
++## 仍缺的证据
++
++每条链仅一个X499，不知道真实偏差起点；C/E权重分别训练，差异含共同参数变化，不能单独归因即时CN。最终8前向已结束才收到CN尺度补充要求，学习CN和头各块实际激活尺度未测，不增加前向。现有统计不证明CN需要新编码器或幅度归一化。候选仅为待审训练正则化假设，未实现/未运行。
++
++原图是主要结论对象。LCC不是纠错或模型收益，既有原始结论不改。本票结束后停止，完整图实验暂停。
+diff --git a/experiments/typed_structure_cn_diagnosis_v1/RESULTS.md b/experiments/typed_structure_cn_diagnosis_v1/RESULTS.md
+new file mode 100644
+index 0000000..888715c
+--- /dev/null
++++ b/experiments/typed_structure_cn_diagnosis_v1/RESULTS.md
+@@ -0,0 +1,26 @@
++# C→E退化定位：一页结论
++
++依据结果提交 `aa4227b9727ca6853ba7e26412ce6d438a0fa971`，PubMed训练seed2026102912、3000步EMA0.99；原图为主，LCC独立列出。结论是：**E在所查普通验证中没有出现末图同等严重的整体欠边，但在两份相同生成状态上都比C更倾向于减边；这不是单靠“两条链走到不同状态”就能解释的。尚未证明CN幅值过强或某个编码错误。**
++
++**末图偏差落点。** 两样本边数均值C889、E804.5，参考926。Gene–Disease为124→97.5（参考137），Disease–Chemical为247.5→231.5（参考267），这两族的逐图绝对误差均值分别恶化26.5、16。并非所有减少都坏：Gene–Chemical172.5→156.5，参考159，绝对误差均值反而改善6。Chemical低度≤1节点为C12/12→E20/20，参考5；Disease为37/31→43/32，参考22（按采样seed21/22顺序）。Chemical最大度仍98/102，参考92，不能称为所有节点均匀变稀。完整数据见 `graph_relations.csv`、`typed_degrees_and_joint.csv`。
++
++**同状态8格已完成，无训练或新图。** 下表是原后验q的预计净变化，不是采样边数；t=1有q=p0。
++
++|冻结输入|当前边数|C预计净变化|E预计净变化|E−C|
++|---|---:|---:|---:|---:|
++|普通t=1|926|+1.564448|+1.585296|+0.020847|
++|普通t=500|932|−0.077557|−0.076543|+0.001013|
++|C链X499，t=499|913|−0.012216|−0.069443|−0.057228|
++|E链X499，t=499|896|+0.043408|−0.030866|−0.074274|
++
++普通t=1/500四次重算的总CE、十族p0和通过历史聚合值核对；历史未存逐槽值，不能称逐槽复现。普通t=500的C/E p0总和为914.479/916.521；生成两状态分别为911.491/901.621、910.302/889.021。高噪声历史t=1000仍有分关系偏差，不能概括为“普通去噪全部正常”。
++
++**槽级线索更具体，但不等于根因。** 对无共同邻居的现有边，E相对C在C-X499的343槽增加预计删除0.062686，在E-X499的363槽增加0.035066；普通t=500也有这一倾向（371槽，+0.037569），只是其他槽抵消了总量差。因此有证据支持“结构条件下的预测取舍随状态组成显现”。C-X499差异主要是多删除，E-X499主要是少出生。两状态Chemical–Chemical净差均约−0.0354，Gene–Chemical约−0.0228/−0.0282；Disease–Chemical却为+0.0190/−0.0075，不能把该时刻当作末图各族缺口的完整解释，也不能把一步差乘499。
++
++**闭合不是全面变差。** PubMed平均二跳机会26633→23646.5，三角2276.5→2104，平均全图传递率0.25684→0.26676。Gene–Gene–Chemical的机会和闭合率都下降；Chemical–Chemical–Chemical机会减少、闭合率却升高且偏离参考。各类型机会/分子/比例和精确代数分解见 `closure_decomposition.csv`，不是因果分解。IMDB D仍须保护：DAM均值41（参考44），总三角接近并不意味着三种中心的闭合率全对；Genre次大度28/20均值24，但首图五个Genre度1，参考只有一个，最大度73/75亦高于65。
++
++**CN核对排除了“尚未连续编码”的说法。** 已有32维学习均值向量＋4维log1p类型计数＋1维存在标记，按候选对进入776→128→2联合头；端点映射代码和四输入73344个槽的独立集合交核对通过。学习向量实际幅值未在8次前向中捕获，不增加前向补测，故不能据此选“再加MLP/归一化”作为修法。详见 `CN_DATAFLOW.md`。
++
++**仅提出一个待审候选：训练时对联合头的整段37维CN特征做固定10%随机整块丢弃，推理不变。** 它检验预测是否过度依赖CN条件而缺少其他证据下的稳健性；不声称已证明此机制，也不直接调整输出概率。不改结构、CE公式、图扰动、EMA、步数或后验，不在本票实施。最小验证为PubMed E和IMDB D各一个修正版，复用绑定一致的原方案，3000步、相同初态/训练输入/两采样seed；两卡预计计算主体约199分钟，建议独立240分钟待授权窗口。若实际生成的关系误差/度偏差不改善，或改善仅以hub失真、IMDB闭合明显损失换取，则不采纳。具体公式、代价及否证见 `ONE_CANDIDATE.md`。
++
++**边界与停止。** 只检查一个训练seed、每链一个X499，无法定位偏差首次形成时刻，不能分离CN即时贡献与共同参数训练变化。8完整前向、0反向、0 optimizer.step、0新生成图；GPU进程已退出。完整成本和实际交付时间见ledger/publication，原科学完成时间不改。完整图实验继续暂停，等待本报告与唯一候选审查。
+diff --git a/experiments/typed_structure_cn_diagnosis_v1/analyze_existing.py b/experiments/typed_structure_cn_diagnosis_v1/analyze_existing.py
+new file mode 100644
+index 0000000..fb753aa
+--- /dev/null
++++ b/experiments/typed_structure_cn_diagnosis_v1/analyze_existing.py
+@@ -0,0 +1,52 @@
++"""Read existing audited metrics and validation; no model or graph evaluation."""
++import pathlib,json,csv,collections,time
++B=pathlib.Path(__file__).resolve().parent
++RUN=B/'evidence/run'
++def read(p):return json.loads(p.read_text())
++def write(name,rows):
++ keys=list(dict.fromkeys(k for x in rows for k in x))
++ with (B/name).open('w',newline='') as f:w=csv.DictWriter(f,fieldnames=keys);w.writeheader();w.writerows(rows)
++def mean(xs):return sum(xs)/len(xs) if xs and all(x is not None for x in xs) else None
++def diff(x,y):return None if x is None or y is None else x-y
++e=read(RUN/'unified_evaluation.json');cfg=read(B/'evidence/config.json');families=list(__import__('itertools').combinations_with_replacement(range(4),2))
++rr=[];tr=[];cl=[];vr=[];tot=[];diffs=[];tail=[]
++for row in e['records']:
++ d=row['dataset'];names=cfg['datasets'][d]['type_names'];s=row['statistics'];identity={k:row[k] for k in ['dataset','arm','train_seed','sample_seed','version']};ref=read(RUN/'derived_lcc_evaluation'/f'{d}_reference.json')['statistics']
++ tot.append(dict(**identity,edges=s['edges'],reference_edges=ref['edges'],W1=row['comparison']['main_incident4_W1'],joint_TV=row['comparison']['main_joint_degree_TV'],triangles=s['triangles'],reference_triangles=ref['triangles'],lcc=s['lcc']))
++ for f,(a,b) in enumerate(families):
++  rr.append(dict(**identity,family=f,relation=names[a]+'--'+names[b],edges=s['family_edges'][f],reference_edges=ref['family_edges'][f],signed_error=s['family_edges'][f]-ref['family_edges'][f],absolute_error=abs(s['family_edges'][f]-ref['family_edges'][f])))
++ for t,name in enumerate(names):
++  sp=s['typed_degree'][name];rp=ref['typed_degree'][name]
++  tail.append(dict(**identity,type=name,sorted_degrees=json.dumps(sp['sorted_degrees']),reference_sorted_degrees=json.dumps(rp['sorted_degrees'])))
++  for k in ['maximum','second','zero','low_le1','mean','p90','p99','gini_standard','top5_degree_share']:
++   tr.append(dict(**identity,type=name,metric=k,value=sp[k],reference=rp[k],error=None if sp[k] is None or rp[k] is None else abs(sp[k]-rp[k])))
++  for k,v in [('total_degree_W1',row['comparison']['type_total_degree_W1'][name]),('joint_degree_TV',row['comparison']['joint_TV_by_type'][name])]:tr.append(dict(**identity,type=name,metric=k,value=v,reference=0,error=v))
++  for f,pair in enumerate(families):
++   if t not in pair:continue
++   q=sp['by_relation'][f];qr=rp['by_relation'][f]
++   for k in ['mean','max','zero','low_le1','p90','p99']:
++    tr.append(dict(**identity,type=name,metric=f'relation{f}_{k}',value=q[k],reference=qr[k],error=None if q[k] is None or qr[k] is None else abs(q[k]-qr[k])))
++ for key,value in s['typed_twohop_closure'].items():
++  a,b,c=__import__('ast').literal_eval(key);r=ref['typed_twohop_closure'][key]
++  cl.append(dict(**identity,pattern=key,label=names[a]+'--'+names[b]+'--'+names[c],**value,**{'reference_'+k:v for k,v in r.items()}))
++for d in ['IMDB','PubMed']:
++ for arm in ['A','C','D','E']:
++  seed=2026102911 if d=='IMDB' else 2026102912;folder=RUN/f'{d}_s{seed}_{arm}'
++  for node in read(folder/'validation.json'):
++   for kind in ['raw','ema_0.99']:
++    for x in node[kind]['rows']:
++     for y in x['family']:
++      f=y['family'];a,b=families[f];names=cfg['datasets'][d]['type_names']
++      vr.append(dict(dataset=d,arm=arm,train_seed=seed,update=node['updates'],readout=kind,t=x['t'],input_sha256=x['input_sha256'],total_CE=x['ce_sum_over_S'],relation=names[a]+'--'+names[b],p0_minus_reference=y['expected_edges']-y['true_edges'],q_available=False,**y))
++for d,left,right in [('PubMed','E','C'),('IMDB','D','A'),('IMDB','E','D')]:
++ for f in range(10):
++  rows=lambda a:[x for x in rr if x['dataset']==d and x['arm']==a and x['family']==f and x['version']=='original']
++  a,b=rows(left),rows(right);diffs.append(dict(dataset=d,contrast=left+'-'+right,family=f,relation=a[0]['relation'],reference=a[0]['reference_edges'],left=mean([x['edges'] for x in a]),right=mean([x['edges'] for x in b]),difference=mean([x['edges'] for x in a])-mean([x['edges'] for x in b]),absolute_error_difference=mean([x['absolute_error'] for x in a])-mean([x['absolute_error'] for x in b])))
++for name,rows in [('graph_totals.csv',tot),('graph_relations.csv',rr),('typed_degrees_and_joint.csv',tr),('degree_spectra.csv',tail),('typed_closure.csv',cl),('fixed_validation.csv',vr),('relation_contrasts.csv',diffs)]:write(name,rows)
++summary=dict(status='complete',read_only=True,graph_records=len(e['records']),validation_relation_rows=len(vr),source_run=str(RUN),missing=['fixed validation saved aggregates, not original logits/p0/q arrays','validation ordinary state arrays not separately persisted; frozen seed recipe and input hashes available','no neuron/CN intermediate attribution collected'],relation_contrasts=diffs)
++(B/'existing_summary.json').write_text(json.dumps(summary,indent=2))
++print('PubMed E-C',json.dumps(diffs[:10],indent=2))
++for t in [1,500,1000]:
++ print('PubMed final EMA t',t)
++ for arm in ['A','C','D','E']:
++  r=[x for x in vr if x['dataset']=='PubMed' and x['arm']==arm and x['update']==3000 and x['readout']=='ema_0.99' and x['t']==t];print(arm,'p0',sum(x['expected_edges'] for x in r),'CE',r[0]['total_CE'],'by_relation',[(x['relation'],round(x['p0_minus_reference'],3)) for x in r])
+diff --git a/experiments/typed_structure_cn_diagnosis_v1/analyze_panel.py b/experiments/typed_structure_cn_diagnosis_v1/analyze_panel.py
+new file mode 100644
+index 0000000..ad02c36
+--- /dev/null
++++ b/experiments/typed_structure_cn_diagnosis_v1/analyze_panel.py
+@@ -0,0 +1,73 @@
++"""CPU reductions of the fixed eight outputs; mutually exclusive bins per axis."""
++import pathlib,json,csv,collections,ast,math
++import numpy as np
++B=pathlib.Path(__file__).resolve().parent;ROOT=B.parents[1]
++RUN=B/'evidence/run'
++def read(p):return json.loads(p.read_text())
++def write(name,rows):
++ keys=list(dict.fromkeys(k for x in rows for k in x))
++ with (B/name).open('w',newline='') as f:w=csv.DictWriter(f,fieldnames=keys);w.writeheader();w.writerows(rows)
++def div(x,n):return float(x/n) if n else None
++def bins(x,bounds):
++ bounds=np.array([float(v) for v in bounds]);idx=np.searchsorted(bounds,x,side='right')-1
++ return [(f'{int(a)}+' if math.isinf(b) else f'{int(a)}..{int(b)-1}',idx==i) for i,(a,b) in enumerate(zip(bounds[:-1],bounds[1:]))]
++panel=read(B/'frozen_panel.json');receipt=read(B/'forward/receipt.json');assert receipt['status']=='complete' and receipt['completed_full_queries']==8
++names=['Gene','Disease','Chemical','Species'];relations=list(__import__('itertools').combinations_with_replacement(range(4),2));rows=[];buckets=[];clean=[];slots=[]
++for info in panel['inputs']:
++ inp=info['name'];c=dict(np.load(B/'forward'/('C_'+inp+'.npz')));e=dict(np.load(B/'forward'/('E_'+inp+'.npz')))
++ for k in ['ids','state','t','types','schema','query','family']:np.testing.assert_array_equal(c[k],e[k])
++ t=int(c['t']);state=c['state'].astype(bool);u,v=c['query'];f=c['family'];A=np.zeros((192,192),dtype=np.int64);A[u[state],v[state]]=1;A[v[state],u[state]]=1
++ degree=A.sum(1);rd=np.zeros((192,10),dtype=np.int64);np.add.at(rd,(u[state],f[state]),1);np.add.at(rd,(v[state],f[state]),1)
++ common=A@A;axes={'cn_all':(common[u,v],panel['bins']['common_neighbors']),'min_degree':(np.minimum(degree[u],degree[v]),panel['bins']['endpoint_total_degree']),'max_degree':(np.maximum(degree[u],degree[v]),panel['bins']['endpoint_total_degree']),'min_relation_degree':(np.minimum(rd[u,f],rd[v,f]),panel['bins']['endpoint_relation_degree']),'max_relation_degree':(np.maximum(rd[u,f],rd[v,f]),panel['bins']['endpoint_relation_degree'])}
++ for label,node in [('left',u),('right',v)]:
++  axes[label+'_degree']=(degree[node],panel['bins']['endpoint_total_degree'])
++  axes[label+'_relation_degree']=(rd[node,f],panel['bins']['endpoint_relation_degree'])
++ for typ,name in enumerate(names):cn=A[:,c['types']==typ]@A[c['types']==typ,:];axes['cn_'+name]=(cn[u,v],panel['bins']['common_neighbors'])
++ deltaP=e['p0']-c['p0'];deltaQ=e['q']-c['q'];deltaL=(e['logits'][:,1].astype(float)-e['logits'][:,0])-(c['logits'][:,1].astype(float)-c['logits'][:,0])
++ np.savez_compressed(B/'forward'/('paired_'+inp+'.npz'),ids=c['ids'],state=c['state'],family=f,query=c['query'],delta_p0=deltaP,delta_q=deltaQ,delta_logit_edge_minus_none=deltaL,cn=common[u,v],endpoint_degree=np.stack([degree[u],degree[v]]),endpoint_relation_degree=np.stack([rd[u,f],rd[v,f]]))
++ for fam,(a,b) in enumerate(relations):
++  mask=f==fam;relation=names[a]+'--'+names[b]
++  values={}
++  for arm,x in [('C',c),('E',e)]:
++   birth=float(x['q'][mask&~state].sum());death=float((1-x['q'][mask&state]).sum());values[arm]=dict(p0_sum=float(x['p0'][mask].sum()),q_sum=float(x['q'][mask].sum()),birth=birth,death=death,net=birth-death)
++  rows.append(dict(input=inp,t=t,family=fam,relation=relation,slots=int(mask.sum()),current_edges=int((mask&state).sum()),**{arm+'_'+k:v for arm,z in values.items() for k,v in z.items()},**{'E_minus_C_'+k:values['E'][k]-values['C'][k] for k in values['C']}))
++  for exists in [False,True]:
++   base=mask&(state==exists)
++   for axis,(vals,bounds) in axes.items():
++    for label,selection in bins(vals,bounds):
++     ix=base&selection;n=int(ix.sum());dq=deltaQ[ix];dp=deltaP[ix];dl=deltaL[ix]
++     buckets.append(dict(input=inp,t=t,family=fam,relation=relation,current_edge=int(exists),axis=axis,bin=label,slots=n,C_p0_sum=float(c['p0'][ix].sum()),E_p0_sum=float(e['p0'][ix].sum()),C_q_sum=float(c['q'][ix].sum()),E_q_sum=float(e['q'][ix].sum()),delta_p0_sum=float(dp.sum()),delta_q_sum=float(dq.sum()),delta_q_positive_sum=float(dq[dq>0].sum()),delta_q_negative_sum=float(dq[dq<0].sum()),delta_logit_mean=div(dl.sum(),n),delta_p0_mean=div(dp.sum(),n),delta_q_mean=div(dq.sum(),n),delta_q_min=float(dq.min()) if n else None,delta_q_q25=float(np.quantile(dq,.25)) if n else None,delta_q_median=float(np.median(dq)) if n else None,delta_q_q75=float(np.quantile(dq,.75)) if n else None,delta_q_max=float(dq.max()) if n else None))
++  if 'clean_label' in c:
++   for exists in [False,True]:
++    for truth in [0,1]:
++     ix=mask&(state==exists)&(c['clean_label']==truth);n=int(ix.sum())
++     clean.append(dict(input=inp,t=t,family=fam,relation=relation,current_edge=int(exists),clean_label=truth,slots=n,**{arm+'_'+k:div(x[k][ix].sum(),n) for arm,x in [('C',c),('E',e)] for k in ['p0','q','ce']}))
++write('cross_relations.csv',rows);write('cross_slot_strata.csv',buckets);write('ordinary_label_groups.csv',clean)
++# Algebraic opportunity/rate decomposition per stored graph, not a causal attribution.
++ev=read(RUN/'unified_evaluation.json');closure=[];tri=[];index={(x['dataset'],x['arm'],x['sample_seed'],x['version']):x for x in ev['records']}
++for d,left,right in [('PubMed','E','C'),('IMDB','D','A'),('IMDB','E','D')]:
++ ref=read(RUN/'derived_lcc_evaluation'/f'{d}_reference.json')['statistics']
++ for sample in [2026102821,2026102822]:
++  for version in ['original','lcc']:
++   l=index[d,left,sample,version]['statistics'];r=index[d,right,sample,version]['statistics']
++   for key in l['typed_twohop_closure']:
++    x,y,z=l['typed_twohop_closure'][key],r['typed_twohop_closure'][key],ref['typed_twohop_closure'][key]
++    for basis in ['path','unique_pair']:
++     nl,nr=x[basis+'_denominator'],y[basis+'_denominator'];pl,pr=x[basis+'_ratio'],y[basis+'_ratio'];numl,numr=x[basis+'_numerator'],y[basis+'_numerator'];op=rate=None
++     if pl is not None and pr is not None:op=(nl-nr)*(pl+pr)/2;rate=(pl-pr)*(nl+nr)/2;assert np.isclose(op+rate,numl-numr,atol=1e-9)
++     closure.append(dict(dataset=d,contrast=left+'-'+right,sample_seed=sample,version=version,pattern=key,basis=basis,left_opportunities=nl,right_opportunities=nr,reference_opportunities=z[basis+'_denominator'],left_closed=numl,right_closed=numr,reference_closed=z[basis+'_numerator'],left_ratio=pl,right_ratio=pr,reference_ratio=z[basis+'_ratio'],delta_closed=numl-numr,opportunity_component=op,rate_component=rate,reason=None if op is not None else 'undefined_zero_denominator',interpretation='symmetric exact algebraic decomposition, not causal'))
++   for key in sorted(set(l['typed_triangles'])|set(r['typed_triangles'])|set(ref['typed_triangles'])):
++    x,y,z=l['typed_triangles'].get(key,0),r['typed_triangles'].get(key,0),ref['typed_triangles'].get(key,0)
++    tri.append(dict(dataset=d,contrast=left+'-'+right,sample_seed=sample,version=version,pattern=key,left=x,right=y,reference=z,quantity_difference=x-y,absolute_error_difference=abs(x-z)-abs(y-z)))
++write('closure_decomposition.csv',closure);write('triangle_contrasts.csv',tri)
++summary=[]
++for inp in [x['name'] for x in panel['inputs']]:
++ rr=[x for x in rows if x['input']==inp];s=dict(input=inp,current_edges=sum(x['current_edges'] for x in rr))
++ for arm in ['C','E']:
++  for k in ['p0_sum','q_sum','birth','death','net']:s[arm+'_'+k]=sum(x[arm+'_'+k] for x in rr)
++ for k in ['p0_sum','q_sum','birth','death','net']:s['E_minus_C_'+k]=s['E_'+k]-s['C_'+k]
++ summary.append(s)
++write('cross_totals.csv',summary)
++print(json.dumps(summary,indent=2))
++print('relation net deltas')
++for inp in [x['name'] for x in panel['inputs']]:print(inp,[(x['relation'],round(x['E_minus_C_p0_sum'],4),round(x['E_minus_C_birth'],6),round(x['E_minus_C_death'],6),round(x['E_minus_C_net'],6)) for x in rows if x['input']==inp])
+diff --git a/experiments/typed_structure_cn_diagnosis_v1/audit_and_cn.py b/experiments/typed_structure_cn_diagnosis_v1/audit_and_cn.py
+new file mode 100644
+index 0000000..dcf7894
+--- /dev/null
++++ b/experiments/typed_structure_cn_diagnosis_v1/audit_and_cn.py
+@@ -0,0 +1,66 @@
++"""CPU-only saved-output audit and nonlearned CN scale/mapping evidence."""
++import pathlib,json,csv,hashlib,itertools,collections
++import numpy as np
++B=pathlib.Path(__file__).resolve().parent
++def read(p):return json.loads(p.read_text())
++def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
++def write(name,rows):
++ with (B/name).open('w',newline='') as h:
++  w=csv.DictWriter(h,fieldnames=list(rows[0]));w.writeheader();w.writerows(rows)
++panel=read(B/'frozen_panel.json');receipt=read(B/'forward/receipt.json')
++assert receipt['completed_full_queries']==receipt['attempted_full_queries']==8
++assert receipt['optimizer_steps']==receipt['backwards']==receipt['sampled_graphs']==0
++checks=collections.Counter();scale=[];compact=[]
++validation=list(csv.DictReader((B/'fixed_validation.csv').open()))
++for dataset in ['IMDB','PubMed']:
++ for t in ['1','500','1000']:
++  subset=[x for x in validation if x['dataset']==dataset and x['t']==t]
++  assert len({x['input_sha256'] for x in subset})==1
++  checks['validation_same_input_all_arms_checkpoints_readouts']+=1
++source=B/'evidence/scientific_source'
++source_files=['hsgd/common_neighbor.py','hsgd/model.py','hsgd/computational.py','hsgd/vendor/sample_edges_utils_typed.py','model_variants.py']
++for item in panel['inputs']:
++ x=dict(np.load(B/'inputs'/(item['name']+'.npz')));assert sha(B/'inputs'/(item['name']+'.npz'))==item['sha256']
++ ids=x['ids'];assert np.array_equal(np.sort(ids),np.arange(18336));checks['input_full_coverage']+=1
++ for arm in ['C','E']:
++  file=B/'forward'/(arm+'_'+item['name']+'.npz');r=read(file.with_suffix('.json'));assert sha(file)==r['output_sha256']
++  z=dict(np.load(file));assert np.array_equal(z['query'][:,ids],x['query']);assert np.array_equal(z['family'][ids],x['f']);assert np.array_equal(z['state'],x['state']);checks['input_mapping_and_output_hash']+=1
++  for key in ['p0','q']:assert np.isfinite(z[key]).all() and ((z[key]>=0)&(z[key]<=1)).all()
++  assert np.isfinite(z['logits']).all();checks['finite_probability_support']+=1
++  s=z['state'].astype(bool);assert np.isclose(z['q'].sum()-s.sum(),z['q'][~s].sum()-(1-z['q'][s]).sum(),atol=1e-10,rtol=0);checks['net_identity']+=1
++  if int(z['t'])==1:np.testing.assert_allclose(z['p0'],z['q'],atol=1e-12,rtol=0);checks['t1_q_equals_p0']+=1
++  if r['historical_comparison']:assert r['historical_comparison']['ce_aggregate_pass'] and r['historical_comparison']['p0_aggregate_pass'];checks['historical_aggregate_reproduction']+=1
++ z=dict(np.load(B/'forward'/('C_'+item['name']+'.npz')));u,v=z['query'];A=np.zeros((192,192),dtype=np.int64);s=z['state'].astype(bool);A[u[s],v[s]]=1;A[v[s],u[s]]=1
++ cn=np.stack([(A[:,z['types']==typ]@A[z['types']==typ,:])[u,v] for typ in range(4)],1)
++ # Independent set intersections verify endpoint correspondence; no model called.
++ adj=[set(np.flatnonzero(a)) for a in A]
++ for k,(a,b) in enumerate(zip(u,v)):
++  common=adj[a]&adj[b];expected=np.bincount(z['types'][list(common)],minlength=4)
++  assert np.array_equal(cn[k],expected)
++ checks['typed_CN_slot_set_intersections']+=len(u)
++ for typ in range(4):
++  c=cn[:,typ];l=np.log1p(c)
++  scale.append(dict(input=item['name'],middle_type=typ,slots=len(c),nonzero_slots=int((c>0).sum()),raw_max=int(c.max()),raw_mean=float(c.mean()),log1p_max=float(l.max()),log1p_mean=float(l.mean()),log1p_rms=float(np.sqrt(np.mean(l*l))),origin='CPU topology only; not learned vector'))
++ assert np.array_equal(cn.sum(1),(A@A)[u,v]);checks['CN_total_consistency']+=1
++rows=list(csv.DictReader((B/'cross_slot_strata.csv').open()))
++for inp in [x['name'] for x in panel['inputs']]:
++ for axis in ['cn_all','min_degree','min_relation_degree']:
++  groups=collections.defaultdict(list)
++  for x in rows:
++   if x['input']==inp and x['axis']==axis:groups[(x['current_edge'],x['bin'])].append(x)
++  for (edge,bin_),xs in groups.items():
++   compact.append(dict(input=inp,axis=axis,current_edge=int(edge),bin=bin_,slots=sum(int(x['slots']) for x in xs),delta_p0_sum=sum(float(x['delta_p0_sum']) for x in xs),delta_q_sum=sum(float(x['delta_q_sum']) for x in xs)))
++ for fam in range(10):
++  for edge in [0,1]:
++   for axis in sorted({x['axis'] for x in rows}):
++    xs=[x for x in rows if x['input']==inp and int(x['family'])==fam and int(x['current_edge'])==edge and x['axis']==axis]
++    z=dict(np.load(B/'forward'/('paired_'+inp+'.npz')));mask=(z['family']==fam)&(z['state']==edge)
++    assert sum(int(x['slots']) for x in xs)==int(mask.sum())
++    assert np.isclose(sum(float(x['delta_q_sum']) for x in xs),z['delta_q'][mask].sum(),atol=1e-12,rtol=0)
++    checks['stratum_partition']+=1
++for row in csv.DictReader((B/'closure_decomposition.csv').open()):
++ if not row['reason']:
++  assert abs(float(row['delta_closed'])-float(row['opportunity_component'])-float(row['rate_component']))<1e-9;checks['closure_algebra']+=1
++write('cn_count_scales.csv',scale);write('strata_all_relations.csv',compact)
++audit=dict(status='passed',checks=dict(checks),model_forward_calls=0,optimizer_steps=0,new_graphs=0,source_sha256={name:sha(source/name) for name in source_files},missing=['learned CN32 activations and joint-head block RMS were not captured during the already completed eight forwards; no extra forward permitted'],CN_dimensions=dict(phi_input=281,phi_hidden=32,phi_output=32,mean=32,typed_log_counts=4,existence=1,total=37,joint_input=776,C_joint_input=739,joint_hidden=128,joint_output=2))
++(B/'audit.json').write_text(json.dumps(audit,indent=2));print(json.dumps(audit,indent=2))
+diff --git a/experiments/typed_structure_cn_diagnosis_v1/evidence/scientific_source/hsgd/common_neighbor.py b/experiments/typed_structure_cn_diagnosis_v1/evidence/scientific_source/hsgd/common_neighbor.py
+new file mode 100644
+index 0000000..e66426d
+--- /dev/null
++++ b/experiments/typed_structure_cn_diagnosis_v1/evidence/scientific_source/hsgd/common_neighbor.py
+@@ -0,0 +1,101 @@
++"""Exact typed common-neighbor features from existing Xt edges ONLY.
++
++Topology enumerates unordered wedges once; no candidate-edge Python loop, no
++NxNxN tensor, no truncation. A query looks up all matching wedges with sorted
++keys. Contextual node features use the shared first Transformer layer on Xt,
++without queries. Query-independent features may be cached inside ONE frozen Xt.
++"""
++import torch
++from torch import nn
++from torch.nn import functional as F
++
++
++class Wedges:
++    def __init__(self, context):
++        self.n = len(context.types)
++        device = context.device
++        directed, family = context.directed, context.directed_families
++        order = torch.argsort(directed[0]*self.n+directed[1], stable=True)
++        edges, family = directed[:,order], family[order]
++        degree = torch.bincount(edges[0], minlength=self.n)
++        starts = degree.cumsum(0)-degree
++        positions = torch.arange(edges.shape[1], device=device)
++        after = degree[edges[0]]-(positions-starts[edges[0]])-1
++        # Exact workload size on CPU from already validated physical endpoints.
++        import numpy as np
++        dc = np.bincount(context.old.ravel(), minlength=self.n)
++        self.raw_wedges = int(np.sum(dc*(dc-1)//2))
++        if self.raw_wedges > context.model.max_wedges:
++            raise RuntimeError('resource guard: exact Xt wedges %d exceed %d; no truncation' % (self.raw_wedges,context.model.max_wedges))
++        self.max_query_paths=context.model.max_query_paths
++        first = torch.repeat_interleave(positions, after, output_size=self.raw_wedges)
++        repeats_start = (after.cumsum(0)-after)[first]
++        second = first+1+torch.arange(self.raw_wedges,device=device)-repeats_start
++        u,v = edges[1,first],edges[1,second]
++        keys = u*self.n+v  # Neighbors sorted; u < v, no immediate returns.
++        perm = torch.argsort(keys,stable=True)
++        self.keys = keys[perm]
++        self.middle = edges[0,first][perm]
++        self.left,self.right = family[first][perm],family[second][perm]
++        self.bytes = sum(x.numel()*x.element_size() for x in (self.keys,self.middle,self.left,self.right))
++
++    def lookup(self, query):
++        lo,hi = torch.minimum(query[0],query[1]),torch.maximum(query[0],query[1])
++        keys = lo*self.n+hi
++        begin=torch.searchsorted(self.keys,keys,right=False)
++        end=torch.searchsorted(self.keys,keys,right=True)
++        counts=end-begin
++        matched=int(counts.sum())
++        if matched>self.max_query_paths:
++            raise RuntimeError('resource guard: matched query paths %d exceed %d; no truncation' % (matched,self.max_query_paths))
++        qid=torch.repeat_interleave(torch.arange(len(keys),device=query.device),counts,output_size=matched)
++        offset=(counts.cumsum(0)-counts)[qid]
++        wid=begin[qid]+torch.arange(len(qid),device=query.device)-offset
++        return qid,self.middle[wid],self.left[wid],self.right[wid]
++
++
++class CommonNeighborFeatures(nn.Module):
++    def __init__(self, node_width,n_types,n_families,hidden=32):
++        super().__init__()
++        self.n_types,self.n_families,self.hidden=n_types,n_families,hidden
++        # h_w, type(w), unordered {r_uw,r_wv}, target family, t/T.
++        dim=node_width+n_types+2*n_families+1
++        self.phi=nn.Sequential(nn.Linear(dim,hidden),nn.SiLU(),nn.Linear(hidden,hidden),nn.SiLU())
++        self.chunk_paths=65536  # Memory batching only: every matched path included.
++
++    def contextual_nodes(self,ctx,time):
++        b=ctx.model.backbone
++        X=b.lin_in_X(ctx.x)
++        if getattr(ctx,'node_residual',None) is not None:X=X+ctx.node_residual
++        if not ctx.directed.numel():return X
++        fam=ctx.directed_families
++        attrs=torch.cat([F.one_hot(fam+1,ctx.model.n_families+1).float(),
++                         F.one_hot(fam,ctx.model.n_families).float()],-1)
++        E=b.lin_in_E(attrs)
++        y=b.lin_in_y(torch.tensor([[float(time)]],device=ctx.device))
++        # Same learned layer, on existing edges alone. No query-edge input.
++        return b.tf_layers[0](X,ctx.directed,E,y,ctx.batch)[0]
++
++    def aggregate(self,ctx,query,qf,time):
++        qid,w,r1,r2=ctx.cn_wedges.lookup(query)
++        features=ctx.x.new_zeros((query.shape[1],self.hidden+self.n_types+1))
++        if not len(w):return features
++        learned=ctx.x.new_zeros((query.shape[1],self.hidden))
++        type_counts=ctx.x.new_zeros((query.shape[1],self.n_types))
++        if ctx.cn_nodes is None:
++            ctx.cn_nodes=self.contextual_nodes(ctx,time)
++            ctx.cn_time=float(time)
++        elif float(time)!=ctx.cn_time:
++            raise ValueError("common-neighbor hidden cache used at a different time")
++        for start in range(0,len(w),self.chunk_paths):
++            sl=slice(start,start+self.chunk_paths)
++            iw,iq=w[sl],qid[sl]
++            rel=F.one_hot(r1[sl],self.n_families)+F.one_hot(r2[sl],self.n_families)
++            z=torch.cat([ctx.cn_nodes[iw],ctx.x[iw],rel.float(),
++                F.one_hot(qf[iq],self.n_families).float(),
++                ctx.x.new_full((len(iw),1),float(time))],-1)
++            learned.index_add_(0,iq,self.phi(z))
++            type_counts.index_add_(0,iq,ctx.x[iw])
++        counts=type_counts.sum(-1)
++        return torch.cat([learned/counts.clamp_min(1).unsqueeze(-1),torch.log1p(type_counts),
++                          (counts>0).to(learned.dtype).unsqueeze(-1)],-1)
+diff --git a/experiments/typed_structure_cn_diagnosis_v1/evidence/scientific_source/hsgd/computational.py b/experiments/typed_structure_cn_diagnosis_v1/evidence/scientific_source/hsgd/computational.py
+new file mode 100644
+index 0000000..0fcf192
+--- /dev/null
++++ b/experiments/typed_structure_cn_diagnosis_v1/evidence/scientific_source/hsgd/computational.py
+@@ -0,0 +1,166 @@
++"""Frozen-context upstream computational graph path; old model.forward retained.
++
++No implicit cache keyed by mutable arrays. One explicit context per frozen Xt;
++caller supplies an exact state-version token, closes it before committing Xt-1.
++Tensor version guards prevent mutated cached metadata from being reused.
++"""
++from dataclasses import dataclass
++import numpy as np
++import torch
++import torch.nn.functional as F
++from hsgd.vendor.sample_edges_utils_typed import get_computational_graph
++
++
++@dataclass
++class GraphInputs:
++    edges: torch.Tensor
++    states: torch.Tensor
++    families: torch.Tensor
++    query_mask: torch.Tensor
++    query_index: torch.Tensor
++    query_families: torch.Tensor
++    attrs: torch.Tensor
++
++
++def check_edges(types, pairs, edges, families, n_families, label):
++    edges = np.asarray(edges, dtype=np.int64).reshape(2, -1)
++    families = np.asarray(families, dtype=np.int64)
++    n = len(types)
++    if families.ndim != 1 or len(families) != edges.shape[1] or ((families < 0) | (families >= n_families)).any():
++        raise ValueError("invalid family metadata")
++    if ((edges < 0) | (edges >= n)).any() or (edges[0] >= edges[1]).any():
++        raise ValueError("canonical upper-triangle edges required")
++    if not np.array_equal(np.sort(types[edges], axis=0).T, pairs[families]):
++        raise ValueError("relation family incompatible with endpoint types")
++    keys = edges[0] * n + edges[1]
++    if len(np.unique(keys)) != len(keys):
++        raise ValueError("duplicate " + label)
++    return edges.copy(), families.copy()
++
++
++class FrozenTypedContext:
++    def __init__(self, model, types, edges, families, state_version):
++        if state_version is None:
++            raise ValueError("explicit frozen-state version required")
++        self.model, self.state_version, self.closed = model, state_version, False
++        self.device = next(model.parameters()).device
++        self.types = np.asarray(types, dtype=np.int64).copy()
++        if self.types.ndim != 1 or len(self.types) < 2 or (self.types < 0).any() or (self.types >= model.n_types).any():
++            raise ValueError("invalid fixed type inventory")
++        self.pairs = np.asarray(model.family_pairs, dtype=np.int64)
++        self._prior_source = model.prior
++        self.prior = self._prior_source.detach().cpu().numpy().copy()
++        self.old, self.of = check_edges(self.types, self.pairs, edges, families, model.n_families, "existing physical edge")
++        if (self.prior[self.of] == 0).any():
++            raise ValueError("existing edge outside exact prior support")
++        for arr in (self.types, self.pairs, self.prior, self.old, self.of):
++            arr.flags.writeable = False
++        # Prepare once per Xt. No repeated node H2D or old-edge extraction.
++        ty = torch.tensor(self.types, dtype=torch.long, device=self.device)
++        self.x = F.one_hot(ty, model.n_types).float()
++        self.batch = torch.zeros(len(ty), dtype=torch.long, device=self.device)
++        old = torch.tensor(self.old, dtype=torch.long, device=self.device)
++        of = torch.tensor(self.of, dtype=torch.long, device=self.device)
++        self.directed = torch.cat([old, old.flip(0)], dim=1)
++        self.directed_families = torch.cat([of, of])
++        # Complete frozen Xt, physical edges counted once; never query edges.
++        sizes=np.bincount(self.types,minlength=model.n_types)
++        capacities=np.array([sizes[a]*(sizes[a]-1)//2 if a==b else sizes[a]*sizes[b] for a,b in self.pairs],dtype=np.float64)
++        counts=np.bincount(self.of,minlength=model.n_families).astype(np.float64)
++        density=np.divide(counts,capacities,out=np.zeros_like(counts),where=capacities>0)
++        log_count=np.divide(np.log1p(counts),np.log1p(capacities),out=np.zeros_like(counts),where=capacities>0)
++        self.global_statistics=torch.tensor(np.r_[log_count,density][None],dtype=torch.float32,device=self.device)
++        self._guards = [(v, v._version) for v in (self.x, self.batch, self.directed, self.directed_families, model.prior)]
++        self.cn_nodes,self.cn_time,self.cn_wedges=None,None,None
++        self._cn_parameters=[(p,p._version) for p in model.parameters()]
++        self._time=None
++        self._guards.append((self.global_statistics,self.global_statistics._version))
++        if model.common_neighbor is not None:
++            from hsgd.common_neighbor import Wedges
++            self.cn_wedges=Wedges(self)
++
++    def check(self, state_version):
++        if self.closed or state_version != self.state_version:
++            raise ValueError("stale/closed frozen context")
++        if self.model.prior is not self._prior_source:
++            raise ValueError("prior tensor replaced inside frozen context")
++        if next(self.model.parameters()).device != self.device or any(v._version != version for v, version in self._guards):
++            raise ValueError("cached metadata or model device changed")
++        if any(p._version!=version for p,version in self._cn_parameters):
++            raise ValueError("model parameters changed inside frozen CN context")
++
++    def prepare_query(self, edges, families, state_version):
++        self.check(state_version)
++        return check_edges(self.types, self.pairs, edges, families, self.model.n_families, "query")
++
++    def transfer_query(self, prepared, state_version):
++        self.check(state_version)
++        qe, qf = prepared
++        return torch.as_tensor(qe, dtype=torch.long, device=self.device), torch.as_tensor(qf, dtype=torch.long, device=self.device)
++
++    def assemble(self, query, state_version):
++        self.check(state_version)
++        qe, qf = query
++        ei, states, fam, mask, idx = get_computational_graph(qe, qf, self.directed, self.directed_families, len(self.types))
++        attrs = torch.cat([F.one_hot(states, self.model.n_families + 1).float(),
++                           F.one_hot(fam, self.model.n_families).float()], dim=-1)
++        return GraphInputs(ei, states, fam, mask, idx, qf, attrs)
++
++    def run_network(self, graph, time, state_version):
++        self.check(state_version)
++        if not np.isfinite(time) or not 0<=time<=1:raise ValueError('invalid normalized diffusion time')
++        if self._time is None:self._time=float(time)
++        elif self._time!=float(time):raise ValueError('frozen context used at a different time')
++        if not graph.edges.numel():
++            logits = torch.empty((0, 2), device=self.device)
++            return logits, torch.empty(0, device=self.device)
++        logits = self.model.joint_predict(self,graph,time)
++        p0 = logits.softmax(-1)[:, 1]
++        pi = self.model.prior[graph.query_families]
++        p0 = torch.where(pi == 0, torch.zeros_like(p0), torch.where(pi == 1, torch.ones_like(p0), p0))
++        return logits, p0
++
++    def predict(self, edges, families, time, state_version, details=False):
++        graph = self.assemble(self.transfer_query(self.prepare_query(edges, families, state_version), state_version), state_version)
++        logits, p0 = self.run_network(graph, time, state_version)
++        return (graph, logits, p0) if details else p0
++
++    def close(self):
++        self.closed = True
++        self.node_residual=None
++        self.cn_nodes=None
++        self.cn_wedges=None
++
++
++def legacy_arrays(context, query_edges, query_families, state_version):
++    """Exact old dictionary/sorted-list builder retained for direct inspection."""
++    qe, qf = context.prepare_query(query_edges, query_families, state_version)
++    state = {}
++    for (a, b), f in zip(context.old.T, context.of):
++        state[int(a), int(b)] = (int(f), int(f) + 1)
++    queries = []
++    for (a, b), f in zip(qe.T, qf):
++        key = int(a), int(b)
++        queries.append(key)
++        if key in state and state[key][0] != f:
++            raise ValueError("family mismatch for query")
++        state.setdefault(key, (int(f), 0))
++    directed = sorted([(a,b,f,c) for (u,v),(f,c) in state.items() for a,b in [(u,v),(v,u)]])
++    arr = np.asarray(directed, dtype=np.int64).reshape(-1,4)
++    lookup = {(a,b):k for k,(a,b,_,_) in enumerate(directed)}
++    idx = np.asarray([lookup[key] for key in queries], dtype=np.int64)
++    return arr, idx, qf
++
++
++def legacy_transfer(context, arrays, include_query_mask=True):
++    arr, idx, qf = [torch.as_tensor(v, device=context.device) for v in arrays]
++    states, fam = arr[:,3], arr[:,2]
++    attrs = torch.cat([F.one_hot(states, context.model.n_families+1).float(),
++                       F.one_hot(fam, context.model.n_families).float()], dim=-1)
++    mask = None
++    if include_query_mask:
++        keys = arr[:,0]*len(context.types)+arr[:,1]
++        selected = keys[idx]
++        reverse = arr[idx,1]*len(context.types)+arr[idx,0]
++        mask = torch.isin(keys, torch.cat([selected,reverse]))
++    return GraphInputs(arr[:,:2].T, states, fam, mask, idx, qf, attrs)
+diff --git a/experiments/typed_structure_cn_diagnosis_v1/evidence/scientific_source/hsgd/model.py b/experiments/typed_structure_cn_diagnosis_v1/evidence/scientific_source/hsgd/model.py
+new file mode 100644
+index 0000000..78c3299
+--- /dev/null
++++ b/experiments/typed_structure_cn_diagnosis_v1/evidence/scientific_source/hsgd/model.py
+@@ -0,0 +1,87 @@
++"""Matched joint-readout framework: optional CN INPUT, never a scalar addition.
++
++This architecture requires fresh native weights. Original v9/CN v2 checkpoints
++are not compatible and are never imported by engineering commands.
++"""
++import itertools
++import numpy as np
++import torch
++from torch import nn
++from hsgd.holders import PlaceHolder
++from hsgd.vendor.conv_transformer_model import GraphTransformerConv
++
++
++class TypedSparseDenoiser(nn.Module):
++    architecture_version = "joint_local_global_cn_v1"
++
++    def __init__(self,n_types,n_families,layers=3,width=128,edge_width=64,heads=4,dropout=0.,
++                 family_pairs=None,prior=None,global_width=32,ff_node=None,ff_edge=None,
++                 ff_global=None,cn_hidden=0,joint_width=128,max_wedges=2000000,max_query_paths=2000000):
++        super().__init__()
++        if width%heads or edge_width%heads:raise ValueError("hidden dimensions must divide heads")
++        self.n_types,self.n_families=n_types,n_families
++        self.family_pairs=tuple(family_pairs or itertools.combinations_with_replacement(range(n_types),2))
++        if len(self.family_pairs)!=n_families or len(set(self.family_pairs))!=n_families:raise ValueError("one relation state per type pair required")
++        if any(a>b or a<0 or b>=n_types for a,b in self.family_pairs):raise ValueError("invalid schema")
++        prior=np.full(n_families,.5) if prior is None else np.asarray(prior,dtype=float)
++        if prior.shape!=(n_families,) or not np.isfinite(prior).all() or ((prior<0)|(prior>1)).any():raise ValueError("invalid prior")
++        self.register_buffer("prior",torch.tensor(prior,dtype=torch.float64))
++        self.backbone=GraphTransformerConv(layers,PlaceHolder(X=n_types,E=2*n_families+1,y=1,charge=0),
++            dict(dx=width,de=edge_width,dy=global_width,n_head=heads,dim_ffX=2*width if ff_node is None else ff_node,
++                 dim_ffE=2*edge_width if ff_edge is None else ff_edge),PlaceHolder(X=n_types,E=n_families+1,y=0,charge=0),
++            dropout=dropout,sn_hidden_dim=0)
++        if ff_global is not None:
++            for layer in self.backbone.tf_layers:
++                if layer.last_layer:
++                    layer.lin_y1=nn.Linear(global_width,ff_global)
++                    layer.lin_y2=nn.Linear(ff_global,global_width)
++        if cn_hidden not in (0,32):raise ValueError("baseline0 or CN32 only")
++        self.max_wedges=int(max_wedges);self.max_query_paths=int(max_query_paths)
++        if min(self.max_wedges,self.max_query_paths)<1:raise ValueError("resource guard must be positive")
++        self.cn_feature_width=32+n_types+1
++        self.common_neighbor=None
++        # Every field enters ONE nonlinear network before the two logits.
++        # Previous backbone logits are input information, not an output residual.
++        fields=[("edge",edge_width),("endpoint_mean",width),("endpoint_absdiff",width),
++                ("backbone_global",global_width),("time",1),("Xt_statistics",2*n_families),
++                ("family",n_families),("current_state",2),("backbone_logits",2),("CN",self.cn_feature_width)]
++        self.joint_slices={};offset=0
++        for name,size in fields:self.joint_slices[name]=slice(offset,offset+size);offset+=size
++        self.joint_head=nn.Sequential(nn.Linear(offset,joint_width),nn.SiLU(),nn.Linear(joint_width,2))
++        # Initialize shared parameters before optional parameters, so the same
++        # seed gives A/B identical common backbone/head initialization.
++        if cn_hidden:
++            from hsgd.common_neighbor import CommonNeighborFeatures
++            self.common_neighbor=CommonNeighborFeatures(width,n_types,n_families,32)
++
++    def forward(self,types,existing_edges,existing_families,query_edges,query_families,time):
++        return self.forward_upstream(types,existing_edges,existing_families,query_edges,query_families,time)
++
++    def forward_upstream(self,types,existing_edges,existing_families,query_edges,query_families,time):
++        from hsgd.computational import FrozenTypedContext
++        token=("one-forward",float(time))
++        context=FrozenTypedContext(self,types,existing_edges,existing_families,token)
++        try:return context.predict(query_edges,query_families,time,token)
++        finally:context.close()
++
++    def joint_predict(self,ctx,graph,time,mask_cn=False,return_features=False):
++        result,hidden=self.backbone(ctx.x,graph.attrs,graph.edges,
++            ctx.x.new_tensor([[float(time)]]),ctx.batch,return_hidden=True,
++            node_residual=getattr(ctx,'node_residual',None))
++        index=graph.query_index;family=graph.query_families
++        query=graph.edges[:,index];left,right=hidden["node"][query[0]],hidden["node"][query[1]]
++        old_logits=torch.stack([result.edge_attr[index,0],result.edge_attr[index,family+1]],-1)
++        cn=ctx.x.new_zeros((len(index),self.cn_feature_width))
++        if self.common_neighbor is not None and not mask_cn:
++            cn=self.common_neighbor.aggregate(ctx,query,family,time)
++        state=(graph.states[index]>0).long()
++        fields=[hidden["edge"][index],(left+right)*.5,(left-right).abs(),
++            hidden["global_state"].expand(len(index),-1),ctx.x.new_full((len(index),1),float(time)),
++            ctx.global_statistics.expand(len(index),-1),
++            torch.nn.functional.one_hot(family,self.n_families).float(),
++            torch.nn.functional.one_hot(state,2).float(),old_logits,cn]
++        features=torch.cat(fields,-1)
++        logits=self.joint_head(features)
++        if not torch.isfinite(features).all() or not torch.isfinite(logits).all():raise FloatingPointError("nonfinite fusion features/logits")
++        if return_features:return logits,features
++        return logits
+diff --git a/experiments/typed_structure_cn_diagnosis_v1/evidence/scientific_source/hsgd/vendor/sample_edges_utils_typed.py b/experiments/typed_structure_cn_diagnosis_v1/evidence/scientific_source/hsgd/vendor/sample_edges_utils_typed.py
+new file mode 100644
+index 0000000..3c9d260
+--- /dev/null
++++ b/experiments/typed_structure_cn_diagnosis_v1/evidence/scientific_source/hsgd/vendor/sample_edges_utils_typed.py
+@@ -0,0 +1,37 @@
++"""Typed adaptation of SparseDiff get_computational_graph, frozen d9c4b20.
++
++Source: sparse_diffusion/diffusion/sample_edges_utils.py:67-126,
++https://github.com/qym7/SparseDiff (MIT; see vendor/LICENSE).
++Reuse concat, mirrored query edges, coalesce(min/max), query-mask logic.
++Adapt only integer state/family metadata and original upper-query order mapping.
++No homogeneous one-hot summation or merging of inconsistent relation labels.
++"""
++import torch
++from torch_geometric.utils import coalesce
++
++
++def get_computational_graph(triu_query_edge_index, query_families,
++                            clean_edge_index, clean_families, n_nodes):
++    # Inputs already checked: old edges are directed; query edges canonical.
++    query_edge_index = torch.cat([triu_query_edge_index, triu_query_edge_index.flip(0)], dim=1)
++    query_family = torch.cat([query_families, query_families])
++    comp_edge_index = torch.cat([clean_edge_index, query_edge_index], dim=1)
++    metadata = torch.stack([
++        torch.cat([clean_families + 1, torch.zeros_like(query_family)]),
++        torch.cat([clean_families, query_family])], dim=-1)
++    # Exact upstream min/max reductions; state min=0 identifies queries,
++    # state max preserves actual presence when a query overlaps an old edge.
++    _, minima = coalesce(comp_edge_index, metadata, num_nodes=n_nodes, reduce="min")
++    edge_index, maxima = coalesce(comp_edge_index, metadata, num_nodes=n_nodes, reduce="max")
++    if not torch.equal(minima[:, 1], maxima[:, 1]):
++        raise ValueError("coalesce cannot merge different relation families")
++    query_mask = minima[:, 0] == 0
++    keys = edge_index[0] * n_nodes + edge_index[1]
++    query_keys = triu_query_edge_index[0] * n_nodes + triu_query_edge_index[1]
++    query_index = torch.searchsorted(keys, query_keys)
++    if len(query_index):
++        if (query_index >= len(keys)).any() or not torch.equal(keys[query_index], query_keys):
++            raise ValueError("query mapping incomplete")
++        if not query_mask[query_index].all():
++            raise ValueError("query mask/mapping disagreement")
++    return edge_index, maxima[:, 0], maxima[:, 1], query_mask, query_index
+diff --git a/experiments/typed_structure_cn_diagnosis_v1/evidence/scientific_source/model_variants.py b/experiments/typed_structure_cn_diagnosis_v1/evidence/scientific_source/model_variants.py
+new file mode 100644
+index 0000000..63959d5
+--- /dev/null
++++ b/experiments/typed_structure_cn_diagnosis_v1/evidence/scientific_source/model_variants.py
+@@ -0,0 +1,130 @@
++"""O/A/B/C preserved. D: CN+ReFeX; E: CN+ReFeX+frozen typed roles.
++
++One joint nonlinear head; no score addition or ensemble of trained models.
++"""
++import time
++import numpy as np
++import torch
++from torch import nn
++from hsgd.model import TypedSparseDenoiser
++from features import extract, encode, digest, feature_width
++from role_dictionary import encode_typed
++
++class DegreeBranch(nn.Module):
++    """Only E07 BASE's active degree branch; no anonymous-role parameters."""
++    def __init__(self,R,K,width):
++        super().__init__()
++        self.degree_encoder=nn.Sequential(nn.Linear(2*R+K+1,32),nn.SiLU(),nn.Linear(32,32),nn.SiLU())
++        self.degree_out=nn.Linear(32,width)
++        nn.init.zeros_(self.degree_out.weight);nn.init.zeros_(self.degree_out.bias)
++    def input(self,ctx,t):
++        sizes=np.bincount(ctx.types,minlength=ctx.model.n_types);cap=np.zeros((len(sizes),ctx.model.n_families))
++        for r,(a,b) in enumerate(ctx.pairs):cap[a,r]=sizes[b]-int(a==b);cap[b,r]=sizes[a]-int(a==b)
++        d=np.zeros((len(ctx.types),ctx.model.n_families))
++        np.add.at(d,(ctx.old[0],ctx.of),1);np.add.at(d,(ctx.old[1],ctx.of),1)
++        safe=np.maximum(cap[ctx.types],1)
++        normalized=np.c_[d/safe,np.log1p(d)/np.log1p(safe)].astype(np.float32)
++        return torch.as_tensor(np.c_[normalized,np.eye(ctx.model.n_types,dtype=np.float32)[ctx.types],
++                    np.full((len(ctx.types),1),t,dtype=np.float32)],device=ctx.device)
++    def forward(self,x):return self.degree_out(self.degree_encoder(x))
++
++class StructuralDenoiser(TypedSparseDenoiser):
++    architecture_version='typed_structure_192_oabc_v1'
++    def __init__(self,case,cfg,arm,basis=None):
++        if arm not in ('O','A','B','C','D','E'):raise ValueError('arm')
++        args=dict(cfg['model']);args['cn_hidden']=32 if arm in ('A','D','E') else 0
++        super().__init__(case['n_types'],case['n_families'],family_pairs=case['space'].pairs,prior=case['prior'],**args)
++        self.branch=DegreeBranch(case['n_families'],case['n_types'],cfg['model']['width'])
++        self.arm=arm;self.feature_calls=0;self.feature_seconds=0.;self.encoding_seconds=0.;self.transfer_seconds=0.
++        if arm not in ('A','D','E'):
++            # CN is last in the original feature layout: remove every CN input
++            # and its learned readout columns, not merely mask a CN score.
++            start=self.joint_slices['CN'].start
++            first=self.joint_head[0];new=nn.Linear(start,first.out_features)
++            with torch.no_grad():new.weight.copy_(first.weight[:,:start]);new.bias.copy_(first.bias)
++            self.joint_head[0]=new;self.cn_feature_width=0;self.joint_slices['CN']=slice(start,start)
++        if arm in ('B','C','D','E'):
++            self.refex_projection=nn.Linear(feature_width(case['n_families']),cfg['model']['width'],bias=False)
++            nn.init.zeros_(self.refex_projection.weight)
++        if arm in ('C','E'):
++            if basis is None:raise ValueError('frozen basis required')
++            if isinstance(basis,dict):matrix=np.asarray(basis['basis'],dtype=np.float64);offsets=np.asarray(basis['offsets'],dtype=np.int64)
++            else:
++                # Historical small engineering fixtures only; no formal loader uses this.
++                value=np.asarray(basis,dtype=np.float64)
++                if value.ndim!=3 or value.shape[0]!=case['n_types']:raise ValueError('typed basis required')
++                offsets=np.arange(case['n_types']+1,dtype=np.int64)*value.shape[1];matrix=value.reshape(-1,value.shape[-1])
++            if matrix.ndim!=2 or matrix.shape[1]!=feature_width(case['n_families']) or offsets.shape!=(case['n_types']+1,) or offsets[0]!=0 or offsets[-1]!=len(matrix) or (np.diff(offsets)<=0).any():raise ValueError('dynamic typed basis shape')
++            if not np.isfinite(matrix).all() or (matrix<0).any() or not np.allclose(np.linalg.norm(matrix,axis=1),1.,atol=1e-12,rtol=1e-12):raise ValueError('finite nonnegative unit-L2 basis required')
++            self.register_buffer('role_basis',torch.tensor(matrix,dtype=torch.float64))
++            self.register_buffer('role_offsets',torch.tensor(offsets,dtype=torch.long))
++            self.role_projection=nn.Linear(len(matrix),cfg['model']['width'],bias=False)
++            nn.init.zeros_(self.role_projection.weight)
++            self._basis_cpu=matrix.copy();self._basis_cpu.flags.writeable=False
++            self._offsets_cpu=offsets.copy();self._offsets_cpu.flags.writeable=False
++            self._basis_hash=digest(self._basis_cpu,self._offsets_cpu)
++            self._basis_tensor_identity=self._role_identity()
++
++    def _role_identity(self):
++        return (id(self.role_basis),self.role_basis._version,id(self.role_offsets),self.role_offsets._version)
++
++    def joint_predict(self,ctx,graph,time,mask_cn=False,return_features=False):
++        if not hasattr(ctx,'degree_input'):ctx.degree_input=self.branch.input(ctx,time)
++        ctx.node_residual=self.branch(ctx.degree_input)
++        if self.arm in ('B','C','D','E'):
++            key=(ctx.state_version,float(time),self.arm)
++            if hasattr(ctx,'structural_key') and ctx.structural_key!=key:raise ValueError('stale structural cache')
++            if self.arm in ('C','E'):
++                # Check both state_dict replacement/in-place writes and private CPU source.
++                identity=self._role_identity()
++                if identity!=self._basis_tensor_identity:raise ValueError('basis replaced; explicit checkpoint reload required')
++                if hasattr(ctx,'basis_identity') and ctx.basis_identity!=identity:raise ValueError('basis changed')
++                if digest(self._basis_cpu,self._offsets_cpu)!=self._basis_hash:raise ValueError('basis CPU changed')
++                ctx.basis_identity=identity
++            if not hasattr(ctx,'structural_features'):
++                begin=__import__('time').perf_counter();f=extract(ctx.types,ctx.old,ctx.of,ctx.pairs)
++                self.feature_seconds+=__import__('time').perf_counter()-begin;self.feature_calls+=1
++                begin=__import__('time').perf_counter()
++                g=None
++                if self.arm in ('C','E'):g,ctx.encoding_receipt=encode_typed(f,self._basis_cpu,self._offsets_cpu,ctx.types)
++                self.encoding_seconds+=__import__('time').perf_counter()-begin
++                begin=__import__('time').perf_counter()
++                ctx.structural_features=torch.tensor(f,dtype=torch.float32,device=ctx.device)
++                ctx.structural_roles=None if g is None else torch.tensor(g,dtype=torch.float32,device=ctx.device)
++                if ctx.device.type=='cuda':torch.cuda.synchronize(ctx.device)
++                self.transfer_seconds+=__import__('time').perf_counter()-begin
++                ctx.structural_key=key
++            # Cache only fixed input arrays, not learned outputs across optimizer steps.
++            ctx.node_residual=ctx.node_residual+self.refex_projection(ctx.structural_features)
++            if self.arm in ('C','E'):ctx.node_residual=ctx.node_residual+self.role_projection(ctx.structural_roles)
++        return super().joint_predict(ctx,graph,time,mask_cn,return_features)
++
++    def load_state_dict(self,state_dict,strict=True):
++        result=super().load_state_dict(state_dict,strict=strict)
++        if self.arm in ('C','E'):
++            self._basis_cpu=self.role_basis.detach().cpu().numpy().copy();self._basis_cpu.flags.writeable=False
++            self._offsets_cpu=self.role_offsets.detach().cpu().numpy().copy();self._offsets_cpu.flags.writeable=False
++            self._basis_hash=digest(self._basis_cpu,self._offsets_cpu)
++            self._basis_tensor_identity=self._role_identity()
++        return result
++
++    def _apply(self,fn):
++        result=super()._apply(fn)
++        if hasattr(self,'role_basis'):
++            self._basis_tensor_identity=self._role_identity()
++        return result
++
++def copy_common(source,target):
++    """Actually copy tensors; differing CN readout columns explicitly mapped."""
++    src=source.state_dict();dst=target.state_dict();copied=[]
++    for name,value in dst.items():
++        if name in src and src[name].shape==value.shape:
++            value.copy_(src[name]);copied.append(name)
++        elif name=='joint_head.0.weight':
++            value.copy_(src[name][:,:value.shape[1]]);copied.append(name+'[:,:shared]')
++    target.load_state_dict(dst)
++    for name in copied:
++        if name.endswith('[:,:shared]'):
++            assert torch.equal(target.joint_head[0].weight,src['joint_head.0.weight'][:,:target.joint_head[0].in_features])
++        else:assert torch.equal(target.state_dict()[name],src[name])
++    return copied
+diff --git a/experiments/typed_structure_cn_diagnosis_v1/execution_sources/analyze_existing.py b/experiments/typed_structure_cn_diagnosis_v1/execution_sources/analyze_existing.py
+new file mode 100644
+index 0000000..deb94e4
+--- /dev/null
++++ b/experiments/typed_structure_cn_diagnosis_v1/execution_sources/analyze_existing.py
+@@ -0,0 +1,53 @@
++"""Read existing audited metrics and validation; no model or graph evaluation."""
++import pathlib,json,csv,collections,time
++B=pathlib.Path(__file__).resolve().parent
++ROOT=B.parents[1];RUN=ROOT/'results/typed_structure_final_screen_formal_v1_20261029T0325/run'
++SRC=ROOT/'research_branches/typed_structure_final_screen_review/experiments/typed_structure_final_screen_v1'
++def read(p):return json.loads(p.read_text())
++def write(name,rows):
++ keys=list(dict.fromkeys(k for x in rows for k in x))
++ with (B/name).open('w',newline='') as f:w=csv.DictWriter(f,fieldnames=keys);w.writeheader();w.writerows(rows)
++def mean(xs):return sum(xs)/len(xs) if xs and all(x is not None for x in xs) else None
++def diff(x,y):return None if x is None or y is None else x-y
++e=read(RUN/'unified_evaluation.json');cfg=read(SRC/'package/config.json');families=list(__import__('itertools').combinations_with_replacement(range(4),2))
++rr=[];tr=[];cl=[];vr=[];tot=[];diffs=[];tail=[]
++for row in e['records']:
++ d=row['dataset'];names=cfg['datasets'][d]['type_names'];s=row['statistics'];identity={k:row[k] for k in ['dataset','arm','train_seed','sample_seed','version']};ref=read(RUN/'derived_lcc_evaluation'/f'{d}_reference.json')['statistics']
++ tot.append(dict(**identity,edges=s['edges'],reference_edges=ref['edges'],W1=row['comparison']['main_incident4_W1'],joint_TV=row['comparison']['main_joint_degree_TV'],triangles=s['triangles'],reference_triangles=ref['triangles'],lcc=s['lcc']))
++ for f,(a,b) in enumerate(families):
++  rr.append(dict(**identity,family=f,relation=names[a]+'--'+names[b],edges=s['family_edges'][f],reference_edges=ref['family_edges'][f],signed_error=s['family_edges'][f]-ref['family_edges'][f],absolute_error=abs(s['family_edges'][f]-ref['family_edges'][f])))
++ for t,name in enumerate(names):
++  sp=s['typed_degree'][name];rp=ref['typed_degree'][name]
++  tail.append(dict(**identity,type=name,sorted_degrees=json.dumps(sp['sorted_degrees']),reference_sorted_degrees=json.dumps(rp['sorted_degrees'])))
++  for k in ['maximum','second','zero','low_le1','mean','p90','p99','gini_standard','top5_degree_share']:
++   tr.append(dict(**identity,type=name,metric=k,value=sp[k],reference=rp[k],error=None if sp[k] is None or rp[k] is None else abs(sp[k]-rp[k])))
++  for k,v in [('total_degree_W1',row['comparison']['type_total_degree_W1'][name]),('joint_degree_TV',row['comparison']['joint_TV_by_type'][name])]:tr.append(dict(**identity,type=name,metric=k,value=v,reference=0,error=v))
++  for f,pair in enumerate(families):
++   if t not in pair:continue
++   q=sp['by_relation'][f];qr=rp['by_relation'][f]
++   for k in ['mean','max','zero','low_le1','p90','p99']:
++    tr.append(dict(**identity,type=name,metric=f'relation{f}_{k}',value=q[k],reference=qr[k],error=None if q[k] is None or qr[k] is None else abs(q[k]-qr[k])))
++ for key,value in s['typed_twohop_closure'].items():
++  a,b,c=__import__('ast').literal_eval(key);r=ref['typed_twohop_closure'][key]
++  cl.append(dict(**identity,pattern=key,label=names[a]+'--'+names[b]+'--'+names[c],**value,**{'reference_'+k:v for k,v in r.items()}))
++for d in ['IMDB','PubMed']:
++ for arm in ['A','C','D','E']:
++  seed=2026102911 if d=='IMDB' else 2026102912;folder=RUN/f'{d}_s{seed}_{arm}'
++  for node in read(folder/'validation.json'):
++   for kind in ['raw','ema_0.99']:
++    for x in node[kind]['rows']:
++     for y in x['family']:
++      f=y['family'];a,b=families[f];names=cfg['datasets'][d]['type_names']
++      vr.append(dict(dataset=d,arm=arm,train_seed=seed,update=node['updates'],readout=kind,t=x['t'],input_sha256=x['input_sha256'],total_CE=x['ce_sum_over_S'],relation=names[a]+'--'+names[b],p0_minus_reference=y['expected_edges']-y['true_edges'],q_available=False,**y))
++for d,left,right in [('PubMed','E','C'),('IMDB','D','A'),('IMDB','E','D')]:
++ for f in range(10):
++  rows=lambda a:[x for x in rr if x['dataset']==d and x['arm']==a and x['family']==f and x['version']=='original']
++  a,b=rows(left),rows(right);diffs.append(dict(dataset=d,contrast=left+'-'+right,family=f,relation=a[0]['relation'],reference=a[0]['reference_edges'],left=mean([x['edges'] for x in a]),right=mean([x['edges'] for x in b]),difference=mean([x['edges'] for x in a])-mean([x['edges'] for x in b]),absolute_error_difference=mean([x['absolute_error'] for x in a])-mean([x['absolute_error'] for x in b])))
++for name,rows in [('graph_totals.csv',tot),('graph_relations.csv',rr),('typed_degrees_and_joint.csv',tr),('degree_spectra.csv',tail),('typed_closure.csv',cl),('fixed_validation.csv',vr),('relation_contrasts.csv',diffs)]:write(name,rows)
++summary=dict(status='complete',read_only=True,graph_records=len(e['records']),validation_relation_rows=len(vr),source_run=str(RUN),missing=['fixed validation saved aggregates, not original logits/p0/q arrays','validation ordinary state arrays not separately persisted; frozen seed recipe and input hashes available','no neuron/CN intermediate attribution collected'],relation_contrasts=diffs)
++(B/'existing_summary.json').write_text(json.dumps(summary,indent=2))
++print('PubMed E-C',json.dumps(diffs[:10],indent=2))
++for t in [1,500,1000]:
++ print('PubMed final EMA t',t)
++ for arm in ['A','C','D','E']:
++  r=[x for x in vr if x['dataset']=='PubMed' and x['arm']==arm and x['update']==3000 and x['readout']=='ema_0.99' and x['t']==t];print(arm,'p0',sum(x['expected_edges'] for x in r),'CE',r[0]['total_CE'],'by_relation',[(x['relation'],round(x['p0_minus_reference'],3)) for x in r])
+diff --git a/experiments/typed_structure_cn_diagnosis_v1/execution_sources/analyze_panel.py b/experiments/typed_structure_cn_diagnosis_v1/execution_sources/analyze_panel.py
+new file mode 100644
+index 0000000..e1998f8
+--- /dev/null
++++ b/experiments/typed_structure_cn_diagnosis_v1/execution_sources/analyze_panel.py
+@@ -0,0 +1,70 @@
++"""CPU reductions of the fixed eight outputs; mutually exclusive bins per axis."""
++import pathlib,json,csv,collections,ast,math
++import numpy as np
++B=pathlib.Path(__file__).resolve().parent;ROOT=B.parents[1]
++RUN=ROOT/'results/typed_structure_final_screen_formal_v1_20261029T0325/run'
++def read(p):return json.loads(p.read_text())
++def write(name,rows):
++ keys=list(dict.fromkeys(k for x in rows for k in x))
++ with (B/name).open('w',newline='') as f:w=csv.DictWriter(f,fieldnames=keys);w.writeheader();w.writerows(rows)
++def div(x,n):return float(x/n) if n else None
++def bins(x,bounds):
++ bounds=np.array([float(v) for v in bounds]);idx=np.searchsorted(bounds,x,side='right')-1
++ return [(f'{int(a)}+' if math.isinf(b) else f'{int(a)}..{int(b)-1}',idx==i) for i,(a,b) in enumerate(zip(bounds[:-1],bounds[1:]))]
++panel=read(B/'frozen_panel.json');receipt=read(B/'forward/receipt.json');assert receipt['status']=='complete' and receipt['completed_full_queries']==8
++names=['Gene','Disease','Chemical','Species'];relations=list(__import__('itertools').combinations_with_replacement(range(4),2));rows=[];buckets=[];clean=[];slots=[]
++for info in panel['inputs']:
++ inp=info['name'];c=dict(np.load(B/'forward'/('C_'+inp+'.npz')));e=dict(np.load(B/'forward'/('E_'+inp+'.npz')))
++ for k in ['ids','state','t','types','schema','query','family']:np.testing.assert_array_equal(c[k],e[k])
++ t=int(c['t']);state=c['state'].astype(bool);u,v=c['query'];f=c['family'];A=np.zeros((192,192),dtype=np.int64);A[u[state],v[state]]=1;A[v[state],u[state]]=1
++ degree=A.sum(1);rd=np.zeros((192,10),dtype=np.int64);np.add.at(rd,(u[state],f[state]),1);np.add.at(rd,(v[state],f[state]),1)
++ common=A@A;axes={'cn_all':(common[u,v],panel['bins']['common_neighbors']),'min_degree':(np.minimum(degree[u],degree[v]),panel['bins']['endpoint_total_degree']),'max_degree':(np.maximum(degree[u],degree[v]),panel['bins']['endpoint_total_degree']),'min_relation_degree':(np.minimum(rd[u,f],rd[v,f]),panel['bins']['endpoint_relation_degree']),'max_relation_degree':(np.maximum(rd[u,f],rd[v,f]),panel['bins']['endpoint_relation_degree'])}
++ for typ,name in enumerate(names):cn=A[:,c['types']==typ]@A[c['types']==typ,:];axes['cn_'+name]=(cn[u,v],panel['bins']['common_neighbors'])
++ deltaP=e['p0']-c['p0'];deltaQ=e['q']-c['q'];deltaL=(e['logits'][:,1].astype(float)-e['logits'][:,0])-(c['logits'][:,1].astype(float)-c['logits'][:,0])
++ np.savez_compressed(B/'forward'/('paired_'+inp+'.npz'),ids=c['ids'],state=c['state'],family=f,query=c['query'],delta_p0=deltaP,delta_q=deltaQ,delta_logit_edge_minus_none=deltaL,cn=common[u,v],endpoint_degree=np.stack([degree[u],degree[v]]),endpoint_relation_degree=np.stack([rd[u,f],rd[v,f]]))
++ for fam,(a,b) in enumerate(relations):
++  mask=f==fam;relation=names[a]+'--'+names[b]
++  values={}
++  for arm,x in [('C',c),('E',e)]:
++   birth=float(x['q'][mask&~state].sum());death=float((1-x['q'][mask&state]).sum());values[arm]=dict(p0_sum=float(x['p0'][mask].sum()),q_sum=float(x['q'][mask].sum()),birth=birth,death=death,net=birth-death)
++  rows.append(dict(input=inp,t=t,family=fam,relation=relation,slots=int(mask.sum()),current_edges=int((mask&state).sum()),**{arm+'_'+k:v for arm,z in values.items() for k,v in z.items()},**{'E_minus_C_'+k:values['E'][k]-values['C'][k] for k in values['C']}))
++  for exists in [False,True]:
++   base=mask&(state==exists)
++   for axis,(vals,bounds) in axes.items():
++    for label,selection in bins(vals,bounds):
++     ix=base&selection;n=int(ix.sum());dq=deltaQ[ix];dp=deltaP[ix];dl=deltaL[ix]
++     buckets.append(dict(input=inp,t=t,family=fam,relation=relation,current_edge=int(exists),axis=axis,bin=label,slots=n,C_p0_sum=float(c['p0'][ix].sum()),E_p0_sum=float(e['p0'][ix].sum()),C_q_sum=float(c['q'][ix].sum()),E_q_sum=float(e['q'][ix].sum()),delta_p0_sum=float(dp.sum()),delta_q_sum=float(dq.sum()),delta_q_positive_sum=float(dq[dq>0].sum()),delta_q_negative_sum=float(dq[dq<0].sum()),delta_logit_mean=div(dl.sum(),n),delta_p0_mean=div(dp.sum(),n),delta_q_mean=div(dq.sum(),n),delta_q_min=float(dq.min()) if n else None,delta_q_q25=float(np.quantile(dq,.25)) if n else None,delta_q_median=float(np.median(dq)) if n else None,delta_q_q75=float(np.quantile(dq,.75)) if n else None,delta_q_max=float(dq.max()) if n else None))
++  if 'clean_label' in c:
++   for exists in [False,True]:
++    for truth in [0,1]:
++     ix=mask&(state==exists)&(c['clean_label']==truth);n=int(ix.sum())
++     clean.append(dict(input=inp,t=t,family=fam,relation=relation,current_edge=int(exists),clean_label=truth,slots=n,**{arm+'_'+k:div(x[k][ix].sum(),n) for arm,x in [('C',c),('E',e)] for k in ['p0','q','ce']}))
++write('cross_relations.csv',rows);write('cross_slot_strata.csv',buckets);write('ordinary_label_groups.csv',clean)
++# Algebraic opportunity/rate decomposition per stored graph, not a causal attribution.
++ev=read(RUN/'unified_evaluation.json');closure=[];tri=[];index={(x['dataset'],x['arm'],x['sample_seed'],x['version']):x for x in ev['records']}
++for d,left,right in [('PubMed','E','C'),('IMDB','D','A'),('IMDB','E','D')]:
++ ref=read(RUN/'derived_lcc_evaluation'/f'{d}_reference.json')['statistics']
++ for sample in [2026102821,2026102822]:
++  for version in ['original','lcc']:
++   l=index[d,left,sample,version]['statistics'];r=index[d,right,sample,version]['statistics']
++   for key in l['typed_twohop_closure']:
++    x,y,z=l['typed_twohop_closure'][key],r['typed_twohop_closure'][key],ref['typed_twohop_closure'][key]
++    for basis in ['path','unique_pair']:
++     nl,nr=x[basis+'_denominator'],y[basis+'_denominator'];pl,pr=x[basis+'_ratio'],y[basis+'_ratio'];numl,numr=x[basis+'_numerator'],y[basis+'_numerator'];op=rate=None
++     if pl is not None and pr is not None:op=(nl-nr)*(pl+pr)/2;rate=(pl-pr)*(nl+nr)/2;assert np.isclose(op+rate,numl-numr,atol=1e-9)
++     closure.append(dict(dataset=d,contrast=left+'-'+right,sample_seed=sample,version=version,pattern=key,basis=basis,left_opportunities=nl,right_opportunities=nr,reference_opportunities=z[basis+'_denominator'],left_closed=numl,right_closed=numr,reference_closed=z[basis+'_numerator'],left_ratio=pl,right_ratio=pr,reference_ratio=z[basis+'_ratio'],delta_closed=numl-numr,opportunity_component=op,rate_component=rate,reason=None if op is not None else 'undefined_zero_denominator',interpretation='symmetric exact algebraic decomposition, not causal'))
++   for key in set(l['typed_triangles'])|set(r['typed_triangles'])|set(ref['typed_triangles']):
++    x,y,z=l['typed_triangles'].get(key,0),r['typed_triangles'].get(key,0),ref['typed_triangles'].get(key,0)
++    tri.append(dict(dataset=d,contrast=left+'-'+right,sample_seed=sample,version=version,pattern=key,left=x,right=y,reference=z,quantity_difference=x-y,absolute_error_difference=abs(x-z)-abs(y-z)))
++write('closure_decomposition.csv',closure);write('triangle_contrasts.csv',tri)
++summary=[]
++for inp in [x['name'] for x in panel['inputs']]:
++ rr=[x for x in rows if x['input']==inp];s=dict(input=inp,current_edges=sum(x['current_edges'] for x in rr))
++ for arm in ['C','E']:
++  for k in ['p0_sum','q_sum','birth','death','net']:s[arm+'_'+k]=sum(x[arm+'_'+k] for x in rr)
++ for k in ['p0_sum','q_sum','birth','death','net']:s['E_minus_C_'+k]=s['E_'+k]-s['C_'+k]
++ summary.append(s)
++write('cross_totals.csv',summary)
++print(json.dumps(summary,indent=2))
++print('relation net deltas')
++for inp in [x['name'] for x in panel['inputs']]:print(inp,[(x['relation'],round(x['E_minus_C_p0_sum'],4),round(x['E_minus_C_birth'],6),round(x['E_minus_C_death'],6),round(x['E_minus_C_net'],6)) for x in rows if x['input']==inp])
+diff --git a/experiments/typed_structure_cn_diagnosis_v1/execution_sources/audit_and_cn.py b/experiments/typed_structure_cn_diagnosis_v1/execution_sources/audit_and_cn.py
+new file mode 100644
+index 0000000..9c3e5a6
+--- /dev/null
++++ b/experiments/typed_structure_cn_diagnosis_v1/execution_sources/audit_and_cn.py
+@@ -0,0 +1,60 @@
++"""CPU-only saved-output audit and nonlearned CN scale/mapping evidence."""
++import pathlib,json,csv,hashlib,itertools,collections
++import numpy as np
++B=pathlib.Path(__file__).resolve().parent
++def read(p):return json.loads(p.read_text())
++def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
++def write(name,rows):
++ with (B/name).open('w',newline='') as h:
++  w=csv.DictWriter(h,fieldnames=list(rows[0]));w.writeheader();w.writerows(rows)
++panel=read(B/'frozen_panel.json');receipt=read(B/'forward/receipt.json')
++assert receipt['completed_full_queries']==receipt['attempted_full_queries']==8
++assert receipt['optimizer_steps']==receipt['backwards']==receipt['sampled_graphs']==0
++checks=collections.Counter();scale=[];compact=[]
++source=B.parents[1]/'research_branches/typed_structure_final_screen_review/experiments/typed_structure_final_screen_v1/package'
++source_files=['hsgd/common_neighbor.py','hsgd/model.py','hsgd/computational.py','hsgd/vendor/sample_edges_utils_typed.py','model_variants.py']
++for item in panel['inputs']:
++ x=dict(np.load(B/'inputs'/(item['name']+'.npz')));assert sha(B/'inputs'/(item['name']+'.npz'))==item['sha256']
++ ids=x['ids'];assert np.array_equal(np.sort(ids),np.arange(18336));checks['input_full_coverage']+=1
++ for arm in ['C','E']:
++  file=B/'forward'/(arm+'_'+item['name']+'.npz');r=read(file.with_suffix('.json'));assert sha(file)==r['output_sha256']
++  z=dict(np.load(file));assert np.array_equal(z['query'][:,ids],x['query']);assert np.array_equal(z['family'][ids],x['f']);assert np.array_equal(z['state'],x['state']);checks['input_mapping_and_output_hash']+=1
++  for key in ['p0','q']:assert np.isfinite(z[key]).all() and ((z[key]>=0)&(z[key]<=1)).all()
++  assert np.isfinite(z['logits']).all();checks['finite_probability_support']+=1
++  s=z['state'].astype(bool);assert np.isclose(z['q'].sum()-s.sum(),z['q'][~s].sum()-(1-z['q'][s]).sum(),atol=1e-10,rtol=0);checks['net_identity']+=1
++  if int(z['t'])==1:np.testing.assert_allclose(z['p0'],z['q'],atol=1e-12,rtol=0);checks['t1_q_equals_p0']+=1
++  if r['historical_comparison']:assert r['historical_comparison']['ce_aggregate_pass'] and r['historical_comparison']['p0_aggregate_pass'];checks['historical_aggregate_reproduction']+=1
++ z=dict(np.load(B/'forward'/('C_'+item['name']+'.npz')));u,v=z['query'];A=np.zeros((192,192),dtype=np.int64);s=z['state'].astype(bool);A[u[s],v[s]]=1;A[v[s],u[s]]=1
++ cn=np.stack([(A[:,z['types']==typ]@A[z['types']==typ,:])[u,v] for typ in range(4)],1)
++ # Independent set intersections verify endpoint correspondence; no model called.
++ adj=[set(np.flatnonzero(a)) for a in A]
++ for k,(a,b) in enumerate(zip(u,v)):
++  common=adj[a]&adj[b];expected=np.bincount(z['types'][list(common)],minlength=4)
++  assert np.array_equal(cn[k],expected)
++ checks['typed_CN_slot_set_intersections']+=len(u)
++ for typ in range(4):
++  c=cn[:,typ];l=np.log1p(c)
++  scale.append(dict(input=item['name'],middle_type=typ,slots=len(c),nonzero_slots=int((c>0).sum()),raw_max=int(c.max()),raw_mean=float(c.mean()),log1p_max=float(l.max()),log1p_mean=float(l.mean()),log1p_rms=float(np.sqrt(np.mean(l*l))),origin='CPU topology only; not learned vector'))
++ assert np.array_equal(cn.sum(1),(A@A)[u,v]);checks['CN_total_consistency']+=1
++rows=list(csv.DictReader((B/'cross_slot_strata.csv').open()))
++for inp in [x['name'] for x in panel['inputs']]:
++ for axis in ['cn_all','min_degree','min_relation_degree']:
++  groups=collections.defaultdict(list)
++  for x in rows:
++   if x['input']==inp and x['axis']==axis:groups[(x['current_edge'],x['bin'])].append(x)
++  for (edge,bin_),xs in groups.items():
++   compact.append(dict(input=inp,axis=axis,current_edge=int(edge),bin=bin_,slots=sum(int(x['slots']) for x in xs),delta_p0_sum=sum(float(x['delta_p0_sum']) for x in xs),delta_q_sum=sum(float(x['delta_q_sum']) for x in xs)))
++ for fam in range(10):
++  for edge in [0,1]:
++   for axis in sorted({x['axis'] for x in rows}):
++    xs=[x for x in rows if x['input']==inp and int(x['family'])==fam and int(x['current_edge'])==edge and x['axis']==axis]
++    z=dict(np.load(B/'forward'/('paired_'+inp+'.npz')));mask=(z['family']==fam)&(z['state']==edge)
++    assert sum(int(x['slots']) for x in xs)==int(mask.sum())
++    assert np.isclose(sum(float(x['delta_q_sum']) for x in xs),z['delta_q'][mask].sum(),atol=1e-12,rtol=0)
++    checks['stratum_partition']+=1
++for row in csv.DictReader((B/'closure_decomposition.csv').open()):
++ if not row['reason']:
++  assert abs(float(row['delta_closed'])-float(row['opportunity_component'])-float(row['rate_component']))<1e-9;checks['closure_algebra']+=1
++write('cn_count_scales.csv',scale);write('strata_all_relations.csv',compact)
++audit=dict(status='passed',checks=dict(checks),model_forward_calls=0,optimizer_steps=0,new_graphs=0,source_sha256={name:sha(source/name) for name in source_files},missing=['learned CN32 activations and joint-head block RMS were not captured during the already completed eight forwards; no extra forward permitted'],CN_dimensions=dict(phi_input=281,phi_hidden=32,phi_output=32,mean=32,typed_log_counts=4,existence=1,total=37,joint_input=776,C_joint_input=739,joint_hidden=128,joint_output=2))
++(B/'audit.json').write_text(json.dumps(audit,indent=2));print(json.dumps(audit,indent=2))
+diff --git a/experiments/typed_structure_cn_diagnosis_v1/execution_sources/forward_panel.py b/experiments/typed_structure_cn_diagnosis_v1/execution_sources/forward_panel.py
+new file mode 100644
+index 0000000..2cf43a2
+--- /dev/null
++++ b/experiments/typed_structure_cn_diagnosis_v1/execution_sources/forward_panel.py
+@@ -0,0 +1,81 @@
++"""At most eight fixed-weight full queries; no backward, optimizer, or sampling."""
++import pathlib,json,sys,os,time,hashlib,traceback,resource,subprocess,signal
++import numpy as np
++B=pathlib.Path(__file__).resolve().parent;ROOT=B.parents[1]
++SRC=ROOT/'research_branches/typed_structure_final_screen_review/experiments/typed_structure_final_screen_v1'
++RUN=ROOT/'results/typed_structure_final_screen_formal_v1_20261029T0325/run'
++sys.path[:0]=[str(SRC),str(SRC/'package')]
++def read(p):return json.loads(p.read_text())
++def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
++def write(p,x):p.write_text(json.dumps(x,indent=2))
++panel=read(B/'frozen_panel.json');ledger=read(B/'ledger.json');out=B/'forward';out.mkdir(exist_ok=False)
++started=time.time();attempted=0;completed=[];failure=None
++def check():
++ if time.time()>=ledger['deadline_epoch']-180:raise TimeoutError('three-minute delivery reserve')
++ if (B/'STOP').exists():raise InterruptedError('STOP')
++def alarm(sig,frame):raise TimeoutError('bounded fixed panel process limit')
++signal.signal(signal.SIGALRM,alarm);signal.alarm(max(1,min(300,int(ledger['deadline_epoch']-time.time()-180))))
++try:
++ check();uuid=os.environ['CUDA_VISIBLE_DEVICES'];assert uuid=='GPU-12b85b68-69e6-12fa-76ce-986c0b46e8a7'
++ apps=subprocess.check_output(['nvidia-smi','-i',uuid,'--query-compute-apps=pid,process_name','--format=csv,noheader'],text=True,timeout=20)
++ assert not apps.strip(),'GPU occupied before diagnostic: '+apps
++ resource_record=subprocess.check_output(['nvidia-smi','-i',uuid,'--query-gpu=uuid,name,memory.total,memory.used,utilization.gpu','--format=csv,noheader'],text=True,timeout=20)
++ write(out/'resource_precheck.json',dict(uuid=uuid,owner_authorization='current user explicitly permits one available local GPU; previous local allocation retained',compute_apps=apps,device=resource_record,epoch=time.time()))
++ import torch
++ from model_io import configure
++ from runtime_contract import source_binding,dictionary_expected
++ from experiment_contract import read_dictionary
++ from prepare import load_case
++ from model_variants import StructuralDenoiser
++ from hsgd.computational import FrozenTypedContext
++ from hsgd.bw_preflight.common import schedule,check_prob
++ from hsgd.kernel import MarginalKernel
++ from hsgd.losses import supported_binary_ce
++ env=configure();write(out/'environment.json',env)
++ oldenv=read(RUN/'PubMed_s2026102912_C/environment.json')
++ for k in ['python_version','torch_runtime_version','packages','device_name']:assert env[k]==oldenv[k],k
++ assert source_binding()[1]==panel['source_sha256']
++ case,cfg=load_case('PubMed');basis,basis_receipt=read_dictionary(SRC/'dictionaries','PubMed',dictionary_expected('PubMed'));kernel=MarginalKernel(case['prior'],schedule(1000))
++ for arm in ['C','E']:
++  check();path=pathlib.Path(panel['models'][arm]['path']);assert sha(path)==panel['models'][arm]['sha256']
++  payload=torch.load(path,map_location='cpu');assert payload['readout']=='ema_0.99' and payload['updates']==3000 and payload['decay']==.99
++  assert payload['binding']['source_sha256']==panel['source_sha256'] and payload['binding']['arm']==arm and payload['binding']['dataset']=='PubMed'
++  model=StructuralDenoiser(case,cfg,arm,basis).cuda();model.load_state_dict(payload['model'],strict=True)
++  assert all(torch.equal(v.cpu(),payload['model'][k]) for k,v in model.state_dict().items())
++  model.eval();del payload
++  historical=read(RUN/f'PubMed_s2026102912_{arm}/validation.json')[-1]['ema_0.99']['rows']
++  for inp in panel['inputs']:
++   check();p=pathlib.Path(inp['path']);assert sha(p)==inp['sha256'];x=dict(np.load(p,allow_pickle=False));t=int(x['t']);ids=x['ids'];f=x['f'];state=x['state']
++   token=('fixed_diagnostic',arm,inp['name']);ctx=FrozenTypedContext(model,x['types'],x['edges'],x['edge_families'],token)
++   assert attempted<8;attempted+=1;write(out/'attempts.json',dict(attempted_full_queries=attempted,completed_full_queries=len(completed),optimizer_steps=0,new_graphs=0))
++   torch.cuda.synchronize();begin=time.perf_counter()
++   try:
++    with torch.no_grad():
++     graph,logits,prob=ctx.predict(x['query'],f,t/1000,token,details=True)
++     p0=check_prob(prob,f,case);L=logits.cpu().numpy();assert np.isfinite(L).all()
++     ce=None
++     if 'labels' in x:ce=supported_binary_ce(logits,torch.as_tensor(x['labels'],device='cuda'),model.prior[graph.query_families]).cpu().numpy()
++    torch.cuda.synchronize();network_seconds=time.perf_counter()-begin
++   finally:ctx.close()
++   q=kernel.reverse(p0,state[ids],f,t-1,t);assert np.isfinite(q).all() and ((q>=0)&(q<=1)).all()
++   arr=dict(ids=np.arange(18336),state=state,t=np.int64(t),types=x['types'],schema=x['schema'],query=np.empty((2,18336),dtype=np.int64),family=np.empty(18336,dtype=np.int64),p0=np.empty(18336,dtype=np.float64),q=np.empty(18336,dtype=np.float64),logits=np.empty((18336,2),dtype=np.float32))
++   for key,value in [('family',f),('p0',p0),('q',q),('logits',L)]:arr[key][ids]=value
++   arr['query'][:,ids]=x['query']
++   hist=None
++   if ce is not None:
++    arr['clean_label']=np.empty(18336,dtype=np.float32);arr['clean_label'][ids]=x['labels'];arr['ce']=np.empty(18336,dtype=np.float32);arr['ce'][ids]=ce
++    old=next(r for r in historical if r['t']==t);prob32=p0.astype(np.float32);current=[float(prob32[f==i].sum()) for i in range(10)];hist=dict(total_ce=float(ce.sum()/18336),historical_total_ce=old['ce_sum_over_S'],current_p0=current,historical_p0=[r['expected_edges'] for r in old['family']],scope='aggregate comparison only; old slot probabilities not saved')
++    atol=panel['historical_validation_comparison']['atol'];rtol=panel['historical_validation_comparison']['rtol']
++    hist['p0_aggregate_pass']=bool(np.allclose(current,hist['historical_p0'],atol=atol,rtol=rtol));hist['ce_aggregate_pass']=bool(np.isclose(hist['total_ce'],hist['historical_total_ce'],atol=atol,rtol=rtol))
++    assert hist['p0_aggregate_pass'] and hist['ce_aggregate_pass'],'historical aggregate mismatch'
++   name=arm+'_'+inp['name'];file=out/(name+'.npz');np.savez_compressed(file,**arr)
++   rec=dict(arm=arm,input=inp['name'],t=t,input_sha256=inp['sha256'],weight_sha256=panel['models'][arm]['sha256'],output=str(file),output_sha256=sha(file),network_full_query_seconds=network_seconds,slots=18336,one_full_query=True,current_edges=int(state.sum()),p0_sum=float(p0.sum()),q_sum=float(q.sum()),birth=float(q[state[ids]==0].sum()),death=float((1-q[state[ids]==1]).sum()),historical_comparison=hist)
++   rec['net']=rec['birth']-rec['death'];completed.append(rec);write(out/(name+'.json'),rec);write(out/'progress.json',dict(attempted=attempted,completed=len(completed),rows=completed));print(json.dumps({k:rec[k] for k in ['arm','input','p0_sum','birth','death','net']}),flush=True)
++  del model;torch.cuda.empty_cache()
++except BaseException as e:failure=dict(error=repr(e),traceback=traceback.format_exc())
++finally:
++ signal.alarm(0)
++ result=dict(status='complete' if len(completed)==8 and failure is None else 'incomplete',attempted_full_queries=attempted,completed_full_queries=len(completed),optimizer_steps=0,backwards=0,sampled_graphs=0,started_epoch=started,finished_epoch=time.time(),rows=completed,failure=failure,peak_rss_mib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024)
++ if 'torch' in globals() and torch.cuda.is_initialized():result.update(peak_allocated_mib=torch.cuda.max_memory_allocated()/2**20,peak_reserved_mib=torch.cuda.max_memory_reserved()/2**20)
++ write(out/'receipt.json',result)
++if failure:raise RuntimeError(failure['error'])
+diff --git a/experiments/typed_structure_cn_diagnosis_v1/execution_sources/prepare_inputs.py b/experiments/typed_structure_cn_diagnosis_v1/execution_sources/prepare_inputs.py
+new file mode 100644
+index 0000000..2e256d3
+--- /dev/null
++++ b/experiments/typed_structure_cn_diagnosis_v1/execution_sources/prepare_inputs.py
+@@ -0,0 +1,44 @@
++"""Recover only hash-identical frozen validation inputs and read sealed X499."""
++import pathlib,json,hashlib,sys,time
++import numpy as np
++B=pathlib.Path(__file__).resolve().parent;ROOT=B.parents[1]
++SRC=ROOT/'research_branches/typed_structure_final_screen_review/experiments/typed_structure_final_screen_v1'
++RUN=ROOT/'results/typed_structure_final_screen_formal_v1_20261029T0325/run'
++sys.path[:0]=[str(SRC),str(SRC/'package')]
++from runtime_contract import source_binding,verify_assets
++from prepare import load_case
++from normal2 import pair_inputs
++from role_dictionary import seed32
++from probe import input_hash
++from hsgd.bw_preflight.common import state_edges,plan_for
++import torch
++def read(p):return json.loads(p.read_text())
++def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
++assert time.time()<read(B/'ledger.json')['deadline_epoch']
++assert source_binding()[1]==read(RUN/'activation.json')['source_sha256'];verify_assets()
++case,cfg=load_case('PubMed');cfg=dict(cfg,seed=2026102912)
++out=B/'inputs';out.mkdir(exist_ok=False);receipts=[]
++def save(name,t,state,ids,f,query,edges,ef,source,labels=None):
++ assert state.shape==(18336,) and np.isin(state,[0,1]).all()
++ assert np.array_equal(np.sort(ids),np.arange(18336)) and len(set(ids))==18336
++ payload=dict(t=np.int64(t),state=state,ids=ids,f=f,query=query,edges=edges,edge_families=ef,types=case['space'].types,schema=np.array(case['space'].pairs),prior=case['prior'])
++ if labels is not None:payload['labels']=labels
++ p=out/(name+'.npz');np.savez_compressed(p,**payload);receipts.append(dict(name=name,t=t,path=str(p),sha256=sha(p),source=source,edges=int(state.sum()),slots=len(ids)))
++for t in [1,500]:
++ private=np.random.default_rng(seed32(cfg['seed'],purpose='fixed_validation_noise',time=t));inp=pair_inputs(case,cfg,10000+t,private,t)[0]
++ digest=input_hash([inp]);expected=[]
++ for arm in ['C','E']:
++  v=read(RUN/f'PubMed_s2026102912_{arm}'/'validation.json')[-1];assert v['updates']==3000
++  for kind in ['raw','ema_0.99']:expected.append(next(x['input_sha256'] for x in v[kind]['rows'] if x['t']==t))
++ assert all(x==digest for x in expected),'frozen validation input not recovered exactly'
++ state=np.zeros(18336,dtype=np.uint8);fam,local=case['space'].encode(inp['edges']);state[case['space'].offsets[fam]+local]=1
++ save(f'ordinary_t{t}',t,state,inp['ids'],inp['f'],inp['query'],inp['edges'],inp['edge_families'],dict(kind='frozen ordinary forward-noise validation',original_array_file_persisted=False,recovered_by_original_recipe=True,matching_original_input_sha256=digest,comparisons=4,recipe='worker.validation -> seed32(train_seed,purpose=fixed_validation_noise,time=t), pair_inputs(case,cfg,10000+t,private,t)[0]'),inp['labels'])
++for arm in ['C','E']:
++ folder=RUN/f'PubMed_s2026102912_{arm}/ema_0.99/sample_2026102821';p=folder/'complete_t0499.pt';receipt=read(p.with_suffix('.sha256.json'));assert sha(p)==receipt['sha256']
++ ck=torch.load(p,map_location='cpu');assert ck['next_t']==499 and ck['job']['arm']==arm and ck['job']['sample_seed']==2026102821 and ck['job']['readout']=='ema_0.99'
++ model_receipt=read(RUN/f'PubMed_s2026102912_{arm}'/'readout_ema_0.99.sha256.json');assert ck['model_sha256']==model_receipt['sha256']
++ steps=[json.loads(l) for l in (folder/'steps.jsonl').read_text().splitlines()];step=next(x for x in steps if x['time']==500);assert step['remaining_time']==499
++ state=np.asarray(ck['state'],np.uint8);edges,ef=state_edges(case,state);ids,f,query=plan_for(case,[2026102821,499,61],1).block(0)
++ save(f'chain_{arm}_X499',499,state,ids,f,query,edges,ef,dict(kind='sealed free-generation state after t500 transition',state_file=str(p),state_file_sha256=receipt['sha256'],payload_next_t=ck['next_t'],preceding_log_time=500,preceding_log_remaining_time=499,model_sha256=ck['model_sha256'],no_chain_replay=True))
++frozen=dict(source_sha256=source_binding()[1],inputs=receipts,models={arm:dict(path=str(RUN/f'PubMed_s2026102912_{arm}/readout_ema_0.99.pt'),sha256=read(RUN/f'PubMed_s2026102912_{arm}/readout_ema_0.99.sha256.json')['sha256']) for arm in ['C','E']},query_rule='ordinary exact original plan; chain original next-time plan; each C/E pair shares the same frozen full query',bins=dict(endpoint_total_degree=[0,2,5,10,20,40,'inf'],endpoint_relation_degree=[0,1,2,5,10,20,'inf'],common_neighbors=[0,1,2,5,10,'inf']),group_rule='left-closed/right-open intervals; each endpoint stratified separately; CN all/type-specific; existing and absent slots separate',precision='original FP32 network and original p0 export; float64 original posterior',historical_validation_comparison=dict(atol=2e-6,rtol=1e-5,scope='saved aggregate CE and per-family p0 sums only; no historical slot arrays, no claim of slotwise replication'),max_queries=8,optimizer_steps=0,new_graphs=0,frozen_epoch=time.time())
++(B/'frozen_panel.json').write_text(json.dumps(frozen,indent=2));print(json.dumps(receipts,indent=2))
+diff --git a/experiments/typed_structure_cn_diagnosis_v1/forward_panel.py b/experiments/typed_structure_cn_diagnosis_v1/forward_panel.py
+new file mode 100644
+index 0000000..2cf43a2
+--- /dev/null
++++ b/experiments/typed_structure_cn_diagnosis_v1/forward_panel.py
+@@ -0,0 +1,81 @@
++"""At most eight fixed-weight full queries; no backward, optimizer, or sampling."""
++import pathlib,json,sys,os,time,hashlib,traceback,resource,subprocess,signal
++import numpy as np
++B=pathlib.Path(__file__).resolve().parent;ROOT=B.parents[1]
++SRC=ROOT/'research_branches/typed_structure_final_screen_review/experiments/typed_structure_final_screen_v1'
++RUN=ROOT/'results/typed_structure_final_screen_formal_v1_20261029T0325/run'
++sys.path[:0]=[str(SRC),str(SRC/'package')]
++def read(p):return json.loads(p.read_text())
++def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
++def write(p,x):p.write_text(json.dumps(x,indent=2))
++panel=read(B/'frozen_panel.json');ledger=read(B/'ledger.json');out=B/'forward';out.mkdir(exist_ok=False)
++started=time.time();attempted=0;completed=[];failure=None
++def check():
++ if time.time()>=ledger['deadline_epoch']-180:raise TimeoutError('three-minute delivery reserve')
++ if (B/'STOP').exists():raise InterruptedError('STOP')
++def alarm(sig,frame):raise TimeoutError('bounded fixed panel process limit')
++signal.signal(signal.SIGALRM,alarm);signal.alarm(max(1,min(300,int(ledger['deadline_epoch']-time.time()-180))))
++try:
++ check();uuid=os.environ['CUDA_VISIBLE_DEVICES'];assert uuid=='GPU-12b85b68-69e6-12fa-76ce-986c0b46e8a7'
++ apps=subprocess.check_output(['nvidia-smi','-i',uuid,'--query-compute-apps=pid,process_name','--format=csv,noheader'],text=True,timeout=20)
++ assert not apps.strip(),'GPU occupied before diagnostic: '+apps
++ resource_record=subprocess.check_output(['nvidia-smi','-i',uuid,'--query-gpu=uuid,name,memory.total,memory.used,utilization.gpu','--format=csv,noheader'],text=True,timeout=20)
++ write(out/'resource_precheck.json',dict(uuid=uuid,owner_authorization='current user explicitly permits one available local GPU; previous local allocation retained',compute_apps=apps,device=resource_record,epoch=time.time()))
++ import torch
++ from model_io import configure
++ from runtime_contract import source_binding,dictionary_expected
++ from experiment_contract import read_dictionary
++ from prepare import load_case
++ from model_variants import StructuralDenoiser
++ from hsgd.computational import FrozenTypedContext
++ from hsgd.bw_preflight.common import schedule,check_prob
++ from hsgd.kernel import MarginalKernel
++ from hsgd.losses import supported_binary_ce
++ env=configure();write(out/'environment.json',env)
++ oldenv=read(RUN/'PubMed_s2026102912_C/environment.json')
++ for k in ['python_version','torch_runtime_version','packages','device_name']:assert env[k]==oldenv[k],k
++ assert source_binding()[1]==panel['source_sha256']
++ case,cfg=load_case('PubMed');basis,basis_receipt=read_dictionary(SRC/'dictionaries','PubMed',dictionary_expected('PubMed'));kernel=MarginalKernel(case['prior'],schedule(1000))
++ for arm in ['C','E']:
++  check();path=pathlib.Path(panel['models'][arm]['path']);assert sha(path)==panel['models'][arm]['sha256']
++  payload=torch.load(path,map_location='cpu');assert payload['readout']=='ema_0.99' and payload['updates']==3000 and payload['decay']==.99
++  assert payload['binding']['source_sha256']==panel['source_sha256'] and payload['binding']['arm']==arm and payload['binding']['dataset']=='PubMed'
++  model=StructuralDenoiser(case,cfg,arm,basis).cuda();model.load_state_dict(payload['model'],strict=True)
++  assert all(torch.equal(v.cpu(),payload['model'][k]) for k,v in model.state_dict().items())
++  model.eval();del payload
++  historical=read(RUN/f'PubMed_s2026102912_{arm}/validation.json')[-1]['ema_0.99']['rows']
++  for inp in panel['inputs']:
++   check();p=pathlib.Path(inp['path']);assert sha(p)==inp['sha256'];x=dict(np.load(p,allow_pickle=False));t=int(x['t']);ids=x['ids'];f=x['f'];state=x['state']
++   token=('fixed_diagnostic',arm,inp['name']);ctx=FrozenTypedContext(model,x['types'],x['edges'],x['edge_families'],token)
++   assert attempted<8;attempted+=1;write(out/'attempts.json',dict(attempted_full_queries=attempted,completed_full_queries=len(completed),optimizer_steps=0,new_graphs=0))
++   torch.cuda.synchronize();begin=time.perf_counter()
++   try:
++    with torch.no_grad():
++     graph,logits,prob=ctx.predict(x['query'],f,t/1000,token,details=True)
++     p0=check_prob(prob,f,case);L=logits.cpu().numpy();assert np.isfinite(L).all()
++     ce=None
++     if 'labels' in x:ce=supported_binary_ce(logits,torch.as_tensor(x['labels'],device='cuda'),model.prior[graph.query_families]).cpu().numpy()
++    torch.cuda.synchronize();network_seconds=time.perf_counter()-begin
++   finally:ctx.close()
++   q=kernel.reverse(p0,state[ids],f,t-1,t);assert np.isfinite(q).all() and ((q>=0)&(q<=1)).all()
++   arr=dict(ids=np.arange(18336),state=state,t=np.int64(t),types=x['types'],schema=x['schema'],query=np.empty((2,18336),dtype=np.int64),family=np.empty(18336,dtype=np.int64),p0=np.empty(18336,dtype=np.float64),q=np.empty(18336,dtype=np.float64),logits=np.empty((18336,2),dtype=np.float32))
++   for key,value in [('family',f),('p0',p0),('q',q),('logits',L)]:arr[key][ids]=value
++   arr['query'][:,ids]=x['query']
++   hist=None
++   if ce is not None:
++    arr['clean_label']=np.empty(18336,dtype=np.float32);arr['clean_label'][ids]=x['labels'];arr['ce']=np.empty(18336,dtype=np.float32);arr['ce'][ids]=ce
++    old=next(r for r in historical if r['t']==t);prob32=p0.astype(np.float32);current=[float(prob32[f==i].sum()) for i in range(10)];hist=dict(total_ce=float(ce.sum()/18336),historical_total_ce=old['ce_sum_over_S'],current_p0=current,historical_p0=[r['expected_edges'] for r in old['family']],scope='aggregate comparison only; old slot probabilities not saved')
++    atol=panel['historical_validation_comparison']['atol'];rtol=panel['historical_validation_comparison']['rtol']
++    hist['p0_aggregate_pass']=bool(np.allclose(current,hist['historical_p0'],atol=atol,rtol=rtol));hist['ce_aggregate_pass']=bool(np.isclose(hist['total_ce'],hist['historical_total_ce'],atol=atol,rtol=rtol))
++    assert hist['p0_aggregate_pass'] and hist['ce_aggregate_pass'],'historical aggregate mismatch'
++   name=arm+'_'+inp['name'];file=out/(name+'.npz');np.savez_compressed(file,**arr)
++   rec=dict(arm=arm,input=inp['name'],t=t,input_sha256=inp['sha256'],weight_sha256=panel['models'][arm]['sha256'],output=str(file),output_sha256=sha(file),network_full_query_seconds=network_seconds,slots=18336,one_full_query=True,current_edges=int(state.sum()),p0_sum=float(p0.sum()),q_sum=float(q.sum()),birth=float(q[state[ids]==0].sum()),death=float((1-q[state[ids]==1]).sum()),historical_comparison=hist)
++   rec['net']=rec['birth']-rec['death'];completed.append(rec);write(out/(name+'.json'),rec);write(out/'progress.json',dict(attempted=attempted,completed=len(completed),rows=completed));print(json.dumps({k:rec[k] for k in ['arm','input','p0_sum','birth','death','net']}),flush=True)
++  del model;torch.cuda.empty_cache()
++except BaseException as e:failure=dict(error=repr(e),traceback=traceback.format_exc())
++finally:
++ signal.alarm(0)
++ result=dict(status='complete' if len(completed)==8 and failure is None else 'incomplete',attempted_full_queries=attempted,completed_full_queries=len(completed),optimizer_steps=0,backwards=0,sampled_graphs=0,started_epoch=started,finished_epoch=time.time(),rows=completed,failure=failure,peak_rss_mib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024)
++ if 'torch' in globals() and torch.cuda.is_initialized():result.update(peak_allocated_mib=torch.cuda.max_memory_allocated()/2**20,peak_reserved_mib=torch.cuda.max_memory_reserved()/2**20)
++ write(out/'receipt.json',result)
++if failure:raise RuntimeError(failure['error'])
+diff --git a/experiments/typed_structure_cn_diagnosis_v1/prepare_inputs.py b/experiments/typed_structure_cn_diagnosis_v1/prepare_inputs.py
+new file mode 100644
+index 0000000..2e256d3
+--- /dev/null
++++ b/experiments/typed_structure_cn_diagnosis_v1/prepare_inputs.py
+@@ -0,0 +1,44 @@
++"""Recover only hash-identical frozen validation inputs and read sealed X499."""
++import pathlib,json,hashlib,sys,time
++import numpy as np
++B=pathlib.Path(__file__).resolve().parent;ROOT=B.parents[1]
++SRC=ROOT/'research_branches/typed_structure_final_screen_review/experiments/typed_structure_final_screen_v1'
++RUN=ROOT/'results/typed_structure_final_screen_formal_v1_20261029T0325/run'
++sys.path[:0]=[str(SRC),str(SRC/'package')]
++from runtime_contract import source_binding,verify_assets
++from prepare import load_case
++from normal2 import pair_inputs
++from role_dictionary import seed32
++from probe import input_hash
++from hsgd.bw_preflight.common import state_edges,plan_for
++import torch
++def read(p):return json.loads(p.read_text())
++def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
++assert time.time()<read(B/'ledger.json')['deadline_epoch']
++assert source_binding()[1]==read(RUN/'activation.json')['source_sha256'];verify_assets()
++case,cfg=load_case('PubMed');cfg=dict(cfg,seed=2026102912)
++out=B/'inputs';out.mkdir(exist_ok=False);receipts=[]
++def save(name,t,state,ids,f,query,edges,ef,source,labels=None):
++ assert state.shape==(18336,) and np.isin(state,[0,1]).all()
++ assert np.array_equal(np.sort(ids),np.arange(18336)) and len(set(ids))==18336
++ payload=dict(t=np.int64(t),state=state,ids=ids,f=f,query=query,edges=edges,edge_families=ef,types=case['space'].types,schema=np.array(case['space'].pairs),prior=case['prior'])
++ if labels is not None:payload['labels']=labels
++ p=out/(name+'.npz');np.savez_compressed(p,**payload);receipts.append(dict(name=name,t=t,path=str(p),sha256=sha(p),source=source,edges=int(state.sum()),slots=len(ids)))
++for t in [1,500]:
++ private=np.random.default_rng(seed32(cfg['seed'],purpose='fixed_validation_noise',time=t));inp=pair_inputs(case,cfg,10000+t,private,t)[0]
++ digest=input_hash([inp]);expected=[]
++ for arm in ['C','E']:
++  v=read(RUN/f'PubMed_s2026102912_{arm}'/'validation.json')[-1];assert v['updates']==3000
++  for kind in ['raw','ema_0.99']:expected.append(next(x['input_sha256'] for x in v[kind]['rows'] if x['t']==t))
++ assert all(x==digest for x in expected),'frozen validation input not recovered exactly'
++ state=np.zeros(18336,dtype=np.uint8);fam,local=case['space'].encode(inp['edges']);state[case['space'].offsets[fam]+local]=1
++ save(f'ordinary_t{t}',t,state,inp['ids'],inp['f'],inp['query'],inp['edges'],inp['edge_families'],dict(kind='frozen ordinary forward-noise validation',original_array_file_persisted=False,recovered_by_original_recipe=True,matching_original_input_sha256=digest,comparisons=4,recipe='worker.validation -> seed32(train_seed,purpose=fixed_validation_noise,time=t), pair_inputs(case,cfg,10000+t,private,t)[0]'),inp['labels'])
++for arm in ['C','E']:
++ folder=RUN/f'PubMed_s2026102912_{arm}/ema_0.99/sample_2026102821';p=folder/'complete_t0499.pt';receipt=read(p.with_suffix('.sha256.json'));assert sha(p)==receipt['sha256']
++ ck=torch.load(p,map_location='cpu');assert ck['next_t']==499 and ck['job']['arm']==arm and ck['job']['sample_seed']==2026102821 and ck['job']['readout']=='ema_0.99'
++ model_receipt=read(RUN/f'PubMed_s2026102912_{arm}'/'readout_ema_0.99.sha256.json');assert ck['model_sha256']==model_receipt['sha256']
++ steps=[json.loads(l) for l in (folder/'steps.jsonl').read_text().splitlines()];step=next(x for x in steps if x['time']==500);assert step['remaining_time']==499
++ state=np.asarray(ck['state'],np.uint8);edges,ef=state_edges(case,state);ids,f,query=plan_for(case,[2026102821,499,61],1).block(0)
++ save(f'chain_{arm}_X499',499,state,ids,f,query,edges,ef,dict(kind='sealed free-generation state after t500 transition',state_file=str(p),state_file_sha256=receipt['sha256'],payload_next_t=ck['next_t'],preceding_log_time=500,preceding_log_remaining_time=499,model_sha256=ck['model_sha256'],no_chain_replay=True))
++frozen=dict(source_sha256=source_binding()[1],inputs=receipts,models={arm:dict(path=str(RUN/f'PubMed_s2026102912_{arm}/readout_ema_0.99.pt'),sha256=read(RUN/f'PubMed_s2026102912_{arm}/readout_ema_0.99.sha256.json')['sha256']) for arm in ['C','E']},query_rule='ordinary exact original plan; chain original next-time plan; each C/E pair shares the same frozen full query',bins=dict(endpoint_total_degree=[0,2,5,10,20,40,'inf'],endpoint_relation_degree=[0,1,2,5,10,20,'inf'],common_neighbors=[0,1,2,5,10,'inf']),group_rule='left-closed/right-open intervals; each endpoint stratified separately; CN all/type-specific; existing and absent slots separate',precision='original FP32 network and original p0 export; float64 original posterior',historical_validation_comparison=dict(atol=2e-6,rtol=1e-5,scope='saved aggregate CE and per-family p0 sums only; no historical slot arrays, no claim of slotwise replication'),max_queries=8,optimizer_steps=0,new_graphs=0,frozen_epoch=time.time())
++(B/'frozen_panel.json').write_text(json.dumps(frozen,indent=2));print(json.dumps(receipts,indent=2))
