@@ -1,0 +1,207 @@
+{
+  "status": "proposal_only_not_executable",
+  "formal_authorized": false,
+  "formula_sha256": "9adacdae45b70f5168afe53510e36d76e4c1aa72f6a7dec7361f76476e5b7084",
+  "tasks": [
+    {
+      "dataset": "PubMed",
+      "train_seed": 2026102912,
+      "arm": "CE",
+      "model": "E",
+      "fusion": "early",
+      "slot": 0,
+      "id": "PubMed_s2026102912_CE",
+      "updates": 500,
+      "initial_source": "initial_bindings.json",
+      "optimizer": "fresh AdamW",
+      "ema": "fresh theta0 EMA0.99",
+      "generation_chains": 0,
+      "paired_initial_id": "PubMed_s2026102912"
+    },
+    {
+      "dataset": "PubMed",
+      "train_seed": 2026102912,
+      "arm": "CE_COUNT",
+      "model": "E",
+      "fusion": "early",
+      "slot": 1,
+      "id": "PubMed_s2026102912_CE_COUNT",
+      "updates": 500,
+      "initial_source": "initial_bindings.json",
+      "optimizer": "fresh AdamW",
+      "ema": "fresh theta0 EMA0.99",
+      "generation_chains": 0,
+      "paired_initial_id": "PubMed_s2026102912"
+    },
+    {
+      "dataset": "PubMed",
+      "train_seed": 2026102932,
+      "arm": "CE",
+      "model": "E",
+      "fusion": "early",
+      "slot": 2,
+      "id": "PubMed_s2026102932_CE",
+      "updates": 500,
+      "initial_source": "initial_bindings.json",
+      "optimizer": "fresh AdamW",
+      "ema": "fresh theta0 EMA0.99",
+      "generation_chains": 0,
+      "paired_initial_id": "PubMed_s2026102932"
+    },
+    {
+      "dataset": "PubMed",
+      "train_seed": 2026102932,
+      "arm": "CE_COUNT",
+      "model": "E",
+      "fusion": "early",
+      "slot": 3,
+      "id": "PubMed_s2026102932_CE_COUNT",
+      "updates": 500,
+      "initial_source": "initial_bindings.json",
+      "optimizer": "fresh AdamW",
+      "ema": "fresh theta0 EMA0.99",
+      "generation_chains": 0,
+      "paired_initial_id": "PubMed_s2026102932"
+    },
+    {
+      "dataset": "IMDB",
+      "train_seed": 2026102911,
+      "arm": "CE",
+      "model": "E",
+      "fusion": "early",
+      "slot": 4,
+      "id": "IMDB_s2026102911_CE",
+      "updates": 500,
+      "initial_source": "initial_bindings.json",
+      "optimizer": "fresh AdamW",
+      "ema": "fresh theta0 EMA0.99",
+      "generation_chains": 0,
+      "paired_initial_id": "IMDB_s2026102911"
+    },
+    {
+      "dataset": "IMDB",
+      "train_seed": 2026102911,
+      "arm": "CE_COUNT",
+      "model": "E",
+      "fusion": "early",
+      "slot": 5,
+      "id": "IMDB_s2026102911_CE_COUNT",
+      "updates": 500,
+      "initial_source": "initial_bindings.json",
+      "optimizer": "fresh AdamW",
+      "ema": "fresh theta0 EMA0.99",
+      "generation_chains": 0,
+      "paired_initial_id": "IMDB_s2026102911"
+    },
+    {
+      "dataset": "IMDB",
+      "train_seed": 2026102931,
+      "arm": "CE",
+      "model": "E",
+      "fusion": "early",
+      "slot": 6,
+      "id": "IMDB_s2026102931_CE",
+      "updates": 500,
+      "initial_source": "initial_bindings.json",
+      "optimizer": "fresh AdamW",
+      "ema": "fresh theta0 EMA0.99",
+      "generation_chains": 0,
+      "paired_initial_id": "IMDB_s2026102931"
+    },
+    {
+      "dataset": "IMDB",
+      "train_seed": 2026102931,
+      "arm": "CE_COUNT",
+      "model": "E",
+      "fusion": "early",
+      "slot": 7,
+      "id": "IMDB_s2026102931_CE_COUNT",
+      "updates": 500,
+      "initial_source": "initial_bindings.json",
+      "optimizer": "fresh AdamW",
+      "ema": "fresh theta0 EMA0.99",
+      "generation_chains": 0,
+      "paired_initial_id": "IMDB_s2026102931"
+    }
+  ],
+  "checkpoint_updates": [
+    0,
+    100,
+    250,
+    500
+  ],
+  "fixed_validation_updates": [
+    0,
+    100,
+    250,
+    500
+  ],
+  "fixed_validation_times": [
+    1,
+    500,
+    1000
+  ],
+  "validation_readouts": [
+    "raw",
+    "ema_0.99"
+  ],
+  "gradient_observation_updates": [
+    1,
+    250,
+    500
+  ],
+  "gradient_observation": {
+    "inputs": "the actual two scheduled normal2 inputs, unchanged, with their times and hashes",
+    "scope": "all trainable parameters; also disjoint backbone/CN-context-shared, early-edge-CN projection, ReFeX projection, role projection and joint-head groups using exact named parameters in integration receipt",
+    "procedure": "accumulate half-CE and half-weighted-aux parameter gradients separately over both inputs before optimizer.step; preserve model.grad and training RNG; then perform original combined backward/update; CE control records auxiliary shadow gradient but excludes it from update",
+    "fields": [
+      "CE_norm",
+      "weighted_aux_norm",
+      "dot",
+      "cosine_or_null_with_reason",
+      "sum_norm",
+      "nonfinite",
+      "zero_gradient_count",
+      "module_norms",
+      "per_relation_loss_share"
+    ],
+    "extra_backward": "two additional reverse-mode passes per input only on three specified updates; no per-step parameter-gradient decomposition",
+    "limitations": "cosine/norms are gradients, not Adam update attribution; no forcing module gradients to be nonzero"
+  },
+  "per_update_logs": [
+    "CE",
+    "unweighted auxiliary",
+    "weighted auxiliary",
+    "weighted total",
+    "t1,t2 and input hashes",
+    "all relations mu,m,delta,scale,rho,weighted contribution",
+    "actual total gradient finite/norm",
+    "optimizer update count",
+    "EMA count"
+  ],
+  "stop_conditions": [
+    "nonfinite loss/gradient/parameter/optimizer state",
+    "support or full-query slot identity error",
+    "data/binding error",
+    "save/load failure",
+    "explicit STOP or approved deadline"
+  ],
+  "analysis_not_automatic_failures": [
+    "rare-family dominance",
+    "positive/negative CE cost",
+    "gradient opposition or imbalance",
+    "one parameter unchanged",
+    "one seed temporarily worse"
+  ],
+  "finish": "all eight stop at500; no generation; preserve failed/missing cells, review whole panel; never select successful seeds to continue",
+  "continuation": "only after explicit new authorization and unchanged formula: restore raw/optimizer/EMA/counter/Torch CPU CUDA/Python NumPy RNG, continue updates501..3000; no reseed, reinitialize or LR reset; then final EMA two fixed seeds per model,16chains; later6000/9000 separately authorized",
+  "stage1_generation_tasks": [],
+  "resume_authorized": false,
+  "approval_file_created": false,
+  "integration_pending": [
+    "replace only parent package/count_aux.py with this standalone file and its lambda; unchanged normal2 generic count logging accepts renamed normalized_penalty",
+    "adapt old9000 launcher/worker to explicit500 stop without chains; old launcher is NOT this stage entry",
+    "add sparse parameter-gradient observations and review-only resume boundary",
+    "perform future minimal real GPU update/restore check, not passed by CPU tests"
+  ]
+}

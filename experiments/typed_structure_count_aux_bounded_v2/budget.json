@@ -1,0 +1,375 @@
+{
+  "status": "estimate_only_not_authorization",
+  "actual_gpu_availability_checked": false,
+  "gpu_model": "RTX2080Ti",
+  "assumption": "eight permitted free cards, one trajectory/card; CPU thread1 per worker; no DDP",
+  "parent_cost_sha256": "e87e090f5d60263030d4857875f28972c0aaf2c355b387c4087924adde425898",
+  "measured_history": {
+    "IMDB": {
+      "historical_update_with_validation_seconds": 2.679974417289098,
+      "engineering_aux_update_max_seconds": 2.6734641026705503,
+      "additional_unmeasured_formula_allowance": 1.02,
+      "planned_update_seconds": 2.7335739056348802,
+      "historical_chain_seconds": [
+        498.9208403136581,
+        495.438984034583
+      ],
+      "planned_chain_seconds": 498.9208403136581,
+      "evidence": "/data2/lyh/gnn_project/DiHug/results/typed_structure_early_cn_expansion_formal_v1_20261029T1242/run_retry1/IMDB_s2026102931_E_earlyCN"
+    },
+    "PubMed": {
+      "historical_update_with_validation_seconds": 3.571133585611979,
+      "engineering_aux_update_max_seconds": 3.5420246981084347,
+      "additional_unmeasured_formula_allowance": 1.02,
+      "planned_update_seconds": 3.6425562573242187,
+      "historical_chain_seconds": [
+        671.254330245778,
+        669.8960437327623
+      ],
+      "planned_chain_seconds": 671.254330245778,
+      "evidence": "/data2/lyh/gnn_project/DiHug/results/typed_structure_early_cn_expansion_formal_v1_20261029T1242/run_retry1/PubMed_s2026102932_E_earlyCN"
+    }
+  },
+  "planning": {
+    "new_loss_logging_multiplier": 1.05,
+    "new_loss_logging_measured": false,
+    "stage_concurrency_multiplier": 1.25,
+    "concurrency_measured": false,
+    "validation_save_gradient_allowances_are_estimates": true
+  },
+  "stage500": {
+    "tasks": 8,
+    "total_normal2_updates": 4000,
+    "full_chains": 0,
+    "queue": [
+      {
+        "id": "PubMed_s2026102912_CE",
+        "slot": 0,
+        "dataset": "PubMed",
+        "training_seconds": 1874.8451324462892,
+        "initialization_and_binding_seconds": 60.0,
+        "extra_validation_seconds": 60.0,
+        "three_gradient_observations_seconds": 90.0,
+        "checkpoint_save_seconds": 45.0,
+        "serial_seconds": 2129.8451324462894
+      },
+      {
+        "id": "PubMed_s2026102912_CE_COUNT",
+        "slot": 1,
+        "dataset": "PubMed",
+        "training_seconds": 1874.8451324462892,
+        "initialization_and_binding_seconds": 60.0,
+        "extra_validation_seconds": 60.0,
+        "three_gradient_observations_seconds": 90.0,
+        "checkpoint_save_seconds": 45.0,
+        "serial_seconds": 2129.8451324462894
+      },
+      {
+        "id": "PubMed_s2026102932_CE",
+        "slot": 2,
+        "dataset": "PubMed",
+        "training_seconds": 1874.8451324462892,
+        "initialization_and_binding_seconds": 60.0,
+        "extra_validation_seconds": 60.0,
+        "three_gradient_observations_seconds": 90.0,
+        "checkpoint_save_seconds": 45.0,
+        "serial_seconds": 2129.8451324462894
+      },
+      {
+        "id": "PubMed_s2026102932_CE_COUNT",
+        "slot": 3,
+        "dataset": "PubMed",
+        "training_seconds": 1874.8451324462892,
+        "initialization_and_binding_seconds": 60.0,
+        "extra_validation_seconds": 60.0,
+        "three_gradient_observations_seconds": 90.0,
+        "checkpoint_save_seconds": 45.0,
+        "serial_seconds": 2129.8451324462894
+      },
+      {
+        "id": "IMDB_s2026102911_CE",
+        "slot": 4,
+        "dataset": "IMDB",
+        "training_seconds": 1406.9865690767765,
+        "initialization_and_binding_seconds": 60.0,
+        "extra_validation_seconds": 60.0,
+        "three_gradient_observations_seconds": 90.0,
+        "checkpoint_save_seconds": 45.0,
+        "serial_seconds": 1661.9865690767765
+      },
+      {
+        "id": "IMDB_s2026102911_CE_COUNT",
+        "slot": 5,
+        "dataset": "IMDB",
+        "training_seconds": 1406.9865690767765,
+        "initialization_and_binding_seconds": 60.0,
+        "extra_validation_seconds": 60.0,
+        "three_gradient_observations_seconds": 90.0,
+        "checkpoint_save_seconds": 45.0,
+        "serial_seconds": 1661.9865690767765
+      },
+      {
+        "id": "IMDB_s2026102931_CE",
+        "slot": 6,
+        "dataset": "IMDB",
+        "training_seconds": 1406.9865690767765,
+        "initialization_and_binding_seconds": 60.0,
+        "extra_validation_seconds": 60.0,
+        "three_gradient_observations_seconds": 90.0,
+        "checkpoint_save_seconds": 45.0,
+        "serial_seconds": 1661.9865690767765
+      },
+      {
+        "id": "IMDB_s2026102931_CE_COUNT",
+        "slot": 7,
+        "dataset": "IMDB",
+        "training_seconds": 1406.9865690767765,
+        "initialization_and_binding_seconds": 60.0,
+        "extra_validation_seconds": 60.0,
+        "three_gradient_observations_seconds": 90.0,
+        "checkpoint_save_seconds": 45.0,
+        "serial_seconds": 1661.9865690767765
+      }
+    ],
+    "compute_wall_seconds": 2129.8451324462894,
+    "concurrency_seconds": 532.4612831115724,
+    "fault_reserve_seconds": 600,
+    "delivery_seconds": 900,
+    "planned_total_seconds": 4162.306415557861,
+    "recommended_budget_seconds": 4200
+  },
+  "alternatives_by_card_count": {
+    "8": {
+      "queue": [
+        [
+          "PubMed_s2026102912_CE"
+        ],
+        [
+          "PubMed_s2026102912_CE_COUNT"
+        ],
+        [
+          "PubMed_s2026102932_CE"
+        ],
+        [
+          "PubMed_s2026102932_CE_COUNT"
+        ],
+        [
+          "IMDB_s2026102911_CE"
+        ],
+        [
+          "IMDB_s2026102911_CE_COUNT"
+        ],
+        [
+          "IMDB_s2026102931_CE"
+        ],
+        [
+          "IMDB_s2026102931_CE_COUNT"
+        ]
+      ],
+      "load_seconds": [
+        2129.8451324462894,
+        2129.8451324462894,
+        2129.8451324462894,
+        2129.8451324462894,
+        1661.9865690767765,
+        1661.9865690767765,
+        1661.9865690767765,
+        1661.9865690767765
+      ],
+      "compute_wall_seconds": 2129.8451324462894,
+      "planned_total_seconds": 4162.306415557861,
+      "recommended_budget_seconds": 4200
+    },
+    "7": {
+      "queue": [
+        [
+          "PubMed_s2026102912_CE"
+        ],
+        [
+          "PubMed_s2026102912_CE_COUNT"
+        ],
+        [
+          "PubMed_s2026102932_CE"
+        ],
+        [
+          "PubMed_s2026102932_CE_COUNT"
+        ],
+        [
+          "IMDB_s2026102911_CE",
+          "IMDB_s2026102931_CE_COUNT"
+        ],
+        [
+          "IMDB_s2026102911_CE_COUNT"
+        ],
+        [
+          "IMDB_s2026102931_CE"
+        ]
+      ],
+      "load_seconds": [
+        2129.8451324462894,
+        2129.8451324462894,
+        2129.8451324462894,
+        2129.8451324462894,
+        3323.973138153553,
+        1661.9865690767765,
+        1661.9865690767765
+      ],
+      "compute_wall_seconds": 3323.973138153553,
+      "planned_total_seconds": 5654.966422691941,
+      "recommended_budget_seconds": 5700
+    },
+    "4": {
+      "queue": [
+        [
+          "PubMed_s2026102912_CE",
+          "IMDB_s2026102911_CE"
+        ],
+        [
+          "PubMed_s2026102912_CE_COUNT",
+          "IMDB_s2026102911_CE_COUNT"
+        ],
+        [
+          "PubMed_s2026102932_CE",
+          "IMDB_s2026102931_CE"
+        ],
+        [
+          "PubMed_s2026102932_CE_COUNT",
+          "IMDB_s2026102931_CE_COUNT"
+        ]
+      ],
+      "load_seconds": [
+        3791.831701523066,
+        3791.831701523066,
+        3791.831701523066,
+        3791.831701523066
+      ],
+      "compute_wall_seconds": 3791.831701523066,
+      "planned_total_seconds": 6239.789626903832,
+      "recommended_budget_seconds": 6300
+    }
+  },
+  "future_gpu_integration": {
+    "authorized_now": false,
+    "max_gpus": 2,
+    "max_temporary_optimizer_steps": 6,
+    "per_dataset_steps": 3,
+    "scope": "one old-seed theta0 per dataset: update1/save; update2; fresh load after1 and repeat update2. Include optimizer, EMA and all RNG; final formula only. No full chain, no old full验收.",
+    "compute_estimate_seconds": 21.426801513671876,
+    "static_runtime_wiring_allowance_seconds": 900,
+    "setup_check_and_delivery_budget_seconds": 900,
+    "total_engineering_proposal_seconds": 1800,
+    "explanation": "15min real GPU integration/check proposal plus15min unimplemented500-stop/gradient-observer wiring; not just GPU kernels; all states engineering-only"
+  },
+  "followup_500_to_3000": {
+    "authorized_now": false,
+    "tasks": 8,
+    "additional_updates": 20000,
+    "full_chains": 16,
+    "queue": [
+      {
+        "id": "PubMed_s2026102912_CE",
+        "slot": 0,
+        "dataset": "PubMed",
+        "training_2500_seconds": 9374.225662231445,
+        "two_full_chains_seconds": 1342.508660491556,
+        "resume_load_binding_seconds": 60.0,
+        "extra_validation_seconds": 180.0,
+        "checkpoint_readout_save_seconds": 90.0,
+        "serial_seconds": 11046.734322723001
+      },
+      {
+        "id": "PubMed_s2026102912_CE_COUNT",
+        "slot": 1,
+        "dataset": "PubMed",
+        "training_2500_seconds": 9374.225662231445,
+        "two_full_chains_seconds": 1342.508660491556,
+        "resume_load_binding_seconds": 60.0,
+        "extra_validation_seconds": 180.0,
+        "checkpoint_readout_save_seconds": 90.0,
+        "serial_seconds": 11046.734322723001
+      },
+      {
+        "id": "PubMed_s2026102932_CE",
+        "slot": 2,
+        "dataset": "PubMed",
+        "training_2500_seconds": 9374.225662231445,
+        "two_full_chains_seconds": 1342.508660491556,
+        "resume_load_binding_seconds": 60.0,
+        "extra_validation_seconds": 180.0,
+        "checkpoint_readout_save_seconds": 90.0,
+        "serial_seconds": 11046.734322723001
+      },
+      {
+        "id": "PubMed_s2026102932_CE_COUNT",
+        "slot": 3,
+        "dataset": "PubMed",
+        "training_2500_seconds": 9374.225662231445,
+        "two_full_chains_seconds": 1342.508660491556,
+        "resume_load_binding_seconds": 60.0,
+        "extra_validation_seconds": 180.0,
+        "checkpoint_readout_save_seconds": 90.0,
+        "serial_seconds": 11046.734322723001
+      },
+      {
+        "id": "IMDB_s2026102911_CE",
+        "slot": 4,
+        "dataset": "IMDB",
+        "training_2500_seconds": 7034.9328453838825,
+        "two_full_chains_seconds": 997.8416806273162,
+        "resume_load_binding_seconds": 60.0,
+        "extra_validation_seconds": 180.0,
+        "checkpoint_readout_save_seconds": 90.0,
+        "serial_seconds": 8362.774526011199
+      },
+      {
+        "id": "IMDB_s2026102911_CE_COUNT",
+        "slot": 5,
+        "dataset": "IMDB",
+        "training_2500_seconds": 7034.9328453838825,
+        "two_full_chains_seconds": 997.8416806273162,
+        "resume_load_binding_seconds": 60.0,
+        "extra_validation_seconds": 180.0,
+        "checkpoint_readout_save_seconds": 90.0,
+        "serial_seconds": 8362.774526011199
+      },
+      {
+        "id": "IMDB_s2026102931_CE",
+        "slot": 6,
+        "dataset": "IMDB",
+        "training_2500_seconds": 7034.9328453838825,
+        "two_full_chains_seconds": 997.8416806273162,
+        "resume_load_binding_seconds": 60.0,
+        "extra_validation_seconds": 180.0,
+        "checkpoint_readout_save_seconds": 90.0,
+        "serial_seconds": 8362.774526011199
+      },
+      {
+        "id": "IMDB_s2026102931_CE_COUNT",
+        "slot": 7,
+        "dataset": "IMDB",
+        "training_2500_seconds": 7034.9328453838825,
+        "two_full_chains_seconds": 997.8416806273162,
+        "resume_load_binding_seconds": 60.0,
+        "extra_validation_seconds": 180.0,
+        "checkpoint_readout_save_seconds": 90.0,
+        "serial_seconds": 8362.774526011199
+      }
+    ],
+    "compute_wall_seconds": 11046.734322723001,
+    "concurrency_planning_multiplier": 1.2,
+    "fault_reserve_seconds": 600,
+    "delivery_and_evaluation_seconds": 1200,
+    "planned_total_seconds": 15056.0811872676,
+    "recommended_budget_seconds": 15300
+  },
+  "disk": {
+    "new_stage_outputs": "~5GiB checkpoints plus logs/receipts; suggest >=16GiB free output volume",
+    "large_weights_not_copied": true
+  },
+  "limits": [
+    "No new GPU throughput measured",
+    "historical rates include old validation overhead; explicit extra allowances conservatively overlap some cost",
+    "new formula can alter generation-state CN costs; full-chain times are historical, not a promise",
+    "no activated start or deadline; independent review and user budget confirmation pending"
+  ]
+}
