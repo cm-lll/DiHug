@@ -1,0 +1,147 @@
+{
+  "version": "typed_structure_count_aux_v1",
+  "formal_authorized": false,
+  "train_seeds": {
+    "IMDB": [
+      2026102911,
+      2026102931
+    ],
+    "PubMed": [
+      2026102912,
+      2026102932
+    ]
+  },
+  "arms": [
+    "CE",
+    "CE_COUNT"
+  ],
+  "sample_seeds": [
+    2026102821,
+    2026102822
+  ],
+  "updates": 9000,
+  "checkpoints": [
+    0,
+    1000,
+    2000,
+    3000,
+    4000,
+    5000,
+    6000,
+    7000,
+    8000,
+    9000
+  ],
+  "sample_readout": "ema_0.99",
+  "ema_decay": 0.99,
+  "T": 1000,
+  "rounds": 1,
+  "S": 18336,
+  "normal2": "one zero_grad; each input (sumCE/18336 + lambda*count_aux)/2 backward; one AdamW step and one EMA update",
+  "validation_times": [
+    1,
+    500,
+    1000
+  ],
+  "delivery_reserve_seconds": 1200,
+  "budget_seconds": null,
+  "K": {
+    "IMDB": [
+      5,
+      4,
+      3,
+      2
+    ],
+    "PubMed": [
+      8,
+      8,
+      8,
+      6
+    ]
+  },
+  "primary": "per-seed length contrasts and CE_COUNT minus CE at each checkpoint; original primary, LCC secondary",
+  "raw_generation": false,
+  "candidate": "E-earlyCN + fixed relation-count auxiliary loss from theta0",
+  "cn_injection": "unchanged reviewed E earlyCN; no late shortcut; no dropout or gradient isolation",
+  "tasks": [
+    {
+      "dataset": "PubMed",
+      "train_seed": 2026102912,
+      "arm": "CE",
+      "model": "E",
+      "fusion": "early",
+      "slot": 0
+    },
+    {
+      "dataset": "PubMed",
+      "train_seed": 2026102912,
+      "arm": "CE_COUNT",
+      "model": "E",
+      "fusion": "early",
+      "slot": 1
+    },
+    {
+      "dataset": "PubMed",
+      "train_seed": 2026102932,
+      "arm": "CE",
+      "model": "E",
+      "fusion": "early",
+      "slot": 2
+    },
+    {
+      "dataset": "PubMed",
+      "train_seed": 2026102932,
+      "arm": "CE_COUNT",
+      "model": "E",
+      "fusion": "early",
+      "slot": 3
+    },
+    {
+      "dataset": "IMDB",
+      "train_seed": 2026102911,
+      "arm": "CE",
+      "model": "E",
+      "fusion": "early",
+      "slot": 4
+    },
+    {
+      "dataset": "IMDB",
+      "train_seed": 2026102911,
+      "arm": "CE_COUNT",
+      "model": "E",
+      "fusion": "early",
+      "slot": 5
+    },
+    {
+      "dataset": "IMDB",
+      "train_seed": 2026102931,
+      "arm": "CE",
+      "model": "E",
+      "fusion": "early",
+      "slot": 6
+    },
+    {
+      "dataset": "IMDB",
+      "train_seed": 2026102931,
+      "arm": "CE_COUNT",
+      "model": "E",
+      "fusion": "early",
+      "slot": 7
+    }
+  ],
+  "generation_checkpoints": [
+    3000,
+    6000,
+    9000
+  ],
+  "alternative_updates": 6000,
+  "loss": {
+    "formula": "mean_r((sum_active_p0+fixed_present-target_edges)**2/(movable_slots*max(target_edges,1)))",
+    "lambda_count": 0.01,
+    "relations": "active movable-slot families only; exclude no-movable families after fixed-support consistency check",
+    "accumulation": "float64 differentiable sums",
+    "ce_denominator": 18336,
+    "normalization": "squared density error / max(target_density,1/movable_slots), with fixed supported edges accounted separately",
+    "engineering_revision": "initial pure-relative form rejected on fixed t500 engineering scale; lambda remains0.01; no generation used"
+  }
+}
