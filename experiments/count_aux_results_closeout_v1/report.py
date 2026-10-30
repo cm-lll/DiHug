@@ -37,7 +37,7 @@ def main():
     for r in doc['paired_means']:
         if r['group'] not in ('absolute_error','distribution_error'):continue
         key=tuple(r[k] for k in ('dataset','checkpoint','version','group','metric'));direction[key].append(r)
-    csvwrite(out/'tables/all_metric_seed_directions.csv',[dict(zip(('dataset','checkpoint','version','group','metric'),k),improved=sum(r['difference'] is not None and r['difference']<0 for r in rows),tied=sum(r['difference']==0 for r in rows),worsened=sum(r['difference'] is not None and r['difference']>0 for r in rows),undefined=sum(r['difference'] is None for r in rows),per_seed={r['train_seed']:r['difference'] for r in rows}) for k,rows in direction.items()])
+    csvwrite(out/'tables/all_metric_seed_directions.csv',[dict(zip(('dataset','checkpoint','version','group','metric'),k),decreased=sum(r['difference'] is not None and r['difference']<0 for r in rows),tied=sum(r['difference']==0 for r in rows),increased=sum(r['difference'] is not None and r['difference']>0 for r in rows),undefined=sum(r['difference'] is None for r in rows),interpretation='numeric direction only; raw MMD U-stat decrease does not prove better quality' if 'MMD' in k[-1] else 'lower reference error is preferable; no aggregate quality claim',per_seed={r['train_seed']:r['difference'] for r in rows}) for k,rows in direction.items()])
     lines+=['## PubMed全部预定阶段（原图）','', '1000/2000为事后补充探索，不用于替换预定3000/6000节点。','']
     for s in SEEDS['PubMed']:
         lines += [f'### 训练seed {s}','','|指标/组别|1000|2000|3000|6000|','|---|---:|---:|---:|---:|']

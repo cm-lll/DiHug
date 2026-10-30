@@ -21,7 +21,7 @@ def audit_zip(p):
         assert len(set(z.namelist()))==len(z.namelist())
         return dict(path=str(p),sha256=sha(p),bytes=p.stat().st_size,files=len(manifest),payload_hashes_verified=True,crc_verified=True,no_weights=not any(n.endswith('.pt') for n in z.namelist()))
 def main():
-    ap=argparse.ArgumentParser();ap.add_argument('--output',required=True);out=pathlib.Path(ap.parse_args().output).resolve();begin=time.time()
+    ap=argparse.ArgumentParser();ap.add_argument('--output',required=True);ap.add_argument('--suffix',default='');args=ap.parse_args();out=pathlib.Path(args.output).resolve();begin=time.time()
     assert read(out/'independent_audit.json')['status']=='passed'
     dst=out/'source';shutil.copytree(HERE,dst,ignore=shutil.ignore_patterns('__pycache__'),dirs_exist_ok=True)
     shutil.copy2(HERE/'recompute_cpu.py',out/'recompute_cpu.py')
@@ -34,12 +34,12 @@ def main():
     assert all(x['unchanged'] for x in science)
     save(out/'scientific_source_unchanged.json',dict(files=science,scope='Only finalize.py and new CPU delivery scripts changed; git patch is included. No source of model/loss/noise/sampling/dictionaries edited.',new_training_updates=0,new_model_forwards=0,new_chains=0))
     save(out/'cpu_preparation_failures.json',[
-        dict(attempt='count_aux_results_closeout_20261030',failure='Duplicate saved diversity float values differed by about 2.8e-17; exact compare stopped report',resolution='log both values and use predeclared1e-12 duplicate-number check; graph hashes and identities remain exact'),
+        dict(attempt='count_aux_results_closeout_20261030',failure='Duplicate saved diversity float values differed by about 2.8e-17; exact compare stopped report',resolution='both values logged,1e-12 audit tolerance applies only to duplicate saved CPU report sums, not any model acceptance gate; first values retained; graph hashes and identities exact'),
         dict(attempt='count_aux_results_closeout_20261030_v2',failure='Old early report6000 missing placeholders compared to completed main results',resolution='retain old pending evidence; current merge uses completed authenticated result'),
         dict(attempt='count_aux_results_closeout_20261030_v3',failure='Detail CSV merge supplied dataset column twice',resolution='validate existing dataset then insert once; no metrics changed'),
         dict(attempt='report refresh command',failure='relative script path repeated inside its own working directory',resolution='corrected to local report.py; no scientific calculation executed')])
     # Do not overwrite any historical archive or original failure file.
-    primary=out/'COUNT_AUX_full_results_48graphs.zip';pub=out/'PubMed_1000_2000_3000_6000_repaired.zip'
+    primary=out/f'COUNT_AUX_full_results_48graphs{args.suffix}.zip';pub=out/f'PubMed_1000_2000_3000_6000_repaired{args.suffix}.zip'
     files=payload(out);manifest={str(p.relative_to(out)):dict(bytes=p.stat().st_size,sha256=sha(p)) for p in files};save(out/'payload_manifest.json',manifest)
     with zipfile.ZipFile(primary,'x',zipfile.ZIP_DEFLATED,compresslevel=5) as z:
         for p in files+[out/'payload_manifest.json']:z.write(p,str(p.relative_to(out)))
