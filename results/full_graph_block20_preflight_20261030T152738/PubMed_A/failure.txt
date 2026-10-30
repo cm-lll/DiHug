@@ -1,0 +1,50 @@
+Traceback (most recent call last):
+  File "/data2/lyh/gnn_project/DiHug/research_branches/full_graph_block20_preflight/experiments/full_graph_block20_preflight_v1/probe_local.py", line 60, in main
+    rec=B.normal2(model,opt,case,inp,cfg['T'],'cuda',phase=event)
+  File "/data2/lyh/gnn_project/DiHug/research_branches/full_graph_block20_preflight/experiments/full_graph_block20_preflight_v1/block20.py", line 60, in normal2
+    graph,logits,p=ctx.predict(inp['query'],inp['f'],inp['t']/T,token,details=True)
+  File "/data2/lyh/gnn_project/DiHug/research_branches/full_graph_block20_preflight/experiments/full_graph_block20_preflight_v1/package/hsgd/computational.py", line 125, in predict
+    logits, p0 = self.run_network(graph, time, state_version)
+  File "/data2/lyh/gnn_project/DiHug/research_branches/full_graph_block20_preflight/experiments/full_graph_block20_preflight_v1/package/hsgd/computational.py", line 117, in run_network
+    logits = self.model.joint_predict(self,graph,time)
+  File "/data2/lyh/gnn_project/DiHug/research_branches/full_graph_block20_preflight/experiments/full_graph_block20_preflight_v1/package/model_variants.py", line 100, in joint_predict
+    return super().joint_predict(ctx,graph,time,mask_cn,return_features)
+  File "/data2/lyh/gnn_project/DiHug/research_branches/full_graph_block20_preflight/experiments/full_graph_block20_preflight_v1/package/hsgd/model.py", line 73, in joint_predict
+    result,hidden=self.backbone(ctx.x,graph.attrs,graph.edges,
+  File "/data2/lyh/miniconda3/envs/sparse_block/lib/python3.9/site-packages/torch/nn/modules/module.py", line 1518, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/data2/lyh/miniconda3/envs/sparse_block/lib/python3.9/site-packages/torch/nn/modules/module.py", line 1527, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/data2/lyh/gnn_project/DiHug/research_branches/full_graph_block20_preflight/experiments/full_graph_block20_preflight_v1/package/hsgd/vendor/conv_transformer_model.py", line 189, in forward
+    X, edge_attr, y = layer(X, edge_index, edge_attr, y, batch)
+  File "/data2/lyh/miniconda3/envs/sparse_block/lib/python3.9/site-packages/torch/nn/modules/module.py", line 1518, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/data2/lyh/miniconda3/envs/sparse_block/lib/python3.9/site-packages/torch/nn/modules/module.py", line 1527, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/data2/lyh/gnn_project/DiHug/research_branches/full_graph_block20_preflight/experiments/full_graph_block20_preflight_v1/package/hsgd/vendor/conv_transformer_model.py", line 91, in forward
+    new_x, new_edge_attr, new_y = self.self_attn(X, edge_index, edge_attr, y, batch)
+  File "/data2/lyh/miniconda3/envs/sparse_block/lib/python3.9/site-packages/torch/nn/modules/module.py", line 1518, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/data2/lyh/miniconda3/envs/sparse_block/lib/python3.9/site-packages/torch/nn/modules/module.py", line 1527, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/data2/lyh/gnn_project/DiHug/research_branches/full_graph_block20_preflight/experiments/full_graph_block20_preflight_v1/package/hsgd/vendor/transconv_layer.py", line 122, in forward
+    out, new_edge_attr = self.propagate(
+  File "/data2/lyh/gnn_project/DiHug/research_branches/full_graph_block20_preflight/experiments/full_graph_block20_preflight_v1/package/hsgd/vendor/transconv_layer.py", line 181, in propagate
+    out = self.aggregate(out, **aggr_kwargs)
+  File "/data2/lyh/miniconda3/envs/sparse_block/lib/python3.9/site-packages/torch_geometric/nn/conv/message_passing.py", line 608, in aggregate
+    return self.aggr_module(inputs, index, ptr=ptr, dim_size=dim_size,
+  File "/data2/lyh/miniconda3/envs/sparse_block/lib/python3.9/site-packages/torch_geometric/nn/aggr/base.py", line 116, in __call__
+    raise e
+  File "/data2/lyh/miniconda3/envs/sparse_block/lib/python3.9/site-packages/torch_geometric/nn/aggr/base.py", line 109, in __call__
+    return super().__call__(x, index, ptr, dim_size, dim, **kwargs)
+  File "/data2/lyh/miniconda3/envs/sparse_block/lib/python3.9/site-packages/torch/nn/modules/module.py", line 1518, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/data2/lyh/miniconda3/envs/sparse_block/lib/python3.9/site-packages/torch/nn/modules/module.py", line 1527, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/data2/lyh/miniconda3/envs/sparse_block/lib/python3.9/site-packages/torch_geometric/nn/aggr/basic.py", line 21, in forward
+    return self.reduce(x, index, ptr, dim_size, dim, reduce='sum')
+  File "/data2/lyh/miniconda3/envs/sparse_block/lib/python3.9/site-packages/torch_geometric/nn/aggr/base.py", line 155, in reduce
+    return scatter(x, index, dim, dim_size, reduce)
+  File "/data2/lyh/miniconda3/envs/sparse_block/lib/python3.9/site-packages/torch_geometric/utils/scatter.py", line 74, in scatter
+    return src.new_zeros(size).scatter_add_(dim, index, src)
+torch.cuda.OutOfMemoryError: CUDA out of memory. Tried to allocate 582.00 MiB. GPU 0 has a total capacty of 10.75 GiB of which 516.50 MiB is free. Including non-PyTorch memory, this process has 10.25 GiB memory in use. Of the allocated memory 9.00 GiB is allocated by PyTorch, and 337.17 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting max_split_size_mb to avoid fragmentation.  See documentation for Memory Management and PYTORCH_CUDA_ALLOC_CONF

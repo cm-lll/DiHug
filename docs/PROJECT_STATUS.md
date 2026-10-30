@@ -1,5 +1,7 @@
 # 本分支确认状态
 
+2026-10-30 full_graph_block20_preflight_v1完成完整数据A+CE短测：IMDB1653/4079通过3次临时normal2（含一次恢复重做）、模型/AdamW/EMA/RNG精确恢复、t500→499的20块覆盖997313槽；PubMed1565/12284首份61190槽/12261条Xt边的grad-enabled前向OOM，0 step，按合同停止。新抽块CE严格20/S、normal2两份各1/2；63份冻结package源码与EMA未改，6项CPU合同测试通过。C/E只有CPU ReFeX计时，未取得完整图字典；COUNT仅审阅未实现。全部GPU资源释放，无正式更新、T1000链、字典拟合或Notebook操作。结果results/full_graph_block20_preflight_20261030T152738；固定60分钟账本15:27:38至16:27:38，发布实际时间另记，不自动用满或延期。
+
 2026-10-30 新增small_graph_source_migration_v1为只读源码/资产封装：A/C、E-earlyCN CE/有界数量项、EMA、训练采样及最终CPU评价入口；实际运行清单301项匹配，完整IMDB1653/4079与PubMed1565/12284原件哈希匹配。独立快照保留科学源码原字节，不含checkpoint或有效审批，不加载模型/使用GPU/训练/生成。192节点、固定S18336、旧服务器/卡型/期限与未打包封存初态依赖均显式披露，不宣称完整图可运行。发布回执位于results/small_graph_source_migration_20261030。
 
 2026-10-30 新HGEN完整192节点基线已完成：科学源码bfbd7b4，09:39:22八卡启动，09:52:43科学完成，09:53:12全指标评价完成；8fits/16原图/16LCC，无科学失败/补抽，GPU释放。49,495项来源、组装账、度/三角、LCC和汇总CPU检查通过。每数据集4GAN seed共享专属真实Hin2Vec，每fit3750D/750G；原生整数节点抽样梯度局限未改，零支持整提案拒绝兼容单独命名。IMDB原图四seed平均W1 .858724、联合TV .929036、三角组成TV1、孤立点56；PubMedW1 1.161458、联合TV .895182、三角绝对误差1651.5。HGEN有总边预算且未强制扩散相同关系支持，不宣称完全同条件击败HGEN。路径银行少量未覆盖边与共享embedding限制保留。结果results/hgen_192_full_reference_20261030T091112，发布/独立解包回执另记。已停止，不扩样、不修梯度或schema，不自动完整图实验。

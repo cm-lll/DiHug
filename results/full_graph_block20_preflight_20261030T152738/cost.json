@@ -1,0 +1,99 @@
+{
+  "IMDB_A": {
+    "measured_normal2_plus_EMA_seconds": [
+      10.309805913828313,
+      9.2413584953174,
+      9.373276522383094
+    ],
+    "normal2_scope": "complete 2 input validation/context/fwd/back/one AdamW; input noising outside; includes evidence phase writes",
+    "cpu_pair_intake_separate_measurement": {
+      "pair_preparation_wall_seconds": 0.05454133078455925,
+      "per_input": [
+        {
+          "preparation_seconds": 0.02450680360198021,
+          "noise_seconds": 0.003669342026114464,
+          "t": 500,
+          "query_slots": 49866,
+          "Xt_edges": 3994
+        },
+        {
+          "preparation_seconds": 0.022599446587264538,
+          "noise_seconds": 0.0036625945940613747,
+          "t": 500,
+          "query_slots": 49866,
+          "Xt_edges": 4177
+        }
+      ],
+      "measurement": "additional CPU-only intake component measurement, not concurrent with GPU; no model construction/forward"
+    },
+    "combined_component_update_estimates_seconds": [
+      10.364347244612873,
+      9.295899826101959,
+      9.427817853167653
+    ],
+    "measured_full_20block_reverse_step_seconds": 33.87206616997719,
+    "reverse_scope": "one ordinary t500->499 state, temporary 2-update EMA; posterior/export/checks/event IO included; no full T1000 chain",
+    "training": [
+      {
+        "updates": 3000,
+        "compute_hours_low": 7.746583188418299,
+        "compute_hours_high": 8.636956037177393,
+        "planning_25percent_on_observed_max_hours": 10.796195046471743
+      },
+      {
+        "updates": 6000,
+        "compute_hours_low": 15.493166376836598,
+        "compute_hours_high": 17.273912074354786,
+        "planning_25percent_on_observed_max_hours": 21.592390092943486
+      },
+      {
+        "updates": 9000,
+        "compute_hours_low": 23.239749565254897,
+        "compute_hours_high": 25.91086811153218,
+        "planning_25percent_on_observed_max_hours": 32.38858513941523
+      },
+      {
+        "updates": 12000,
+        "compute_hours_low": 30.986332753673196,
+        "compute_hours_high": 34.54782414870957,
+        "planning_25percent_on_observed_max_hours": 43.18478018588697
+      }
+    ],
+    "one_T1000_chain_hours": 9.408907269438108,
+    "one_T1000_chain_planning_25percent_hours": 11.761134086797634,
+    "four_checkpoints_two_chains_each": {
+      "chains": 8,
+      "sampling_hours": 75.27125815550487,
+      "planning_25percent_hours": 94.08907269438107
+    },
+    "validation_reference_proxy_seconds_per_checkpoint_raw_EMA_three_times": 203.23239701986313,
+    "validation_proxy_note": "uses six measured reverse-step walls as a proxy; no full multi-time full-graph validation timing",
+    "checkpoint_write_only_seconds": 0.19028262794017792,
+    "checkpoint_bytes": 107038728,
+    "checkpoint_note": "excludes unmeasured cpu_tree export; CPU model/optimizer/EMA/RNG payload",
+    "model_disk_lower_bound_5_complete_checkpoints_bytes": 535193640,
+    "total_formal_wallclock": "not committed: task count/parallel schedule/full-chain state variation/evaluation costs not measured"
+  },
+  "PubMed_A": {
+    "training_cost": null,
+    "sampling_cost": null,
+    "reason": "grad-enabled first forward OOM; no successful normal2 or reverse step; cannot copy IMDB throughput"
+  },
+  "C_E": {
+    "training_cost": null,
+    "sampling_cost": null,
+    "reason": "full-graph dictionaries/NNLS absent; only CPU ReFeX measured"
+  },
+  "count_proposal": {
+    "status": "not implemented or authorized",
+    "normal2_forward_count": 80,
+    "normal2_backward_count": 40,
+    "IMDB_A_component_only_proxy_seconds": 261.51241373891634,
+    "full_query_objective_equivalence": false
+  },
+  "evaluation": {
+    "measured": false,
+    "reason": "full frozen metric suite not rerun for timing; native missing items unchanged; no small-graph runtime extrapolation presented as measured"
+  },
+  "margin": "25% is a planning assumption, not measured concurrency or a completion guarantee"
+}

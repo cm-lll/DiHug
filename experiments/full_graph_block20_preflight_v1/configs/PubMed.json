@@ -1,0 +1,78 @@
+{
+  "model": {
+    "layers": 8,
+    "width": 256,
+    "edge_width": 64,
+    "global_width": 128,
+    "heads": 8,
+    "ff_node": 256,
+    "ff_edge": 64,
+    "ff_global": 256,
+    "dropout": 0.1,
+    "cn_hidden": 32,
+    "joint_width": 128,
+    "max_wedges": 2000000,
+    "max_query_paths": 2000000
+  },
+  "optimizer": {
+    "type": "AdamW",
+    "lr": 0.0002,
+    "weight_decay": 1e-12,
+    "betas": [
+      0.9,
+      0.999
+    ],
+    "eps": 1e-08,
+    "amsgrad": false
+  },
+  "precision": "FP32 network/stable CE; float64 probability kernel",
+  "T": 1000,
+  "rounds": 20,
+  "schedule_offset": 0.008,
+  "tf32": false,
+  "version": "full_graph_block20_preflight_v1",
+  "arms": [
+    "O",
+    "A",
+    "B",
+    "C"
+  ],
+  "formal_authorized": false,
+  "feature_spec": {
+    "version": "typed_refex_relation_one_round_v2",
+    "depth": 1,
+    "base": "relation degree, closed-egonet internal and boundary edges",
+    "normalization": "log1p(base count)/log1p(schema bound); ONE round: for each relation mean and sum/(N-1) of base features",
+    "rank": "per-type held-out selection K=1..min(8,fold_sizes)",
+    "basis_seed": 2026102861,
+    "nmf_max_iter": 50000,
+    "nmf_tol": 1e-05,
+    "encoding": "per-node NNLS, fixed unit-L2 basis rows; no coefficient normalization",
+    "nnls_max_iter": 240
+  },
+  "inputs_per_update": 2,
+  "engineering_only": true,
+  "max_updates_per_dataset_arm": 5,
+  "seed": 2026103001,
+  "noise_times": [
+    1,
+    500,
+    1000
+  ],
+  "threads": 1,
+  "tolerances": {
+    "float64_features": 1e-10,
+    "fp32_atol": 2e-06,
+    "fp32_rtol": 1e-05
+  },
+  "datasets": {
+    "PubMed": {
+      "file": "/data2/lyh/gnn_project/DiHug/research_branches/full_graph_block20_preflight/experiments/full_graph_block20_preflight_v1/data/PubMed.npz",
+      "sha256": "dacff5a392e23fbcfb695076a14a6db5317f4a4382b69af2a7596a1a217163f8",
+      "nodes": 1565,
+      "edges": 12284
+    }
+  },
+  "query_contract": "ALL active slots in ONE forward per input; S=18336, loss=(sum CE input1 + sum CE input2)/(2*S)",
+  "source_note": "normal2 sequential backward; O/A/B/C and held-out rank selection; formal execution requires independent review plus explicit continue confirmation"
+}

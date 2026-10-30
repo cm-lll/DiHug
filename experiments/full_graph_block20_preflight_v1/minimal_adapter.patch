@@ -1,0 +1,1312 @@
+--- /dev/null
++++ b/experiments/full_graph_block20_preflight_v1/COUNT_REVIEW.md
+@@ -0,0 +1,22 @@
++# COUNT分块审阅：当前禁用，仅提出一个待确认实现
++
++现有COUNT不是块边数预测。原定义是对完整无向槽的p0按关系求μ，和完整X0关系边数m比较，再计算`λ/|M| * Σρ((μ-m)/s)`；s=sqrt(max(m,1))，ρ(u)=sqrt(1+u²)-1，λ=.001，M为可动关系。
++
++本票只恢复CE抽块路径。block20.normal2遇到非零count_aux_weight直接拒绝；没有COUNT完整图更新或伪造适配成功。旧package/normal2.py是保留的192节点全查询源码，不能当本票入口。
++
++唯一建议为**固定Xt、固定20块计划、参数不变的双遍精确链式法则**：
++
++1. 第一遍扫完20块，将每块完整无向候选槽p0以FP64分关系累加，加入固定支持的常数贡献，得到μ；目标m始终来自完整X0。每块及时释放计算图，不保留20块激活。
++2. 按完整μ计算真实数量项及其数量导数`a_r = λ/|M| * u_r/(s_r*sqrt(1+u_r²))`，并detach这些导数值。
++3. 第二遍重算同一20块。各块反向`Σ_r a_r*Σ_{e in block,r} p0_e`；仅被原CE抽中的块另加`20*sumCE/S`。每份输入整体乘1/2，两份输入所有反向完成后只更新一次优化器及EMA。
++4. 日志记录真实ρ损失；第二遍线性代理仅用于链式梯度，数值本身不能作为实际数量损失。
++
++该方案数学上精确计算**当前20块预测上下文所定义的全关系数量目标及梯度**，不会把非线性惩罚套到20倍单块估计量上。不能宣称它等于旧rounds=1网络的损失：查询块参与Transformer，因而p0本身可能随上下文变化；本票没有证明分块与全查询概率相等。
++
++重复计算还须控制实际实现：第一遍应保留和第二遍一致的grad-enabled计算/后端分派，再立即detach数量并释放图；不能仅用no_grad后假设PyG分派与grad-enabled一致。保存/恢复各块随机状态，验证重算概率的数值一致性；保持buffers不变。当前attention dropout实际未启用，也不应据此省略状态合同。固定ReFeX/NNLS数组可以在同一Xt内复用；学习投影、CN学习上下文须按梯度需要重算，不能缓存no-grad输出后冒充可导表示，不能跨优化器更新复用。
++
++普通CE normal2是2前向/2反向；通用双遍方案是80前向/40反向（每份输入40前向/20反向）。增加78前向/38反向，非微小开销。IMDB A本次组件均值约前向1.86s/输入、反向2.81s/输入，以此粗估约261s/normal2，约28倍CE，尚未计字典编码/检查/IO；**不是C/E实测，也不是正式预算**。不同块的CN缓存与全图特征重算策略会改变成本。
++
++每块显存仍至少要能容纳CE所需前后向。PubMed A的20块grad-enabled前向本票已OOM，因此该COUNT建议也不能解决它的本地显存准入。若要求旧全查询预测上下文本身严格不变，则本方案不满足，不能未经确认替换目标。
++
++下一步只在明确确认该目标与额外成本后另票实现/验证。本票没有实现模型COUNT分块训练、没有改成新估计损失、没有新增前向。
+--- /dev/null
++++ b/experiments/full_graph_block20_preflight_v1/README.md
+@@ -0,0 +1,63 @@
++# 完整IMDB/PubMed：固定20块本地有界短测
++
++本票独立起点2026-10-30 15:27:38，固定最终截止16:27:38 Asia/Shanghai，主动预留最后10分钟用于交付。仅工程短测，不含12,000更新正式训练、T1000链或新角色拟合。旧票与封存材料不改。
++
++## 当前结论
++
++- 完整IMDB A+CE：3次临时normal2（更新1、连续更新2、从1恢复重做2），一个普通t500→499的完整20块反向步通过。完整加载模型/AdamW/EMA/RNG正确；后续模型/优化器/EMA逐位相同，输入与RNG一致。没有验证完整T1000链或所有生成状态的显存。
++- 完整PubMed A+CE：第一份t500输入的grad-enabled主干前向OOM，0次反向完成、0次optimizer.step。61,190个查询槽、12,261条完整Xt真实边。按合同停止该配置，没有增加块数、减宽度、换精度或再试一遍。
++- C/E-earlyCN：科学源码保留，完整图字典未准备；没有加载192节点/合成字典、没有构造C/E模型或跑GPU。仅CPU实测完整Xt的630维ReFeX。
++- COUNT：本票CE入口明确禁止非零数量项。COUNT_REVIEW.md只提出一个需确认的双遍全关系方案，未执行。
++
++详细数值/预算见交付目录REPORT_ZH.md、cost.json、各dataset_A/status.json及cpu_feature_cost.json。
++
++## 来源与最小修改
++
++基于迁移包固定6a9b20c8a73100d7001af981e666b9d7c5966ddc，实际执行科学父版c3f9ed007167484e4d336b2768ea2376b92fcb6e。package/及ema.py直接复制冻结源码，backbone、CN、公共min/max、早CN、ReFeX、RolX、核均未修改。source_parent.json记录原文件哈希。E-earlyCN仍由package/early_cn.py安装，末端CN不恢复，无Dropout。
++
++新增block20.py只适配完整数据、历史抽块输入、块合同检查和CE normal2；probe_local.py提供有界工程更新、完整单步及保存恢复。test_protocol.py/cpu_cost.py为新增合同的CPU检查。历史package/prepare.py、normal2.py、worker.py等仍是192节点材料，**不作为本票入口**；有效配置为configs/与输出resolved_config.json。没有formal训练入口或可激活审批。
++
++## 核对的20块协议
++
++1. TypedSlots按无向端点类型对划分10个schema关系。只监督有非零参考支持的活跃关系，固定零关系留在全schema分母S里；不对它们猜边。
++2. UniformQueryPlan对每个关系用独立SeedSequence子流随机排列局部槽，均分20份，余数由随机块分配。每个活跃槽在一轮完整计划中恰出现一次，各训练块以1/20概率均匀抽取，不是对每个关系取等量边。
++3. 原train_input实际顺序为抽t、生成查询计划、抽round_id、以同一显式rng构造完整前向噪声Xt；本票直接调用其rounds=20路径，未自行调整随机调用顺序。两份normal2各自有计划及完整Xt。块不按正/负标签筛选。
++4. 每份损失为`0.5 * 20 * sumCE(block) / S`，两份顺序反向后更新一次AdamW/EMA。IMDB S=1,365,378，PubMed S=1,223,830；不再用18,336。该比例修正抽块包含概率，不意味着查询上下文与全查询一致。
++5. FrozenTypedContext始终持有完整Xt真实邻接。度、全局统计及CN都用完整Xt；CN共同邻居不包含临时查询边。主Transformer输入是完整Xt真实边与该块查询边的并集（正反方向），因此查询块会影响消息传递上下文。
++6. reverse_step用`[seed,t,61]`建立20块计划，一次抽全schema随机均匀量，各块读取同一冻结Xt。原full_sweep检查重复与完整覆盖、计算原Bayes后验，全部成功后返回新状态；本票再原子保存一次完整状态。不把20块当20个时间步，不在块间更新Xt。
++
++## 本地命令
++
++只用于**新的有明确起止时间的工程票**，不直接重用已过期ledger或旧输出；每个配置最多3次更新。本票运行已结束，不应重跑已知OOM配置。
++
++```sh
++# 使用已授权且空闲的一张卡；两数据集分别运行到独立新目录。
++CUDA_VISIBLE_DEVICES=GPU_UUID CUBLAS_WORKSPACE_CONFIG=:4096:8 \
++OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 \
++PYTHONDONTWRITEBYTECODE=1 /path/to/existing/python -u -B probe_local.py \
++  --dataset PubMed --output /data/new_ticket/PubMed_A --ledger /data/new_ticket/ledger.json
++```
++
++ledger需包含`science_stop_Asia_Shanghai`（ISO8601+08:00），本票完整示例在交付材料中；它是工程绝对截止记录，不是科学训练审批。未提供新授权时不要自行改时间激活。程序检查单卡可见，不安装依赖，也不限定只有2080Ti可调用，因此同一固定源码可以给BW/Notebook做后续有界20块检查。实际后端兼容性须在该环境重新核实，不宣称BW已通过。
++
++当前库按原FP32、Torch确定性设置和TF32关闭运行。宿主GPU可见而本工具沙箱nvidia-smi失败，已通过只读宿主核实及受限工程执行区分；未改驱动。运行资源为GPU0 PubMed、GPU1 IMDB，结束后已释放。
++
++首次probe对异常写failed状态但进程返回0；交付前只补了失败退出码1（通过返回0），新增CPU用例验证。GPU实际执行的原脚本及哈希在executed_adapter_source/中保留，没有为了这个退出码修复重跑OOM。科学前后向/更新/采样代码没有改动，不能凭旧进程exit0把PubMed写成通过。
++
++## 完整图字典缺项
++
++仅有小图字典，本目录不装载它们。完整图仍需每数据集干净图+100/500/1000各2份噪声、固定两折节点/两侧15组特征及原状态权重，K=1..min(8,两训练折节点数)，原CD/NNDSVDa/Frobenius/tol1e-5/max_iter50000及固定NNLS验收。本次完整两图四类型折节点均足够，候选上界各8，即每数据集64次候选拟合+4次最终拟合；两图共128候选+8最终。没有因此自动选择K=8。
++
++七状态630维FP64面板约IMDB55.61MiB、PubMed52.66MiB（不含NMF工作区、折复制等）。当前实测的单状态ReFeX耗时不能代表NMF或NNLS；求解次数/迭代决定总成本，尚不能可靠给出正式字典墙钟。不得拿小图字典/合成字典或未测编码耗时宣称C/E可开训。
++
++## SparseDiff参照
++
++已核对官方实现与论文：核心确实是保留完整稀疏噪声图、训练抽候选查询、推理分块覆盖。官方Protein配置的8层、dx256/de64/dy128、8头、FF256/64/256和T1000与本票冻结主干一致；官方该配置edge_fraction=.1，不是我们固定的20块=.05。没有据此修改当前参数。
++
++arXiv v2附录D.1还报告Facebook单图1045节点/27755边，说明有接近规模的同质图实例，但它不是本项目11GB显卡可运行的保证，也不是异质图质量证据。当前同质参照只是配置依据，不替代本票实测。
++
++- https://github.com/qym7/SparseDiff
++- https://raw.githubusercontent.com/qym7/SparseDiff/main/configs/experiment/protein.yaml
++- https://arxiv.org/pdf/2311.02142 （核对版本v2；§3.2/§3.3/附录D.1）
++
++正式选本地还是BW，应按本票具体配置判定：IMDB A有本地短测可行性；PubMed A当前11GB/20块失败，应先用固定适配包在BW做同协议20块测试。没有连接或操作Notebook，也没有把BW全查询OOM外推为20块失败。完整图正式任务数、seed和预算仍须后续明确。
+--- /dev/null
++++ b/experiments/full_graph_block20_preflight_v1/block20.py
+@@ -0,0 +1,78 @@
++"""Full-graph CE, historical uniform 1-of-20 query protocol. COUNT disabled."""
++import hashlib,json,pathlib,sys,time
++ROOT=pathlib.Path(__file__).resolve().parent
++sys.path.insert(0,str(ROOT/'package'))
++import numpy as np
++import torch
++from hsgd.bw_preflight.common import make_case,train_input,plan_for,check_prob_device
++from hsgd.computational import FrozenTypedContext
++from hsgd.losses import supported_binary_ce
++from model_variants import StructuralDenoiser
++from early_cn import install
++
++ROUNDS=20
++DATA={'IMDB':(1653,4079,'10f1dbbbe55c6a069594b2dcb590d1b8295ca5436320ef4597cd30e6b7f73e42'),
++      'PubMed':(1565,12284,'dacff5a392e23fbcfb695076a14a6db5317f4a4382b69af2a7596a1a217163f8')}
++def digest(x):return hashlib.sha256(np.ascontiguousarray(x).tobytes()).hexdigest()
++def load_case(dataset):
++    n,e,h=DATA[dataset];path=ROOT/'data'/f'{dataset}.npz'
++    if hashlib.sha256(path.read_bytes()).hexdigest()!=h:raise ValueError('full original data binding')
++    with np.load(path,allow_pickle=False) as z:
++        if z['types'].shape!=(n,) or z['edges'].shape!=(e,2):raise ValueError('full graph dimensions')
++        case=make_case(z['types'],z['edges'].T,tuple(map(tuple,z['schema'])))
++        if not np.array_equal(case['space'].encode(z['edges'].T)[0],z['relations'].astype(np.int64)-1):raise ValueError('relation convention')
++    cfg=json.loads((ROOT/'package/config.json').read_text())
++    # Preserve model/optimizer/kernel values; replace only intake/query configuration.
++    cfg.update(version='full_graph_block20_preflight_v1',rounds=20,formal_authorized=False,seed=2026103001 if dataset=='PubMed' else 2026103002)
++    cfg['datasets']={dataset:dict(file=str(path),sha256=h,nodes=n,edges=e)}
++    return case,cfg
++def make_model(case,cfg,arm='A',basis=None):
++    if arm in ('C','E') and basis is None:raise RuntimeError('full-graph dictionary unavailable; no small/synthetic fallback')
++    model=StructuralDenoiser(case,cfg,arm,basis)
++    if arm=='E':model=install(model)
++    return model
++def pair_inputs(case,cfg,position,rng,force_t=None):
++    out=[]
++    for j in range(2):
++        pos=2*position+j
++        inp=train_input(case,cfg['T'],ROUNDS,cfg['seed'],pos,rng,force_t=force_t)
++        inp.update(plan_seed=[cfg['seed'],pos,21],rounds=ROUNDS)
++        out.append(inp)
++    return out
++def validate_input(case,inp):
++    if inp['rounds']!=20:raise ValueError('fixed 20 blocks required')
++    ids,f,query=plan_for(case,inp['plan_seed'],20).block(inp['round_id'])
++    for key,value in [('ids',ids),('f',f),('query',query)]:
++        if not np.array_equal(inp[key],value):raise ValueError('query block contract '+key)
++    if len(np.unique(ids))!=len(ids) or not np.all(case['active'][f]):raise ValueError('duplicate/inactive query slot')
++    if not np.array_equal(inp['labels'],np.isin(ids,case['clean_ids']).astype(np.float32)):raise ValueError('clean labels')
++    if inp['ce_weight']!=20/case['space'].total:raise ValueError('whole-schema CE scaling')
++    return dict(slots=len(ids),round_id=int(inp['round_id']),query_ids_sha256=digest(ids),Xt_edges=inp['edges'].shape[1],Xt_sha256=digest(inp['edges']),t=inp['t'])
++def normal2(model,opt,case,inputs,T,device,phase=None):
++    if len(inputs)!=2:raise ValueError('exactly two independent Xt inputs')
++    if getattr(model,'count_aux_weight',0.)!=0:raise RuntimeError('COUNT not adapted; nonlinear plug-in estimator forbidden')
++    torch.cuda.synchronize(device);start=time.perf_counter();model.train();opt.zero_grad(set_to_none=True);rows=[];loss_sum=0.
++    for j,inp in enumerate(inputs):
++        row=validate_input(case,inp);token=('full20-normal2',j,id(inp));ctx=FrozenTypedContext(model,case['space'].types,inp['edges'],inp['edge_families'],token)
++        try:
++            if phase:phase('forward',j,row)
++            torch.cuda.synchronize(device);stamp=time.perf_counter()
++            graph,logits,p=ctx.predict(inp['query'],inp['f'],inp['t']/T,token,details=True)
++            check_prob_device(p,inp['f'],case,model.prior)
++            labels=torch.as_tensor(inp['labels'],device=device)
++            loss=supported_binary_ce(logits,labels,model.prior[graph.query_families]).sum()*(20./case['space'].total)/2
++            if not torch.isfinite(loss):raise FloatingPointError('nonfinite half CE')
++            torch.cuda.synchronize(device);row['forward_seconds']=time.perf_counter()-stamp
++            row['half_CE']=float(loss.detach());row['computation_directed_edges']=int(graph.edges.shape[1])
++            if phase:phase('backward',j,row)
++            stamp=time.perf_counter();loss.backward();torch.cuda.synchronize(device);row['backward_seconds']=time.perf_counter()-stamp
++            loss_sum+=row['half_CE'];rows.append(row)
++        finally:ctx.close()
++        del ctx,graph,logits,p,labels,loss
++    live=[p.grad for p in model.parameters() if p.grad is not None]
++    if not live or not all(torch.isfinite(x).all() for x in live):raise FloatingPointError('missing/nonfinite gradients')
++    grad_norm=float(torch.linalg.vector_norm(torch.stack([torch.linalg.vector_norm(x) for x in live])))
++    if phase:phase('optimizer',None,{})
++    stamp=time.perf_counter();opt.step();torch.cuda.synchronize(device)
++    return dict(loss=loss_sum,gradient_norm=grad_norm,finite_gradients=True,inputs=rows,optimizer_seconds=time.perf_counter()-stamp,normal2_seconds=time.perf_counter()-start,
++                supervised_slots=sum(x['slots'] for x in rows),CE_formula='sum over two inputs [0.5*20*sumCE/S]',schema_slots=case['space'].total,optimizer_steps=1)
+--- /dev/null
++++ b/experiments/full_graph_block20_preflight_v1/build_report.py
+@@ -0,0 +1,67 @@
++"""Assemble bounded-preflight evidence/costs without model calls."""
++import argparse,datetime,hashlib,json,pathlib,statistics
++
++def read(p):return json.loads(pathlib.Path(p).read_text())
++def save(p,x):p=pathlib.Path(p);p.parent.mkdir(parents=True,exist_ok=True);p.write_text(json.dumps(x,indent=2,ensure_ascii=False,allow_nan=False)+'\n')
++def main():
++    p=argparse.ArgumentParser();p.add_argument('--results',required=True);a=p.parse_args();r=pathlib.Path(a.results);src=pathlib.Path(__file__).resolve().parent
++    im=read(r/'IMDB_A/status.json');pm=read(r/'PubMed_A/status.json');cpu=read(r/'cpu_feature_cost.json');intake=read(r/'cpu_intake_cost.json')
++    update=[x['normal2_seconds']+x['EMA_seconds'] for x in im['updates']];step=im['sampling']['step_seconds']
++    f=statistics.mean(v['forward_seconds'] for u in im['updates'] for v in u['inputs']);b=statistics.mean(v['backward_seconds'] for u in im['updates'] for v in u['inputs'])
++    combined=[x+intake['IMDB']['pair_preparation_wall_seconds'] for x in update]
++    costs=dict(IMDB_A=dict(measured_normal2_plus_EMA_seconds=update,normal2_scope='complete 2 input validation/context/fwd/back/one AdamW; input noising outside; includes evidence phase writes',cpu_pair_intake_separate_measurement=intake['IMDB'],combined_component_update_estimates_seconds=combined,
++      measured_full_20block_reverse_step_seconds=step,reverse_scope='one ordinary t500->499 state, temporary 2-update EMA; posterior/export/checks/event IO included; no full T1000 chain',
++      training=[dict(updates=u,compute_hours_low=u*min(combined)/3600,compute_hours_high=u*max(combined)/3600,planning_25percent_on_observed_max_hours=u*max(combined)*1.25/3600) for u in (3000,6000,9000,12000)],
++      one_T1000_chain_hours=step*1000/3600,one_T1000_chain_planning_25percent_hours=step*1000*1.25/3600,
++      four_checkpoints_two_chains_each=dict(chains=8,sampling_hours=step*8000/3600,planning_25percent_hours=step*8000*1.25/3600),
++      validation_reference_proxy_seconds_per_checkpoint_raw_EMA_three_times=6*step,validation_proxy_note='uses six measured reverse-step walls as a proxy; no full multi-time full-graph validation timing',
++      checkpoint_write_only_seconds=im['save_seconds'],checkpoint_bytes=im['checkpoint_bytes'],checkpoint_note='excludes unmeasured cpu_tree export; CPU model/optimizer/EMA/RNG payload',
++      model_disk_lower_bound_5_complete_checkpoints_bytes=5*im['checkpoint_bytes'],total_formal_wallclock='not committed: task count/parallel schedule/full-chain state variation/evaluation costs not measured'),
++      PubMed_A=dict(training_cost=None,sampling_cost=None,reason='grad-enabled first forward OOM; no successful normal2 or reverse step; cannot copy IMDB throughput'),
++      C_E=dict(training_cost=None,sampling_cost=None,reason='full-graph dictionaries/NNLS absent; only CPU ReFeX measured'),
++      count_proposal=dict(status='not implemented or authorized',normal2_forward_count=80,normal2_backward_count=40,IMDB_A_component_only_proxy_seconds=80*f+40*b,full_query_objective_equivalence=False),
++      evaluation=dict(measured=False,reason='full frozen metric suite not rerun for timing; native missing items unchanged; no small-graph runtime extrapolation presented as measured'),
++      margin='25% is a planning assumption, not measured concurrency or a completion guarantee')
++    save(r/'cost.json',costs)
++    config_bindings={}
++    for d in ('IMDB','PubMed'):
++        cfg=read(r/f'{d}_A/resolved_config.json');save(src/'configs'/f'{d}.json',cfg)
++        inventory=read(r/f'{d}_A/query_inventory.json');config_bindings[d]=dict(config_sha256=hashlib.sha256((src/'configs'/f'{d}.json').read_bytes()).hexdigest(),data_sha256=cfg['datasets'][d]['sha256'],query_inventory=inventory)
++    save(src/'configs/bindings.json',config_bindings)
++    recovery=read(r/'IMDB_A/restore_continue.json');save(r/'recovery_summary.json',{k:dict(exact=v['exact'],within_original_tolerance=v['within_original_tolerance']) if isinstance(v,dict) else v for k,v in recovery.items()})
++    lines=['# 完整图本地20块短测：一页结论','',
++      '**结论：IMDB A+CE在本地2080Ti通过本次短测；PubMed A+CE的20块grad-enabled前向仍OOM。不能把两图统一写成可开训，也不能把PubMed本地失败推成BW20块失败。**','',
++      '|配置|实际数据|本次完成|结论|','|---|---|---|---|',
++      '|IMDB A+CE|1653节点/4079边|3次临时normal2；完整20块t500→499；完整保存恢复|短测可行，未验证全链/所有状态|',
++      '|PubMed A+CE|1565节点/12284边|首份输入61,190槽/12,261条Xt边，前向OOM；0次step|本地11GB级2080Ti不通过本配置|',
++      '|两图C/E-earlyCN|完整图|仅完整Xt ReFeX CPU计时；无完整图字典|没有C/E GPU验收，不能用小图字典冒充|',
++      '|COUNT|完整图|审阅双遍完整μ建议，未执行|当前入口禁止非零COUNT|','',
++      '## 关键测量','',
++      f'- IMDB normal2+EMA三次墙钟：{", ".join(f"{x:.3f}s" for x in update)}。第3次是恢复后重复第2次，只有两次连续更新，不是稳定吞吐测试。',
++      f'- IMDB完整20块一个反向步：{step:.3f}s，覆盖997,313活跃槽，输入Xt未改、全部覆盖后才原子提交X499。完整schema分母1,365,378；本票采样输入为普通前向t500状态，不是自由生成中间状态。',
++      f'- IMDB训练峰值allocated={max(x["memory"]["allocated_mib"] for x in im["updates"]):.2f}MiB，reserved={max(x["memory"]["reserved_mib"] for x in im["updates"]):.2f}MiB。采样allocated={im["sampling_memory"]["allocated_mib"]:.2f}MiB、reserved={im["sampling_memory"]["reserved_mib"]:.2f}MiB；采样reserved含此前训练分配器缓存，不能解释为纯推理最低需求。',
++      f'- PubMed失败时峰值allocated={pm["memory"]["allocated_mib"]:.2f}MiB、reserved={pm["memory"]["reserved_mib"]:.2f}MiB；额外582MiB申请失败。堆栈为主干TransformerConv→PyG scatter_add，未捕获具体层号，不猜测。',
++      f'- CPU进程峰值IMDB={im["sampling_memory"]["cpu_peak_rss_mib"]:.2f}MiB，PubMed={pm["memory"]["cpu_peak_rss_mib"]:.2f}MiB；均含Torch/取证/检查点，不是ReFeX单独内存。',
++      '- 保存/恢复：IMDB模型、完整AdamW、EMA、计数、全局及显式RNG载入通过，恢复后的模型/优化器/EMA逐位相同，输入和RNG一致；没有新增CPU/GPU等价要求。',
++      '- 所有现有科学源码package/、ema.py未改；6项新增CPU合同测试通过，无跳过。首版异常进程返回0但status记录failed，最终仅补失败退出码1，原执行脚本保留，不重跑GPU。','',
++      '## 抽块训练量与预算','',
++      '|数据集|S全schema|活跃槽|单份抽块均值|normal2监督槽期望|12000更新槽求值期望|','|---|---:|---:|---:|---:|---:|']
++    for d in ('IMDB','PubMed'):
++        z=config_bindings[d]['query_inventory'];c=cpu[d];lines.append(f'|{d}|{z["all_slots"]:,}|{z["active_slots"]:,}|{z["active_slots"]/20:,.2f}|{c["expected_supervised_slots_per_normal2"]:,.2f}|{c["expected_12000_update_slot_evaluations"]:,}|')
++    lines+=['','每个活跃槽在12000次normal2中期望被监督1200次；小图12000次全查询normal2是每槽24000次，两者相差20倍。这里是期望监督次数，不是不同槽/不同图的唯一覆盖量。',f'CPU单独测得两份输入完整准备：IMDB {intake["IMDB"]["pair_preparation_wall_seconds"]:.3f}s，PubMed {intake["PubMed"]["pair_preparation_wall_seconds"]:.3f}s。下表将该CPU组件加到IMDB更新+EMA测量，再线性外推；不是额外实测稳态吞吐。','',
++      '|IMDB A终点|训练计算外推范围|按实测最大值加25%规划|','|---|---:|---:|']
++    for x in costs['IMDB_A']['training']:lines.append(f'|{x["updates"]}|{x["compute_hours_low"]:.2f}–{x["compute_hours_high"]:.2f}小时|{x["planning_25percent_on_observed_max_hours"]:.2f}小时|')
++    lines +=['',f'单条T1000仅线性外推约{costs["IMDB_A"]["one_T1000_chain_hours"]:.2f}小时；四个检查点各两条链共8链，采样外推约{step*8000/3600:.2f}小时（串行），加25%规划为{step*8000*1.25/3600:.2f}小时。这不是实际链计时，生成稠密度、资源保护及多卡竞争均可能改变成本。',
++      '固定验证、CPU导出/保存、完整评价和交付必须另加；成本JSON明确未测项。每模型5份完整检查点至少约510MiB，另计EMA导出、链状态、日志与评价。25%不是实测并发吞吐。不根据几个临时更新承诺完整正式总预算。','',
++      '## 特征、字典与下一决定','']
++    for d in ('IMDB','PubMed'):
++        x=cpu[d];lines.append(f'- {d} ReFeX630维：'+', '.join(f'{f["source"]} {f["seconds"]:.3f}s' for f in x['features'])+f'；单状态FP64 {x["features"][0]["bytes"]/2**20:.2f}MiB。CPU编码/完整NMF未运行。')
++    lines+=['- 完整字典仍缺：两图共128候选+8最终拟合及收敛/留出验收；节点/关系映射、K规则沿冻结协议，不能直接继承小图K或字典。本票不假报拟合/NNLS墙钟。',
++      '- 若后续授权，IMDB A可优先列入本地正式队列；PubMed A先把同一固定20块适配版本交BW做有界短测；C/E等待完整图字典。COUNT需先确认双遍成本与查询上下文目标，不让它阻塞CE。',
++      '- SparseDiff参照已核实：官方Protein主干8层/256节点宽度/64边宽度/8头与当前一致；论文v2有Facebook1045节点/27755边实例。故“恢复稀疏查询”方向正确，但论文规模不是11GB卡准入保证。参照链接在源码README。',
++      '- 无正式训练、无T1000链、无字典拟合、无Notebook操作。仅IMDB3次临时step；PubMed0。GPU0/1进程结束，宿主只读检查显存0MiB/无计算进程。','',
++      '证据：IMDB_A/status.json、restore_load.json、restore_continue.json；PubMed_A/failure.txt、status.json；各自query_inventory.json、resolved_config.json、environment.json；cpu_tests.log、cpu_feature_cost.json、cost.json。全部临时权重留本地并登记哈希，不夹带公开包。']
++    (r/'REPORT_ZH.md').write_text('\n'.join(lines)+'\n')
++    print(json.dumps(dict(report=str(r/'REPORT_ZH.md'),IMDB_passed=im['status']=='passed',PubMed_OOM=pm.get('oom'),temporary_steps=im['actual_optimizer_steps']+pm['actual_optimizer_steps'],science_complete=True)))
++
++if __name__=='__main__':main()
+--- /dev/null
++++ b/experiments/full_graph_block20_preflight_v1/configs/IMDB.json
+@@ -0,0 +1,78 @@
++{
++  "model": {
++    "layers": 8,
++    "width": 256,
++    "edge_width": 64,
++    "global_width": 128,
++    "heads": 8,
++    "ff_node": 256,
++    "ff_edge": 64,
++    "ff_global": 256,
++    "dropout": 0.1,
++    "cn_hidden": 32,
++    "joint_width": 128,
++    "max_wedges": 2000000,
++    "max_query_paths": 2000000
++  },
++  "optimizer": {
++    "type": "AdamW",
++    "lr": 0.0002,
++    "weight_decay": 1e-12,
++    "betas": [
++      0.9,
++      0.999
++    ],
++    "eps": 1e-08,
++    "amsgrad": false
++  },
++  "precision": "FP32 network/stable CE; float64 probability kernel",
++  "T": 1000,
++  "rounds": 20,
++  "schedule_offset": 0.008,
++  "tf32": false,
++  "version": "full_graph_block20_preflight_v1",
++  "arms": [
++    "O",
++    "A",
++    "B",
++    "C"
++  ],
++  "formal_authorized": false,
++  "feature_spec": {
++    "version": "typed_refex_relation_one_round_v2",
++    "depth": 1,
++    "base": "relation degree, closed-egonet internal and boundary edges",
++    "normalization": "log1p(base count)/log1p(schema bound); ONE round: for each relation mean and sum/(N-1) of base features",
++    "rank": "per-type held-out selection K=1..min(8,fold_sizes)",
++    "basis_seed": 2026102861,
++    "nmf_max_iter": 50000,
++    "nmf_tol": 1e-05,
++    "encoding": "per-node NNLS, fixed unit-L2 basis rows; no coefficient normalization",
++    "nnls_max_iter": 240
++  },
++  "inputs_per_update": 2,
++  "engineering_only": true,
++  "max_updates_per_dataset_arm": 5,
++  "seed": 2026103002,
++  "noise_times": [
++    1,
++    500,
++    1000
++  ],
++  "threads": 1,
++  "tolerances": {
++    "float64_features": 1e-10,
++    "fp32_atol": 2e-06,
++    "fp32_rtol": 1e-05
++  },
++  "datasets": {
++    "IMDB": {
++      "file": "/data2/lyh/gnn_project/DiHug/research_branches/full_graph_block20_preflight/experiments/full_graph_block20_preflight_v1/data/IMDB.npz",
++      "sha256": "10f1dbbbe55c6a069594b2dcb590d1b8295ca5436320ef4597cd30e6b7f73e42",
++      "nodes": 1653,
++      "edges": 4079
++    }
++  },
++  "query_contract": "ALL active slots in ONE forward per input; S=18336, loss=(sum CE input1 + sum CE input2)/(2*S)",
++  "source_note": "normal2 sequential backward; O/A/B/C and held-out rank selection; formal execution requires independent review plus explicit continue confirmation"
++}
+--- /dev/null
++++ b/experiments/full_graph_block20_preflight_v1/configs/PubMed.json
+@@ -0,0 +1,78 @@
++{
++  "model": {
++    "layers": 8,
++    "width": 256,
++    "edge_width": 64,
++    "global_width": 128,
++    "heads": 8,
++    "ff_node": 256,
++    "ff_edge": 64,
++    "ff_global": 256,
++    "dropout": 0.1,
++    "cn_hidden": 32,
++    "joint_width": 128,
++    "max_wedges": 2000000,
++    "max_query_paths": 2000000
++  },
++  "optimizer": {
++    "type": "AdamW",
++    "lr": 0.0002,
++    "weight_decay": 1e-12,
++    "betas": [
++      0.9,
++      0.999
++    ],
++    "eps": 1e-08,
++    "amsgrad": false
++  },
++  "precision": "FP32 network/stable CE; float64 probability kernel",
++  "T": 1000,
++  "rounds": 20,
++  "schedule_offset": 0.008,
++  "tf32": false,
++  "version": "full_graph_block20_preflight_v1",
++  "arms": [
++    "O",
++    "A",
++    "B",
++    "C"
++  ],
++  "formal_authorized": false,
++  "feature_spec": {
++    "version": "typed_refex_relation_one_round_v2",
++    "depth": 1,
++    "base": "relation degree, closed-egonet internal and boundary edges",
++    "normalization": "log1p(base count)/log1p(schema bound); ONE round: for each relation mean and sum/(N-1) of base features",
++    "rank": "per-type held-out selection K=1..min(8,fold_sizes)",
++    "basis_seed": 2026102861,
++    "nmf_max_iter": 50000,
++    "nmf_tol": 1e-05,
++    "encoding": "per-node NNLS, fixed unit-L2 basis rows; no coefficient normalization",
++    "nnls_max_iter": 240
++  },
++  "inputs_per_update": 2,
++  "engineering_only": true,
++  "max_updates_per_dataset_arm": 5,
++  "seed": 2026103001,
++  "noise_times": [
++    1,
++    500,
++    1000
++  ],
++  "threads": 1,
++  "tolerances": {
++    "float64_features": 1e-10,
++    "fp32_atol": 2e-06,
++    "fp32_rtol": 1e-05
++  },
++  "datasets": {
++    "PubMed": {
++      "file": "/data2/lyh/gnn_project/DiHug/research_branches/full_graph_block20_preflight/experiments/full_graph_block20_preflight_v1/data/PubMed.npz",
++      "sha256": "dacff5a392e23fbcfb695076a14a6db5317f4a4382b69af2a7596a1a217163f8",
++      "nodes": 1565,
++      "edges": 12284
++    }
++  },
++  "query_contract": "ALL active slots in ONE forward per input; S=18336, loss=(sum CE input1 + sum CE input2)/(2*S)",
++  "source_note": "normal2 sequential backward; O/A/B/C and held-out rank selection; formal execution requires independent review plus explicit continue confirmation"
++}
+--- /dev/null
++++ b/experiments/full_graph_block20_preflight_v1/configs/bindings.json
+@@ -0,0 +1,652 @@
++{
++  "IMDB": {
++    "config_sha256": "6e1ac62ca26f9568e74174ae2811763faa8a54ff956637ad62942bb75fbba942",
++    "data_sha256": "10f1dbbbe55c6a069594b2dcb590d1b8295ca5436320ef4597cd30e6b7f73e42",
++    "query_inventory": {
++      "all_slots": 1365378,
++      "active_slots": 997313,
++      "deterministic_none_slots": 368065,
++      "family_slot_counts": [
++        83845,
++        202540,
++        297660,
++        9430,
++        121771,
++        358644,
++        11362,
++        263175,
++        16698,
++        253
++      ],
++      "prior": [
++        0.0,
++        0.0029821269872617752,
++        0.0021568232211247734,
++        0.0,
++        0.0001231820384163717,
++        0.0020605391418788547,
++        0.0,
++        0.0,
++        0.12450592885375494,
++        0.0
++      ],
++      "reference_family_edges": [
++        0,
++        604,
++        642,
++        0,
++        15,
++        739,
++        0,
++        0,
++        2079,
++        0
++      ],
++      "active_mask": [
++        false,
++        true,
++        true,
++        false,
++        true,
++        true,
++        false,
++        false,
++        true,
++        false
++      ],
++      "rounds": 20,
++      "query_sizes": [
++        49866,
++        49865,
++        49866,
++        49866,
++        49866,
++        49865,
++        49865,
++        49866,
++        49865,
++        49865,
++        49866,
++        49866,
++        49866,
++        49866,
++        49866,
++        49865,
++        49866,
++        49866,
++        49865,
++        49866
++      ],
++      "family_by_round": [
++        [
++          0,
++          10127,
++          14883,
++          0,
++          6088,
++          17933,
++          0,
++          0,
++          835,
++          0
++        ],
++        [
++          0,
++          10127,
++          14883,
++          0,
++          6088,
++          17932,
++          0,
++          0,
++          835,
++          0
++        ],
++        [
++          0,
++          10127,
++          14883,
++          0,
++          6089,
++          17932,
++          0,
++          0,
++          835,
++          0
++        ],
++        [
++          0,
++          10127,
++          14883,
++          0,
++          6089,
++          17932,
++          0,
++          0,
++          835,
++          0
++        ],
++        [
++          0,
++          10127,
++          14883,
++          0,
++          6089,
++          17932,
++          0,
++          0,
++          835,
++          0
++        ],
++        [
++          0,
++          10127,
++          14883,
++          0,
++          6088,
++          17932,
++          0,
++          0,
++          835,
++          0
++        ],
++        [
++          0,
++          10127,
++          14883,
++          0,
++          6089,
++          17932,
++          0,
++          0,
++          834,
++          0
++        ],
++        [
++          0,
++          10127,
++          14883,
++          0,
++          6089,
++          17932,
++          0,
++          0,
++          835,
++          0
++        ],
++        [
++          0,
++          10127,
++          14883,
++          0,
++          6089,
++          17932,
++          0,
++          0,
++          834,
++          0
++        ],
++        [
++          0,
++          10127,
++          14883,
++          0,
++          6088,
++          17932,
++          0,
++          0,
++          835,
++          0
++        ],
++        [
++          0,
++          10127,
++          14883,
++          0,
++          6089,
++          17932,
++          0,
++          0,
++          835,
++          0
++        ],
++        [
++          0,
++          10127,
++          14883,
++          0,
++          6089,
++          17932,
++          0,
++          0,
++          835,
++          0
++        ],
++        [
++          0,
++          10127,
++          14883,
++          0,
++          6088,
++          17933,
++          0,
++          0,
++          835,
++          0
++        ],
++        [
++          0,
++          10127,
++          14883,
++          0,
++          6089,
++          17932,
++          0,
++          0,
++          835,
++          0
++        ],
++        [
++          0,
++          10127,
++          14883,
++          0,
++          6089,
++          17932,
++          0,
++          0,
++          835,
++          0
++        ],
++        [
++          0,
++          10127,
++          14883,
++          0,
++          6088,
++          17932,
++          0,
++          0,
++          835,
++          0
++        ],
++        [
++          0,
++          10127,
++          14883,
++          0,
++          6088,
++          17933,
++          0,
++          0,
++          835,
++          0
++        ],
++        [
++          0,
++          10127,
++          14883,
++          0,
++          6088,
++          17933,
++          0,
++          0,
++          835,
++          0
++        ],
++        [
++          0,
++          10127,
++          14883,
++          0,
++          6088,
++          17932,
++          0,
++          0,
++          835,
++          0
++        ],
++        [
++          0,
++          10127,
++          14883,
++          0,
++          6089,
++          17932,
++          0,
++          0,
++          835,
++          0
++        ]
++      ],
++      "active_inclusion_probability": 0.05,
++      "full_schema_ce_weight": 1.4647958294333144e-05,
++      "coverage": "each active slot exactly once; exact-none inactive states checked and preserved"
++    }
++  },
++  "PubMed": {
++    "config_sha256": "3c1a526432757e3804f2c10d99f7ccc2c9211349275cf2c5a62b7a432a767688",
++    "data_sha256": "dacff5a392e23fbcfb695076a14a6db5317f4a4382b69af2a7596a1a217163f8",
++    "query_inventory": {
++      "all_slots": 1223830,
++      "active_slots": 1223830,
++      "deterministic_none_slots": 0,
++      "family_slot_counts": [
++        48828,
++        201259,
++        176532,
++        14085,
++        206403,
++        362652,
++        28935,
++        158766,
++        25380,
++        990
++      ],
++      "prior": [
++        0.011100188416482346,
++        0.009008292796843868,
++        0.01263227063648517,
++        0.013276535321263756,
++        0.005305155448321972,
++        0.009913084720337955,
++        0.010851909452220494,
++        0.013472657873852083,
++        0.013908589440504333,
++        0.01616161616161616
++      ],
++      "reference_family_edges": [
++        542,
++        1813,
++        2230,
++        187,
++        1095,
++        3595,
++        314,
++        2139,
++        353,
++        16
++      ],
++      "active_mask": [
++        true,
++        true,
++        true,
++        true,
++        true,
++        true,
++        true,
++        true,
++        true,
++        true
++      ],
++      "rounds": 20,
++      "query_sizes": [
++        61191,
++        61192,
++        61190,
++        61191,
++        61191,
++        61193,
++        61192,
++        61192,
++        61192,
++        61190,
++        61190,
++        61194,
++        61191,
++        61190,
++        61192,
++        61192,
++        61194,
++        61191,
++        61190,
++        61192
++      ],
++      "family_by_round": [
++        [
++          2441,
++          10063,
++          8826,
++          705,
++          10320,
++          18133,
++          1447,
++          7938,
++          1269,
++          49
++        ],
++        [
++          2442,
++          10063,
++          8827,
++          704,
++          10320,
++          18132,
++          1446,
++          7939,
++          1269,
++          50
++        ],
++        [
++          2441,
++          10063,
++          8827,
++          704,
++          10320,
++          18132,
++          1447,
++          7938,
++          1269,
++          49
++        ],
++        [
++          2441,
++          10063,
++          8827,
++          704,
++          10320,
++          18133,
++          1446,
++          7938,
++          1269,
++          50
++        ],
++        [
++          2441,
++          10063,
++          8826,
++          705,
++          10320,
++          18133,
++          1446,
++          7939,
++          1269,
++          49
++        ],
++        [
++          2442,
++          10062,
++          8827,
++          704,
++          10320,
++          18133,
++          1447,
++          7939,
++          1269,
++          50
++        ],
++        [
++          2441,
++          10063,
++          8827,
++          704,
++          10321,
++          18133,
++          1447,
++          7938,
++          1269,
++          49
++        ],
++        [
++          2442,
++          10063,
++          8826,
++          704,
++          10320,
++          18132,
++          1447,
++          7939,
++          1269,
++          50
++        ],
++        [
++          2442,
++          10063,
++          8827,
++          704,
++          10320,
++          18133,
++          1447,
++          7938,
++          1269,
++          49
++        ],
++        [
++          2441,
++          10063,
++          8827,
++          704,
++          10320,
++          18132,
++          1446,
++          7938,
++          1269,
++          50
++        ],
++        [
++          2441,
++          10063,
++          8826,
++          704,
++          10320,
++          18133,
++          1447,
++          7938,
++          1269,
++          49
++        ],
++        [
++          2442,
++          10063,
++          8827,
++          704,
++          10320,
++          18133,
++          1447,
++          7939,
++          1269,
++          50
++        ],
++        [
++          2442,
++          10063,
++          8826,
++          704,
++          10320,
++          18133,
++          1447,
++          7938,
++          1269,
++          49
++        ],
++        [
++          2441,
++          10063,
++          8826,
++          704,
++          10320,
++          18133,
++          1447,
++          7938,
++          1269,
++          49
++        ],
++        [
++          2441,
++          10063,
++          8827,
++          704,
++          10320,
++          18133,
++          1447,
++          7938,
++          1269,
++          50
++        ],
++        [
++          2442,
++          10063,
++          8827,
++          705,
++          10320,
++          18132,
++          1447,
++          7938,
++          1269,
++          49
++        ],
++        [
++          2442,
++          10063,
++          8827,
++          705,
++          10320,
++          18132,
++          1447,
++          7939,
++          1269,
++          50
++        ],
++        [
++          2441,
++          10063,
++          8827,
++          704,
++          10320,
++          18132,
++          1447,
++          7938,
++          1269,
++          50
++        ],
++        [
++          2441,
++          10063,
++          8826,
++          704,
++          10321,
++          18132,
++          1446,
++          7938,
++          1269,
++          50
++        ],
++        [
++          2441,
++          10063,
++          8826,
++          705,
++          10321,
++          18133,
++          1447,
++          7938,
++          1269,
++          49
++        ]
++      ],
++      "active_inclusion_probability": 0.05,
++      "full_schema_ce_weight": 1.6342139022576664e-05,
++      "coverage": "each active slot exactly once; exact-none inactive states checked and preserved"
++    }
++  }
++}
+--- /dev/null
++++ b/experiments/full_graph_block20_preflight_v1/cpu_cost.py
+@@ -0,0 +1,25 @@
++"""CPU feature/resource accounting; no fitting, NNLS, model or GPU calls."""
++import os
++os.environ.setdefault('OPENBLAS_NUM_THREADS','1');os.environ.setdefault('OMP_NUM_THREADS','1')
++import argparse,json,pathlib,resource,time
++import numpy as np
++import block20 as B
++from features import extract,digest
++from hsgd.bw_preflight.common import plan_for,query_inventory
++
++def main():
++    ap=argparse.ArgumentParser();ap.add_argument('--output',required=True);a=ap.parse_args();out={}
++    for dataset in ('PubMed','IMDB'):
++        c,cfg=B.load_case(dataset);inp=B.pair_inputs(c,cfg,0,np.random.default_rng(cfg['seed']+71),500)[0];rows=[]
++        for label,edges,families in [('clean_reference',c['clean'],c['space'].encode(c['clean'])[0]),('ordinary_t500',inp['edges'],inp['edge_families'])]:
++            start=time.perf_counter();f=extract(c['space'].types,edges,families,c['space'].pairs);elapsed=time.perf_counter()-start
++            rows.append(dict(source=label,nodes=len(c['space'].types),edges=edges.shape[1],Xt_hash=B.digest(edges),feature_sha256=digest(f),shape=list(f.shape),bytes=f.nbytes,seconds=elapsed,finite=bool(np.isfinite(f).all()),nonnegative=bool((f>=0).all())))
++        plan=plan_for(c,[cfg['seed']+91,500,61],20)
++        out[dataset]=dict(features=rows,sampling_plan_inventory=query_inventory(c,plan),full_graph_roles='not fitted; no dictionary or NNLS benchmark',full_dictionary_candidate_fits=64,full_dictionary_final_fits=4,
++            seven_state_FP64_feature_bytes=len(c['space'].types)*630*8*7,expected_supervised_slots_per_normal2=2*plan.query_total/20,
++            expected_12000_update_slot_evaluations=1200*plan.query_total,expected_per_slot_supervisions_12000=1200,
++            formal_training=0,models_constructed=0,nnls_calls=0,nmf_fits=0)
++    out['cpu_peak_rss_mib']=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024
++    pathlib.Path(a.output).write_text(json.dumps(out,indent=2,allow_nan=False)+'\n');print(json.dumps(out,indent=2))
++
++if __name__=='__main__':main()
+--- /dev/null
++++ b/experiments/full_graph_block20_preflight_v1/probe_local.py
+@@ -0,0 +1,100 @@
++"""Bounded engineering only: <=3 normal2 updates and ONE reverse step per A."""
++import os
++os.environ.setdefault('CUBLAS_WORKSPACE_CONFIG',':4096:8')
++os.environ.setdefault('OMP_NUM_THREADS','1');os.environ.setdefault('OPENBLAS_NUM_THREADS','1');os.environ.setdefault('MKL_NUM_THREADS','1')
++import argparse,copy,gc,hashlib,json,pathlib,random,resource,signal,sys,time,traceback,warnings
++import block20 as B
++import numpy as np
++import torch
++from ema import ParameterEMA
++from hsgd.bw_preflight.common import cpu_tree,environment,rng_save,rng_restore,schedule,query_inventory,plan_for,seed_all
++from hsgd.runtime import reverse_step
++from hsgd.kernel import MarginalKernel
++from probe import equal,flatten,metric
++
++def save(p,x):
++    p=pathlib.Path(p);tmp=p.with_suffix(p.suffix+'.tmp');tmp.write_text(json.dumps(x,indent=2,allow_nan=False));tmp.replace(p)
++def atomic_torch(p,x):
++    p=pathlib.Path(p);tmp=p.with_suffix('.tmp');torch.save(x,tmp);os.replace(tmp,p)
++def mem():return dict(allocated_mib=torch.cuda.max_memory_allocated()/2**20,reserved_mib=torch.cuda.max_memory_reserved()/2**20,cpu_peak_rss_mib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024)
++def state_hash(s):return {k:hashlib.sha256(v.detach().cpu().contiguous().numpy().tobytes()).hexdigest() for k,v in s.items()}
++def result_exit_code(result):return 0 if result.get('status')=='passed' else 1
++def main():
++    ap=argparse.ArgumentParser();ap.add_argument('--dataset',choices=list(B.DATA),required=True);ap.add_argument('--output',required=True);ap.add_argument('--ledger',required=True);a=ap.parse_args()
++    out=pathlib.Path(a.output);out.mkdir(parents=True,exist_ok=False);ledger=json.loads(pathlib.Path(a.ledger).read_text());stop=__import__('datetime').datetime.fromisoformat(ledger['science_stop_Asia_Shanghai']).timestamp()
++    result=dict(dataset=a.dataset,arm='A',loss='CE',status='running',actual_optimizer_steps=0,completed_updates=0,full_T1000_chains=0,single_reverse_steps=0)
++    def event(stage,idx=None,info=None):
++        if time.time()>=stop:raise TimeoutError('ticket science stop; delivery reserve')
++        result['last_phase']=dict(stage=stage,input_index=idx,info=info or {},epoch=time.time());save(out/'status.json',result);print(stage,idx,flush=True)
++    signal.signal(signal.SIGALRM,lambda s,f:(_ for _ in ()).throw(TimeoutError('absolute science deadline')));signal.alarm(max(1,int(stop-time.time())))
++    begin=time.perf_counter()
++    with warnings.catch_warnings(record=True) as warns:
++      warnings.simplefilter('always')
++      try:
++        torch.set_num_threads(1);torch.set_num_interop_threads(1);torch.use_deterministic_algorithms(True,warn_only=False);torch.backends.cuda.matmul.allow_tf32=False;torch.backends.cudnn.allow_tf32=False
++        if not torch.cuda.is_available() or torch.cuda.device_count()!=1:raise RuntimeError('exactly one selected GPU required')
++        save(out/'environment.json',environment('cuda'));case,cfg=B.load_case(a.dataset);save(out/'resolved_config.json',cfg)
++        inv=query_inventory(case,plan_for(case,[cfg['seed'],0,21],20));save(out/'query_inventory.json',inv)
++        seed_all(cfg['seed']);model=B.make_model(case,cfg,'A');initial=cpu_tree(model.state_dict());save(out/'initial_tensor_hashes.json',state_hash(initial));atomic_torch(out/'initial_engineering.pt',dict(model=initial,config=cfg,updates=0,engineering_only=True))
++        model=model.to('cuda');opt=torch.optim.AdamW(model.parameters(),**{k:v for k,v in cfg['optimizer'].items() if k!='type'});ema=ParameterEMA(model,.99);rng=np.random.default_rng(cfg['seed']+71);torch.cuda.reset_peak_memory_stats()
++        result['parameters']=sum(p.numel() for p in model.parameters());result['updates']=[]
++        save(out/'binding.json',dict(data_sha256=B.DATA[a.dataset][2],config=cfg,source_parent=json.loads((B.ROOT/'source_parent.json').read_text()),query_inventory=inv,engineering_only=True))
++        for seq in (1,2,3):
++            event('prepare_update',seq)
++            if seq==3:
++                ck=torch.load(out/'after1.pt',map_location='cpu');event('restore')
++                del opt,ema,model;gc.collect();torch.cuda.empty_cache()
++                model=B.make_model(case,cfg,'A').to('cuda');model.load_state_dict(ck['model'],strict=True)
++                opt=torch.optim.AdamW(model.parameters(),**{k:v for k,v in cfg['optimizer'].items() if k!='type'});opt.load_state_dict(ck['optimizer']);ema=ParameterEMA(model,.99);ema.load_state_dict(ck['ema'],model,1)
++                rng_restore(ck['rng'],rng,'cuda')
++                loaded=dict(model=equal(cpu_tree(model.state_dict()),ck['model']),optimizer=equal(cpu_tree(opt.state_dict()),ck['optimizer']),ema=equal(ema.state_dict(),ck['ema']),rng=equal(rng_save(rng,'cuda'),ck['rng']),updates=ck['updates']==1)
++                save(out/'restore_load.json',loaded)
++                if not all(loaded.values()):raise ValueError('incomplete checkpoint load')
++                result['completed_updates']=1
++            inp=B.pair_inputs(case,cfg,result['completed_updates'],rng,force_t=500)
++            ih=hashlib.sha256()
++            for x in inp:
++                for k in ('ids','f','query','labels','edges','edge_families'):ih.update(np.ascontiguousarray(x[k]).tobytes())
++            ih=ih.hexdigest()
++            event('normal2_start',seq,dict(input_hash=ih))
++            # Count an actual step only after the complete update returns.
++            rec=B.normal2(model,opt,case,inp,cfg['T'],'cuda',phase=event)
++            result['actual_optimizer_steps']+=1;result['completed_updates']+=1
++            stamp=time.perf_counter();ema.update(model,result['completed_updates']);torch.cuda.synchronize();rec['EMA_seconds']=time.perf_counter()-stamp;rec['input_hash']=ih;rec['sequence']=seq;rec['memory']=mem();result['updates'].append(rec)
++            if seq==1:
++                payload=dict(model=cpu_tree(model.state_dict()),optimizer=cpu_tree(opt.state_dict()),ema=ema.state_dict(),rng=rng_save(rng,'cuda'),updates=1,config=cfg,data_sha256=B.DATA[a.dataset][2],engineering_only=True)
++                stamp=time.perf_counter();atomic_torch(out/'after1.pt',payload);result['save_seconds']=time.perf_counter()-stamp;result['checkpoint_bytes']=(out/'after1.pt').stat().st_size
++            if seq==2:
++                continuous=dict(model=cpu_tree(model.state_dict()),optimizer=cpu_tree(opt.state_dict()),ema=ema.state_dict(),rng=rng_save(rng,'cuda'),input_hash=ih)
++            if seq==3:
++                actual=dict(model=cpu_tree(model.state_dict()),optimizer=cpu_tree(opt.state_dict()),ema=ema.state_dict(),rng=rng_save(rng,'cuda'),input_hash=ih)
++                cmp={}
++                for category in ('model','optimizer','ema'):
++                    left,right=flatten(actual[category]),flatten(continuous[category]);cmp[category]=dict(exact=equal(actual[category],continuous[category]),tensors={k:metric(v,right[k]) for k,v in left.items()})
++                    cmp[category]['within_original_tolerance']=all(v['passes'] for v in cmp[category]['tensors'].values())
++                cmp.update(input_exact=ih==continuous['input_hash'],rng_exact=equal(actual['rng'],continuous['rng']))
++                save(out/'restore_continue.json',cmp)
++                result['restore_continuation_passed']=all(v['within_original_tolerance'] for k,v in cmp.items() if isinstance(v,dict)) and cmp['input_exact'] and cmp['rng_exact']
++            save(out/'status.json',result)
++        # One ordinary t=500 state; NOT a terminal-generated or full-chain state.
++        event('single_reverse_step_start');model.eval();model.load_state_dict(ema.readout_state_dict(model),strict=True)
++        state=np.zeros(case['space'].total,dtype=np.uint8);f,loc=case['space'].encode(inp[0]['edges']);state[case['space'].offsets[f]+loc]=1
++        before=state.copy();h=B.digest(state);kernel=MarginalKernel(case['prior'],schedule(cfg['T'],cfg['schedule_offset']));events=[]
++        def step_event(kind,**fields):
++            events.append(dict(kind=kind,**fields));event(kind,None,fields)
++        torch.cuda.reset_peak_memory_stats();value,stats=reverse_step(model,case,state,kernel,500,20,cfg['seed']+91,np.random.default_rng(cfg['seed']+93),'cuda',event=step_event,check_time=lambda:event('reverse_deadline_check'),trace=False)
++        if not np.array_equal(before,state):raise AssertionError('frozen Xt modified before commit')
++        if stats['blocks']!=20 or stats['covered_slots']!=int(np.sum(np.where(case['active'],case['space'].counts,0))) or not stats['exact_coverage']:raise ValueError('coverage')
++        for family,prior in enumerate(case['prior']):
++            if prior in (0.,1.) and not np.all(value[case['space'].offsets[family]:case['space'].offsets[family+1]]==int(prior)):raise ValueError('posterior fixed support')
++        atomic_torch(out/'single_step_state.pt',dict(input_state=state,result_state=value,input_sha256=h,t=500,result_t=499,source='ordinary reference forward noise; temporary engineering EMA',complete_blocks=20,engineering_only=True))
++        result.update(single_reverse_steps=1,sampling=stats,sampling_memory=mem(),frozen_Xt_unchanged=True,status='passed',single_step_state_commit='atomic only after full 20-block coverage')
++      except BaseException as exc:
++        result.update(status='failed',error=repr(exc),traceback=traceback.format_exc(),oom=isinstance(exc,torch.cuda.OutOfMemoryError),memory=mem() if torch.cuda.is_initialized() else None)
++        (out/'failure.txt').write_text(result['traceback']);print(result['traceback'],flush=True)
++      finally:
++        signal.alarm(0);result['warnings']=[dict(category=w.category.__name__,message=str(w.message),file=w.filename,line=w.lineno) for w in warns];result['wall_seconds']=time.perf_counter()-begin;save(out/'status.json',result)
++    print(json.dumps({k:v for k,v in result.items() if k not in ('updates','traceback','warnings')},indent=2),flush=True)
++    raise SystemExit(result_exit_code(result))
++
++if __name__=='__main__':main()
+--- /dev/null
++++ b/experiments/full_graph_block20_preflight_v1/source_parent.json
+@@ -0,0 +1,69 @@
++{
++  "packaging_commit": "6a9b20c8a73100d7001af981e666b9d7c5966ddc",
++  "executed_science_commit": "c3f9ed007167484e4d336b2768ea2376b92fcb6e",
++  "package_files": {
++    "package/admission.py": "681b55f1186f9249d5e63dd0081f5332a328f54e5072fcceb675cf013992e9d6",
++    "package/assets/IMDB.npz": "398d59a0602e14dd0c92b8781e69a3234727d674923275864eec558770dffb5c",
++    "package/assets/IMDB_synthetic_receipt.json": "787717042d6836274c7feb2d343e59befccfc728468a5934a455675af684e519",
++    "package/assets/PubMed.npz": "f6ea8ec461052094dd02c6b07d8ebb69e85fb3e595195007563593b9568914ef",
++    "package/assets/PubMed_synthetic_receipt.json": "b00d945bac69c3f99391398db0e7e8d3aa2a126786fd86fc13c9d6cd3b942c68",
++    "package/audit_dictionary.py": "337a6c1f2e49534143e712d8bc8163dfdf3da57331d5e2da7336086131dff18c",
++    "package/audit_pairing_de.py": "d611a9aa6c9394c666b4855b1f79b5d0e2312c0251ffc015b61c0ec782a66bb5",
++    "package/audit_reference/capacity_readout.py": "4888d64930a83ca13a5a099760ecf4c194c2433f8cbf2a63c92cb64bb014b52b",
++    "package/audit_reference/late_fusion.py": "bfb5375bf02e6c8e2629771c8f818570d4639eb0e67b624a8fb1696cc849c14b",
++    "package/audit_reference/newton_solver.py": "9c35e7e630dab51ea265cda74caf87b3559938e23892b88818d9d42dcdc944af",
++    "package/audit_reference/pair_model.py": "43b9ec29d5a0e149a2f44fe9c78892afe2cdc3e2ef90e3dcfd48512e98f672ba",
++    "package/audit_reference/role_condition/__init__.py": "c5a2c3695f8702d7dfcef50fd6e50c8c874126c0456b1c8f8256e46912d6364e",
++    "package/audit_reference/role_condition/metrics.py": "c0f52c195ab8320a841e682837f3cab4ac55c0126b6c5f779f8986a123cbbe6a",
++    "package/audit_reference/role_condition/model.py": "7b8458421fc9ceac69b4fc8b2b892afeb0c640e29b95c0e0d960bb87e0f48838",
++    "package/config.json": "765f452d150fa6f8984cb8db779c0d182fbce384745934c36babec597c74939a",
++    "package/count_aux.py": "09cecef089a38da1b9c7331f4e4a3d00ac73af6338018c6e9a1828d352b14e41",
++    "package/early_cn.py": "1dfd3af2c09a3fbadb880faf17ee6ad58adefe1eac37c8275d68539f13518659",
++    "package/engineering_de.py": "4c38a0d0365d5cab05419d4e30a69fd14d7355260ebbd0eccad88415437e8dd3",
++    "package/engineering_real.py": "7d3c0c106455d96f060787d23a5680a6845c4cad32af3baf5c1639cd0d67f2a7",
++    "package/evaluation.py": "bf6e5576a422f002612d2dae0497eec5599ee9964c587e68cd38026cb748595f",
++    "package/experiment_contract.py": "fd014cadc66fa18b07d0e55b0e2f0c6f8dfe05b54789ae05384a59360b46c4c5",
++    "package/features.py": "7f83323b427d4a1e0563f50431df7c8cbd5b3e75a9fd08559285eaf145b0d888",
++    "package/gradient_observation.py": "762a90d608d69cc1f86eeda88d36b303a292ad3bdd93dba5e6805582349c7b2b",
++    "package/hsgd/__init__.py": "a4737e1651429fcffe97f6d5c2b81c056b7caca1b87e880ae88e8152c34abaa2",
++    "package/hsgd/bw_preflight/__init__.py": "486d75e373229cd7c8c0f780a7943361a5244e8e1cbd99002cbc04526c362771",
++    "package/hsgd/bw_preflight/common.py": "c6068da392bd551977c514118ba12d092a54b43361eb2866e9d1deef932a95c9",
++    "package/hsgd/bw_preflight/config.json": "48f3852a99b032c263fbbea6b3360e8269e7d5b837f679834b1227a13caf25ff",
++    "package/hsgd/common_neighbor.py": "d48d75193e25879bfbfdd6e190f45ee3db7d7ef9a23d3ad0da917325bf6f01c8",
++    "package/hsgd/computational.py": "d149a3a01b7932039356fc1f0393ae1a648295fc50e7a7312b4d11278180c1b9",
++    "package/hsgd/fusion_checks.py": "5f91387075f4d8f8ce9794113cac8350288bf785c40db146d84d69e97cf7fda0",
++    "package/hsgd/fusion_preflight.py": "91fe18b78b4a33b22c5a550c073f8704d7b01af0105cab8b6542135a01202f6c",
++    "package/hsgd/holders.py": "8ae8714419a2c20d94ccdfa388aaefb409b5b8facea3aac0d6585b6cb0bfde07",
++    "package/hsgd/kernel.py": "e398606416f2dd6b58c94c67c423bd81c0f04b938b3144989f6044b69a416c74",
++    "package/hsgd/learning_mode.py": "05a3b3991f068a9a1ae0f4c06494cc7c59c5db215d0d7a7dc4a5a7b1572ca576",
++    "package/hsgd/losses.py": "9dc175d9fa591221bb3c7118151f86b86ab679447e509483f611b69a4a56c8b6",
++    "package/hsgd/model.py": "9485ce26bd2a629a17d25c35992aa55abe92f5100b7fdd2ca69d230f465658e7",
++    "package/hsgd/noising.py": "c8c4586ec5e9dd55ba6bb50c68237130b1cf6af0cb6def5374325906fa7ebd08",
++    "package/hsgd/runtime.py": "87cdb9c083516fa693acf6877680f667221f1f78e166bb1d967dd36b412c7046",
++    "package/hsgd/slots.py": "f69709a6c63924e5d5875dbd71a3ed038fdbabe12c76b40fd8cbdbe48a8e5eb6",
++    "package/hsgd/vendor/LICENSE": "59ffc4f084981aec77968bbbe3feb815f1fca429b04a96a318f9f260c640fcf3",
++    "package/hsgd/vendor/__init__.py": "a9d1e40ec3e568dbe891006f6f0d913b5c508bc43af0fe62f31177bac0211f72",
++    "package/hsgd/vendor/conv_transformer_model.py": "996febc1dac0ccf77d3705d9cccbd25e51c4cd960bcf1f2fe840f70a6b7a74ed",
++    "package/hsgd/vendor/layers.py": "b76dc91aa623bce78a98d610dd26a15c3e0ca6e36bfbfdc7669533d5425b8419",
++    "package/hsgd/vendor/sample_edges_utils_typed.py": "7653a2dfb4a88be7a0e4f76cdb04325e69cf927071625b22b544a87df24996dc",
++    "package/hsgd/vendor/tie_extrema.py": "367beb31ccfcdb142442d5d463744f3682227f93e56ba5adba101166a537ce99",
++    "package/hsgd/vendor/transconv_layer.py": "de76c4fa8b1d9b02c03149f9b43bd4b7a0b884c7adbb1f794d498241ec288074",
++    "package/launch.py": "ba854f93b3d3653284e66233e2f923cec52837a839d1610d865fb79d5a592390",
++    "package/model_variants.py": "ab80c709c9a25ae6e803d8ea9059030d5a378dae8986ecdf7f27d34b96b64587",
++    "package/normal2.py": "d4ade2e06adbc3f6de3c64eef971f1f4febd1c2529b06bbe4c09af74676742bf",
++    "package/prepare.py": "e7bec69358acdb488e40e3ba8f1a276d92f049a50d887e6d51b2aec0226b65e4",
++    "package/probe.py": "dac368c5ead6a9f5d6d0cc7ebdec9f5842ddff522f54a656d2777e44d0122e05",
++    "package/refit_dictionary.py": "db3ab354a8313f1c92cbeeb137d3dca52cbb5c3092089600d32c430296663a8e",
++    "package/restore_checks.py": "65d752cb438ea7f8e16eaa0773ab0c8f2ba54ae39ab84dec303d7a6c9bc9a428",
++    "package/role_dictionary.py": "757f51187edea9261f13d8884a25464a4dbe2e886f8abd14df665bfa85029a03",
++    "package/runtime_plan.py": "bacf8215ddb68a5b10916206324c84c8ce71cc310686eb3ef5a92bb7e9fa9f56",
++    "package/select_dictionary.py": "5c6c241c8fe30127a8f586e9173d44a36719765417f2388669d70f57ad10417a",
++    "package/setup_engineering.py": "fa6edb3fb0f4b85c9a12d015763171dbd13e85177285b5c8bd67fd2a76354297",
++    "package/source_binding.json": "932519a75a2483ffc0885539e8ad903f6abf4fcc8e9b0521edf991f07d3e9ef6",
++    "package/source_config.json": "4ba149b16c432c2b569ef2df53078a5788e2f7a328eb28b170643f38656c2163",
++    "package/test_de.py": "379b42de7922cf4ee8d4dcb78157cd93b12ffca33d0c45bd89a2922d617ec342",
++    "package/test_engineering.py": "a954a71f07d2aa4921fbc68ef6cc043625c2da6c9602a3a1476cbadf51d58c2c",
++    "package/test_oabc.py": "00a7d0e6d533ac7bbfb5ea26cf53338fa0e53b2cbc793875488d63ead07b3fee",
++    "package/worker.py": "7cafa8f6be17b59182ecb587ca38d997a63540f1e41ecb30029a69365bffedc8"
++  }
++}
+--- /dev/null
++++ b/experiments/full_graph_block20_preflight_v1/test_protocol.py
+@@ -0,0 +1,47 @@
++"""CPU-only checks for the newly restored query/loss contract, no model calls."""
++import copy,unittest
++import numpy as np
++import block20 as B
++from hsgd.bw_preflight.common import make_case,plan_for,query_inventory,train_input
++
++class ProtocolTests(unittest.TestCase):
++    def test_failed_preflight_exit_status(self):
++        from probe_local import result_exit_code
++        self.assertEqual(result_exit_code({'status':'passed'}),0)
++        for status in ('failed','running',None):self.assertEqual(result_exit_code({'status':status}),1)
++    def test_full_data_and_denominators(self):
++        for d,total,active in [('IMDB',1365378,997313),('PubMed',1223830,1223830)]:
++            c,cfg=B.load_case(d);self.assertEqual(c['space'].total,total)
++            inv=query_inventory(c,plan_for(c,20261030,20));self.assertEqual(inv['active_slots'],active);self.assertEqual(inv['rounds'],20)
++            self.assertEqual(inv['full_schema_ce_weight'],20/total)
++            self.assertNotEqual(total,18336)
++    def test_original_rng_and_input_order(self):
++        c,cfg=B.load_case('IMDB');rng=np.random.default_rng(79);old=np.random.default_rng(79)
++        pair=B.pair_inputs(c,cfg,3,rng,500)
++        for j,inp in enumerate(pair):
++            expected=train_input(c,1000,20,cfg['seed'],6+j,old,500)
++            for k in ('ids','f','query','labels','edges','edge_families'):self.assertTrue(np.array_equal(inp[k],expected[k]),k)
++            B.validate_input(c,inp)
++        self.assertFalse(np.array_equal(pair[0]['edges'],pair[1]['edges']))
++        self.assertEqual(rng.bit_generator.state,old.bit_generator.state)
++    def test_bad_query_and_old_full_query_weight_rejected(self):
++        c,cfg=B.load_case('IMDB');inp=B.pair_inputs(c,cfg,0,np.random.default_rng(3),500)[0]
++        bad=copy.deepcopy(inp);bad['ce_weight']=1/c['space'].total
++        with self.assertRaisesRegex(ValueError,'scaling'):B.validate_input(c,bad)
++        bad=copy.deepcopy(inp);bad['labels'][0]=1-bad['labels'][0]
++        with self.assertRaisesRegex(ValueError,'labels'):B.validate_input(c,bad)
++        bad=copy.deepcopy(inp);bad['ids'][0]=bad['ids'][1]
++        with self.assertRaisesRegex(ValueError,'query block'):B.validate_input(c,bad)
++    def test_uniform_block_ce_and_normal2_coefficients(self):
++        c=make_case(np.array([0,0,0,1,1]),np.array([[0,0],[1,3]]),((0,0),(0,1),(1,1)))
++        plan=plan_for(c,76,20);loss=np.linspace(.01,.1,c['space'].total);loss[np.repeat(~c['active'],c['space'].counts)]=0
++        estimate=np.mean([20*loss[plan.block(r)[0]].sum()/c['space'].total for r in range(20)])
++        self.assertAlmostEqual(estimate,loss.sum()/c['space'].total,places=15)
++        # Two sequential half losses; averaging does not multiply S by20.
++        self.assertEqual(.5*(20*2/10)+.5*(20*3/10),5.)
++    def test_roles_require_full_graph_dictionary(self):
++        c,cfg=B.load_case('IMDB')
++        for arm in ('C','E'):
++            with self.assertRaisesRegex(RuntimeError,'dictionary unavailable'):B.make_model(c,cfg,arm)
++
++if __name__=='__main__':unittest.main()

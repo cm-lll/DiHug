@@ -1,0 +1,17 @@
+--- executed/probe_local.py
++++ delivered/probe_local.py
+@@ -18,6 +18,7 @@
+     p=pathlib.Path(p);tmp=p.with_suffix('.tmp');torch.save(x,tmp);os.replace(tmp,p)
+ def mem():return dict(allocated_mib=torch.cuda.max_memory_allocated()/2**20,reserved_mib=torch.cuda.max_memory_reserved()/2**20,cpu_peak_rss_mib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024)
+ def state_hash(s):return {k:hashlib.sha256(v.detach().cpu().contiguous().numpy().tobytes()).hexdigest() for k,v in s.items()}
++def result_exit_code(result):return 0 if result.get('status')=='passed' else 1
+ def main():
+     ap=argparse.ArgumentParser();ap.add_argument('--dataset',choices=list(B.DATA),required=True);ap.add_argument('--output',required=True);ap.add_argument('--ledger',required=True);a=ap.parse_args()
+     out=pathlib.Path(a.output);out.mkdir(parents=True,exist_ok=False);ledger=json.loads(pathlib.Path(a.ledger).read_text());stop=__import__('datetime').datetime.fromisoformat(ledger['science_stop_Asia_Shanghai']).timestamp()
+@@ -94,5 +95,6 @@
+       finally:
+         signal.alarm(0);result['warnings']=[dict(category=w.category.__name__,message=str(w.message),file=w.filename,line=w.lineno) for w in warns];result['wall_seconds']=time.perf_counter()-begin;save(out/'status.json',result)
+     print(json.dumps({k:v for k,v in result.items() if k not in ('updates','traceback','warnings')},indent=2),flush=True)
++    raise SystemExit(result_exit_code(result))
+ 
+ if __name__=='__main__':main()
