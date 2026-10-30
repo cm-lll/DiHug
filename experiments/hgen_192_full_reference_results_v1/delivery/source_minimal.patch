@@ -1,0 +1,2922 @@
+diff --git a/experiments/hgen_192_full_reference_v1/README.md b/experiments/hgen_192_full_reference_v1/README.md
+new file mode 100644
+index 0000000..8614fee
+--- /dev/null
++++ b/experiments/hgen_192_full_reference_v1/README.md
+@@ -0,0 +1,29 @@
++# HGEN完整192节点外部基线
++
++用户批准补HGEN测试，并要求利用多卡增加重复。固定IMDB/PubMed各4训练seed、每模型2次组装，共8拟合/16图；不继续优化本项目模型。
++
++## 定义
++
++冻结作者HGEN提交ddd93c3的Generator/Discriminator/train逐字节不变，仅AST隔离顶层启动并加入不消耗随机数的日志回调。原整数节点抽样的梯度局限保留、如实报告，不加入straight-through或schema模型改造。
++
++完整192节点和全部原边构成唯一训练参考。IMDB188/2/2分量完整保留，不沿用默认LCC裁剪；不做40%边留出。每个参考图的Hin2Vec按HGEN脚本链接的e-yi实现及固定32维/4epoch配方拟合一次，四GAN seed共享此固定资产，不能称四次完全独立的embedding流程。Hin2Vec节点重编号映射逐项保存，不用全图embedding截片或类型原型噪声。
++
++HGEN原生从零target_g组装，提供参考总边数预算；它有这项显式条件，Diffusion无硬边数配额。保留原低支持直接返回和<=目标导致的过冲，不补边截边，不把边数接近自动归功于学习。
++
++已知上游零支持事件没有可靠的原定义，因此单独命名“官方核心＋完整参考适配＋整条零支持提案拒绝兼容”。复用10月16日已验收函数，不均匀补节点、不加硬schema过滤。小夹具核验其正支持定义域与作者输出/RNG一致；每图20m提案/600秒看门狗，失败/部分图保留，不重抽。不能称原论文留出表格原样复现。
++
++## 科学工作量与工程门
++
++固定每fit24000完整图路径、5epoch、batch32，即3750D/750G；RMSprop1e-4、原clip、tau3和5层128维保持。训练后保存96000条节点/类型序列、score与pattern，再使用固定两个组装seed输出两图。无EMA、扩散链或后处理修图。
++
++四训练seed清单与配方见protocol.json，源码/输入/资产绑定由source_manifest及各receipt给出。全部正式GAN从新状态开始，不继承工程更新。已完成8CPU接口测试，两参考各100次Hin2Vec/20D4G临时更新与256工程序列；无工程图进入科学样本。
++
++成本按p95短测、八卡队列和1.5规划余量估算，不冒充已测八卡吞吐。原用户未指定精确墙钟，本实现主动采用09:11:12开始的90分钟内部保护窗口，10:26:12停止科学、10:41:12交付，不能写成用户明确批准的90分钟预算。只有输入/资产/CPU/数值/成本/八卡资源门全部通过才启动固定8fits；不足则报告，不缩图、缩epoch或减seed。
++
++## 评价
++
++仅复用当前frozen纯CPU评价器，原图主、LCC附；逐图误差再两图均值，4个GAN seed为统计重复单位。参考为0的关系/三角生成量保留，不自动硬禁。非简单或不完整结果如实列账，不仅平均成功图。与已有CE/CE_COUNT3000/6000对照只作同参考描述，GAN更新不等于normal2更新，不宣称相同随机轨迹配对。
++
++所有635原值/635绝对误差/73分布项及长表、闭合/元路径/度尾部/样本差异保留。原生HGEN powerlaw在公共冻结评价器中未执行，现有环境虽有powerlaw包也不冒充已运行；社区标签及通用orbit缺项继续披露。
++
++工作区和输出均在data2，TMPDIR显式指定，不触碰旧HGEN/扩散结果或原环境。正式入口launch.py不会重试或自动恢复。完成后停止，不优化HGEN、不扩大完整图实验。
+diff --git a/experiments/hgen_192_full_reference_v1/assets.py b/experiments/hgen_192_full_reference_v1/assets.py
+new file mode 100644
+index 0000000..76f3a75
+--- /dev/null
++++ b/experiments/hgen_192_full_reference_v1/assets.py
+@@ -0,0 +1,27 @@
++"""Fit the single fixed Hin2Vec asset per reference, following linked script."""
++import os
++os.environ['OMP_NUM_THREADS']='1';os.environ['OPENBLAS_NUM_THREADS']='1'
++import sys,time,traceback,contextlib
++import numpy as np,torch
++from torch.utils.data import DataLoader,TensorDataset
++from common import *
++torch.set_num_threads(1)
++def main(d):
++ folder=OUT/'data'/d;mapping=read(folder/'hin2vec_mapping.json');z=np.load(str(folder/'hin2vec_examples.npz'));check_time(1200)
++ seed(PROTOCOL['embedding_seeds'][d]);m=module(ROOT/'vendor/hin2vec/model.py','frozen_hin2vec');h=m.HIN2vec(192,mapping['path_size'],32,True).cuda();opt=torch.optim.AdamW(h.parameters());ds=TensorDataset(torch.from_numpy(z['x']),torch.from_numpy(z['y']));dl=DataLoader(ds,batch_size=32,shuffle=True,num_workers=0)
++ if (folder/'embedding.npy').exists():raise FileExistsError('do not refit a fixed asset')
++ torch.save(dict(model=h.state_dict(),optimizer=opt.state_dict(),rng=rng()),str(folder/'hin2vec_initial.pt'));begin=time.time()
++ # Literal upstream train(), no changed negative sampling, optimizer or epochs.
++ with (folder/'hin2vec_training.log').open('w') as log:
++  for epoch in range(4):
++   check_time(900)
++   with contextlib.redirect_stdout(log):m.train(200,h,'cuda',dl,opt,torch.nn.BCELoss(),epoch)
++   log.flush();save(folder/'asset_progress.json',dict(stage='Hin2Vec',epochs=epoch+1,seconds=time.time()-begin))
++ emb=h.start_embeds.weight.detach().cpu().numpy()[[mapping['node2id'][str(i)] for i in range(192)]]
++ assert emb.shape==(192,32) and np.isfinite(emb).all()
++ np.save(str(folder/'embedding.npy'),emb);torch.save(dict(model=h.state_dict(),optimizer=opt.state_dict(),rng=rng(),epochs=4),str(folder/'hin2vec_final.pt'))
++ save(folder/'embedding_receipt.json',dict(status='complete',dataset=d,seed=PROTOCOL['embedding_seeds'][d],epochs=4,updates=4*len(dl),examples=len(ds),seconds=time.time()-begin,sha256=sha(folder/'embedding.npy'),node_mapping_sha256=sha(folder/'hin2vec_mapping.json'),reference_sha256=sha(folder/'reference.npz'),native_source_sha256=sha(ROOT/'vendor/hin2vec/model.py'),only_current_reference=True,fixed_across_four_GAN_seeds=True))
++ print(d,'Hin2Vec fixed asset complete',time.time()-begin)
++if __name__=='__main__':
++ try:main(sys.argv[1])
++ except BaseException:save(OUT/('asset_failure_'+sys.argv[1]+'.json'),dict(traceback=traceback.format_exc(),epoch=time.time()));raise
+diff --git a/experiments/hgen_192_full_reference_v1/common.py b/experiments/hgen_192_full_reference_v1/common.py
+new file mode 100644
+index 0000000..7774f9a
+--- /dev/null
++++ b/experiments/hgen_192_full_reference_v1/common.py
+@@ -0,0 +1,57 @@
++import pathlib,json,hashlib,os,random,time,ast,importlib.util,collections
++ROOT=pathlib.Path(__file__).resolve().parent
++PROJECT=pathlib.Path('/data2/lyh/gnn_project/DiHug')
++OUT=PROJECT/'results/hgen_192_full_reference_20261030T091112'
++PROTOCOL=json.loads((ROOT/'protocol.json').read_text())
++def read(p):return json.loads(pathlib.Path(p).read_text())
++def save(p,x):
++ p=pathlib.Path(p);p.parent.mkdir(parents=True,exist_ok=True);tmp=p.with_suffix(p.suffix+'.tmp');tmp.write_text(json.dumps(x,ensure_ascii=False,indent=2,allow_nan=False));os.replace(str(tmp),str(p))
++def sha(p):return hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest()
++def module(p,name):
++ s=importlib.util.spec_from_file_location(name,str(p));m=importlib.util.module_from_spec(s);s.loader.exec_module(m);return m
++def check_time(reserve=0):
++ if time.time()>read(OUT/'ledger.json')['science_stop_epoch']-reserve:raise TimeoutError('bounded science stop')
++def source_manifest():return {str(p.relative_to(ROOT)):sha(p) for p in sorted(ROOT.rglob('*')) if p.is_file() and p.suffix in ('.py','.json') and '__pycache__' not in p.parts}
++def seed(s):
++ import numpy as np,torch
++ random.seed(s);np.random.seed(s);torch.manual_seed(s)
++ if torch.cuda.is_available():torch.cuda.manual_seed_all(s)
++def load_core(instrument=False):
++ import numpy as np,scipy.sparse as sp,torch
++ from torch import nn
++ from torch.nn import functional as F
++ from torch.autograd import Variable
++ from types import SimpleNamespace
++ env=dict(np=np,sp=sp,torch=torch,nn=nn,F=F,Variable=Variable,random=random,Counter=collections.Counter,__name__='isolated_author_HGEN')
++ unames={'make_noise','delete_from_tail','pad_along_axis','score_matrix_from_random_walks','heterogeneous_graph_assemble','sample_from_dict','array_subtraction','symmetric'}
++ nodes=[n for n in ast.parse((ROOT/'vendor/hgen/utils.py').read_text()).body if isinstance(n,ast.FunctionDef) and n.name in unames]
++ tree=ast.Module(body=nodes)
++ if hasattr(ast,'TypeIgnore'):tree.type_ignores=[]
++ exec(compile(tree,str(ROOT/'vendor/hgen/utils.py'),'exec'),env);env['utils']=SimpleNamespace(**{k:env[k] for k in unames})
++ names={'Generator','Discriminator','train','frequent_meta_path_pattern','meta_path_frequency'}
++ nodes=[n for n in ast.parse((ROOT/'vendor/hgen/hgen.py').read_text()).body if isinstance(n,(ast.ClassDef,ast.FunctionDef)) and n.name in names]
++ if instrument:
++  tr=next(n for n in nodes if n.name=='train');loop=tr.body[-1].body[0];assert isinstance(loop,ast.For)
++  loop.body.append(ast.parse('record_update(batches_done, loss_D)').body[0])
++ tree=ast.Module(body=nodes)
++ if hasattr(ast,'TypeIgnore'):tree.type_ignores=[]
++ exec(compile(ast.fix_missing_locations(tree),str(ROOT/'vendor/hgen/hgen.py'),'exec'),env)
++ return env
++def setup(env,types,embedding,device,epochs=5):
++ import numpy as np,torch
++ from types import SimpleNamespace
++ groups={i:np.flatnonzero(types==i).tolist() for i in range(4)}
++ a=SimpleNamespace(batch_size=32,noise_dim=64,noise_type='Uniform',hidden_units=128,num_G_layer=5,max_path_len=4,W_down_generator_size=128,W_down_discriminator_size=128,neighbor_sampling_size=120,dataset='IMDB_movie',lr_gen=1e-4,lr_dis=1e-4,n_critic=5,clip_value=.03,n_epochs=epochs)
++ emb=[torch.tensor(embedding[groups[i]],dtype=torch.float32,device=device) for i in range(4)]
++ g=env['Generator'](groups,len(types),emb,torch.device(device),a).to(device);d=env['Discriminator'](len(types),torch.device(device),a).to(device)
++ go=torch.optim.RMSprop(g.parameters(),lr=1e-4);do=torch.optim.RMSprop(d.parameters(),lr=1e-4)
++ env.update(args=a,device=torch.device(device),generator=g,discriminator=d,optimizer_G=go,optimizer_D=do)
++ return g,d,go,do,groups
++def rng():
++ import numpy as np,torch
++ return dict(py=random.getstate(),np=np.random.get_state(),torch=torch.get_rng_state(),cuda=torch.cuda.get_rng_state_all() if torch.cuda.is_available() else [])
++def restore_rng(r):
++ import numpy as np,torch
++ random.setstate(r['py']);np.random.set_state(r['np']);torch.set_rng_state(r['torch'])
++ if r['cuda']:torch.cuda.set_rng_state_all(r['cuda'])
++def cell(d,s):return d+'_s'+str(s)
+diff --git a/experiments/hgen_192_full_reference_v1/evaluate.py b/experiments/hgen_192_full_reference_v1/evaluate.py
+new file mode 100644
+index 0000000..f88a080
+--- /dev/null
++++ b/experiments/hgen_192_full_reference_v1/evaluate.py
+@@ -0,0 +1,91 @@
++"""Apply the existing frozen all-metric evaluator, including separate induced LCC."""
++import os
++os.environ['OMP_NUM_THREADS']='1';os.environ['OPENBLAS_NUM_THREADS']='1'
++import sys,time,csv,collections,shutil,traceback,itertools
++import numpy as np
++from common import *
++METRICS=PROJECT/'research_branches/count_aux_length_run/experiments/typed_structure_count_aux_length_v1'
++sys.path.insert(0,str(METRICS))
++import summarize as S
++from lcc_eval import metrics as M
++NAMES={'IMDB':['Director','Actor','Movie','Genre'],'PubMed':['Gene','Disease','Chemical','Species']}
++def dump(p,x):S.write_json(p,x)
++def write_csv(p,rows):
++ p=pathlib.Path(p);p.parent.mkdir(parents=True,exist_ok=True)
++ if not rows:p.write_text('');return
++ keys=list(dict.fromkeys(k for row in rows for k in row))
++ with p.open('w',newline='') as f:w=csv.DictWriter(f,keys);w.writeheader();w.writerows(rows)
++def mean(v):return sum(v)/len(v) if v and all(x is not None for x in v) else None
++def leaves(x,p=''):
++ if isinstance(x,dict):
++  for k,v in x.items():yield from leaves(v,p+'.'+str(k) if p else str(k))
++ elif isinstance(x,list):
++  for i,v in enumerate(x):yield from leaves(v,p+'['+str(i)+']')
++ else:yield p,x
++def main():
++ begin=time.time();records=[];inventory=[];graphs={};refs={};F=S.factory();errors=[];derived=OUT/'derived';derived.mkdir(exist_ok=True)
++ def check():
++  if time.time()>read(OUT/'ledger.json')['delivery_deadline_epoch']-120:raise TimeoutError('delivery reserve')
++ for d in PROTOCOL['datasets']:
++  z=np.load(str(OUT/'data'/d/'reference.npz'));g=M.make_graph(z['types'],z['edges'].T,z['schema']);st=M.stats(g,F,NAMES[d],check);refs[d]=(g,st);dump(derived/(d+'_reference.json'),S.evaluate_graph(g,g,st,F,NAMES[d],check))
++  for s,sample in itertools.product(PROTOCOL['train_seeds'][d],PROTOCOL['sample_seeds']):
++   folder=OUT/'run'/cell(d,s)/('sample_'+str(sample));path=folder/'binding.json';base=dict(dataset=d,train_seed=s,sample_seed=sample,arm='HGEN',checkpoint='D3750_G750',readout='native_final',model='author_HGEN',fusion='not_applicable')
++   item=dict(**base,status='missing',reason='worker or assembly not completed');inventory.append(item)
++   if not path.exists():continue
++   b=read(path)
++   if (b['dataset'],b['train_seed'],b['sample_seed'])!=(d,s,sample) or sha(folder/'graph.npz')!=b['graph_sha256']:raise ValueError('identity/hash binding')
++   item.update(status='complete' if b['complete'] and b['simple'] else 'failed_or_incomplete',reason=b['reason'],self_loops=b['self_loops'],binding=b)
++   if not b['simple']:continue
++   z=np.load(str(folder/'graph.npz'));g=M.make_graph(z['types'],z['edges'],z['schema']);kept,mapping=M.lcc(g);target=derived/(cell(d,s)+'_'+str(sample));target.mkdir(exist_ok=True);mapping.update(source_sha256=sha(folder/'graph.npz'),source=str(folder/'graph.npz'))
++   np.savez_compressed(str(target/'lcc.npz'),types=kept['types'],edges=kept['edges'],families=kept['families'],schema=kept['schema'],new_to_original=kept['original_ids'],old_to_new=np.array(mapping['old_to_new']));mapping['derived_sha256']=sha(target/'lcc.npz');save(target/'mapping.json',mapping)
++   item.update(node_retention=len(kept['types'])/192,edge_retention=kept['edges'].shape[1]/g['edges'].shape[1] if g['edges'].shape[1] else None,type_counts_original=np.bincount(g['types'],minlength=4).tolist(),type_counts_lcc=np.bincount(kept['types'],minlength=4).tolist())
++   for version,gg in [('original',g),('lcc',kept)]:
++    check();val=S.evaluate_graph(gg,*refs[d],F,NAMES[d],check)
++    # The frozen evaluator's unavailable-native-powerlaw label is historical;
++    # actual package availability here differs. No frozen scalar is replaced.
++    val['statistics']['HGEN_native_powerlaw_reason']='not executed by frozen common evaluator; original HGEN native extra is reported separately'
++    val.update(**base,version=version,status=item['status'],graph_source_sha256=b['graph_sha256'],reference_source_sha256=sha(OUT/'data'/d/'reference.npz'),evaluation_source_sha256='c0f5d92db2f891ebde70befb4e0e29adc50bcb632bdeff5866173d79aa56ed16')
++    records.append(val);dump(target/(version+'.json'),val);graphs[d,s,sample,version]=(gg,val['statistics'])
++ means=[];diversity=[];scalars=[];details=[]
++ for r in records:
++  ident={k:r[k] for k in ('dataset','train_seed','sample_seed','arm','checkpoint','version','status')}
++  for group in ('raw','absolute_error','distribution_error'):
++   for k,v in r[group].items():scalars.append(dict(**ident,group=group,metric=k,value=v,reference=r['reference'].get(k) if group!='distribution_error' else 0,reason=r['undefined'].get(group,{}).get(k) if v is None else None))
++  for group in ('statistics','comparison'):
++   for k,v in leaves(r[group]):details.append(dict(**ident,group=group,field=k,value=v,reason='undefined_or_unavailable' if v is None else None))
++ for d in PROTOCOL['datasets']:
++  for s,v in itertools.product(PROTOCOL['train_seeds'][d],('original','lcc')):
++   rr=[r for r in records if (r['dataset'],r['train_seed'],r['version'])==(d,s,v)];good=len(rr)==2 and all(x['status']=='complete' for x in rr)
++   for group in ('raw','absolute_error','distribution_error'):
++    keys=set(refs[d][1]) if False else set()
++    for r in rr:keys.update(r[group])
++    # No intersection: preserve all fields even if one generated graph is absent.
++    if not keys:keys.update(read(derived/(d+'_reference.json'))[group])
++    for k in sorted(keys):
++     value=mean([r[group].get(k) for r in rr]) if good else None
++     means.append(dict(dataset=d,train_seed=s,method='HGEN',checkpoint='D3750_G750',version=v,group=group,metric=k,value=value,reason=None if value is not None else 'both_complete_samples_required_or_undefined'))
++   ab=[graphs.get((d,s,z,v)) for z in PROTOCOL['sample_seeds']]
++   diversity.append(dict(dataset=d,train_seed=s,version=v,metrics=S.diversity(ab[0][0],ab[1][0],ab[0][1],ab[1][1],F) if all(x is not None for x in ab) else None,reason=None if all(x is not None for x in ab) else 'both_graphs_required'))
++ result=dict(records=records,inventory=inventory,cell_means=means,diversity=diversity,errors=errors,status='complete' if len(records)==32 and all(x['status']=='complete' for x in inventory) else 'incomplete',seconds=time.time()-begin)
++ dump(OUT/'evaluation.json',result);write_csv(OUT/'tables/per_graph_all_scalar_metrics.csv',scalars);write_csv(OUT/'tables/per_graph_all_detail_fields.csv',details);write_csv(OUT/'tables/training_seed_means.csv',means);dump(OUT/'tables/sample_diversity.json',diversity);dump(OUT/'tables/inventory.json',inventory)
++ # Diffusion controls are existing results only, independently trained methods;
++ # equal integer seeds would not make GAN and diffusion RNG trajectories paired.
++ prior=read(PROJECT/'results/count_aux_results_closeout_20261030_final/evaluation.json');cross=[]
++ for row in means:cross.append(row)
++ for row in prior['cell_means']:
++  if row['checkpoint'] in (3000,6000):cross.append(dict(row,method='E-earlyCN_'+row['arm']))
++ write_csv(OUT/'tables/cross_method_training_seed_means.csv',cross)
++ agg=[]
++ for d,v in itertools.product(PROTOCOL['datasets'],('original','lcc')):
++  keys={(x['group'],x['metric']) for x in means if (x['dataset'],x['version'])==(d,v)}
++  for group,k in sorted(keys):
++   vals=[x['value'] for x in means if (x['dataset'],x['version'],x['group'],x['metric'])==(d,v,group,k)];valid=all(x is not None for x in vals) and len(vals)==4
++   agg.append(dict(dataset=d,version=v,group=group,metric=k,training_seed_count=4,value=mean(vals) if valid else None,minimum=min(vals) if valid else None,maximum=max(vals) if valid else None,reason=None if valid else 'all_four_seeds_required_or_undefined'))
++ write_csv(OUT/'tables/HGEN_four_seed_summary.csv',agg)
++ # Copy authoritative definitions, including all gaps, without redefining metrics.
++ refsrc=PROJECT/'results/count_aux_results_closeout_20261030_final'
++ shutil.copy2(str(refsrc/'METRIC_DIRECTORY.md'),str(OUT/'METRIC_DIRECTORY.md'));shutil.copy2(str(refsrc/'tables/metric_catalog.csv'),str(OUT/'tables/metric_catalog.csv'))
++ print(result['status'],len(records),'all metric versions',time.time()-begin)
++if __name__=='__main__':
++ try:main()
++ except BaseException:save(OUT/'evaluation_failure.json',dict(traceback=traceback.format_exc(),epoch=time.time()));raise
+diff --git a/experiments/hgen_192_full_reference_v1/launch.py b/experiments/hgen_192_full_reference_v1/launch.py
+new file mode 100644
+index 0000000..094e0f1
+--- /dev/null
++++ b/experiments/hgen_192_full_reference_v1/launch.py
+@@ -0,0 +1,55 @@
++"""One bounded eight-card queue. No retries, restarts or additional candidates."""
++import os,sys,time,subprocess,traceback,datetime
++from common import *
++PYTHON='/data2/lyh/miniconda3/envs/hgen_env/bin/python'
++def resources():
++ cards=subprocess.check_output(['nvidia-smi','--query-gpu=index,uuid,name,memory.free,utilization.gpu','--format=csv,noheader,nounits'],universal_newlines=True)
++ jobs=subprocess.check_output(['nvidia-smi','--query-compute-apps=gpu_uuid,pid,used_memory','--format=csv,noheader,nounits'],universal_newlines=True)
++ parsed=[]
++ for row in cards.splitlines():
++  i,u,n,free,util=[x.strip() for x in row.split(',')];parsed.append(dict(index=int(i),uuid=u,name=n,free_mib=int(free),utilization=int(util)))
++ assert len(parsed)==8 and not jobs.strip(),'eight available devices required; do not stop anyone'
++ assert all('2080 Ti' in x['name'] and x['free_mib']>=9000 for x in parsed)
++ return dict(cards=parsed,compute_processes=jobs,permission_basis='same node1 eight2080Ti resource pool explicitly allowed by user; latest user requested multi-card repeated HGEN tests; absence of processes alone is not authorization',time=time.time())
++def cost():
++ rows=[]
++ for d in PROTOCOL['datasets']:
++  p=read(OUT/'engineering'/d/'receipt.json');a=read(OUT/'data'/d/'embedding_receipt.json');assert p['status']=='passed' and a['status']=='complete'
++  train=3750*p['native_D_period_p95_seconds'];sample=3000*p['eight_walk_batches_seconds']/8
++  # Existing native assembler is CPU-only; allowance is a planning assumption,
++  # not a throughput measurement or a substitute for the per-request watchdog.
++  model=(train+sample+60)*1.5;assembly=200
++  rows.append(dict(dataset=d,train_seconds_p95_extrapolation=train,walk_seconds_extrapolation=sample,save_IO_allowance_seconds=60,concurrency_planning_margin=1.5,model_phase_with_margin=model,assembly_two_graphs_planning_seconds=assembly,assembly_two_graphs_hard_watchdog_seconds=1200,critical_path_planned_seconds=model+assembly,asset_actual_seconds=a['seconds']))
++ planned=max(r['critical_path_planned_seconds'] for r in rows);remaining=read(OUT/'ledger.json')['science_stop_epoch']-time.time()
++ result=dict(status='passed' if planned<remaining else 'budget_insufficient',rows=rows,queue=[dict(gpu=i,dataset=d,train_seed=s,D_updates=3750,G_updates=750,sample_seeds=PROTOCOL['sample_seeds']) for i,(d,s) in enumerate((d,s) for d in PROTOCOL['datasets'] for s in PROTOCOL['train_seeds'][d])],planned_science_seconds=planned,remaining_science_seconds=remaining,all_eight_parallel=True,measured_simultaneous_eight_card_throughput=False,CPU_evaluation_planning_seconds=300,delivery_reserve_seconds=900,clock=read(OUT/'ledger.json'))
++ save(OUT/'cost.json',result);return result
++def main():
++ if (OUT/'formal_started.json').exists():raise FileExistsError('already launched; no retry')
++ assert read(OUT/'cpu_tests.json')['passed']==8
++ plan=cost();assert plan['status']=='passed','remaining window cannot accommodate fixed scope'
++ r=resources();save(OUT/'resources_at_launch.json',r)
++ manifest=source_manifest();save(OUT/'source_manifest.json',manifest)
++ queue=plan['queue'];now=time.time();save(OUT/'formal_started.json',dict(start_epoch=now,start_Asia_Shanghai=datetime.datetime.fromtimestamp(now,datetime.timezone(datetime.timedelta(hours=8))).isoformat(),queue=queue,cards=r['cards'],scope='8 native HGEN fits and16 assemblies; no diffusion training',authorization='user approved baseline tests and multi-card repeats; quantitative gates input/engineering/CPU/cost/resources passed',clock=read(OUT/'ledger.json'),source_manifest_sha256=sha(OUT/'source_manifest.json')))
++ children=[]
++ for j in queue:
++  log=(OUT/(cell(j['dataset'],j['train_seed'])+'.log')).open('w');env=dict(os.environ,CUDA_VISIBLE_DEVICES=str(j['gpu']),OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1',MKL_NUM_THREADS='1',TMPDIR=str(OUT/'tmp'),PYTHONDONTWRITEBYTECODE='1')
++  p=subprocess.Popen([PYTHON,'-B',str(ROOT/'worker.py'),j['dataset'],str(j['train_seed'])],env=env,stdout=log,stderr=subprocess.STDOUT);children.append((p,log,j))
++ save(OUT/'startup.json',dict(launcher_pid=os.getpid(),workers=[dict(j,pid=p.pid) for p,_,j in children]))
++ done=[]
++ while children:
++  for item in list(children):
++   p,log,j=item
++   if p.poll() is not None:log.close();done.append(dict(j,exit_code=p.returncode,finished_epoch=time.time()));children.remove(item)
++  save(OUT/'launcher_progress.json',dict(running=[dict(j,pid=p.pid) for p,_,j in children],finished=done))
++  # Worker checks its own absolute science stop at every update/model batch;
++  # assembly retains the already audited600s per-request watchdog. No restarts.
++  if children:time.sleep(5)
++ save(OUT/'scientific_completion.json',dict(epoch=time.time(),finished=done,new_HGEN_D_updates=sum(3750 for x in done if x['exit_code']==0),new_HGEN_G_updates=sum(750 for x in done if x['exit_code']==0)))
++ env=dict(os.environ,CUDA_VISIBLE_DEVICES='',OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1',MKL_NUM_THREADS='1',TMPDIR=str(OUT/'tmp'))
++ with (OUT/'evaluation.log').open('w') as f:
++  p=subprocess.run([PYTHON,'-B',str(ROOT/'evaluate.py')],env=env,stdout=f,stderr=subprocess.STDOUT)
++ save(OUT/'evaluation_exit.json',dict(exit_code=p.returncode,epoch=time.time()))
++ print('HGEN science and CPU evaluation finished',time.time(),p.returncode)
++if __name__=='__main__':
++ try:main()
++ except BaseException:save(OUT/'launcher_failure.json',dict(traceback=traceback.format_exc(),epoch=time.time()));raise
+diff --git a/experiments/hgen_192_full_reference_v1/prepare.py b/experiments/hgen_192_full_reference_v1/prepare.py
+new file mode 100644
+index 0000000..48797da
+--- /dev/null
++++ b/experiments/hgen_192_full_reference_v1/prepare.py
+@@ -0,0 +1,47 @@
++"""Only this192-node reference supplies paths and Hin2Vec training material."""
++import os
++os.environ['OMP_NUM_THREADS']='1';os.environ['OPENBLAS_NUM_THREADS']='1'
++import sys,time,shutil,traceback
++import numpy as np
++import pandas as pd
++import networkx as nx
++import torch
++from common import *
++torch.set_num_threads(1)
++def prepare():
++ begun=time.time();rows=[]
++ for d,expected in PROTOCOL['datasets'].items():
++  check_time(900);folder=OUT/'data'/d;folder.mkdir(parents=True,exist_ok=False)
++  ref=PROJECT/'results/count_aux_results_closeout_20261030_final/reference'/(d+'.npz');z=np.load(str(ref),allow_pickle=False);types=z['types'];edges=z['edges'];schema=z['schema']
++  assert len(types)==expected['nodes'] and len(edges)==expected['edges'] and edges.shape[1]==2
++  graph=nx.Graph();graph.add_nodes_from(range(len(types)));graph.add_edges_from(edges)
++  assert sorted(map(len,nx.connected_components(graph)),reverse=True)==expected['components']
++  assert not list(nx.isolates(graph));shutil.copy2(str(ref),str(folder/'reference.npz'))
++  adj=[sorted(graph.neighbors(i)) for i in range(len(types))];banks=[[],[],[]]
++  def visit(seq):
++   if len(seq)>1:banks[len(seq)-2].append(seq.copy())
++   if len(seq)==4:return
++   for v in adj[seq[-1]]:
++    if v not in seq:visit(seq+[v])
++  for i in range(len(types)):visit([i])
++  parts=[]
++  for length,bank in enumerate(banks,2):
++   arr=np.asarray(bank,dtype=np.int64);assert arr.shape[1]==length
++   padded=np.full((len(arr),4),len(types),np.int64);padded[:,:length]=arr;parts.append(padded)
++  paths=np.concatenate(parts);assert len(paths)>=24000;np.save(str(folder/'all_paths.npy'),paths)
++  for s in PROTOCOL['train_seeds'][d]:
++   ix=np.random.Generator(np.random.PCG64(s)).choice(len(paths),24000,replace=False);nodes=paths[ix];tt=np.full_like(nodes,4);valid=nodes<len(types);tt[valid]=types[nodes[valid]]
++   np.savez_compressed(str(folder/('bank'+str(s)+'.npz')),nodes=nodes,types=tt,source_indices=ix)
++  # Use the HGEN-linked native HIN2vec implementation, no synthetic embeddings.
++  walker=module(ROOT/'vendor/hin2vec/walker.py','frozen_hin2vec_walker');model=module(ROOT/'vendor/hin2vec/model.py','frozen_hin2vec_model')
++  seed(PROTOCOL['embedding_seeds'][d]);df=pd.DataFrame([dict(source_node=int(u),dest_node=int(v),source_class=int(types[u]),dest_class=int(types[v]),edge_class=str(types[u])+'-'+str(types[v]),weight=1.) for u,v in edges])
++  hin=walker.load_a_HIN_from_pandas([df]);hin.window=5;examples=hin.sample(10,8);dataset=model.NSTrainSet(examples,hin.node_size,neg=8)
++  assert set(hin.id2node.values())==set(range(192)) and hin.node_size==192
++  np.savez_compressed(str(folder/'hin2vec_examples.npz'),x=dataset.x.numpy(),y=dataset.y.numpy())
++  save(folder/'hin2vec_mapping.json',dict(node2id={int(k):int(v) for k,v in hin._node2id.items()},path_size=hin.path_size,seed=PROTOCOL['embedding_seeds'][d],reference_sha256=sha(ref)))
++  rows.append(dict(dataset=d,nodes=len(types),edges=len(edges),components=expected['components'],reference_sha256=sha(ref),ordered_path_counts=[len(b) for b in banks],total_paths=len(paths),Hin2Vec_examples=len(dataset),Hin2Vec_batches_per_epoch=(len(dataset)+31)//32,window=5,train_only_this_reference=True))
++ save(OUT/'input_gate.json',dict(status='passed',datasets=rows,seconds=time.time()-begun,no_LCC_crop=True,no_edge_split=True,embedding_fitted=False))
++ print(rows)
++if __name__=='__main__':
++ try:prepare()
++ except BaseException:save(OUT/'prepare_failure.json',dict(traceback=traceback.format_exc(),epoch=time.time()));raise
+diff --git a/experiments/hgen_192_full_reference_v1/probe.py b/experiments/hgen_192_full_reference_v1/probe.py
+new file mode 100644
+index 0000000..e51e1e1
+--- /dev/null
++++ b/experiments/hgen_192_full_reference_v1/probe.py
+@@ -0,0 +1,51 @@
++"""Two bounded engineering jobs. No engineering state enters scientific fits."""
++import os
++os.environ['OMP_NUM_THREADS']='1';os.environ['OPENBLAS_NUM_THREADS']='1'
++import sys,time,traceback,resource,copy,io
++import numpy as np
++import torch
++from torch.utils.data import DataLoader,TensorDataset
++from common import *
++torch.set_num_threads(1)
++def batch_bank(d):
++ s=PROTOCOL['train_seeds'][d][0];z=np.load(str(OUT/'data'/d/('bank'+str(s)+'.npz')));n=192
++ t=torch.nn.functional.one_hot(torch.from_numpy(z['types'][:640]).long(),5).float();x=torch.nn.functional.one_hot(torch.from_numpy(z['nodes'][:640]).long(),n+1).float()
++ return [(t[i:i+32],x[i:i+32]) for i in range(0,640,32)]
++def main(d):
++ begin=time.time();check_time(900);torch.cuda.set_device(0);folder=OUT/'engineering'/d;folder.mkdir(parents=True,exist_ok=False);seed(2026103009)
++ z=np.load(str(OUT/'data'/d/'reference.npz'));types=z['types'];mp=read(OUT/'data'/d/'hin2vec_mapping.json');examples=np.load(str(OUT/'data'/d/'hin2vec_examples.npz'))
++ m=module(ROOT/'vendor/hin2vec/model.py','native_Hin2Vec');h=m.HIN2vec(192,mp['path_size'],32,True).cuda();opt=torch.optim.AdamW(h.parameters());ds=TensorDataset(torch.from_numpy(examples['x']),torch.from_numpy(examples['y']));dl=DataLoader(ds,batch_size=32,shuffle=True,num_workers=0)
++ elapsed=[];tic=time.time()
++ for i,(x,y) in enumerate(dl):
++  if i==100:break
++  start=time.time();x,y=x.cuda(),y.cuda();opt.zero_grad();p=h(x[:,0],x[:,1],x[:,2]);loss=torch.nn.functional.binary_cross_entropy(p,y);assert torch.isfinite(loss);loss.backward();opt.step();torch.cuda.synchronize();elapsed.append(time.time()-start)
++ embedding=h.start_embeds.weight.detach().cpu().numpy()[[mp['node2id'][str(i)] for i in range(192)]]
++ hin_seconds=time.time()-tic;assert np.isfinite(embedding).all();del h,opt;torch.cuda.empty_cache()
++ env=load_core(True);g,dis,go,do,groups=setup(env,types,embedding,'cuda',1);env['dataloader']=batch_bank(d);calls=[];last=[time.time()];dur=[]
++ def record(step,loss):
++  torch.cuda.synchronize();dur.append(time.time()-last[0]);last[0]=time.time();assert torch.isfinite(loss);calls.append(step)
++ env.update(record_update=record,print=lambda *a,**k:None);tic=time.time();env['train']();torch.cuda.synchronize();hgen_seconds=time.time()-tic
++ assert calls==list(range(1,21)) and all(torch.isfinite(p).all() for x in [g,dis] for p in x.parameters())
++ node_grad={name:p.grad is None for name,p in g.named_parameters() if name.startswith('lin_node_') and not name.startswith('lin_node_type')}
++ # Preserve known original integer-sampling gradient limitation; never repair it silently.
++ snap=copy.deepcopy(dict(g=g.state_dict(),d=dis.state_dict(),go=go.state_dict(),do=do.state_dict(),rng=rng()))
++ saved=folder/'temporary_checkpoint.pt';torch.save(snap,str(saved));loaded=torch.load(str(saved),map_location='cpu')
++ g2,d2,go2,do2,_=setup(load_core(),types,embedding,'cuda',1);g2.load_state_dict(loaded['g']);d2.load_state_dict(loaded['d']);go2.load_state_dict(loaded['go']);do2.load_state_dict(loaded['do']);restore_rng(loaded['rng'])
++ def exact(a,b):
++  if torch.is_tensor(a):return torch.equal(a.cpu(),b.cpu())
++  if isinstance(a,np.ndarray):return np.array_equal(a,b)
++  if isinstance(a,dict):return a.keys()==b.keys() and all(exact(a[k],b[k]) for k in a)
++  if isinstance(a,(list,tuple)):return len(a)==len(b) and all(exact(x,y) for x,y in zip(a,b))
++  return a==b
++ assert exact(g2.state_dict(),snap['g']) and exact(d2.state_dict(),snap['d']) and exact(go2.state_dict(),snap['go']) and exact(do2.state_dict(),snap['do']) and exact(rng(),snap['rng'])
++ tic=time.time()
++ with torch.no_grad():
++  for _ in range(8):
++   t,n=g(env['make_noise']((32,64),'Uniform').cuda());assert torch.isfinite(t).all() and torch.isfinite(n).all()
++ torch.cuda.synchronize();sample_seconds=time.time()-tic
++ allocated=torch.cuda.max_memory_allocated()/2**20;reserved=torch.cuda.max_memory_reserved()/2**20;assert allocated<9000
++ save(folder/'receipt.json',dict(status='passed',dataset=d,device=torch.cuda.get_device_name(0),CUDA_VISIBLE_DEVICES=os.environ.get('CUDA_VISIBLE_DEVICES'),temporary_Hin2Vec_updates=100,temporary_D_updates=20,temporary_G_updates=4,temporary_walks=256,temporary_assembled_graphs=0,Hin2Vec100_updates_seconds=hin_seconds,Hin2Vec_p95_update_seconds=float(np.quantile(elapsed[5:],.95)),native20_D4_G_seconds=hgen_seconds,native_D_period_mean_seconds=sum(dur)/20,native_D_period_p95_seconds=float(np.quantile(dur[5:],.95)),eight_walk_batches_seconds=sample_seconds,exact_model_optimizer_rng_load=True,known_native_node_gradient_absence=node_grad,peak_allocated_mib=allocated,peak_reserved_mib=reserved,peak_RSS_mib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024,seconds=time.time()-begin,engineering_states_excluded_from_science=True))
++ print(read(folder/'receipt.json'))
++if __name__=='__main__':
++ try:main(sys.argv[1])
++ except BaseException:save(OUT/('probe_failure_'+sys.argv[1]+'.json'),dict(traceback=traceback.format_exc(),epoch=time.time()));raise
+diff --git a/experiments/hgen_192_full_reference_v1/protocol.json b/experiments/hgen_192_full_reference_v1/protocol.json
+new file mode 100644
+index 0000000..4a240d3
+--- /dev/null
++++ b/experiments/hgen_192_full_reference_v1/protocol.json
+@@ -0,0 +1,15 @@
++{
++  "name": "HGEN-author-core-192-full-reference-with-declared-zero-support-rejection",
++  "upstream_hgen_commit": "ddd93c38ead7e8ca0db21854b114fb8481407fb8",
++  "upstream_hin2vec_commit": "7c3b6c4160476568985622117cf2263e7b78760e",
++  "datasets": {"IMDB": {"nodes": 192, "edges": 323, "components": [188, 2, 2]}, "PubMed": {"nodes": 192, "edges": 926, "components": [192]}},
++  "train_seeds": {"IMDB": [2026103011, 2026103012, 2026103013, 2026103014], "PubMed": [2026103021, 2026103022, 2026103023, 2026103024]},
++  "sample_seeds": [2026102821, 2026102822],
++  "embedding_seeds": {"IMDB": 2026103001, "PubMed": 2026103002},
++  "embedding": {"window": 5, "walk": 8, "walk_length": 10, "dimension": 32, "negative_samples": 8, "sigmoid_reg": true, "epochs": 4, "batch_size": 32, "optimizer": "AdamW native defaults", "fit_scope": "this192-node reference only; shared fixed asset across four GAN seeds"},
++  "hgen": {"train_paths": 24000, "sample_without_replacement": true, "path_nodes": [2, 3, 4], "epochs": 5, "batch_size": 32, "D_updates": 3750, "G_updates": 750, "hidden_units": 128, "G_layers": 5, "noise_dim": 64, "noise_type": "Uniform", "optimizer": "RMSprop", "lr": 0.0001, "clip": 0.03, "tau": 3, "G_every_D": 5, "generated_walk_batches": 3000, "generated_walks": 96000},
++  "assembly": {"target": "2*reference_undirected_edges supplied as native total-edge-budget condition", "initial_graph": "all zero; no reference backbone", "zero_support": "reuse previously audited whole-proposal rejection, named compatibility extension; no uniform fallback", "max_proposals": "20*reference_edges", "per_graph_wall_seconds": 600, "keep_native_low_support_and_overshoot": true, "repair_or_redraw": false},
++  "gates": {"full192_input_and_mapping": true, "real_Hin2Vec_required": true, "synthetic_or_global_embedding_crop_allowed": false, "native_model_source_exact": true, "finite_training_and_outputs": true, "same_input_state_restore": true, "at_most_gpu_cards": 8, "fit_one_per_card": true, "CPU_threads_per_process": 1, "peak_GPU_mib_limit": 9000, "planning_margin": 1.5, "must_fit_remaining_science_window": true},
++  "evaluation": {"reference": "same frozen192 references and pure CPU evaluator as current diffusion results", "original_primary": true, "LCC_secondary": true, "no_schema_projection": true, "loops": "retain raw adjacency, report invalid simple graph rather than silently remove", "all_implemented_metrics": true, "failures_and_nulls": "retain; no successful-only averages"},
++  "limits": ["native integer node sampling gradient limitation unchanged", "GAN four seeds conditional on one fixed embedding per dataset, not four fully independent embedding pipelines", "HGEN receives total edge budget; diffusion has no hard quota", "native GAN steps are not equivalent to diffusion normal2 updates", "not a reproduction of author held-out table numbers"]
++}
+diff --git a/experiments/hgen_192_full_reference_v1/test_input.py b/experiments/hgen_192_full_reference_v1/test_input.py
+new file mode 100644
+index 0000000..2486af6
+--- /dev/null
++++ b/experiments/hgen_192_full_reference_v1/test_input.py
+@@ -0,0 +1,36 @@
++import unittest,ast,random
++import numpy as np,scipy.sparse as sp
++from common import *
++from worker import compatible_assembly,scores
++class InputTests(unittest.TestCase):
++ def test_all_reference_nodes_and_components(self):
++  import networkx as nx
++  for d,v in PROTOCOL['datasets'].items():
++   z=np.load(str(OUT/'data'/d/'reference.npz'));g=nx.Graph();g.add_nodes_from(range(192));g.add_edges_from(z['edges']);self.assertEqual(sorted(map(len,nx.connected_components(g)),reverse=True),v['components']);self.assertEqual(g.number_of_edges(),v['edges'])
++ def test_every_cached_path_is_in_reference(self):
++  for d in PROTOCOL['datasets']:
++   z=np.load(str(OUT/'data'/d/'reference.npz'));adj=np.zeros((192,192),bool);es=z['edges'];adj[es[:,0],es[:,1]]=True;adj|=adj.T
++   for s in PROTOCOL['train_seeds'][d]:
++    b=np.load(str(OUT/'data'/d/('bank'+str(s)+'.npz')));self.assertEqual(len(np.unique(b['source_indices'])),24000)
++    for i in range(3):
++     good=(b['nodes'][:,i]<192)&(b['nodes'][:,i+1]<192);self.assertTrue(adj[b['nodes'][good,i],b['nodes'][good,i+1]].all())
++    good=b['nodes']<192;np.testing.assert_array_equal(b['types'][good],z['types'][b['nodes'][good]])
++ def test_native_classes_unmodified(self):
++  src=ast.parse((ROOT/'vendor/hgen/hgen.py').read_text());env=load_core()
++  for name in ('Generator','Discriminator','train'):self.assertIn(name,env)
++  self.assertEqual(PROTOCOL['hgen']['epochs'],5);self.assertEqual(PROTOCOL['hgen']['train_paths'],24000)
++ def test_assembly_defined_domain_matches(self):
++  s=sp.csr_matrix(np.ones((8,8))-np.eye(8));p={(0,1,0):5,(1,0,1):3};groups={0:list(range(4)),1:list(range(4,8))}
++  for v in (1,2,3):
++   seed(v);a=load_core()['heterogeneous_graph_assemble'](s,12,p,groups);r1=random.getstate();n1=np.random.get_state()
++   b,_,ok,_=compatible_assembly(s,12,p,groups,v);self.assertTrue(ok);np.testing.assert_array_equal(a,b);self.assertEqual(r1,random.getstate());np.testing.assert_array_equal(n1[1],np.random.get_state()[1])
++ def test_empty_pattern_failure_kept(self):
++  a,l,ok,why=compatible_assembly(sp.csr_matrix(np.ones((8,8))),8,{}, {0:[0,1],1:[2,3],2:[4,5],3:[6,7]},1);self.assertFalse(ok);self.assertEqual(why,'empty_pattern_support')
++ def test_low_support_return_unchanged(self):
++  s=np.zeros((8,8));s[0,1]=s[1,0]=1;a,l,ok,why=compatible_assembly(sp.csr_matrix(s),20,{(0,1):1},{0:[0,1,2,3],1:[4,5,6,7]},2);np.testing.assert_array_equal(a,s);self.assertTrue(ok)
++ def test_eight_fits_sixteen_graphs(self):
++  self.assertEqual(sum(map(len,PROTOCOL['train_seeds'].values())),8);self.assertEqual(len(PROTOCOL['sample_seeds']),2);self.assertEqual(len(set(sum(PROTOCOL['train_seeds'].values(),[]))),8)
++ def test_Hin2Vec_mapping_not_assumed_identity(self):
++  for d in PROTOCOL['datasets']:
++   m=read(OUT/'data'/d/'hin2vec_mapping.json');self.assertEqual(set(map(int,m['node2id'])),set(range(192)));self.assertEqual(set(m['node2id'].values()),set(range(192)));self.assertGreater(m['path_size'],0)
++if __name__=='__main__':unittest.main(verbosity=2)
+diff --git a/experiments/hgen_192_full_reference_v1/vendor/hgen/LICENSE b/experiments/hgen_192_full_reference_v1/vendor/hgen/LICENSE
+new file mode 100644
+index 0000000..5fa66a8
+--- /dev/null
++++ b/experiments/hgen_192_full_reference_v1/vendor/hgen/LICENSE
+@@ -0,0 +1,21 @@
++MIT License
++
++Copyright (c) 2021 Chen Ling
++
++Permission is hereby granted, free of charge, to any person obtaining a copy
++of this software and associated documentation files (the "Software"), to deal
++in the Software without restriction, including without limitation the rights
++to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++copies of the Software, and to permit persons to whom the Software is
++furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in all
++copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++SOFTWARE.
+diff --git a/experiments/hgen_192_full_reference_v1/vendor/hgen/PROVENANCE.json b/experiments/hgen_192_full_reference_v1/vendor/hgen/PROVENANCE.json
+new file mode 100644
+index 0000000..cbdc9db
+--- /dev/null
++++ b/experiments/hgen_192_full_reference_v1/vendor/hgen/PROVENANCE.json
+@@ -0,0 +1,13 @@
++{
++  "remote": "https://github.com/lingchen0331/HGEN",
++  "commit": "ddd93c38ead7e8ca0db21854b114fb8481407fb8",
++  "files": {
++    "LICENSE": "ec73c322cbe8a414273fd8ce434de2cf7f4790f543d7a936e6b04dbf23f3fcf7",
++    "README.md": "77bfa2481eea51161cf119afdf963b21c8242d8f357c0bbc1faab041e1dd4d1e",
++    "data_helper.py": "217e00fd544df636a2a14064f829181519fc13ae83b62dad13e7817182223fee",
++    "hgen.py": "634667def6f31cd4bd6c5c3a1ac1e7f27aff3c83b25a186611b68d20459a988b",
++    "hgen_syn.py": "a872677a0430526ab90e2fc3fc54b50c5c821df2f71af8fad40b753261430282",
++    "hin2vec_emb_gen.py": "7073f2e72dd5d2fdb4c6759596d664b9a6a1c0a02781dc8133584bb6363d1b15",
++    "utils.py": "f8090bf20551d4439370e20b53d9bc46000704d16cf9e44efff8a6e05dc6a689"
++  }
++}
+\ No newline at end of file
+diff --git a/experiments/hgen_192_full_reference_v1/vendor/hgen/hgen.py b/experiments/hgen_192_full_reference_v1/vendor/hgen/hgen.py
+new file mode 100644
+index 0000000..a9ab75b
+--- /dev/null
++++ b/experiments/hgen_192_full_reference_v1/vendor/hgen/hgen.py
+@@ -0,0 +1,496 @@
++# -*- coding: utf-8 -*-
++
++import argparse
++import numpy as np
++import pandas as pd
++from torch.utils.data import DataLoader
++from torch.autograd import Variable
++import torch.nn as nn
++import torch.nn.functional as F
++import torch
++import pickle
++import utils
++import scipy.sparse as sp
++import networkx as nx
++from collections import Counter
++from torch_two_sample import MMDStatistic
++import matplotlib.pyplot as plt
++import time
++
++# Training settings
++parser = argparse.ArgumentParser()
++parser.add_argument('--W-down-generator-size', type=int, default=128)
++parser.add_argument('--W-down-discriminator-size', type=int, default=128)
++parser.add_argument("--batch-size", default=32,
++                    help="Batch size of the training/testing set")
++parser.add_argument("--noise-dim", default=64,
++                    help="The dim of the random noise that is used as input.")
++parser.add_argument("--noise-type", choices=["Gaussian", "Uniform"], default="Uniform",
++                    help="The noise type to feed into the generator.")
++parser.add_argument("--hidden-units", default=128,
++                    help="The dimension of the hidden unit in lstm cells.")
++parser.add_argument("--num-G-layer", type=int, default=5,
++                    help="The number of layers in lstm cells of Generator.")
++parser.add_argument("--max-path-len", type=int, default=4,
++                    help="The maximum meta path length")
++parser.add_argument("--neighbor-sampling-size", type=int, default=120,
++                    help="The sampling size from the neighbor nodes")
++parser.add_argument("--lr_gen", type=float, default=1e-4,
++                    help="Learning Rate of generator")
++parser.add_argument("--lr_dis", type=float, default=1e-4,
++                    help="Learning Rate of descriminator")
++parser.add_argument("--disc-iters", type=int, default=5,
++                    help="Discriminator update iterations")
++parser.add_argument("--clip-value", type=float, default=0.03,
++                    help="lower and upper clip value for disc. weights")
++parser.add_argument("--n-critic", type=int, default=5,
++                    help="number of training steps for discriminator per iter")
++parser.add_argument("--n-epochs", type=int, default=5,
++                    help="The number of epochs.")
++parser.add_argument("--dataset", choices=["syn_100", "syn_200", "syn_500", "PubMed", "IMDB_movie", "DBLP_four_area"], 
++                    default="IMDB_movie", help="The choice of dataset.")
++parser.add_argument("--edge-type", type=bool, default=False,
++                    help="Whether to predict edge type.")
++parser.add_argument("--save", type=bool, default=False,
++                    help="Whether to save the trained model.")
++args = parser.parse_args()
++device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
++
++val_share = 0.0
++test_share = 0.4
++seed = 481516234
++
++def data_preprocess(val_share, test_share, seed, directory=args.dataset):
++    _X_obs, _A_obs = utils.load_HIN(directory)
++    _A_obs[_A_obs > 1] = 1
++    _A_obs[_A_obs < 0] = 0
++    diag_A = np.diag(np.diag(np.ones(_A_obs.shape)))
++    _A_obs = _A_obs - sp.csr_matrix(diag_A)
++    _A_obs = _A_obs + _A_obs.T
++    _A_obs[_A_obs > 1] = 1
++    _A_obs[_A_obs < 0] = 0
++    lcc = utils.largest_connected_components(_A_obs)
++    _A_obs = _A_obs[lcc, :][:, lcc]
++    _N = _A_obs.shape[0]
++    _X_obs = dict(zip(lcc, [_X_obs[i] for i in lcc]))
++    _X_obs = dict(zip(list(range(len(_X_obs))), _X_obs.values()))
++    node_type = utils.group_dict(_X_obs)
++    # Spliting training graph and testing graph
++    train_ones, val_ones, val_zeros, test_ones, test_zeros = utils.train_val_test_split_adjacency(
++            _A_obs, val_share, test_share, seed, undirected=True, connected=False, asserts=False)
++    test_graph = sp.coo_matrix((np.ones(len(test_ones)),(test_ones[:,0], test_ones[:,1]))).tocsr()
++
++    return _A_obs, _X_obs, _N, lcc, node_type, test_graph
++
++
++def read_node_embeddings(node_type, lcc, device, dataset=args.dataset):
++    node_embs = pickle.load(open(dataset+"/hin2vec_{}_32.p".format(dataset),"rb"))
++    node_embs_classified = []
++    bb = dict(zip(list(range(len(lcc))), lcc))
++    for i in range(len(node_type)):
++        temp = []
++        for j in node_type[i]:
++            temp.append(torch.tensor(node_embs[bb[j]]).unsqueeze(0))
++        node_embs_classified.append(torch.cat(temp, 0).to(device))
++    return node_embs_classified
++
++
++class HINDataset(torch.utils.data.Dataset):
++    def __init__(self, node_attribute, num_nodes, max_path_len, dataset):
++        self.node_attribute = node_attribute
++        self.num_nodes = num_nodes
++        self.max_path_len = max_path_len
++        self.dataset = dataset
++        if self.dataset in ["syn_100", "syn_200", "syn_500"]:
++            self.num_classes = 3+1
++        else:
++            self.num_classes = 4+1
++        self.data = self.cache(self.node_attribute, self.num_nodes)
++
++    def cache(self, node_attribute, num_nodes):
++        path_len_2 = pickle.load(open(self.dataset+"/path_len_2.p", "rb"))
++        path_len_3 = pickle.load(open(self.dataset+"/path_len_3.p", "rb"))
++        path_len_4 = pickle.load(open(self.dataset+"/path_len_4.p", "rb"))
++        paths = np.array(path_len_2 + path_len_3 + path_len_4)
++        g = np.random.Generator(np.random.PCG64())
++        sampled_paths = paths[g.choice(len(paths), 24000, replace=False)]
++        real_walk_data = []
++        for path in sampled_paths:
++            temp_walk = utils.one_hot_encoder(np.array(path), num_nodes+1)
++            temp_type = utils.one_hot_encoder(np.array([node_attribute[i] for i in path]), self.num_classes)
++            # Padding random walks to the max length
++            if temp_type.shape[0] < self.max_path_len:
++                temp_walk = utils.pad_along_axis(temp_walk, self.max_path_len, axis=0)
++                temp_type = utils.pad_along_axis(temp_type, self.max_path_len, axis=0)
++            real_walk_data.append((temp_type, temp_walk))
++        print("Done!")
++        return real_walk_data
++
++    def __getitem__(self, item):
++        types, walks = self.data[item]
++        return types, walks
++
++    def __len__(self):
++        return len(self.data)
++
++
++class Generator(nn.Module):
++    def __init__(self, node_type, N, node_embs, device, args):
++        super(Generator, self).__init__()
++        self.node_type = node_type
++        self.N = N
++        self.batch_size = args.batch_size
++        self.hidden_units = args.hidden_units
++        self.noise_dim = args.noise_dim
++        self.max_path_len = args.max_path_len
++        self.W_down_generator_size = args.W_down_generator_size
++        self.num_G_layer = args.num_G_layer
++        self.node_embs = node_embs
++        self.device = device
++        self.node_emb_size = 32
++        
++        self.type_0 = torch.tensor(node_type[0], dtype=torch.float).to(self.device)
++        self.type_1 = torch.tensor(node_type[1], dtype=torch.float).to(self.device)
++        self.type_2 = torch.tensor(node_type[2], dtype=torch.float).to(self.device)
++        
++        self.lin_node_0 = nn.Linear(self.hidden_units, self.node_emb_size)
++        self.lin_node_1 = nn.Linear(self.hidden_units, self.node_emb_size)
++        self.lin_node_2 = nn.Linear(self.hidden_units, self.node_emb_size)
++        
++        if args.dataset in ["syn_100", "syn_200", "syn_500"]:
++            self.node_classes = 4
++        else:
++            self.node_classes = 5
++            self.type_3 = torch.tensor(node_type[3], dtype=torch.float).to(self.device)
++            self.lin_node_3 = nn.Linear(self.hidden_units, self.node_emb_size)
++            
++        self.W_down_generator_type = nn.Linear(self.node_classes, self.W_down_generator_size)
++        self.W_down_generator_node = nn.Linear(self.N+1, self.W_down_generator_size)
++        self.neighbor_sampling_size = args.neighbor_sampling_size
++        
++        self.lstm = nn.LSTM(self.hidden_units, self.hidden_units, self.num_G_layer)
++        self.init_lin_1 = nn.Linear(self.noise_dim, self.hidden_units)
++        self.init_lin_2_h = nn.Linear(self.hidden_units, self.hidden_units)
++        self.init_lin_2_c = nn.Linear(self.hidden_units, self.hidden_units)
++        self.lin_node_type = nn.Linear(self.hidden_units, self.node_classes)
++
++    def reverse_sampling(self, dist):
++        dist_weight = torch.exp(-dist)
++        return torch.multinomial(dist_weight, 1)[0]
++        
++    def forward(self, z):
++        outputs_type, outputs_node, init_c, init_h = [], [], [], []
++        for _ in range(self.num_G_layer):
++            intermediate = torch.tanh(self.init_lin_1(z))
++            init_c.append(torch.tanh(self.init_lin_2_c(intermediate)))
++            init_h.append(torch.tanh(self.init_lin_2_h(intermediate)))
++        # Initialize an input tensor
++        inputs = Variable(torch.zeros((self.batch_size, self.hidden_units))).to(self.device)
++        hidden = (torch.stack(init_c, dim=0), torch.stack(init_h, dim=0))
++
++        # LSTM time steps
++        for i in range(self.max_path_len):
++            out, hidden = self.lstm(inputs.unsqueeze(0), hidden)
++            output_bef = self.lin_node_type(out.squeeze(0))
++            output_type = F.gumbel_softmax(output_bef, dim=1, tau=3, hard=True)
++            temp_node = []
++            for j, x in enumerate(torch.argmax(output_type, dim=1)):
++                if x==0:
++                    temp_output_node = self.lin_node_0(out.squeeze(0)[j])
++                    dist = torch.norm(self.node_embs[x] - temp_output_node, dim=1, p=None)
++                    dist = dist.topk(int(dist.shape[0]//1), largest=False)
++                    candidate = dist.indices[self.reverse_sampling(dist.values)]
++                    temp_node.append(self.type_0[candidate])
++                elif x==1:
++                    temp_output_node = self.lin_node_1(out.squeeze(0)[j])
++                    dist = torch.norm(self.node_embs[x] - temp_output_node, dim=1, p=None)
++                    dist = dist.topk(int(dist.shape[0]//1), largest=False)
++                    candidate = dist.indices[self.reverse_sampling(dist.values)]
++                    temp_node.append(self.type_1[candidate])
++                elif x==2:
++                    temp_output_node = self.lin_node_2(out.squeeze(0)[j])
++                    dist = torch.norm(self.node_embs[x] - temp_output_node, dim=1, p=None)
++                    dist = dist.topk(int(dist.shape[0]//1), largest=False)
++                    candidate = dist.indices[self.reverse_sampling(dist.values)]
++                    temp_node.append(self.type_2[candidate])
++                elif x==3:
++                    temp_output_node = self.lin_node_3(out.squeeze(0)[j])
++                    dist = torch.norm(self.node_embs[x] - temp_output_node, dim=1, p=None)
++                    dist = dist.topk(int(dist.shape[0]//1), largest=False)
++                    candidate = dist.indices[self.reverse_sampling(dist.values)]
++                    temp_node.append(self.type_3[candidate])
++                elif x==4:
++                    temp_node.append(torch.tensor(self.N).to(self.device))
++            temp_node = torch.stack(temp_node)
++            output_node = F.one_hot(temp_node.to(int), self.N+1).float()
++            outputs_type.append(output_type)
++            outputs_node.append(output_node)
++
++            inputs = self.W_down_generator_type(output_type) + self.W_down_generator_node(output_node)
++
++        outputs_type = torch.stack(outputs_type, dim=1)
++        outputs_node = torch.stack(outputs_node, dim=1)
++
++        return outputs_type, outputs_node
++
++
++class Discriminator(nn.Module):
++    def __init__(self, N, device, args):
++        super(Discriminator, self).__init__()
++        self.N = N
++        self.device = device
++        self.batch_size = args.batch_size
++        self.hidden_units = args.hidden_units
++        self.W_down_discriminator_size = args.W_down_discriminator_size
++        self.max_path_len = args.max_path_len
++        if args.dataset in ["IMDB", "syn_100", "syn_200", "syn_500"]:
++            self.node_classes = 4
++        else:
++            self.node_classes = 5
++
++        self.lin_in_type = nn.Linear(self.max_path_len*self.node_classes, self.hidden_units)
++        self.lstm_type = nn.Linear(self.W_down_discriminator_size, self.hidden_units, 4)
++        self.lin_out_3_type = nn.Linear(self.hidden_units, 1)
++
++        self.lin_in_node = nn.Linear(self.max_path_len*(self.N+1), self.hidden_units)
++        self.lstm_node = nn.Linear(self.hidden_units, self.hidden_units, 4)
++        self.lin_out_3_node = nn.Linear(self.hidden_units, 1)
++
++    def forward(self, z):
++        input_type, input_node = z[0], z[1]
++        # Discriminator score of node type
++        input_type = torch.tanh(self.lin_in_type(input_type.view(self.batch_size, -1)))
++        output_type = torch.tanh(self.lstm_type(input_type))
++        output_type = self.lin_out_3_type(output_type)
++        # Discriminator score of node sequence
++        input_node = torch.tanh(self.lin_in_node(input_node.view(self.batch_size, -1)))
++        output_node = torch.tanh(self.lstm_node(input_node))
++        output_node = self.lin_out_3_node(output_node)
++        
++        return output_type + output_node
++
++
++def generate_walks():
++    print("Start Generating Graph...")
++    transitions_per_walk = 4-1
++    transitions_per_iter = 20e4
++    eval_transitions = 60e7
++    sample_many_count = int(np.round(transitions_per_iter/transitions_per_walk))
++    n_eval_walks = eval_transitions/transitions_per_walk
++    n_eval_iters = int(np.round(n_eval_walks/sample_many_count))
++
++    smpls_type, smpls_node = [], []
++    for i in range(n_eval_iters):
++        initial_noise = utils.make_noise((args.batch_size, args.noise_dim), args.noise_type).to(device)
++        synthetic_type, synthetic_node = generator(initial_noise)
++        synthetic_type = torch.argmax(synthetic_type.cpu(), dim=2).numpy().astype(np.int32)
++        synthetic_node = torch.argmax(synthetic_node.cpu(), dim=2).numpy().astype(np.int32)
++        smpls_type += utils.delete_from_tail(synthetic_type, 4)
++        smpls_node += utils.delete_from_tail(synthetic_node, _N)
++        if i % 100 == 0:
++            print("Done, generating {} of {} batches meta-paths...".format(i, n_eval_iters))
++
++    return smpls_type, smpls_node
++
++
++def frequent_meta_path_pattern(smpls_type):
++    #aa = np.concatenate(smpls_type)
++    bb = []
++    for i in smpls_type:
++        bb.append(tuple(i))
++    count = Counter(bb)
++
++    #print(count.most_common())
++    return count.most_common()
++    
++
++def meta_path_frequency(smpls_type_2, smpls_type_3, smpls_type_4):
++    len_2 = frequent_meta_path_pattern(smpls_type_2)
++    len_3 = frequent_meta_path_pattern(smpls_type_3)
++    len_4 = frequent_meta_path_pattern(smpls_type_4)
++    len_2, len_3, len_4 = len_2[:len(len_2)//2], len_3[:len(len_3)//2], len_4[:len(len_4)//2]
++    
++    return dict(len_2 + len_3 + len_4)
++
++
++def evaluation(orig_A, test_A, syn_A):
++    #orig_G = nx.from_scipy_sparse_matrix(orig_A)
++    orig_G = nx.from_scipy_sparse_matrix(test_A)
++    syn_G = nx.from_numpy_matrix(syn_A)
++    print("========== Real Graph ==========")
++    print(nx.info(orig_G))
++    print("========== Generated Graph ==========")
++    print(nx.info(syn_G))
++    print("")
++    print("Clustering coefficient ratio for real graph: ", nx.average_clustering(orig_G))
++    print("Clustering coefficient ratio for generated graph: ", nx.average_clustering(syn_G))
++
++    print("Triangle count for real graph: ", utils.statistics_triangle_count(orig_G))
++    print("Triangle count for generated graph: ", utils.statistics_triangle_count(syn_G))
++    
++    print("LCC for real graph: ", len(utils.statistics_LCC(test_A)))
++    print("LCC for generated graph: ", len(utils.statistics_LCC(syn_A)))
++    
++    orig_G_edge = set(orig_G.edges())
++    syn_G_edge = set(syn_G.edges())
++    intersecting_edges = orig_G_edge & syn_G_edge
++    print("Edge Overlap Rate: ", '{:.2%}'.format(len(intersecting_edges)/len(orig_G_edge)))
++    
++    print("Statistical Powerlaw Distribution Coeff. for real Graph： ", utils.statistics_power_law_alpha(test_A.toarray()))
++    print("Statistical Powerlaw Distribution Coeff. for generated Graph： ", utils.statistics_power_law_alpha(syn_A))
++    
++    # Node Degree Distribution
++    test_degree_sequence = sorted([d for n, d in orig_G.degree()], reverse=True)  # degree sequence
++    syn_degree_sequence = sorted([d for n, d in syn_G.degree()], reverse=True)  # degree sequence
++    mmd_test = MMDStatistic(len(test_degree_sequence), len(syn_degree_sequence))
++    test_degree_sequence = torch.tensor(test_degree_sequence).unsqueeze(-1)
++    syn_degree_sequence = torch.tensor(syn_degree_sequence).unsqueeze(-1)
++
++    print("MMD distance for node degree distribution: {}".format(mmd_test(
++        test_degree_sequence, syn_degree_sequence, alphas=[4.], ret_matrix=False)))
++    print("Degree Assortativity \t\t real graph: {}".format(
++        nx.degree_assortativity_coefficient(orig_G)))
++    print("Degree Assortativity \t\t generated graph: {}".format(
++        nx.degree_assortativity_coefficient(syn_G)))
++    
++    return (nx.average_clustering(syn_G), utils.statistics_triangle_count(syn_G), utils.statistics_LCC(syn_A), utils.statistics_power_law_alpha(syn_A), mmd_test(test_degree_sequence, syn_degree_sequence, alphas=[4.], ret_matrix=False), nx.degree_assortativity_coefficient(syn_G))
++
++
++print("Loading adj matrix and features...")
++_A_obs, _X_obs, _N, lcc, node_type, test_graph = data_preprocess(val_share, test_share, seed)
++real_walks = HINDataset(_X_obs, _N, args.max_path_len, args.dataset)
++dataloader = DataLoader(real_walks, shuffle=True, batch_size=args.batch_size, num_workers=0, drop_last=True)
++
++print("Reading Node Embeddings...")
++node_embs = read_node_embeddings(node_type, lcc, device)
++
++print("Initialize Generator and Discriminator")
++generator = Generator(node_type, _N, node_embs, device, args).to(device)
++discriminator = Discriminator(_N, device, args).to(device)
++
++optimizer_G = torch.optim.RMSprop(generator.parameters(), lr=args.lr_gen)
++optimizer_D = torch.optim.RMSprop(discriminator.parameters(), lr=args.lr_dis)
++
++
++def train():
++    batches_done = 0
++    print("Start Training...")
++    for epoch in range(args.n_epochs):
++        for i, (real_node_type, real_node_seq) in enumerate(dataloader):
++            # Configure input
++            real_node_type = Variable(real_node_type.float()).to(device)
++            real_node_seq = Variable(real_node_seq.float()).to(device)
++            initial_noise = utils.make_noise((args.batch_size, args.noise_dim), args.noise_type).to(device)
++            # ---------------------
++            #  Train Discriminator
++            # ---------------------
++            discriminator.train()
++            optimizer_D.zero_grad()
++            fake_result = generator(initial_noise)
++            fake_type = fake_result[0].detach()
++            fake_node = fake_result[1].detach()
++            loss_D = torch.mean(discriminator((fake_type, fake_node))) -\
++                torch.mean(discriminator((real_node_type, real_node_seq)))
++
++            loss_D.backward()
++            optimizer_D.step()
++
++            # Clip weights of discriminator
++            for p in discriminator.parameters():
++                p.data.clamp_(-args.clip_value, args.clip_value)
++                
++            # Train the generator every n_critic iterations
++            if i % args.n_critic == 0:
++                # -----------------
++                #  Train Generator
++                # -----------------
++                optimizer_G.zero_grad()
++
++                # Generate a batch of random walks
++                syn_types, syn_node_seq = generator(initial_noise)
++                # Adversarial loss
++                loss_G = -torch.mean(discriminator((syn_types, syn_node_seq)))
++                # Loss back-propagation
++                loss_G.backward()
++                optimizer_G.step()
++            
++                print(
++                    "[Epoch %d/%d] [Batch %d/%d] [D loss: %f] [G loss: %f]"
++                    % (epoch+1, args.n_epochs, batches_done % len(dataloader), len(dataloader), loss_D.item(), loss_G.item()))
++            batches_done += 1
++
++
++def write_to_gephi(test_A, syn_A, dataset, node_attribute):
++    orig_G = nx.from_scipy_sparse_matrix(test_A)
++    syn_G = nx.from_numpy_matrix(syn_A)
++    for i in orig_G.nodes:
++        orig_G.nodes[i]['class'] = node_attribute[i]
++        syn_G.nodes[i]['class'] = node_attribute[i]
++        
++    nx.write_gexf(orig_G, "results/{}_real.gexf".format(dataset))
++    nx.write_gexf(syn_G, "results/{}_hgen.gexf".format(dataset))
++    
++
++def getting_metapaths(adj_matrix):
++    try:
++        aa = adj_matrix.toarray()
++    except:
++        aa = adj_matrix
++    edge_dir = {}
++    for i, x in enumerate(aa):
++        edge_dir[i] = list(np.nonzero(x)[0])
++    
++    meta_path_length_2, meta_path_length_3, meta_path_length_4 = [], [], []
++    for i in range(len(edge_dir)):
++        for p in utils.findAllPaths(i, lambda n: edge_dir[n], depth=2):
++            meta_path_length_2.append(p)
++        for p in utils.findAllPaths(i, lambda n: edge_dir[n], depth=3):
++            meta_path_length_3.append(p)
++        for p in utils.findAllPaths(i, lambda n: edge_dir[n], depth=4):
++            meta_path_length_4.append(p)
++        if i % 1000 == 0:
++            print("Done, {} of {}".format(i, len(edge_dir)))
++    
++    return meta_path_length_2, meta_path_length_3, meta_path_length_4
++
++
++def heterogeneous_statistics(test_graph, syn_graph):
++    print("Getting real meta-paths...")
++    real_meta_paths = getting_metapaths(test_graph)
++    print("Getting generated meta-paths...")
++    generated_meta_paths = getting_metapaths(syn_graph)
++    
++
++if __name__ == '__main__':
++    print('Start Training...')
++    train()
++    if args.save:
++        torch.save(generator.state_dict(), "model/{}_{}".format(int(time.time()), args.dataset))
++
++    smpls_type, smpls_node = generate_walks()
++    #smpls_type, smpls_node = pickle.load(open("results/smpls_type_dblp.p","rb")), pickle.load(open("results/smpls_node_dblp.p","rb"))
++    smpls_type_2 = [i for i in smpls_type if i.shape[0] == 2 and 4 not in i]
++    smpls_type_3 = [i for i in smpls_type if i.shape[0] == 3 and 4 not in i]
++    smpls_type_4 = [i for i in smpls_type if i.shape[0] == 4 and 4 not in i]
++    
++    smpls_node_2 = [i for i in smpls_node if i.shape[0] == 2 and _N not in i]
++    smpls_node_3 = [i for i in smpls_node if i.shape[0] == 3 and _N not in i]
++    smpls_node_4 = [i for i in smpls_node if i.shape[0] == 4 and _N not in i]
++    
++    meta_path_freq = meta_path_frequency(smpls_type_2, smpls_type_3, smpls_type_4)
++    
++    score_matrix = utils.score_matrix_from_random_walks(smpls_node_2, _N)
++    score_matrix += utils.score_matrix_from_random_walks(smpls_node_3, _N)
++    score_matrix += utils.score_matrix_from_random_walks(smpls_node_4, _N)
++    score_matrix = score_matrix.tocsr()
++    syn_graph = utils.heterogeneous_graph_assemble(score_matrix, test_graph.sum(), meta_path_freq, node_type)
++    evaluation(_A_obs, test_graph, syn_graph)
++
++    print("Getting real meta-paths...")
++    real_meta_paths = getting_metapaths(test_graph)
++    print("Getting generated meta-paths...")
++    generated_meta_paths = getting_metapaths(syn_graph)
++    
++    metapath_len_2 = [[tuple(sorted([_X_obs[j] for j in i])) for i in real_meta_paths[0]], [tuple(sorted([_X_obs[j] for j in i])) for i in generated_meta_paths[0]]]
++    metapath_len_3 = [[tuple(sorted([_X_obs[j] for j in i])) for i in real_meta_paths[1]], [tuple(sorted([_X_obs[j] for j in i])) for i in generated_meta_paths[1]]]
++    metapath_len_4 = [[tuple(sorted([_X_obs[j] for j in i])) for i in real_meta_paths[2]], [tuple(sorted([_X_obs[j] for j in i])) for i in generated_meta_paths[2]]]
+diff --git a/experiments/hgen_192_full_reference_v1/vendor/hgen/hin2vec_emb_gen.py b/experiments/hgen_192_full_reference_v1/vendor/hgen/hin2vec_emb_gen.py
+new file mode 100644
+index 0000000..600904c
+--- /dev/null
++++ b/experiments/hgen_192_full_reference_v1/vendor/hgen/hin2vec_emb_gen.py
+@@ -0,0 +1,78 @@
++# -*- coding: utf-8 -*-
++
++import torch
++import pandas as pd
++import torch.nn as nn
++import torch.optim as optim
++from torch.utils.data import DataLoader
++
++from walker import load_a_HIN_from_pandas
++from model import NSTrainSet, HIN2vec, train
++import pickle
++import csv
++# set method parameters
++window = 5
++walk = 8
++walk_length = 10
++embed_size = 32
++neg = 8
++sigmoid_reg = True 
++device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
++print(f'device = {device}')
++
++directory = "pubmed_new"
++
++# set dataset [PLEASE USE YOUR OWN DATASET TO REPLACE THIS]
++demo_edge = pd.read_csv('./{}.csv'.format(directory), index_col=0)
++
++edges = [demo_edge]
++
++print('finish loading edges')
++
++# init HIN
++hin = load_a_HIN_from_pandas(edges)
++hin.window = window
++
++dataset = NSTrainSet(hin.sample(walk_length, walk), hin.node_size, neg=neg)
++
++hin2vec = HIN2vec(hin.node_size, hin.path_size, embed_size, sigmoid_reg).to(device)
++
++# set training parameters
++n_epoch = 4
++batch_size = 32
++log_interval = 200
++
++data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
++optimizer = optim.AdamW(hin2vec.parameters())
++loss_function = nn.BCELoss()
++
++for epoch in range(n_epoch):
++    train(log_interval, hin2vec, device, data_loader, optimizer, loss_function, epoch)
++
++#torch.save(hin2vec, 'hin2vec.pt')
++
++# set output parameters [the output file is a bit different from the original code.]
++node_vec_fname = 'hin2vec_{}_32.p'.format(directory)
++# path_vec_fname = 'meta_path_vec.txt'
++path_vec_fname = None
++
++print(f'saving node embedding vectors to {node_vec_fname}...')
++node_embeds = pd.DataFrame(hin2vec.start_embeds.weight.data.cpu().numpy())
++node_embeds = node_embeds.rename(hin.id2node)
++
++node_embedding = {}
++indices = list(node_embeds.index)
++for i, x in enumerate(indices):
++    node_embedding[x] = list(node_embeds.iloc[i])
++    
++pickle.dump(node_embedding, open(node_vec_fname, "wb"))
++'''
++if path_vec_fname:
++    print(f'saving meta path embedding vectors to {path_vec_fname}...')
++    path_embeds = pd.DataFrame(hin2vec.path_embeds.weight.data.numpy())
++    path_embeds.rename(hin.id2path).to_csv(path_vec_fname, sep=' ')
++       
++# save model
++# torch.save(hin2vec.state_dict(), 'hin2vec.pt')
++'''
++
+diff --git a/experiments/hgen_192_full_reference_v1/vendor/hgen/utils.py b/experiments/hgen_192_full_reference_v1/vendor/hgen/utils.py
+new file mode 100644
+index 0000000..770985c
+--- /dev/null
++++ b/experiments/hgen_192_full_reference_v1/vendor/hgen/utils.py
+@@ -0,0 +1,985 @@
++import networkx as nx
++import scipy.sparse as sp
++import pandas as pd
++import numpy as np
++import torch
++import random
++from torch.autograd import Variable
++from scipy.sparse.csgraph import connected_components, minimum_spanning_tree
++import warnings
++from collections import defaultdict
++import igraph
++import powerlaw
++from numba import jit
++import pickle
++import random
++
++
++def findAllPaths(node, childrenFn, depth, _depth=0, _parents={}):
++    if _depth == depth - 1:
++        # path found with desired length, create path and stop traversing
++        path = []
++        parent = node
++        for i in range(depth):
++            path.insert(0, parent)
++            if parent not in _parents:
++                continue
++            parent = _parents[parent]
++            if parent in path:
++                return  # this path is cyclic, forget
++        yield path
++        return
++
++    for nb in childrenFn(node):
++        _parents[nb] = node # keep track of where we came from
++        for p in findAllPaths(nb, childrenFn, depth, _depth + 1, _parents):
++            yield p
++            
++            
++def make_noise(shape, type="Gaussian"):
++    """
++    Generate random noise.
++    Parameters
++    ----------
++    shape: List or tuple indicating the shape of the noise
++    type: str, "Gaussian" or "Uniform", default: "Gaussian".
++    Returns
++    -------
++    noise tensor
++    """
++
++    if type == "Gaussian":
++        noise = Variable(torch.randn(shape))
++    elif type == 'Uniform':
++        noise = Variable(torch.randn(shape).uniform_(-1, 1))
++    else:
++        print("ERROR: Noise type {} not supported".format(type))
++    return noise
++
++
++def delete_from_tail(array, target):
++    updated_array = []
++    for i in array:
++        temp = i.copy()
++        while temp[-1] == target:
++            temp = temp[:-1]
++        updated_array.append(temp)
++    
++    return updated_array
++
++
++def pad_along_axis(array, target_length, axis):
++    pad_size = target_length - array.shape[axis]
++    if pad_size <= 0:
++        return array
++    
++    padding = np.zeros([pad_size, array.shape[1]])
++    for i in range(len(padding)):
++        padding[i][-1] = 1
++        
++    return np.concatenate([array, padding], axis=axis)
++
++
++def load_HIN(directory="PubMed"):
++    """Load a SparseGraph from a file.
++
++    Parameters
++    ----------
++    file_name : str
++        Name of the file to load.
++
++    Returns
++    -------
++    sparse_graph : SparseGraph
++        Graph in sparse matrix format.
++
++    """
++    try:
++        new_node_dict = pickle.load(open(directory+"/new_node_dict.p","rb"))
++        adj_matrix = pickle.load(open(directory+"/adj_matrix.p","rb"))
++    except FileNotFoundError as e:
++        link_info = [i.strip().split()[:2] for i in open(directory+"/link.dat").readlines()]
++        node_info = [i.strip().split() for i in open(directory+"/node.dat").readlines()]
++        nodes = dict([(int(i[0]), int(i[2])) for i in node_info])
++        edges = [[int(i[0]), int(i[1])] for i in link_info]
++        #edge_types = [int(i[2]) for i in link_info]
++        # Getting subgraph from the original one
++        #subgraph = random.sample(list(nodes.keys()), k=7000)
++        subgraph = list(nodes.keys())[:10000]
++        edge_list = [i for i in edges if i[0] in subgraph and i[1] in subgraph]
++        #edge_type_list = [edge_types[i] for i, x in enumerate(edges) if x[0] in subgraph and x[1] in subgraph]
++        new_node_dict = dict(zip(subgraph, [nodes[i] for i in subgraph]))
++        adj_matrix = read_data_as_sp_matrix(edge_list)
++        
++        # Store pro-processed information
++        pickle.dump(new_node_dict, open(directory+"/new_node_dict.p", "wb"))
++        pickle.dump(adj_matrix, open(directory+"/adj_matrix.p", "wb"))
++        
++        #pickle.dump(edge_type_list, open(directory+"/edge_type_list.p", "wb"))
++    return new_node_dict, adj_matrix
++    
++
++def read_data_as_sp_matrix(edge_list):
++    "Read data file and return sparse matrix in coordinate format."
++    data = pd.DataFrame(edge_list)  
++    rows = data[0]  # Not a copy, just a reference.
++    cols = data[1]
++    ones = np.ones(len(rows), np.uint32)
++    n = max(max(rows), max(cols)) + 1
++    matrix = sp.csr_matrix((ones, (rows, cols)), shape=(n, n))
++    return matrix
++
++
++def group_dict(my_dict):
++    "Grouping dictionary keys by value"
++    res = defaultdict(list)
++    for key, val in sorted(my_dict.items()):
++        res[val].append(key)
++    
++    return dict(res)
++    
++
++def one_hot_encoder(data, max_value):
++    shape = (data.size, max_value)
++    one_hot = np.zeros(shape)
++    rows = np.arange(data.size)
++    one_hot[rows, data] = 1
++    
++    return one_hot 
++
++
++def largest_connected_components(adj, n_components=1):
++    """Select the largest connected components in the graph.
++
++    Parameters
++    ----------
++    sparse_graph : SparseGraph
++        Input graph.
++    n_components : int, default 1
++        Number of largest connected components to keep.
++
++    Returns
++    -------
++    sparse_graph : SparseGraph
++        Subgraph of the input graph where only the nodes in largest n_components are kept.
++
++    """
++    _, component_indices = connected_components(adj)
++    component_sizes = np.bincount(component_indices)
++    components_to_keep = np.argsort(component_sizes)[::-1][:n_components]  # reverse order to sort descending
++    nodes_to_keep = [
++        idx for (idx, component) in enumerate(component_indices) if component in components_to_keep
++
++
++    ]
++    return nodes_to_keep
++
++
++def edges_to_sparse(edges, N, values=None):
++    """
++    Create a sparse adjacency matrix from an array of edge indices and (optionally) values.
++
++    Parameters
++    ----------
++    edges : array-like, shape [n_edges, 2]
++        Edge indices
++    N : int
++        Number of nodes
++    values : array_like, shape [n_edges]
++        The values to put at the specified edge indices. Optional, default: np.ones(.)
++
++    Returns
++    -------
++    A : scipy.sparse.csr.csr_matrix
++        Sparse adjacency matrix
++
++    """
++    if values is None:
++        values = np.ones(edges.shape[0])
++
++    return sp.coo_matrix((values, (edges[:, 0], edges[:, 1])), shape=(N, N)).tocsr()
++
++
++def train_val_test_split_adjacency(A, p_val=0.10, p_test=0.05, seed=0, neg_mul=1,
++                                   every_node=True, connected=False, undirected=False,
++                                   use_edge_cover=True, set_ops=True, asserts=False):
++    """
++    Split the edges of the adjacency matrix into train, validation and test edges
++    and randomly samples equal amount of validation and test non-edges.
++
++    Parameters
++    ----------
++    A : scipy.sparse.spmatrix
++        Sparse unweighted adjacency matrix
++    p_val : float
++        Percentage of validation edges. Default p_val=0.10
++    p_test : float
++        Percentage of test edges. Default p_test=0.05
++    seed : int
++        Seed for numpy.random. Default seed=0
++    neg_mul : int
++        What multiplicity of negative samples (non-edges) to have in the test/validation set
++        w.r.t the number of edges, i.e. len(non-edges) = L * len(edges). Default neg_mul=1
++    every_node : bool
++        Make sure each node appears at least once in the train set. Default every_node=True
++    connected : bool
++        Make sure the training graph is still connected after the split
++    undirected : bool
++        Whether to make the split undirected, that is if (i, j) is in val/test set then (j, i) is there as well.
++        Default undirected=False
++    use_edge_cover: bool
++        Whether to use (approximate) edge_cover to find the minimum set of edges that cover every node.
++        Only active when every_node=True. Default use_edge_cover=True
++    set_ops : bool
++        Whether to use set operations to construction the test zeros. Default setwise_zeros=True
++        Otherwise use a while loop.
++    asserts : bool
++        Unit test like checks. Default asserts=False
++
++    Returns
++    -------
++    train_ones : array-like, shape [n_train, 2]
++        Indices of the train edges
++    val_ones : array-like, shape [n_val, 2]
++        Indices of the validation edges
++    val_zeros : array-like, shape [n_val, 2]
++        Indices of the validation non-edges
++    test_ones : array-like, shape [n_test, 2]
++        Indices of the test edges
++    test_zeros : array-like, shape [n_test, 2]
++        Indices of the test non-edges
++
++    """
++    assert p_val + p_test > 0
++    assert A.max() == 1  # no weights
++    assert A.min() == 0  # no negative edges
++    assert A.diagonal().sum() == 0  # no self-loops
++    assert not np.any(A.sum(0).A1 + A.sum(1).A1 == 0)  # no dangling nodes
++
++    is_undirected = (A != A.T).nnz == 0
++
++    if undirected:
++        assert is_undirected  # make sure is directed
++        A = sp.tril(A).tocsr()  # consider only upper triangular
++        A.eliminate_zeros()
++    else:
++        if is_undirected:
++            warnings.warn('Graph appears to be undirected. Did you forgot to set undirected=True?')
++
++    np.random.seed(seed)
++
++    E = A.nnz
++    N = A.shape[0]
++    s_train = int(E * (1 - p_val - p_test))
++
++    idx = np.arange(N)
++
++    # hold some edges so each node appears at least once
++    if every_node:
++        if connected:
++            assert connected_components(A)[0] == 1  # make sure original graph is connected
++            A_hold = minimum_spanning_tree(A)
++        else:
++            A.eliminate_zeros()  # makes sure A.tolil().rows contains only indices of non-zero elements
++            d = A.sum(1).A1
++
++            if use_edge_cover:
++                hold_edges = np.array(list(nx.maximal_matching(nx.DiGraph(A))))
++                not_in_cover = np.array(list(set(range(N)).difference(hold_edges.flatten())))
++
++                # makes sure the training percentage is not smaller than N/E when every_node is set to True
++                min_size = hold_edges.shape[0] + len(not_in_cover)
++                if min_size > s_train:
++                    raise ValueError('Training percentage too low to guarantee every node. Min train size needed {:.2f}'
++                                     .format(min_size / E))
++
++                d_nic = d[not_in_cover]
++
++                hold_edges_d1 = np.column_stack((not_in_cover[d_nic > 0],
++                                                 np.row_stack(map(np.random.choice,
++                                                                  A[not_in_cover[d_nic > 0]].tolil().rows))))
++
++                if np.any(d_nic == 0):
++                    hold_edges_d0 = np.column_stack((np.row_stack(map(np.random.choice, A[:, not_in_cover[d_nic == 0]].T.tolil().rows)),
++                                                     not_in_cover[d_nic == 0]))
++                    hold_edges = np.row_stack((hold_edges, hold_edges_d0, hold_edges_d1))
++                else:
++                    hold_edges = np.row_stack((hold_edges, hold_edges_d1))
++
++            else:
++                # makes sure the training percentage is not smaller than N/E when every_node is set to True
++                if N > s_train:
++                    raise ValueError('Training percentage too low to guarantee every node. Min train size needed {:.2f}'
++                                     .format(N / E))
++
++                hold_edges_d1 = np.column_stack(
++                    (idx[d > 0], np.row_stack(map(np.random.choice, A[d > 0].tolil().rows))))
++
++                if np.any(d == 0):
++                    hold_edges_d0 = np.column_stack((np.row_stack(map(np.random.choice, A[:, d == 0].T.tolil().rows)),
++                                                     idx[d == 0]))
++                    hold_edges = np.row_stack((hold_edges_d0, hold_edges_d1))
++                else:
++                    hold_edges = hold_edges_d1
++
++            if asserts:
++                assert np.all(A[hold_edges[:, 0], hold_edges[:, 1]])
++                assert len(np.unique(hold_edges.flatten())) == N
++
++            A_hold = edges_to_sparse(hold_edges, N)
++
++        A_hold[A_hold > 1] = 1
++        A_hold.eliminate_zeros()
++        A_sample = A - A_hold
++
++        s_train = s_train - A_hold.nnz
++    else:
++        A_sample = A
++
++    idx_ones = np.random.permutation(A_sample.nnz)
++    ones = np.column_stack(A_sample.nonzero())
++    train_ones = ones[idx_ones[:s_train]]
++    test_ones = ones[idx_ones[s_train:]]
++
++    # return back the held edges
++    if every_node:
++        train_ones = np.row_stack((train_ones, np.column_stack(A_hold.nonzero())))
++
++    n_test = len(test_ones) * neg_mul
++    if set_ops:
++        # generate slightly more completely random non-edge indices than needed and discard any that hit an edge
++        # much faster compared a while loop
++        # in the future: estimate the multiplicity (currently fixed 1.3/2.3) based on A_obs.nnz
++        if undirected:
++            random_sample = np.random.randint(0, N, [int(2.3 * n_test), 2])
++            random_sample = random_sample[random_sample[:, 0] > random_sample[:, 1]]
++        else:
++            random_sample = np.random.randint(0, N, [int(1.3 * n_test), 2])
++            random_sample = random_sample[random_sample[:, 0] != random_sample[:, 1]]
++
++        test_zeros = random_sample[A[random_sample[:, 0], random_sample[:, 1]].A1 == 0]
++        test_zeros = np.row_stack(test_zeros)[:n_test]
++        assert test_zeros.shape[0] == n_test
++    else:
++        test_zeros = []
++        while len(test_zeros) < n_test:
++            i, j = np.random.randint(0, N, 2)
++            if A[i, j] == 0 and (not undirected or i > j) and (i, j) not in test_zeros:
++                test_zeros.append((i, j))
++        test_zeros = np.array(test_zeros)
++
++    # split the test set into validation and test set
++    s_val_ones = int(len(test_ones) * p_val / (p_val + p_test))
++    s_val_zeros = int(len(test_zeros) * p_val / (p_val + p_test))
++
++    val_ones = test_ones[:s_val_ones]
++    test_ones = test_ones[s_val_ones:]
++
++    val_zeros = test_zeros[:s_val_zeros]
++    test_zeros = test_zeros[s_val_zeros:]
++
++    if undirected:
++        # put (j, i) edges for every (i, j) edge in the respective sets and form back original A
++        symmetrize = lambda x: np.row_stack((x, np.column_stack((x[:, 1], x[:, 0]))))
++        train_ones = symmetrize(train_ones)
++        val_ones = symmetrize(val_ones)
++        val_zeros = symmetrize(val_zeros)
++        test_ones = symmetrize(test_ones)
++        test_zeros = symmetrize(test_zeros)
++        A = A.maximum(A.T)
++
++    if asserts:
++        set_of_train_ones = set(map(tuple, train_ones))
++        assert train_ones.shape[0] + test_ones.shape[0] + val_ones.shape[0] == A.nnz
++        assert (edges_to_sparse(np.row_stack((train_ones, test_ones, val_ones)), N) != A).nnz == 0
++        assert set_of_train_ones.intersection(set(map(tuple, test_ones))) == set()
++        assert set_of_train_ones.intersection(set(map(tuple, val_ones))) == set()
++        assert set_of_train_ones.intersection(set(map(tuple, test_zeros))) == set()
++        assert set_of_train_ones.intersection(set(map(tuple, val_zeros))) == set()
++        assert len(set(map(tuple, test_zeros))) == len(test_ones) * neg_mul
++        assert len(set(map(tuple, val_zeros))) == len(val_ones) * neg_mul
++        assert not connected or connected_components(A_hold)[0] == 1
++        assert not every_node or ((A_hold - A) > 0).sum() == 0
++
++    return train_ones, val_ones, val_zeros, test_ones, test_zeros
++
++
++def score_matrix_from_random_walks(random_walks, N, symmetric=True):
++    """
++    Compute the transition scores, i.e. how often a transition occurs, for all node pairs from
++    the random walks provided.
++    Parameters
++    ----------
++    random_walks: np.array of shape (n_walks, rw_len, N)
++                  The input random walks to count the transitions in.
++    N: int
++       The number of nodes
++    symmetric: bool, default: True
++               Whether to symmetrize the resulting scores matrix.
++
++    Returns
++    -------
++    scores_matrix: sparse matrix, shape (N, N)
++                   Matrix whose entries (i,j) correspond to the number of times a transition from node i to j was
++                   observed in the input random walks.
++
++    """
++
++    random_walks = np.array(random_walks)
++    bigrams = np.array(list(zip(random_walks[:, :-1], random_walks[:, 1:])))
++    bigrams = np.transpose(bigrams, [0, 2, 1])
++    bigrams = bigrams.reshape([-1, 2])
++    if symmetric:
++        bigrams = np.row_stack((bigrams, bigrams[:, ::-1]))
++
++    mat = sp.coo_matrix((np.ones(bigrams.shape[0]), (bigrams[:, 0], bigrams[:, 1])),
++                        shape=[N, N])
++    return mat
++
++@jit(nopython=True)
++def random_walk(edges, node_ixs, rwlen, p=1, q=1, n_walks=1):
++    N=len(node_ixs)
++    
++    walk = []
++    prev_nbs = None
++    for w in range(n_walks):
++        source_node = np.random.choice(N)
++        walk.append(source_node)
++        for it in range(rwlen-1):
++            
++            if walk[-1] == N-1:
++                nbs = edges[node_ixs[walk[-1]]::,1]
++            else:
++                nbs = edges[node_ixs[walk[-1]]:node_ixs[walk[-1]+1],1]
++                
++            if it == 0:
++                walk.append(np.random.choice(nbs))
++                prev_nbs = set(nbs)
++                continue
++
++            is_dist_1 = []
++            for n in nbs:
++                is_dist_1.append(int(n in set(prev_nbs)))
++
++            is_dist_1_np = np.array(is_dist_1)
++            is_dist_0 = nbs == walk[-2]
++            is_dist_2 = 1 - is_dist_1_np - is_dist_0
++
++            alpha_pq = is_dist_0 / p + is_dist_1_np + is_dist_2/q
++            alpha_pq_norm = alpha_pq/np.sum(alpha_pq)
++            rdm_num = np.random.rand()
++            cumsum = np.cumsum(alpha_pq_norm)
++            nxt = nbs[np.sum(1-(cumsum > rdm_num))]
++            walk.append(nxt)
++            prev_nbs = set(nbs)
++    return np.array(walk)
++
++
++class RandomWalker:
++    """
++    Helper class to generate random walks on the input adjacency matrix.
++    """
++    def __init__(self, adj, rw_len, p=1, q=1, batch_size=128):
++        self.adj = adj
++        #if not "lil" in str(type(adj)):
++        #    warnings.warn("Input adjacency matrix not in lil format. Converting it to lil.")
++        #    self.adj = self.adj.tolil()
++
++        self.rw_len = rw_len
++        self.p = p
++        self.q = q
++        self.edges = np.array(self.adj.nonzero()).T
++        self.node_ixs = np.unique(self.edges[:, 0], return_index=True)[1]
++        self.batch_size = batch_size
++
++    def walk(self):
++        while True:
++            yield random_walk(self.edges, self.node_ixs, self.rw_len, self.p, self.q, self.batch_size).reshape([-1, self.rw_len])
++
++
++def edge_overlap(A, B):
++    """
++    Compute edge overlap between input graphs A and B, i.e. how many edges in A are also present in graph B. Assumes
++    that both graphs contain the same number of edges.
++
++    Parameters
++    ----------
++    A: sparse matrix or np.array of shape (N,N).
++       First input adjacency matrix.
++    B: sparse matrix or np.array of shape (N,N).
++       Second input adjacency matrix.
++
++    Returns
++    -------
++    float, the edge overlap.
++    """
++
++    return ((A == B) & (A == 1)).sum()
++
++
++def graph_from_scores(scores, n_edges):
++    """
++    Assemble a symmetric binary graph from the input score matrix. Ensures that there will be no singleton nodes.
++    See the paper for details.
++
++    Parameters
++    ----------
++    scores: np.array of shape (N,N)
++            The input transition scores.
++    n_edges: int
++             The desired number of edges in the target graph.
++
++    Returns
++    -------
++    target_g: symmettic binary sparse matrix of shape (N,N)
++              The assembled graph.
++
++    """
++
++    if  len(scores.nonzero()[0]) < n_edges:
++        return symmetric(scores) > 0
++
++    target_g = np.zeros(scores.shape) # initialize target graph
++    scores_int = scores.toarray().copy() # internal copy of the scores matrix
++    scores_int[np.diag_indices_from(scores_int)] = 0  # set diagonal to zero
++    degrees_int = scores_int.sum(0)   # The row sum over the scores.
++
++    N = scores.shape[0]
++    
++    for n in np.random.choice(N, replace=False, size=N): # Iterate the nodes in random order
++
++        row = scores_int[n,:].copy()
++        if row.sum() == 0:
++            continue
++
++        probs = row / row.sum()
++
++        target = np.random.choice(N, p=probs)
++        target_g[n, target] = 1
++        target_g[target, n] = 1
++
++    diff = np.round((n_edges - target_g.sum())/2)
++    
++    if diff > 0:
++        triu = np.triu(scores_int)
++        triu[target_g > 0] = 0
++        triu[np.diag_indices_from(scores_int)] = 0
++        triu = triu / triu.sum()
++
++        triu_ixs = np.triu_indices_from(scores_int)
++        extra_edges = np.random.choice(triu_ixs[0].shape[0], replace=False, p=triu[triu_ixs], size=int(diff))
++
++        target_g[(triu_ixs[0][extra_edges], triu_ixs[1][extra_edges])] = 1
++        target_g[(triu_ixs[1][extra_edges], triu_ixs[0][extra_edges])] = 1
++
++    target_g = symmetric(target_g)
++    return target_g
++
++
++def graph_from_scores_new(scores, n_edges):
++
++    if  len(scores.nonzero()[0]) < n_edges:
++        return symmetric(scores) > 0
++
++    target_g = np.zeros(scores.shape) # initialize target graph
++    scores_int = scores.toarray().copy() # internal copy of the scores matrix
++    scores_int[np.diag_indices_from(scores_int)] = 0  # set diagonal to zero
++    degrees_int = scores_int.sum(0)   # The row sum over the scores.
++
++    N = scores.shape[0]
++    count = 0
++    for i, n in enumerate(random.choices(range(N), degrees_int, k=3*N)): # np.random.choice(N, replace=False, size=N): random.choices(range(N), degrees_int, k=N):
++        row = scores_int[n,:].copy()
++
++        probs = row / row.sum()
++
++        target = np.random.choice(N, p=probs)
++        target_g[n, target] = 1
++        target_g[target, n] = 1
++
++        if target_g.sum() >= n_edges:
++            break
++        
++        if i % 1000 == 0:
++            print("Generating {} of {} edges...".format(target_g.sum(), n_edges))
++        
++    target_g = symmetric(target_g)
++    
++    return target_g
++
++
++def heterogeneous_graph_assemble(scores, n_edges, meta_path_freq, node_type):
++    """ Assemble a heterogeneous graph based on the meta-path ratio"""
++    if  len(scores.nonzero()[0]) < n_edges:
++        return symmetric(scores) > 0
++    
++    target_g = np.zeros(scores.shape) # initialize target graph
++    scores_int = scores.toarray().copy() # internal copy of the scores matrix
++    scores_int[np.diag_indices_from(scores_int)] = 0  # set diagonal to zero
++    degrees_int = scores_int.sum(0)   # The row sum over the scores.
++    N = scores.shape[0]
++    
++    node_type_degs = []
++    for i in range(len(node_type)):
++        node_type_degs.append(dict(zip(node_type[i], [degrees_int[i] for i in node_type[i]])))
++    
++    count = 0
++    while target_g.sum() <= n_edges:
++        sampled_metapath = sample_from_dict(meta_path_freq, 1)[0]
++        actual_path = []
++        for i in range(len(sampled_metapath)-1):
++            if i == 0:
++                n = sample_from_dict(node_type_degs[sampled_metapath[i]], 1)[0]
++                actual_path.append(n)
++            else:
++                n = actual_path[-1]
++            row = scores_int[n,:].copy()
++            next_node_type_degs = list(node_type_degs[sampled_metapath[i+1]].keys())
++            row[array_subtraction(range(N), next_node_type_degs)] = 0
++            probs = row / row.sum()
++            try:
++                target = np.random.choice(N, p=probs)
++            except ValueError:
++                print(n)
++            target_g[n, target] = 1
++            target_g[target, n] = 1
++            
++            actual_path.append(target)
++            count += 1
++        if count % 10000 == 0:
++            print("Generating {} of {} edges...".format(target_g.sum(), n_edges))
++            
++    target_g = symmetric(target_g)
++    return target_g
++        
++def sample_from_dict(d, sample):
++    """ Random sample from a dict """
++    key = random.choices(list(d.keys()), list(d.values()), k=sample)
++    return key
++    
++
++def array_subtraction(x, y):
++    return np.array(list(set(x) - set(y)))
++    
++
++def symmetric(directed_adjacency, clip_to_one=True):
++    """
++    Symmetrize the input adjacency matrix.
++    Parameters
++    ----------
++    directed_adjacency: sparse matrix or np.array of shape (N,N)
++                        Input adjacency matrix.
++    clip_to_one: bool, default: True
++                 Whether the output should be binarized (i.e. clipped to 1)
++
++    Returns
++    -------
++    A_symmetric: sparse matrix or np.array of the same shape as the input
++                 Symmetrized adjacency matrix.
++
++    """
++
++    A_symmetric = directed_adjacency + directed_adjacency.T
++    if clip_to_one:
++        A_symmetric[A_symmetric > 1] = 1
++    return A_symmetric
++
++def squares(g):
++    """
++    Count the number of squares for each node
++    Parameters
++    ----------
++    g: igraph Graph object
++       The input graph.
++
++    Returns
++    -------
++    List with N entries (N is number of nodes) that give the number of squares a node is part of.
++    """
++
++    cliques = g.cliques(min=4, max=4)
++    result = [0] * g.vcount()
++    for i, j, k, l in cliques:
++        result[i] += 1
++        result[j] += 1
++        result[k] += 1
++        result[l] += 1
++    return result
++
++
++def statistics_degrees(A_in):
++    """
++    Compute min, max, mean degree
++
++    Parameters
++    ----------
++    A_in: sparse matrix or np.array
++          The input adjacency matrix.
++    Returns
++    -------
++    d_max. d_min, d_mean
++    """
++
++    degrees = A_in.sum(axis=0)
++    return np.max(degrees), np.min(degrees), np.mean(degrees)
++
++
++def statistics_LCC(A_in):
++    """
++    Compute the size of the largest connected component (LCC)
++
++    Parameters
++    ----------
++    A_in: sparse matrix or np.array
++          The input adjacency matrix.
++    Returns
++    -------
++    Size of LCC
++
++    """
++
++    unique, counts = np.unique(connected_components(A_in)[1], return_counts=True)
++    LCC = np.where(connected_components(A_in)[1] == np.argmax(counts))[0]
++    return LCC
++
++
++def statistics_wedge_count(A_in):
++    """
++    Compute the wedge count of the input graph
++
++    Parameters
++    ----------
++    A_in: sparse matrix or np.array
++          The input adjacency matrix.
++
++    Returns
++    -------
++    The wedge count.
++    """
++
++    degrees = A_in.sum(axis=0)
++    return float(np.sum(np.array([0.5 * x * (x - 1) for x in degrees])))
++
++
++def statistics_claw_count(A_in):
++    """
++    Compute the claw count of the input graph
++
++    Parameters
++    ----------
++    A_in: sparse matrix or np.array
++          The input adjacency matrix.
++
++    Returns
++    -------
++    Claw count
++    """
++
++    degrees = A_in.sum(axis=0)
++    return float(np.sum(np.array([1 / 6. * x * (x - 1) * (x - 2) for x in degrees])))
++
++
++def statistics_triangle_count(A_in):
++    """
++    Compute the triangle count of the input graph
++
++    Parameters
++    ----------
++    A_in: sparse matrix or np.array
++          The input adjacency matrix.
++    Returns
++    -------
++    Triangle count
++    """
++
++    triangles = nx.triangles(A_in)
++    t = np.sum(list(triangles.values())) / 3
++    return int(t)
++
++
++def statistics_square_count(A_in):
++    """
++    Compute the square count of the input graph
++
++    Parameters
++    ----------
++    A_in: sparse matrix or np.array
++          The input adjacency matrix.
++    Returns
++    -------
++    Square count
++    """
++
++    A_igraph = igraph.Graph.Adjacency((A_in > 0).tolist()).as_undirected()
++    return int(np.sum(squares(A_igraph)) / 4)
++
++
++def statistics_power_law_alpha(A_in):
++    """
++    Compute the power law coefficient of the degree distribution of the input graph
++
++    Parameters
++    ----------
++    A_in: sparse matrix or np.array
++          The input adjacency matrix.
++
++    Returns
++    -------
++    Power law coefficient
++    """
++
++    degrees = A_in.sum(axis=0)
++    return powerlaw.Fit(degrees, xmin=max(np.min(degrees),1)).power_law.alpha
++
++
++def statistics_gini(A_in):
++    """
++    Compute the Gini coefficient of the degree distribution of the input graph
++
++    Parameters
++    ----------
++    A_in: sparse matrix or np.array
++          The input adjacency matrix.
++
++    Returns
++    -------
++    Gini coefficient
++    """
++
++    n = A_in.shape[0]
++    degrees = A_in.sum(axis=0)
++    degrees_sorted = np.sort(degrees)
++    G = (2 * np.sum(np.array([i * degrees_sorted[i] for i in range(len(degrees))]))) / (n * np.sum(degrees)) - (
++                                                                                                               n + 1) / n
++    return float(G)
++
++
++def statistics_edge_distribution_entropy(A_in):
++    """
++    Compute the relative edge distribution entropy of the input graph.
++
++    Parameters
++    ----------
++    A_in: sparse matrix or np.array
++          The input adjacency matrix.
++
++    Returns
++    -------
++    Rel. edge distribution entropy
++    """
++
++    degrees = A_in.sum(axis=0)
++    m = 0.5 * np.sum(np.square(A_in))
++    n = A_in.shape[0]
++
++    H_er = 1 / np.log(n) * np.sum(-degrees / (2 * float(m)) * np.log((degrees+.0001) / (2 * float(m))))
++    return H_er
++
++def statistics_cluster_props(A, Z_obs):
++    def get_blocks(A_in, Z_obs, normalize=True):
++        block = Z_obs.T.dot(A_in.dot(Z_obs))
++        counts = np.sum(Z_obs, axis=0)
++        blocks_outer = counts[:,None].dot(counts[None,:])
++        if normalize:
++            blocks_outer = np.multiply(block, 1/blocks_outer)
++        return blocks_outer
++    
++    in_blocks = get_blocks(A, Z_obs)
++    diag_mean = np.multiply(in_blocks, np.eye(in_blocks.shape[0])).mean()
++    offdiag_mean = np.multiply(in_blocks, 1-np.eye(in_blocks.shape[0])).mean() 
++    return diag_mean, offdiag_mean
++
++def statistics_compute_cpl(A):
++    """Compute characteristic path length."""
++    P = sp.csgraph.shortest_path(sp.csr_matrix(A))
++    return P[((1 - np.isinf(P)) * (1 - np.eye(P.shape[0]))).astype(np.bool)].mean()
++
++
++def compute_graph_statistics(A_in, Z_obs=None):
++    """
++
++    Parameters
++    ----------
++    A_in: sparse matrix
++          The input adjacency matrix.
++    Z_obs: np.matrix [N, K], where K is the number of classes.
++          Matrix whose rows are one-hot vectors indicating the class membership of the respective node.
++          
++    Returns
++    -------
++    Dictionary containing the following statistics:
++             * Maximum, minimum, mean degree of nodes
++             * Size of the largest connected component (LCC)
++             * Wedge count
++             * Claw count
++             * Triangle count
++             * Square count
++             * Power law exponent
++             * Gini coefficient
++             * Relative edge distribution entropy
++             * Assortativity
++             * Clustering coefficient
++             * Number of connected components
++             * Intra- and inter-community density (if Z_obs is passed)
++             * Characteristic path length
++    """
++
++    A = A_in.copy()
++
++    assert ((A == A.T).all())
++    A_graph = nx.from_numpy_matrix(A).to_undirected()
++
++    statistics = {}
++
++    d_max, d_min, d_mean = statistics_degrees(A)
++
++    # Degree statistics
++    statistics['d_max'] = d_max
++    statistics['d_min'] = d_min
++    statistics['d'] = d_mean
++
++    # largest connected component
++    LCC = statistics_LCC(A)
++
++    statistics['LCC'] = LCC.shape[0]
++    # wedge count
++    statistics['wedge_count'] = statistics_wedge_count(A)
++
++    # claw count
++    statistics['claw_count'] = statistics_claw_count(A)
++
++    # triangle count
++    statistics['triangle_count'] = statistics_triangle_count(A)
++
++    # Square count
++    statistics['square_count'] = statistics_square_count(A)
++
++    # power law exponent
++    statistics['power_law_exp'] = statistics_power_law_alpha(A)
++
++    # gini coefficient
++    statistics['gini'] = statistics_gini(A)
++
++    # Relative edge distribution entropy
++    statistics['rel_edge_distr_entropy'] = statistics_edge_distribution_entropy(A)
++
++    # Assortativity
++    statistics['assortativity'] = nx.degree_assortativity_coefficient(A_graph)
++
++    # Clustering coefficient
++    statistics['clustering_coefficient'] = 3 * statistics['triangle_count'] / statistics['claw_count']
++
++    # Number of connected components
++    statistics['n_components'] = connected_components(A)[0]
++    
++    if Z_obs is not None:
++        # inter- and intra-community density
++        intra, inter = statistics_cluster_props(A, Z_obs)
++        statistics['intra_community_density'] = intra
++        statistics['inter_community_density'] = inter
++      
++    statistics['cpl'] = statistics_compute_cpl(A)
++
++    return statistics
++
++
+diff --git a/experiments/hgen_192_full_reference_v1/vendor/hin2vec/LICENSE b/experiments/hgen_192_full_reference_v1/vendor/hin2vec/LICENSE
+new file mode 100644
+index 0000000..d3c0ea5
+--- /dev/null
++++ b/experiments/hgen_192_full_reference_v1/vendor/hin2vec/LICENSE
+@@ -0,0 +1,21 @@
++MIT License
++
++Copyright (c) 2019 e
++
++Permission is hereby granted, free of charge, to any person obtaining a copy
++of this software and associated documentation files (the "Software"), to deal
++in the Software without restriction, including without limitation the rights
++to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++copies of the Software, and to permit persons to whom the Software is
++furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in all
++copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++SOFTWARE.
+diff --git a/experiments/hgen_192_full_reference_v1/vendor/hin2vec/README.md b/experiments/hgen_192_full_reference_v1/vendor/hin2vec/README.md
+new file mode 100644
+index 0000000..c606cd9
+--- /dev/null
++++ b/experiments/hgen_192_full_reference_v1/vendor/hin2vec/README.md
+@@ -0,0 +1,123 @@
++# HIN2vec_pytorch
++A pytorch implementation of [HIN2vec](https://github.com/csiesheep/hin2vec)
++
++
++
++---
++
++07/13/2021 add binary activation function 
++
++---
++
++>*HIN2Vec* learns distributed representations of nodes in heterogeneous information networks (HINs) by capturing the distiguishing metapath relationships between nodes. 
++Please refer the paper [here](https://dl.acm.org/citation.cfm?doid=3132847.3132953).
++
++Please find more details in [the original repo](https://github.com/csiesheep/hin2vec)
++
++### Requirements
++- python3.6+ 
++- pytorch
++- numpy
++- pandas
++- networkx
++
++### Some differences with the original implementation
++
++- use Adam instead of SGD to optimize weights
++
++I find Adam much more effective in training.
++
++- some tricks not implemented
++  - sampling the same type of nodes
++  - learning rate decay
++
++- may be more robust comparing to the original implementation
++
++Maybe there is something wrong about my parameter setting, but when I do some experiments using the original code,
++the program won't continue with `window` set to more than 4. This pytorch code works fine.
++
++- this implementation is slower (It takes about 10 times of the time)
++
++But is surly more easier to understand and modify. (And I would try to use a bigger window size to get comparable or 
++better results.)
++
++### Usage
++create your own edge.csv referring to `demo_data.csv`
++
++**The input graph is assumed to be undirected by default.**
++
++create a main.py in the project folder, copy the following code and modify it.
++
++```python
++    import torch
++    import pandas as pd
++    import torch.nn as nn
++    import torch.optim as optim
++    from torch.utils.data import DataLoader
++    
++    from walker import load_a_HIN_from_pandas
++    from model import NSTrainSet, HIN2vec, train
++
++    # set method parameters
++    window = 4
++    walk = 10
++    walk_length = 300
++    embed_size = 100
++    neg = 5
++    sigmoid_reg = True 
++    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
++    print(f'device = {device}')
++
++    # set dataset [PLEASE USE YOUR OWN DATASET TO REPLACE THIS]
++    demo_edge = pd.read_csv('./demo_data.csv', index_col=0)
++
++    edges = [demo_edge]
++
++    print('finish loading edges')
++
++    # init HIN
++    hin = load_a_HIN_from_pandas(edges)
++    hin.window = window
++
++    dataset = NSTrainSet(hin.sample(walk_length, walk), hin.node_size, neg=neg)
++
++    hin2vec = HIN2vec(hin.node_size, hin.path_size, embed_size, sigmoid_reg)
++
++    # load model
++    # hin2vec.load_state_dict(torch.load('hin2vec.pt'))
++
++    # set training parameters
++    n_epoch = 10
++    batch_size = 20
++    log_interval = 200
++
++    data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
++    optimizer = optim.AdamW(hin2vec.parameters())  # 原作者使用的是SGD？ 这里使用AdamW
++    loss_function = nn.BCELoss()
++
++    for epoch in range(n_epoch):
++        train(log_interval, hin2vec, device, data_loader, optimizer, loss_function, epoch)
++
++    torch.save(hin2vec, 'hin2vec.pt')
++
++    # set output parameters [the output file is a bit different from the original code.]
++    node_vec_fname = 'node_vec.txt'
++    # path_vec_fname = 'meta_path_vec.txt'
++    path_vec_fname = None
++    
++    print(f'saving node embedding vectors to {node_vec_fname}...')
++    node_embeds = pd.DataFrame(hin2vec.start_embeds.weight.data.numpy())
++    node_embeds.rename(hin.id2node).to_csv(node_vec_fname, sep=' ')
++
++    if path_vec_fname:
++        print(f'saving meta path embedding vectors to {path_vec_fname}...')
++        path_embeds = pd.DataFrame(hin2vec.path_embeds.weight.data.numpy())
++        path_embeds.rename(hin.id2path).to_csv(path_vec_fname, sep=' ')
++       
++    # save model
++    # torch.save(hin2vec.state_dict(), 'hin2vec.pt')
++```
++
++### About `data_demo.csv`
++In this repository, the Heterogeneous Information Network is considered as an undirected weighted simple graph with multiple node types and multiple edge types. And each edge type is presented as "<node_type_A>-<node_type_B>" (e.g. "User-Item"), so there is at most one type of edges for each pair of node types. Besides, isolated nodes are not preferable and the only way to add a node into the graph is to add an edge with this node on one side.
++
+diff --git a/experiments/hgen_192_full_reference_v1/vendor/hin2vec/model.py b/experiments/hgen_192_full_reference_v1/vendor/hin2vec/model.py
+new file mode 100644
+index 0000000..b11770d
+--- /dev/null
++++ b/experiments/hgen_192_full_reference_v1/vendor/hin2vec/model.py
+@@ -0,0 +1,130 @@
++import torch
++import numpy as np
++import torch.nn as nn
++from torch.utils.data import Dataset, DataLoader
++
++def binary_reg(x: torch.Tensor):
++    # forward: f(x) = (x>=0)
++    # backward: f(x) = sigmoid
++    a = torch.sigmoid(x)
++    b = a.detach()
++    c = (x.detach() >= 0).float()
++    return a - b + c
++
++class HIN2vec(nn.Module):
++
++    def __init__(self, node_size, path_size, embed_dim, sigmoid_reg=False, r=True):
++        super().__init__()
++
++        self.reg = torch.sigmoid if sigmoid_reg else binary_reg
++
++        self.__initialize_model(node_size, path_size, embed_dim, r)
++
++    def __initialize_model(self, node_size, path_size, embed_dim, r):
++        self.start_embeds = nn.Embedding(node_size, embed_dim)
++        self.end_embeds = self.start_embeds if r else nn.Embedding(node_size, embed_dim)
++
++        self.path_embeds = nn.Embedding(path_size, embed_dim)
++        # self.classifier = nn.Sequential(
++        #     nn.Linear(embed_dim, 1),
++        #     nn.Sigmoid(),
++        # )
++
++    def forward(self, start_node: torch.LongTensor, end_node: torch.LongTensor, path: torch.LongTensor):
++        # assert start_node.dim() == 1  # shape = (batch_size,)
++
++        s = self.start_embeds(start_node)  # (batch_size, embed_size)
++        e = self.end_embeds(end_node)
++        p = self.path_embeds(path)
++        p = self.reg(p)
++
++        agg = torch.mul(s, e)
++        agg = torch.mul(agg, p)
++        # agg = F.sigmoid(agg)
++        # output = self.classifier(agg)
++
++        output = torch.sigmoid(torch.sum(agg, axis=1))
++
++        return output
++
++
++def train(log_interval, model, device, train_loader: DataLoader, optimizer, loss_function, epoch):
++    model.train()
++    for idx, (data, target) in enumerate(train_loader):
++        data, target = data.to(device), target.to(device)
++        optimizer.zero_grad()
++        output = model(data[:, 0], data[:, 1], data[:, 2])
++        loss = loss_function(output.view(-1), target)
++        loss.backward()
++        optimizer.step()
++
++        if idx % log_interval == 0:
++            print(f'\rTrain Epoch: {epoch} '
++                  f'[{idx * len(data)}/{len(train_loader.dataset)} ({100. * idx / len(train_loader):.3f}%)]\t'
++                  f'Loss: {loss.item():.3f}\t\t',
++                  # f'data = {data}\t target = {target}',
++                  end='')
++    print()
++
++
++class NSTrainSet(Dataset):
++    """
++    完全随机的负采样 todo 改进一下？
++    """
++
++    def __init__(self, sample, node_size, neg=5):
++        """
++        :param node_size: 节点数目
++        :param neg: 负采样数目
++        :param sample: HIN.sample()返回值，(start_node, end_node, path_id)
++        """
++
++        print('init training dataset...')
++
++        l = len(sample)
++
++        x = np.tile(sample, (neg + 1, 1))
++        y = np.zeros(l * (1 + neg))
++        y[:l] = 1
++
++        # x[l:, 2] = np.random.randint(0, path_size - 1, (l * neg,))
++        x[l:, 1] = np.random.randint(0, node_size - 1, (l * neg,))
++
++        self.x = torch.LongTensor(x)
++        self.y = torch.FloatTensor(y)
++        self.length = len(x)
++
++        print('finished')
++
++    def __getitem__(self, index):
++        return self.x[index], self.y[index]
++
++    def __len__(self):
++        return self.length
++
++if __name__ == '__main__':
++    ## test binary_reg
++
++    print('sigmoid')
++    a = torch.tensor([-1.,0.,1.],requires_grad=True)
++    b = torch.sigmoid(a)
++    c = b.sum()
++    print(a)
++    print(b)
++    print(c)
++    c.backward()
++    print(c.grad)
++    print(b.grad)
++    print(a.grad)
++
++    print('binary')
++    a = torch.tensor([-1., 0., 1.], requires_grad=True)
++    b = binary_reg(a)
++    c = b.sum()
++    print(a)
++    print(b)
++    print(c)
++    c.backward()
++    print(c.grad)
++    print(b.grad)
++    print(a.grad)
+diff --git a/experiments/hgen_192_full_reference_v1/vendor/hin2vec/walker.py b/experiments/hgen_192_full_reference_v1/vendor/hin2vec/walker.py
+new file mode 100644
+index 0000000..c031a07
+--- /dev/null
++++ b/experiments/hgen_192_full_reference_v1/vendor/hin2vec/walker.py
+@@ -0,0 +1,184 @@
++import random
++
++import pandas as pd
++import networkx as nx
++from itertools import product
++from collections import defaultdict
++
++
++class HIN:
++    """
++    Class to generate vertex sequences.
++    """
++
++    def __init__(self, window=None):
++        self.graph = nx.DiGraph()
++        self.node_size = 0
++        self._path_size = 0
++
++        def new_id():
++            i = self.node_size
++            self.node_size += 1
++            return i
++
++        self._node2id = defaultdict(new_id)
++        self._id2type = {}
++        self._window = window
++        self._node_types = set()
++        self._path2id = None
++        self._id2path = None
++        self._id2node = None
++
++    @property
++    def id2node(self):
++        return self._id2node
++
++    @property
++    def id2path(self):
++        return self._id2path
++
++    @property
++    def window(self):
++        return self._window
++
++    @window.setter
++    def window(self, val):
++        if not self._window:
++            self._window = val
++        else:
++            raise ValueError("window只能被设定一次")
++
++    @property
++    def path_size(self):
++        if not self._path_size:
++            raise ValueError("run sample() first to count path size")
++        return self._path_size
++
++    def add_edge(self, source_node, source_class, dest_node, dest_class, edge_class, weight):
++        i = self._node2id[source_node]
++        j = self._node2id[dest_node]
++        self._id2type[i] = source_class
++        self._id2type[j] = dest_class
++        self._node_types.add(source_class)
++        self._node_types.add(dest_class)
++        self.graph.add_edge(i, j, weight=weight)
++
++    def small_walk(self, start_node, length):
++        walk = [start_node]
++        for i in range(1, length):
++            if next(nx.neighbors(self.graph, walk[-1]), None) is None:
++                break
++            cur_node = walk[-1]
++            nodes = list(nx.neighbors(self.graph, cur_node))
++            weights = [self.graph[cur_node][i]['weight'] for i in nodes]  # 有向图可能不能这么做
++            s = sum(weights)
++            weights = [i/s for i in weights]
++            walk += random.choices(nodes, weights, k=1)
++            # walk += random.sample(list(nx.neighbors(self.graph, cur_node)), 1)  # todo 添加按权重游走的采样方式
++        return walk
++
++    def do_walks(self, length):
++        for start_node in range(self.node_size):
++            yield self.small_walk(start_node, length)
++
++    def sample(self, length, n_repeat):
++        """
++        从随机游走的结果中截取结果返回，每个节点轮流作为起始节点
++        :param length: 游走长度
++        :param n_repeat: 游走次数
++        :return: （start_id,end_id,edge_type)
++        """
++        if not self.window:
++            raise ValueError("window not set")
++
++        if not self._path2id:
++            self._path2id = {}
++            path_id = 0
++            for w in range(1, self._window + 1):
++                for i in product(self._node_types, repeat=w + 1):
++                    self._path2id[i] = path_id
++                    path_id += 1
++
++            self._path_size = len(self._path2id)
++            self._id2node = {v: k for k, v in self._node2id.items()}
++            self._id2path = {v: k for k, v in self._path2id.items()}
++
++        samples = []
++
++        for repeat in range(n_repeat):
++            for walk in self.do_walks(length):
++                cur_len = 0
++                for i, node_id in enumerate(walk):
++                    cur_len = min(cur_len + 1, self._window + 1)  # 当window=n的时候，最长路径有n+1个节点
++                    if cur_len >= 2:
++                        for path_length in range(1, cur_len):
++                            sample = (walk[i - path_length], walk[i],
++                                      self._path2id[tuple([self._id2type[t] for t in walk[i - path_length:i + 1]])])
++                            # print(tuple([self.id2type[t] for t in walk[i-path_length:i + 1]]))
++                            samples.append(sample)
++
++        return samples
++
++    def print_statistics(self):
++        print(f'size = {self.node_size}')
++
++
++def load_a_HIN_from_pandas(edges, print_graph=False):
++    """
++    单向边：edges = list(pd.df)
++    """
++
++    def reverse(df):
++        """
++        reverse source & dest
++        """
++        df = df.rename({'source_node': 'dest_node', 'dest_node': 'source_node',
++                        'source_class': 'dest_class', 'dest_class': 'source_class'},
++                       axis=1)
++        # reverse edge_class
++        df.edge_class = df.edge_class.map(lambda x: '-'.join(reversed(x.split('-'))))
++        return df
++
++    print('load graph from edges...')
++    g = HIN()
++    if isinstance(edges, list):
++        edges = pd.concat(edges, sort=False)
++    edges = edges.append(reverse(edges), sort=False, ignore_index=True)
++
++    for index, row in edges.iterrows():
++        g.add_edge(row['source_node'], row['source_class'],
++                   row['dest_node'], row['dest_class'], row['edge_class'],
++                   row['weight'])
++    if print_graph:
++        g.print_statistics()
++    print('finish loading graph!')
++    return g
++
++
++if __name__ == '__main__':
++    hin = HIN()
++    hin.window = 4
++    # hin.window = 6
++    # hin.add_edge('A', 'Dr', 'a', 'Di', None, 0.3)
++    # hin.add_edge('B', 'Dr', 'b', 'Di', None, 0.3)
++    # hin.add_edge('C', 'Dr', 'c', 'Di', None, 0.3)
++    # hin.add_edge('A', 'Dr', 'b', 'Di', None, 0.3)
++    # hin.add_edge('C', 'Dr', 'b', 'Di', None, 0.3)
++    # hin.add_edge('c', 'Di', 'A', 'Dr', None, 0.3)
++    # hin.add_edge('a', 'Di', 'B', 'Dr', None, 0.3)
++    # hin.add_edge('A', 'Dr', 'B', 'Dr', None, 0.3)
++
++    hin.add_edge('A', 'Dr', 'B', 'Di', None, 0.3)
++    hin.add_edge('B', 'Di', 'C', 'Dr', None, 0.3)
++    hin.add_edge('C', 'Dr', 'D', 'Di', None, 0.3)
++    hin.add_edge('D', 'Di', 'E', 'Dr', None, 0.3)
++    hin.add_edge('E', 'Dr', 'F', 'Di', None, 0.3)
++    hin.add_edge('F', 'Di', 'A', 'Dr', None, 0.3)
++
++    print(hin.small_walk(hin._node2id['A'], 4))
++    print(hin.sample(3))
++    print(hin.node_size)
++    print(hin._path_size)
++
++    print(hin.graph.edges)
++
+diff --git a/experiments/hgen_192_full_reference_v1/vendor/old_core.py b/experiments/hgen_192_full_reference_v1/vendor/old_core.py
+new file mode 100644
+index 0000000..67bc33c
+--- /dev/null
++++ b/experiments/hgen_192_full_reference_v1/vendor/old_core.py
+@@ -0,0 +1,130 @@
++"""Load author definitions without executing their command-line entry point."""
++import ast
++import copy
++import hashlib
++import json
++import random
++from collections import Counter
++from pathlib import Path
++from types import SimpleNamespace
++
++import numpy as np
++import scipy.sparse as sp
++import torch
++from torch import nn
++from torch.nn import functional as F
++from torch.autograd import Variable
++
++ROOT = Path('/data2/lyh/gnn_project/DiHug')
++UP = ROOT.parent/'DiHug_paper_revision/results/r4_hgen_motif_20261015_v1/source/vendor/hgen_upstream'
++DATA = ROOT.parent/'HGEN/downloads/official_data_20260716'
++REF = ROOT/'results/paper_revision_pr3b/pr3b_20261008_stage2_attribution_v1/private_reference'
++
++def sha(p):
++    return hashlib.sha256(Path(p).read_bytes()).hexdigest()
++
++def write(p, value):
++    p = Path(p); p.parent.mkdir(parents=True, exist_ok=True)
++    tmp = p.with_suffix('.tmp')
++    tmp.write_text(json.dumps(value, indent=2, ensure_ascii=False, allow_nan=False))
++    tmp.replace(p)
++
++def seed(s):
++    random.seed(s); np.random.seed(s); torch.manual_seed(s)
++    if torch.cuda.is_available(): torch.cuda.manual_seed_all(s)
++
++def rng():
++    return dict(py=random.getstate(), np=np.random.get_state(), torch=torch.get_rng_state(),
++                cuda=torch.cuda.get_rng_state_all() if torch.cuda.is_available() else [])
++
++def restore(r):
++    random.setstate(r['py']); np.random.set_state(r['np']); torch.set_rng_state(r['torch'])
++    if r['cuda']: torch.cuda.set_rng_state_all(r['cuda'])
++
++def args(dataset, epochs=5):
++    return SimpleNamespace(batch_size=32, noise_dim=64, noise_type='Uniform', hidden_units=128,
++        num_G_layer=5, max_path_len=4, W_down_generator_size=128, W_down_discriminator_size=128,
++        neighbor_sampling_size=120, dataset=dataset, lr_gen=1e-4, lr_dis=1e-4,
++        n_critic=5, clip_value=.03, n_epochs=epochs)
++
++def load(instrument=False):
++    env = dict(np=np, sp=sp, torch=torch, nn=nn, F=F, Variable=Variable,
++               random=random, Counter=Counter, __name__='hgen_author_isolated')
++    unames = {'make_noise','delete_from_tail','pad_along_axis','score_matrix_from_random_walks',
++              'heterogeneous_graph_assemble','sample_from_dict','array_subtraction','symmetric'}
++    nodes = [n for n in ast.parse((UP/'utils.py').read_text()).body
++             if isinstance(n, ast.FunctionDef) and n.name in unames]
++    exec(compile(ast.Module(body=nodes, type_ignores=[]), str(UP/'utils.py'), 'exec'), env)
++    env['utils'] = SimpleNamespace(**{k:env[k] for k in unames})
++    hnames = {'Generator','Discriminator','train','frequent_meta_path_pattern','meta_path_frequency'}
++    nodes = [n for n in ast.parse((UP/'hgen.py').read_text()).body
++             if isinstance(n,(ast.FunctionDef,ast.ClassDef)) and n.name in hnames]
++    if instrument:
++        train = next(n for n in nodes if n.name == 'train')
++        batchloop = train.body[-1].body[0]
++        assert isinstance(batchloop, ast.For)
++        assert isinstance(batchloop.body[-1], ast.AugAssign)
++        batchloop.body.append(ast.parse('record_update(batches_done, loss_D)').body[0])
++    module = ast.fix_missing_locations(ast.Module(body=nodes, type_ignores=[]))
++    exec(compile(module, str(UP/'hgen.py'), 'exec'), env)
++    return env
++
++def tail_total(rows, eos):
++    """Original tail deletion on its domain; empty extension for all-EOS."""
++    result=[]
++    for row in rows:
++        end=len(row)
++        while end and row[end-1] == eos: end-=1
++        result.append(row[:end].copy())
++    return result
++
++def scores_patterns(env, types, nodes, n):
++    tt=tail_total(types,4); vv=tail_total(nodes,n)
++    valid_t=[[x for x in tt if len(x)==k and 4 not in x] for k in [2,3,4]]
++    valid_v=[[x for x in vv if len(x)==k and n not in x] for k in [2,3,4]]
++    score=sp.csr_matrix((n,n))
++    for rows in valid_v:
++        if rows: score=score+env['score_matrix_from_random_walks'](rows,n)
++    patterns=env['meta_path_frequency'](*valid_t)
++    return score.tocsr(), patterns, dict(empty=int(sum(len(x)==0 for x in vv)),
++        usable_lengths=[len(x) for x in valid_v], total=len(nodes))
++
++class LazyBank(torch.utils.data.Dataset):
++    def __init__(self, nodes, types, n): self.nodes,self.types,self.n=nodes,types,n
++    def __len__(self): return len(self.nodes)
++    def __getitem__(self,i):
++        return (F.one_hot(torch.as_tensor(self.types[i]).long(),5).float(),
++                F.one_hot(torch.as_tensor(self.nodes[i]).long(),self.n+1).float())
++
++def setup(env, reference, embedding, device, epochs=5):
++    typ=np.asarray(reference['node_types']);n=len(typ)
++    groups={t:np.flatnonzero(typ==t).tolist() for t in range(4)}
++    emb=[torch.tensor(embedding[groups[t]],dtype=torch.float32,device=device) for t in range(4)]
++    a=args('IMDB_movie',epochs)
++    g=env['Generator'](groups,n,emb,torch.device(device),a).to(device)
++    d=env['Discriminator'](n,torch.device(device),a).to(device)
++    go=torch.optim.RMSprop(g.parameters(),lr=a.lr_gen)
++    do=torch.optim.RMSprop(d.parameters(),lr=a.lr_dis)
++    env.update(args=a,device=torch.device(device),generator=g,discriminator=d,optimizer_G=go,optimizer_D=do)
++    return g,d,go,do,groups
++
++def graph_payload(reference, adjacency):
++    """Retain forbidden type pairs; never silently project to reference schema."""
++    g=copy.deepcopy(reference)
++    for f in g['families']: f['edges']=[]
++    bypair={tuple(sorted((f['src_type'],f['dst_type']))):f for f in g['families']}
++    types=np.asarray(g['node_types']);loops=[];illegal=0
++    for u,v in zip(*np.triu(np.asarray(adjacency)>0).nonzero()):
++        u,v=int(u),int(v)
++        if u==v: loops.append(u);continue
++        pair=tuple(sorted((int(types[u]),int(types[v]))))
++        if pair not in bypair:
++            a,b=pair
++            f=dict(name=f'unsupported_{a}_{b}',src_type=a,dst_type=b,
++                   src_nodes=np.flatnonzero(types==a).tolist(),dst_nodes=np.flatnonzero(types==b).tolist(),edges=[])
++            bypair[pair]=f;g['families'].append(f)
++        f=bypair[pair]
++        if f['name'].startswith('unsupported_'):illegal+=1
++        f['edges'].append([u,v])
++    return g,dict(self_loops=loops,unsupported_edges=illegal,schema_valid=illegal==0,
++                  simple=len(loops)==0)
+diff --git a/experiments/hgen_192_full_reference_v1/vendor/old_safe_assembly.py b/experiments/hgen_192_full_reference_v1/vendor/old_safe_assembly.py
+new file mode 100644
+index 0000000..288d09e
+--- /dev/null
++++ b/experiments/hgen_192_full_reference_v1/vendor/old_safe_assembly.py
+@@ -0,0 +1,116 @@
++"""Explicit totalization of undefined author assembly paths; preserve defined proposals."""
++import os
++os.environ['OMP_NUM_THREADS']='1';os.environ['OPENBLAS_NUM_THREADS']='1'
++import sys,json,time,signal,copy,random
++from pathlib import Path
++import numpy as np
++import scipy.sparse as sp
++import core as c
++from prepare_check import same
++
++def sample(score,target,patterns,groups,seed,max_attempts=None):
++    c.seed(seed);env=c.load();n=score.shape[0]
++    if len(score.nonzero()[0])<target:
++        a=env['symmetric'](score)>0
++        return a.toarray().astype(np.uint8),[],True,'upstream_low_support_return'
++    a=np.zeros((n,n),dtype=np.uint8);s=score.toarray().copy();np.fill_diagonal(s,0)
++    degree=s.sum(0);bytype=[dict(zip(groups[t],[degree[i] for i in groups[t]])) for t in range(len(groups))]
++    masks={t:env['array_subtraction'](range(n),groups[t]) for t in groups}
++    if not patterns:return a,[],False,'empty_pattern_support'
++    if not any(len(p)>=2 for p in patterns):return a,[],False,'no_transition_pattern'
++    limit=max_attempts if max_attempts is not None else 20*max(1,target//2)
++    logs=[];directed=0;started=time.time()
++    for attempt in range(limit):
++        if time.time()-started>600:return a,logs,False,'wall_watchdog'
++        pattern=env['sample_from_dict'](patterns,1)[0];seq=[];reason=None
++        if sum(bytype[pattern[0]].values())<=0:reason='zero_root_mass'
++        else:
++            root=env['sample_from_dict'](bytype[pattern[0]],1)[0];seq=[int(root)]
++            for typ in pattern[1:]:
++                row=s[seq[-1],:].copy();row[masks[typ]]=0
++                if row.sum()<=0:reason='zero_transition_mass';break
++                seq.append(int(np.random.choice(n,p=row/row.sum())))
++        added=0
++        if reason is None:
++            for u,v in zip(seq[:-1],seq[1:]):
++                if a[u,v]==0:a[u,v]=a[v,u]=1;added+=1;directed+=2
++        logs.append(dict(attempt=attempt,pattern=list(map(int,pattern)),nodes=seq,status=reason or 'accepted',added=added,directed_edges=directed))
++        if directed>target:return a,logs,True,'target_exceeded_as_upstream'
++    return a,logs,False,'proposal_limit'
++
++def gate():
++    env=c.load();groups={0:list(range(4)),1:list(range(4,8))};p={(0,1,0):5,(1,0,1):3}
++    s=sp.csr_matrix(np.ones((8,8))-np.eye(8))
++    for seed in range(10):
++        c.seed(seed);a=env['heterogeneous_graph_assemble'](s,12,p,groups);r1=c.rng()
++        b,logs,ok,_=sample(s,12,p,groups,seed);r2=c.rng()
++        assert ok and np.array_equal(a,b) and same(r1,r2)
++    # Strong score only within each type: cross-type proposals cannot complete.
++    x=np.zeros((8,8));x[:4,:4]=1;x[4:,4:]=1;np.fill_diagonal(x,0)
++    a,l,ok,why=sample(sp.csr_matrix(x),12,p,groups,12,max_attempts=3)
++    assert not ok and len(l)==3 and a.sum()==0 and all(z['status']=='zero_transition_mass' for z in l)
++    a,l,ok,why=sample(sp.csr_matrix(x),12,{},groups,12);assert not ok and why=='empty_pattern_support'
++    a,l,ok,why=sample(sp.csr_matrix(x),100,p,groups,12);assert ok and np.array_equal(a,x)
++    return dict(passed=True,positive_support_exact_replays=10,boundary_cases=3,training=0,model_calls=0)
++
++def run(parent,out):
++    out.mkdir(exist_ok=False,parents=True);checks=gate();c.write(out/'engineering_gate.json',checks)
++    source={str(Path(__file__).resolve()):c.sha(__file__),str(c.ROOT/'docs/HGEN_OFFICIAL_COMPATIBILITY_20261016.md'):c.sha(c.ROOT/'docs/HGEN_OFFICIAL_COMPATIBILITY_20261016.md')}
++    for p in [Path(c.__file__),c.UP/'utils.py',c.ROOT/'paper_revision_lab/hgen_motif_r2/review.py',c.ROOT/'paper_revision_lab/hgen_motif_r2/review_endpoints.py',c.ROOT/'paper_revision_lab/scripts/typed_triangle_supplement.py']:
++        source[str(p)]=c.sha(p)
++    c.write(out/'sources_at_launch.json',source)
++    c.write(out/'status.json',dict(stage='waiting_for_strict_branch_acceptance'))
++    while not (parent/'controller_exit.json').exists():
++        if (parent/'failure_recover_None_None.json').exists():raise RuntimeError('parent recovery failed; compatible branch not started')
++        time.sleep(30)
++    assert json.loads((parent/'independent_acceptance.json').read_text())['engineering_passed']
++    import accept as review
++    public=json.loads((c.ROOT/'results/paper_revision_pr3b/pr3b_20261008_stage2_attribution_v1/public_motif_counts.json').read_text())
++    records=[];tic=time.time();logchecks=0
++    for ds in ['imdb','pubmed']:
++        ref=json.loads((parent/'data'/ds/'reference.json').read_text());n=len(ref['node_types']);groups={t:[i for i,x in enumerate(ref['node_types']) if x==t] for t in range(4)}
++        for seed in [310,311,312]:
++            origin=parent/ds/f'seed{seed}'
++            for name in ['checkpoint.pt','scores.npz','patterns.json','generated_walks.npz']:source[str(origin/name)]=c.sha(origin/name)
++            score=sp.load_npz(origin/'scores.npz');patterns={tuple(x['types']):x['count'] for x in json.loads((origin/'patterns.json').read_text())}
++            for rep in range(10):
++                dest=out/ds/f'seed{seed}'/f'graph{rep:02d}';dest.mkdir(parents=True);ss=seed*10000+rep+1000000
++                a,ledger,ok,reason=sample(score,sum(len(f['edges']) for f in ref['families'])*2,patterns,groups,ss)
++                np.savez_compressed(dest/'raw_adjacency.npz',adjacency=a)
++                with (dest/'actions.jsonl').open('w') as f:
++                    for row in ledger:f.write(json.dumps(row)+'\n')
++                # Independent edge-set reconstruction, all proposals and accounting.
++                edges=set();cnt=0
++                for row in ledger:
++                    before=len(edges)
++                    if row['status']=='accepted':
++                        assert len(row['nodes'])==len(row['pattern'])
++                        assert [ref['node_types'][i] for i in row['nodes']]==row['pattern']
++                        for u,v in zip(row['nodes'][:-1],row['nodes'][1:]):assert u!=v and score[u,v]>0;edges.add(tuple(sorted((u,v))))
++                    assert row['added']==len(edges)-before and row['directed_edges']==2*len(edges);cnt+=1
++                if ledger:assert edges==set(zip(*np.triu(a,k=1).nonzero()))
++                logchecks+=cnt;g,valid=c.graph_payload(ref,a);c.write(dest/'graph.json',g)
++                row=dict(dataset=ds,seed=seed,repeat=rep,complete=ok,reason=reason,validity=valid,proposals=len(ledger),rejected=sum(x['status']!='accepted' for x in ledger),path=str(dest/'graph.json'),sha256=c.sha(dest/'graph.json'))
++                if ok and valid['simple']:
++                    extended=copy.deepcopy(ref);names={f['name'] for f in ref['families']}
++                    for f in g['families']:
++                        if f['name'] not in names:q=copy.deepcopy(f);q['edges']=[];extended['families'].append(q)
++                    row['metrics'],_,_=review.metric(g,extended,public[ds]['templates'])
++                    obs,_=review.tt.measure(g);rr,_=review.tt.measure(extended)
++                    row['typed_triangles']=review.tt.compare(obs,rr,sorted(set(review.tt.schema_classes(extended))|set(obs['counts'])|set(rr['counts'])))
++                c.write(dest/'request.json',row);records.append(row)
++                c.write(out/'status.json',dict(stage='assembly_and_independent_accounting',requests=len(records),total=60))
++    assert len(records)==60 and all(c.sha(p)==h for p,h in source.items())
++    c.write(out/'sources.json',source);c.write(out/'per_graph.json',records)
++    summary={}
++    for ds in ['imdb','pubmed']:
++        rr=[r for r in records if r['dataset']==ds];valid=[r for r in rr if 'metrics' in r]
++        summary[ds]=dict(requests=30,completed=sum(r['complete'] for r in rr),schema_valid_completed=sum(r['complete'] and r['validity']['schema_valid'] for r in rr),statistics={k:review.moments([r['metrics'][k] for r in valid]) for k in ['triangles','motif_mean_relative_error','clustering','degree_wasserstein','LCC']},typed_tv=review.moments([r['typed_triangles']['composition_tv_when_defined'] for r in valid if r['typed_triangles']['composition_tv_when_defined'] is not None]))
++    c.write(out/'independent_acceptance.json',dict(engineering_passed=True,requests=60,complete=sum(r['complete'] for r in records),full_action_accounting=logchecks,summary=summary,wall_seconds=time.time()-tic,cpu_seconds=time.process_time(),training=0,new_model_walks=0,limitations=['Standalone minimal compatibility extension, not the original undefined branch','Whole-path rejection changes the law on histories containing zero support','No quality-based filtering; complete/incomplete requests retained; source model reused']))
++    c.write(out/'status.json',dict(stage='completed_and_audited',requests=60))
++
++if __name__=='__main__':
++    try:run(Path(sys.argv[1]),Path(sys.argv[2]))
++    except BaseException:
++        import traceback
++        c.write(Path(sys.argv[2])/'failure.json',dict(traceback=traceback.format_exc()));raise
+diff --git a/experiments/hgen_192_full_reference_v1/worker.py b/experiments/hgen_192_full_reference_v1/worker.py
+new file mode 100644
+index 0000000..6590eb6
+--- /dev/null
++++ b/experiments/hgen_192_full_reference_v1/worker.py
+@@ -0,0 +1,90 @@
++"""Run literal frozen author GAN once; final generated walks feed two assemblies."""
++import os
++os.environ['OMP_NUM_THREADS']='1';os.environ['OPENBLAS_NUM_THREADS']='1'
++import sys,time,traceback,contextlib,types,resource
++import numpy as np,scipy.sparse as sp,torch
++from torch.utils.data import Dataset,DataLoader
++from common import *
++torch.set_num_threads(1)
++class Bank(Dataset):
++ def __init__(self,z):self.nodes=z['nodes'];self.types=z['types']
++ def __len__(self):return len(self.nodes)
++ def __getitem__(self,i):return (torch.nn.functional.one_hot(torch.from_numpy(self.types[i]).long(),5).float(),torch.nn.functional.one_hot(torch.from_numpy(self.nodes[i]).long(),193).float())
++def compatible_assembly(score,target,patterns,groups,s):
++ tree=ast.parse((ROOT/'vendor/old_safe_assembly.py').read_text());node=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='sample')
++ mod=ast.Module(body=[node])
++ if hasattr(ast,'TypeIgnore'):mod.type_ignores=[]
++ env=dict(np=np,sp=sp,time=time,c=types.SimpleNamespace(seed=seed,load=load_core))
++ exec(compile(mod,str(ROOT/'vendor/old_safe_assembly.py'),'exec'),env)
++ return env['sample'](score,target,patterns,groups,s)
++def scores(env,tt,nn):
++ # Exactly original defined-domain tail handling, totalized only for all-EOS.
++ def tail(rows,eos):
++  out=[]
++  for row in rows:
++   end=len(row)
++   while end and row[end-1]==eos:end-=1
++   out.append(row[:end].copy())
++  return out
++ ts=tail(tt,4);ns=tail(nn,192)
++ valid_t=[[x for x in ts if len(x)==k and 4 not in x] for k in (2,3,4)]
++ valid_n=[[x for x in ns if len(x)==k and 192 not in x] for k in (2,3,4)]
++ score=sp.csr_matrix((192,192))
++ for rows in valid_n:
++  if rows:score=score+env['score_matrix_from_random_walks'](rows,192)
++ # Native top-half per-length frequency rule, no schema or quality filtering.
++ p=env['meta_path_frequency'](*valid_t)
++ return score.tocsr(),p,dict(total=len(nn),all_EOS=sum(len(x)==0 for x in ns),usable_lengths=[len(x) for x in valid_n])
++def main(d,s):
++ start=time.time();folder=OUT/'run'/cell(d,s);folder.mkdir(parents=True,exist_ok=False);check_time(600)
++ expected=read(OUT/'source_manifest.json')
++ if source_manifest()!=expected:raise ValueError('source changed')
++ z=np.load(str(OUT/'data'/d/'reference.npz'));typ=z['types'];schema=z['schema'];ref_edges=z['edges'];embedding=np.load(str(OUT/'data'/d/'embedding.npy'));asset=read(OUT/'data'/d/'embedding_receipt.json')
++ assert sha(OUT/'data'/d/'embedding.npy')==asset['sha256'];bankpath=OUT/'data'/d/('bank'+str(s)+'.npz');bank=np.load(str(bankpath));assert len(bank['nodes'])==24000
++ seed(s);env=load_core(True);g,dis,go,do,groups=setup(env,typ,embedding,'cuda',5);env['dataloader']=DataLoader(Bank(bank),batch_size=32,shuffle=True,num_workers=0,drop_last=True)
++ def snapshot(step):return dict(g=g.state_dict(),d=dis.state_dict(),go=go.state_dict(),do=do.state_dict(),rng=rng(),dataset=d,train_seed=s,D_updates=step,G_updates=step//5,protocol_sha256=sha(ROOT/'protocol.json'),embedding_sha256=asset['sha256'],bank_sha256=sha(bankpath))
++ torch.save(snapshot(0),str(folder/'initial.pt'));parameter_counts=dict(G=sum(x.numel() for x in g.parameters()),D=sum(x.numel() for x in dis.parameters()))
++ last=[0];log=(folder/'training.jsonl').open('w')
++ def record(step,loss):
++  last[0]=step;check_time()
++  if not torch.isfinite(loss):raise FloatingPointError('nonfinite GAN loss')
++  if step%25==0:
++   log.write(json.dumps(dict(D_updates=step,G_updates=(step+4)//5,loss_D=float(loss),seconds=time.time()-start))+'\n');log.flush();save(folder/'progress.json',dict(stage='training',D_updates=step,G_updates=(step+4)//5,seconds=time.time()-start))
++ env.update(record_update=record,print=lambda *a,**kw:None)
++ tic=time.time()
++ try:env['train']()
++ except BaseException:
++  torch.save(snapshot(last[0]),str(folder/'interrupted_state.pt'));log.close();raise
++ torch.cuda.synchronize();train_seconds=time.time()-tic;log.close();assert last[0]==3750
++ assert all(torch.isfinite(p).all() for model in (g,dis) for p in model.parameters())
++ final=folder/'final.pt';torch.save(snapshot(3750),str(final));save(folder/'training_complete.json',dict(D_updates=3750,G_updates=750,seconds=train_seconds,weights_sha256=sha(final),parameter_counts=parameter_counts,known_native_node_head_no_gradient={n:p.grad is None for n,p in g.named_parameters() if n.startswith('lin_node_') and not n.startswith('lin_node_type')}))
++ # Independent fixed generation stream; does not alter finished training state.
++ seed((s+1000003)%(2**32));tt=[];nn=[];tic=time.time();g.eval()
++ with torch.no_grad():
++  for i in range(3000):
++   check_time();t,n=g(env['make_noise']((32,64),'Uniform').cuda())
++   if not torch.isfinite(t).all() or not torch.isfinite(n).all():raise FloatingPointError('nonfinite native model sampling')
++   tt.append(t.argmax(2).cpu().numpy());nn.append(n.argmax(2).cpu().numpy())
++   if i%100==0:save(folder/'progress.json',dict(stage='model_walks',D_updates=3750,batches=i+1,planned=3000))
++ tt=np.concatenate(tt);nn=np.concatenate(nn);np.savez_compressed(str(folder/'generated_walks.npz'),types=tt,nodes=nn);sample_seconds=time.time()-tic
++ score,patterns,info=scores(env,tt,nn);sp.save_npz(str(folder/'scores.npz'),score);save(folder/'patterns.json',[dict(types=list(map(int,k)),count=int(v)) for k,v in patterns.items()]);save(folder/'walk_receipt.json',dict(**info,seconds=sample_seconds,sha256=sha(folder/'generated_walks.npz')))
++ peak=torch.cuda.max_memory_allocated()/2**20;del g,dis,go,do;torch.cuda.empty_cache()
++ requests=[]
++ for sample_seed in PROTOCOL['sample_seeds']:
++  check_time();dest=folder/('sample_'+str(sample_seed));dest.mkdir();tic=time.time()
++  adj,ledger,complete,reason=compatible_assembly(score,len(ref_edges)*2,patterns,groups,sample_seed)
++  assert adj.shape==(192,192) and np.isfinite(adj).all() and np.array_equal(adj,adj.T)
++  np.savez_compressed(str(dest/'raw_adjacency.npz'),adjacency=adj);loops=np.flatnonzero(np.diag(adj)).tolist();es=np.stack(np.triu(adj,1).nonzero(),axis=0).astype(np.int64)
++  lookup={tuple(p):i for i,p in enumerate(schema)};relations=np.array([lookup[tuple(sorted((int(typ[u]),int(typ[v]))))]+1 for u,v in es.T],np.int64)
++  # This export is exact when simple. Raw loops are retained above and disqualify
++  # primary simple-graph metric evaluation; never silently call it a clean graph.
++  np.savez_compressed(str(dest/'graph.npz'),types=typ,edges=es,schema=schema,relations=relations)
++  with (dest/'assembly_actions.jsonl').open('w') as f:
++   for row in ledger:f.write(json.dumps(row)+'\n')
++  r=dict(dataset=d,train_seed=s,sample_seed=sample_seed,readout='final_G_after3750D_750G',complete=bool(complete),reason=reason,self_loops=loops,simple=len(loops)==0,edges=int(len(es.T)),raw_directed_edges=int(adj.sum()),target_undirected_edges=len(ref_edges),graph_sha256=sha(dest/'graph.npz'),raw_sha256=sha(dest/'raw_adjacency.npz'),weight_sha256=sha(final),reference_sha256=sha(OUT/'data'/d/'reference.npz'),embedding_sha256=asset['sha256'],seconds=time.time()-tic,variant=PROTOCOL['name'],assembly_proposals=len(ledger),zero_support_rejections=sum(x['status']!='accepted' for x in ledger),no_backbone=True)
++  save(dest/'binding.json',r);requests.append(r)
++ save(folder/'summary.json',dict(status='complete' if all(x['complete'] and x['simple'] for x in requests) else 'completed_with_failures',dataset=d,train_seed=s,D_updates=3750,G_updates=750,requests=requests,seconds=time.time()-start,peak_allocated_mib=peak,peak_RSS_mib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024,finished_epoch=time.time()))
++ print(cell(d,s),'finished',time.time()-start)
++if __name__=='__main__':
++ try:main(sys.argv[1],int(sys.argv[2]))
++ except BaseException:save(OUT/('failure_'+cell(sys.argv[1],int(sys.argv[2]))+'.json'),dict(traceback=traceback.format_exc(),epoch=time.time()));raise

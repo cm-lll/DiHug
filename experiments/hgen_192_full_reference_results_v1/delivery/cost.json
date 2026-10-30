@@ -1,0 +1,136 @@
+{
+  "status": "passed",
+  "rows": [
+    {
+      "dataset": "IMDB",
+      "train_seconds_p95_extrapolation": 773.975372314453,
+      "walk_seconds_extrapolation": 238.7111485004425,
+      "save_IO_allowance_seconds": 60,
+      "concurrency_planning_margin": 1.5,
+      "model_phase_with_margin": 1609.0297812223434,
+      "assembly_two_graphs_planning_seconds": 200,
+      "assembly_two_graphs_hard_watchdog_seconds": 1200,
+      "critical_path_planned_seconds": 1809.0297812223434,
+      "asset_actual_seconds": 133.04621982574463
+    },
+    {
+      "dataset": "PubMed",
+      "train_seconds_p95_extrapolation": 767.1942114830017,
+      "walk_seconds_extrapolation": 241.5790557861328,
+      "save_IO_allowance_seconds": 60,
+      "concurrency_planning_margin": 1.5,
+      "model_phase_with_margin": 1603.1599009037018,
+      "assembly_two_graphs_planning_seconds": 200,
+      "assembly_two_graphs_hard_watchdog_seconds": 1200,
+      "critical_path_planned_seconds": 1803.1599009037018,
+      "asset_actual_seconds": 126.35795593261719
+    }
+  ],
+  "queue": [
+    {
+      "gpu": 0,
+      "dataset": "IMDB",
+      "train_seed": 2026103011,
+      "D_updates": 3750,
+      "G_updates": 750,
+      "sample_seeds": [
+        2026102821,
+        2026102822
+      ]
+    },
+    {
+      "gpu": 1,
+      "dataset": "IMDB",
+      "train_seed": 2026103012,
+      "D_updates": 3750,
+      "G_updates": 750,
+      "sample_seeds": [
+        2026102821,
+        2026102822
+      ]
+    },
+    {
+      "gpu": 2,
+      "dataset": "IMDB",
+      "train_seed": 2026103013,
+      "D_updates": 3750,
+      "G_updates": 750,
+      "sample_seeds": [
+        2026102821,
+        2026102822
+      ]
+    },
+    {
+      "gpu": 3,
+      "dataset": "IMDB",
+      "train_seed": 2026103014,
+      "D_updates": 3750,
+      "G_updates": 750,
+      "sample_seeds": [
+        2026102821,
+        2026102822
+      ]
+    },
+    {
+      "gpu": 4,
+      "dataset": "PubMed",
+      "train_seed": 2026103021,
+      "D_updates": 3750,
+      "G_updates": 750,
+      "sample_seeds": [
+        2026102821,
+        2026102822
+      ]
+    },
+    {
+      "gpu": 5,
+      "dataset": "PubMed",
+      "train_seed": 2026103022,
+      "D_updates": 3750,
+      "G_updates": 750,
+      "sample_seeds": [
+        2026102821,
+        2026102822
+      ]
+    },
+    {
+      "gpu": 6,
+      "dataset": "PubMed",
+      "train_seed": 2026103023,
+      "D_updates": 3750,
+      "G_updates": 750,
+      "sample_seeds": [
+        2026102821,
+        2026102822
+      ]
+    },
+    {
+      "gpu": 7,
+      "dataset": "PubMed",
+      "train_seed": 2026103024,
+      "D_updates": 3750,
+      "G_updates": 750,
+      "sample_seeds": [
+        2026102821,
+        2026102822
+      ]
+    }
+  ],
+  "planned_science_seconds": 1809.0297812223434,
+  "remaining_science_seconds": 2822.80335021019,
+  "all_eight_parallel": true,
+  "measured_simultaneous_eight_card_throughput": false,
+  "CPU_evaluation_planning_seconds": 300,
+  "delivery_reserve_seconds": 900,
+  "clock": {
+    "start_epoch": 1793322672.0,
+    "start_Asia_Shanghai": "2026-10-30T09:11:12+08:00",
+    "clock_note": "first timestamped implementation/resource check; discovery preceding this is separate",
+    "planning_bound_minutes": 90,
+    "science_stop_epoch": 1793327172.0,
+    "delivery_deadline_epoch": 1793328072.0,
+    "user_exact_wall_clock_limit_specified": false,
+    "authorization": "user approved completing HGEN full-reference test and using multiple cards/repetitions; agent-selected bounded plan, not a claimed explicit90min authorization",
+    "formal_started": false
+  }
+}

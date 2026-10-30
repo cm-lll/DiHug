@@ -1,0 +1,15 @@
+{
+  "name": "HGEN-author-core-192-full-reference-with-declared-zero-support-rejection",
+  "upstream_hgen_commit": "ddd93c38ead7e8ca0db21854b114fb8481407fb8",
+  "upstream_hin2vec_commit": "7c3b6c4160476568985622117cf2263e7b78760e",
+  "datasets": {"IMDB": {"nodes": 192, "edges": 323, "components": [188, 2, 2]}, "PubMed": {"nodes": 192, "edges": 926, "components": [192]}},
+  "train_seeds": {"IMDB": [2026103011, 2026103012, 2026103013, 2026103014], "PubMed": [2026103021, 2026103022, 2026103023, 2026103024]},
+  "sample_seeds": [2026102821, 2026102822],
+  "embedding_seeds": {"IMDB": 2026103001, "PubMed": 2026103002},
+  "embedding": {"window": 5, "walk": 8, "walk_length": 10, "dimension": 32, "negative_samples": 8, "sigmoid_reg": true, "epochs": 4, "batch_size": 32, "optimizer": "AdamW native defaults", "fit_scope": "this192-node reference only; shared fixed asset across four GAN seeds"},
+  "hgen": {"train_paths": 24000, "sample_without_replacement": true, "path_nodes": [2, 3, 4], "epochs": 5, "batch_size": 32, "D_updates": 3750, "G_updates": 750, "hidden_units": 128, "G_layers": 5, "noise_dim": 64, "noise_type": "Uniform", "optimizer": "RMSprop", "lr": 0.0001, "clip": 0.03, "tau": 3, "G_every_D": 5, "generated_walk_batches": 3000, "generated_walks": 96000},
+  "assembly": {"target": "2*reference_undirected_edges supplied as native total-edge-budget condition", "initial_graph": "all zero; no reference backbone", "zero_support": "reuse previously audited whole-proposal rejection, named compatibility extension; no uniform fallback", "max_proposals": "20*reference_edges", "per_graph_wall_seconds": 600, "keep_native_low_support_and_overshoot": true, "repair_or_redraw": false},
+  "gates": {"full192_input_and_mapping": true, "real_Hin2Vec_required": true, "synthetic_or_global_embedding_crop_allowed": false, "native_model_source_exact": true, "finite_training_and_outputs": true, "same_input_state_restore": true, "at_most_gpu_cards": 8, "fit_one_per_card": true, "CPU_threads_per_process": 1, "peak_GPU_mib_limit": 9000, "planning_margin": 1.5, "must_fit_remaining_science_window": true},
+  "evaluation": {"reference": "same frozen192 references and pure CPU evaluator as current diffusion results", "original_primary": true, "LCC_secondary": true, "no_schema_projection": true, "loops": "retain raw adjacency, report invalid simple graph rather than silently remove", "all_implemented_metrics": true, "failures_and_nulls": "retain; no successful-only averages"},
+  "limits": ["native integer node sampling gradient limitation unchanged", "GAN four seeds conditional on one fixed embedding per dataset, not four fully independent embedding pipelines", "HGEN receives total edge budget; diffusion has no hard quota", "native GAN steps are not equivalent to diffusion normal2 updates", "not a reproduction of author held-out table numbers"]
+}
