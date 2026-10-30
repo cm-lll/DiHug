@@ -32,7 +32,9 @@ def main(run,deadline):
     if training:
         with (out/'training_curve.csv').open('w',newline='') as f:
             w=csv.DictWriter(f,fieldnames=list(training[0]));w.writeheader();w.writerows(training)
-    by={(x['dataset'],x['train_seed'],x['arm']):x for x in taskrows}
+    # Task metadata is nested under ``job``; status/restore are sibling fields.
+    # The old flat lookup aborted delivery after successful science/evaluation.
+    by={(x['job']['dataset'],x['job']['train_seed'],x['job']['arm']):x for x in taskrows}
     input_pairs=[]
     for ds,seeds in read(ROOT/'protocol.json')['train_seeds'].items():
         for seed in seeds:
