@@ -1,0 +1,348 @@
+{
+  "datasets": {
+    "IMDB": {
+      "path": "/data2/lyh/gnn_project/DiHug/research_branches/role_newton_large_model_v1_review/experiments/joint_cn_dual_rounds_v1_1/package/data/IMDB.npz",
+      "sha256": "10f1dbbbe55c6a069594b2dcb590d1b8295ca5436320ef4597cd30e6b7f73e42",
+      "bytes": 14004,
+      "config_path": "/data2/lyh/gnn_project/DiHug/research_branches/role_newton_large_model_v1_review/experiments/joint_cn_dual_rounds_v1_1/package/configs/IMDB.json",
+      "config_sha256": "001ef83c7553c350b9327ac4765db70fc26ddc811b0b3548f9f1fa7a04acae05",
+      "nodes": 1653,
+      "edges": 4079,
+      "type_names": [
+        "Director",
+        "Actor",
+        "Movie",
+        "Genre"
+      ],
+      "type_counts": [
+        410,
+        494,
+        726,
+        23
+      ],
+      "schema": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          1
+        ],
+        [
+          0,
+          2
+        ],
+        [
+          0,
+          3
+        ],
+        [
+          1,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          1,
+          3
+        ],
+        [
+          2,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          3
+        ]
+      ],
+      "family_edges": [
+        0,
+        604,
+        642,
+        0,
+        15,
+        739,
+        0,
+        0,
+        2079,
+        0
+      ],
+      "family_capacities": [
+        83845,
+        202540,
+        297660,
+        9430,
+        121771,
+        358644,
+        11362,
+        263175,
+        16698,
+        253
+      ],
+      "prior": [
+        0.0,
+        0.0029821269872617752,
+        0.0021568232211247734,
+        0.0,
+        0.0001231820384163717,
+        0.0020605391418788547,
+        0.0,
+        0.0,
+        0.12450592885375494,
+        0.0
+      ],
+      "active_slots": 997313,
+      "schema_slots": 1365378,
+      "exact_joint_degree_kinds": [
+        19,
+        27,
+        20,
+        19
+      ],
+      "kernel": {
+        "T": 1000,
+        "rounds": 20,
+        "schedule_offset": 0.008
+      },
+      "query_block_sizes": [
+        49867,
+        49867,
+        49867,
+        49867,
+        49866,
+        49866,
+        49866,
+        49866,
+        49866,
+        49866,
+        49866,
+        49865,
+        49865,
+        49865,
+        49865,
+        49865,
+        49865,
+        49865,
+        49864,
+        49864
+      ],
+      "model": {
+        "layers": 8,
+        "width": 256,
+        "edge_width": 64,
+        "global_width": 128,
+        "heads": 8,
+        "ff_node": 256,
+        "ff_edge": 64,
+        "ff_global": 256,
+        "dropout": 0.1,
+        "cn_hidden": 32,
+        "joint_width": 128,
+        "max_wedges": 2000000,
+        "max_query_paths": 2000000
+      },
+      "static_memory_bytes": {
+        "refex_fp64": 8331120,
+        "refex_fp32_gpu": 4165560,
+        "seven_state_feature_panel": 58317840,
+        "input_degree_fp64": 132240,
+        "adjacency_CSR_lower_bound": 104512,
+        "max_candidate_CPU_arrays": 43692096,
+        "NNLS_basis_K8_upper_example": 161280,
+        "NNLS_coeff_K8_upper_example": 423168
+      },
+      "operation_estimate": {
+        "refex_egonet_edge_checks": 6742587,
+        "refex_relation_aggregation_multiply_adds": 244740,
+        "nnls_solves_per_state": 1653,
+        "nnls_role_K": "not chosen for full graph",
+        "nnls_note": "per-type K with630 columns; convergence/data dependent, cannot extrapolate time by nodes only"
+      },
+      "no_new_feature_extraction": true,
+      "no_model_loaded": true,
+      "full_graph_dictionary_available": false,
+      "dataset_identity": "typed Director/Actor/Movie/Genre graph"
+    },
+    "PubMed": {
+      "path": "/data2/lyh/gnn_project/DiHug/research_branches/role_newton_large_model_v1_review/experiments/joint_cn_dual_rounds_v1_1/package/data/PubMed.npz",
+      "sha256": "dacff5a392e23fbcfb695076a14a6db5317f4a4382b69af2a7596a1a217163f8",
+      "bytes": 30658,
+      "config_path": "/data2/lyh/gnn_project/DiHug/research_branches/role_newton_large_model_v1_review/experiments/joint_cn_dual_rounds_v1_1/package/configs/PubMed.json",
+      "config_sha256": "475310696a61440bde50a0ffe370da5be63f2d7c2193675f37440497a294cf42",
+      "nodes": 1565,
+      "edges": 12284,
+      "type_names": [
+        "Gene",
+        "Disease",
+        "Chemical",
+        "Species"
+      ],
+      "type_counts": [
+        313,
+        643,
+        564,
+        45
+      ],
+      "schema": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          1
+        ],
+        [
+          0,
+          2
+        ],
+        [
+          0,
+          3
+        ],
+        [
+          1,
+          1
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          1,
+          3
+        ],
+        [
+          2,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          3
+        ]
+      ],
+      "family_edges": [
+        542,
+        1813,
+        2230,
+        187,
+        1095,
+        3595,
+        314,
+        2139,
+        353,
+        16
+      ],
+      "family_capacities": [
+        48828,
+        201259,
+        176532,
+        14085,
+        206403,
+        362652,
+        28935,
+        158766,
+        25380,
+        990
+      ],
+      "prior": [
+        0.011100188416482346,
+        0.009008292796843868,
+        0.01263227063648517,
+        0.013276535321263756,
+        0.005305155448321972,
+        0.009913084720337955,
+        0.010851909452220494,
+        0.013472657873852083,
+        0.013908589440504333,
+        0.01616161616161616
+      ],
+      "active_slots": 1223830,
+      "schema_slots": 1223830,
+      "exact_joint_degree_kinds": [
+        193,
+        277,
+        309,
+        36
+      ],
+      "kernel": {
+        "T": 1000,
+        "rounds": 20,
+        "schedule_offset": 0.008
+      },
+      "query_block_sizes": [
+        61196,
+        61196,
+        61196,
+        61195,
+        61195,
+        61194,
+        61193,
+        61193,
+        61192,
+        61192,
+        61191,
+        61191,
+        61189,
+        61189,
+        61189,
+        61188,
+        61188,
+        61188,
+        61188,
+        61187
+      ],
+      "model": {
+        "layers": 8,
+        "width": 256,
+        "edge_width": 64,
+        "global_width": 128,
+        "heads": 8,
+        "ff_node": 256,
+        "ff_edge": 64,
+        "ff_global": 256,
+        "dropout": 0.1,
+        "cn_hidden": 32,
+        "joint_width": 128,
+        "max_wedges": 2000000,
+        "max_query_paths": 2000000
+      },
+      "static_memory_bytes": {
+        "refex_fp64": 7887600,
+        "refex_fp32_gpu": 3943800,
+        "seven_state_feature_panel": 55213200,
+        "input_degree_fp64": 125200,
+        "adjacency_CSR_lower_bound": 301080,
+        "max_candidate_CPU_arrays": 39162560,
+        "NNLS_basis_K8_upper_example": 161280,
+        "NNLS_coeff_K8_upper_example": 400640
+      },
+      "operation_estimate": {
+        "refex_egonet_edge_checks": 19224460,
+        "refex_relation_aggregation_multiply_adds": 737040,
+        "nnls_solves_per_state": 1565,
+        "nnls_role_K": "not chosen for full graph",
+        "nnls_note": "per-type K with630 columns; convergence/data dependent, cannot extrapolate time by nodes only"
+      },
+      "no_new_feature_extraction": true,
+      "no_model_loaded": true,
+      "full_graph_dictionary_available": false,
+      "dataset_identity": "typed Gene/Disease/Chemical/Species graph; NOT PubMed23 paper retrieval corpus"
+    }
+  },
+  "static_only": true,
+  "full_graph_training": 0,
+  "full_graph_forward": 0,
+  "dictionary_fits": 0
+}

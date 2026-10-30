@@ -1,0 +1,148 @@
+{
+  "version": "typed_structure_count_aux_length_v1",
+  "formal_authorized": false,
+  "train_seeds": {
+    "IMDB": [
+      2026102911,
+      2026102931
+    ],
+    "PubMed": [
+      2026102912,
+      2026102932
+    ]
+  },
+  "arms": [
+    "CE",
+    "CE_COUNT"
+  ],
+  "sample_seeds": [
+    2026102821,
+    2026102822
+  ],
+  "updates": 6000,
+  "checkpoints": [
+    1000,
+    2000,
+    3000,
+    4000,
+    5000,
+    6000
+  ],
+  "sample_readout": "ema_0.99",
+  "ema_decay": 0.99,
+  "T": 1000,
+  "rounds": 1,
+  "S": 18336,
+  "normal2": "one zero_grad; each input (sumCE/18336 + lambda*count_aux)/2 backward; one AdamW step and one EMA update",
+  "validation_times": [
+    1,
+    500,
+    1000
+  ],
+  "delivery_reserve_seconds": 1800,
+  "budget_seconds": 32400,
+  "K": {
+    "IMDB": [
+      5,
+      4,
+      3,
+      2
+    ],
+    "PubMed": [
+      8,
+      8,
+      8,
+      6
+    ]
+  },
+  "primary": "paired count loss at3000 and6000;PubMed length3000to6000;original primary LCC secondary",
+  "raw_generation": false,
+  "candidate": "E-earlyCN + fixed relation-count auxiliary loss from theta0",
+  "cn_injection": "unchanged reviewed E earlyCN; no late shortcut; no dropout or gradient isolation",
+  "tasks": [
+    {
+      "dataset": "PubMed",
+      "train_seed": 2026102912,
+      "arm": "CE",
+      "model": "E",
+      "fusion": "early",
+      "slot": 0
+    },
+    {
+      "dataset": "PubMed",
+      "train_seed": 2026102912,
+      "arm": "CE_COUNT",
+      "model": "E",
+      "fusion": "early",
+      "slot": 1
+    },
+    {
+      "dataset": "PubMed",
+      "train_seed": 2026102932,
+      "arm": "CE",
+      "model": "E",
+      "fusion": "early",
+      "slot": 2
+    },
+    {
+      "dataset": "PubMed",
+      "train_seed": 2026102932,
+      "arm": "CE_COUNT",
+      "model": "E",
+      "fusion": "early",
+      "slot": 3
+    },
+    {
+      "dataset": "IMDB",
+      "train_seed": 2026102911,
+      "arm": "CE",
+      "model": "E",
+      "fusion": "early",
+      "slot": 4
+    },
+    {
+      "dataset": "IMDB",
+      "train_seed": 2026102911,
+      "arm": "CE_COUNT",
+      "model": "E",
+      "fusion": "early",
+      "slot": 5
+    },
+    {
+      "dataset": "IMDB",
+      "train_seed": 2026102931,
+      "arm": "CE",
+      "model": "E",
+      "fusion": "early",
+      "slot": 6
+    },
+    {
+      "dataset": "IMDB",
+      "train_seed": 2026102931,
+      "arm": "CE_COUNT",
+      "model": "E",
+      "fusion": "early",
+      "slot": 7
+    }
+  ],
+  "generation_checkpoints": [
+    3000,
+    6000
+  ],
+  "loss": {
+    "formula": "mean_movable_r(sqrt(1+((mu_r-m_r)/sqrt(max(m_r,1)))**2)-1)",
+    "lambda_count": 0.001,
+    "ce_denominator": 18336,
+    "accumulation": "float64 differentiable full unordered active-slot sums plus fixed supported present edges",
+    "relation_average": "all movable families, independent of target count; no-movable excluded after support consistency",
+    "normal2": "two independent half-loss backwards, one AdamW then EMA0.99",
+    "candidate_source": "3be64f7d188985e3d55a7c74a6984a0be42d716e"
+  },
+  "gradient_observation_updates": [],
+  "final_updates": {
+    "IMDB": 3000,
+    "PubMed": 6000
+  },
+  "resume_updates": 500,
+  "temporary_optimizer_step_calls": 0
+}

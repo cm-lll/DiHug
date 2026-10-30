@@ -1,0 +1,1946 @@
+--- a/COMMANDS.md
++++ b/COMMANDS.md
+@@ -0,0 +1,42 @@
++# 入口与复现
++
++使用现有`sparse_block`环境，不安装升级依赖。下列相对路径均从本包根目录执行。准备票已结束后不重跑工程更新。
++
++安全查看队列（不创建输出，不调用worker）：
++
++```bash
++python run.py dry-run --output /path/to/new_final_screen_run
++```
++
++CPU回归（选择有空间的本任务临时目录，不使用已满系统/tmp）：
++
++```bash
++CUDA_VISIBLE_DEVICES='' OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 \
++PYTEST_ADDOPTS='' python -m pytest -q test_screen.py --basetemp /path/to/new_review_tmp
++```
++
++**尚未授权执行**的正式命令：
++
++```bash
++python run.py formal --output /path/to/new_final_screen_run \
++  --approval /path/to/future_user_approved_binding.json --cost cost.json \
++  --gpu-uuids GPU-slot0 GPU-slot1 GPU-slot2 GPU-slot3 GPU-slot4 GPU-slot5 GPU-slot6 GPU-slot7
++```
++
++审批须由新审查及用户预算授权产生，绑定最终source_sha256、protocol/asset_bindings/cost哈希、3000更新、预算秒数、实际8卡UUID及完整环境。没有本次授权不创建true审批。launcher记录首次进入formal的时间，所有启动检查计入；源码绑定覆盖训练、采样、汇总及LCC指标源码。旧package/launch.py和worker.py不是本轮入口。
++
++停止：在实际run目录创建`STOP`。监督器在已审安全边界保存和停止，只处理自己的子进程，不自动恢复、重启、补抽或延时。SIGKILL/断电不可捕获，不能保证该瞬间完成保存。
++
++原始输出：`DATASET_sTRAINSEED_ARM/ema_0.99/sample_SAMPLESEED/graph.npz`。
++训练：对应模型目录的initial.pt、checkpoint_u1000.pt、checkpoint_u2000.pt、final.pt、validation.json、training.jsonl及binding.json。
++统一评价：run/unified_evaluation.json；派生图及CSV：run/derived_lcc_evaluation/。监督器在失败时也尝试输出不完整汇总，并保留主失败原因。
++
++独立CPU汇总可用：
++
++```bash
++CUDA_VISIBLE_DEVICES='' OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 \
++python summarize.py --run /path/to/run --output /path/to/run/unified_evaluation.json \
++  --deadline APPROVED_ABSOLUTE_EPOCH
++```
++
++该入口拒绝覆盖已有derived_lcc_evaluation目录。需要独立复核时，在独立副本上运行，不删除旧派生结果；运行截止仍受原授权约束，不借独立评价延长科学计算。
+--- a/FULL_GRAPH_READINESS.md
++++ b/FULL_GRAPH_READINESS.md
+@@ -0,0 +1,59 @@
++# 完整IMDB / PubMed就绪清单（本票仅静态）
++
++两份现有完整数据与旧配置/库存期望SHA一致。没有重抽图，没有复制大文件。
++
++|数据|节点/边|类型顺序与数量|可动槽/完整schema槽|20块单块范围|
++|---|---|---|---|---|
++|IMDB|1653 / 4079|Director410、Actor494、Movie726、Genre23|997313 / 1365378|49864–49867|
++|PubMed|1565 / 12284|Gene313、Disease643、Chemical564、Species45|1223830 / 1223830|61187–61196|
++
++IMDB SHA256 `10f1dbbbe55c6a069594b2dcb590d1b8295ca5436320ef4597cd30e6b7f73e42`。
++PubMed SHA256 `dacff5a392e23fbcfb695076a14a6db5317f4a4382b69af2a7596a1a217163f8`。
++路径、配置SHA、全部关系编号/容量/边数/prior、确切块大小和完整联合向量种类数见evidence/full_graph_inventory.json。
++
++PubMed是上述异质图数据，不是论文检索任务的PubMed23。NPZ relations为1起始，模型为0起始；本次检查一次转换并逐边验证类型对应、端点范围、无自环/重复、上三角及排序。原节点映射只作追溯，不进入网络。
++
++## 可复用与待决定的源码
++
++数据来源为固定完整图包joint_cn_dual_rounds_v1_1；旧基线dd53 joint-CN演化配置T1000、原cosine offset0.008、20查询块。当前小图A/C/D/E模型及EMA、NNLS源码由本包固定Git来源绑定。不能直接用旧大图配置中的单输入/microbatch设置宣称复现本轮normal2；未来完整图需单独冻结匹配训练合同。
++
++原配置记录的模型8层、256/64/128、8heads与当前形状一致，但这不是本票已完成大图严格加载或GPU资源验收。旧历史正式优化器betas/eps来源的限制保持；未来新实验使用明确冻结的当前AdamW实现。
++
++## 20块查询保留什么上下文
++
++分块的是完整合法候选槽，按关系随机排列后分20轮，每个可动槽恰好覆盖一次，固定支持族不查询。每个反向时刻的StepPredictor由**完整冻结Xt**构造同一个FrozenTypedContext；全部块完成后才统一提交下一状态。
++
++ctx.old/of、节点类型、全图关系计数、CN楔形邻接由完整Xt提供；ReFeX extract也读取ctx.old/of。候选查询边参与原主干计算图，但不被当作已存在边加入CN/ReFeX的邻接依据。节点固定结构数组可在同一Xt内复用，学习投影仍每次运行；不跨参数更新缓存学习输出，不在块间异步改图。
++
++这不意味着主干对查询划分完全不变；恢复完整图原20块语义，需要在下一票明确采用其合同，不能把本轮小图1块成本直接乘除20。当前实现中的完整Xt缓存与原查询入口已静态定位；未做完整图A/C/D/E模型执行。
++
++## ReFeX与NNLS成本
++
++ReFeX固定630列。完整一次FP64特征IMDB约7.95MiB、PubMed约7.52MiB；GPU FP32副本约3.97/3.76MiB。七状态面板约55.62/52.66MiB，仅是数组本身，下游加权矩阵/NMF副本、NNLS工作区、网络激活另计。
++
++当前extract使用CSR邻接，但逐节点扫描所有Xt物理边计算egonet内部/边界，主工作量O(N×E_Xt)。在干净参考上约674万/1922万边检查；一轮分关系聚合约2E×30。每新Xt的NNLS分别求1653/1565行，K与收敛状态决定耗时；不是按单个节点均摊后即可保证速度。
++
++没有构造N×N×N特征张量；不建立所有1000时刻缓存。存储在CPU上下文，特征/系数投影输入再转GPU。完整图正式RolX基目前**没有**，本票没有提取新的完整图特征或拟合。若仅A/D候选不需要RolX字典，仍须完整图对应特征与网络短测。
++
++已有20261021完整图CPU工程探针是旧Newton匿名读取、随机权重，不是本票RolX路线。其IMDB t500冷完整20块约176.97秒，网络约174.75秒；PubMed因预计重复路径超单项420秒门而停止后续时刻。只能说明旧完整图网络成本可能占主导，不能将其Newton/度似然成本当作ReFeX/NNLS计时，也不能据此许诺当前GPU大图速度。现存路径：results/role_newton_large_model_20261021_v1，来源固定f4d410cc相关归档。
++
++## 完整图字典未来材料与最小执行计划（未授权执行）
++
++候选含RolX时，另行冻结完整图自己的类型容量尺度、七状态面板（干净及t100/500/1000各两份）、数据/状态哈希、节点两折、30基础统计及其后代的特征组遮蔽。采用已审的加权CD-NMF及NNLS留出重建规则，先提交完整图选K范围与求解预算，再拟合；不能沿用小图14/30列字典或默认完整图最优K相同。
++
++建议后续先给CPU特征与NNLS拟合前置成本探测单独15分钟上限（使用另行冻结输入，不含完整选K承诺）；然后每候选、每数据集在所选GPU最多2次工程normal2和一个完整20块反向步，30分钟总上限，以实际来源/显存/吞吐为准。模型加载、正式字典拟合与GPU前向本票均为0，具体正式完整图预算尚不能可靠给出。
++
++## 旧结果与匹配对照
++
++可复用旧论文Table2资产交接：results/legacy_table2_handoff_20261022_v1/payload，发布6fe67d060cb19bf99d67f40a7f5b3c870a1ee1b5。该旧审计报告两数据集×DiHug/GraphRNN/NetGAN/VGAE/HGEN的80张投稿样本及96张候选历史图，全部Table2列已轻量复现；本票复用资产清单，不重跑。
++
++旧HGEN精确历史hgen.py字节和16个模型checkpoint未齐，各方法也没有全部逐图认证argv/权重链路；限制保留。旧投稿typed-TV的空分布口径与后来代码有差别，不能直接混表。完整图比较可读取这些原始图，先统一当前评价和参考数据/节点映射，再把旧预算、旧算法标为背景基线；不能叫与本轮同预算配对。
++
++现有旧joint-CN双数据训练曲线、IMDB基础/匿名软角色生成结果也仅作背景；旧匿名Newton分支不是RolX。新主候选至少需要与当前同主干、同度分支、同预算及同EMA读出的A进行匹配比较；若筛选主候选本身是A，是否加入C等次候选由筛选结论及新授权决定。最多两个候选，不把旧小图结果移作大图效果证据。
++
++## 阻塞与限制
++
++- 数据/映射/schema/prior齐备，源字节核验通过；无私有权重需求。
++- 完整图本路线字典（若需要）、新数据尺度绑定、网络/后向显存、真实生成状态成本、并发资源占用均待测。
++- 系统/tmp盘满，不清理他人文件；当前运行包把临时文件放在实际输出卷。未来需重新核对输出卷容量及持久性，不能只凭目录名声称持久。
++- 不访问notebook/BW、不加载完整图模型、不在本票选K/拟合，不对其他正在运行的项目操作。
+--- a/METRICS.md
++++ b/METRICS.md
+@@ -0,0 +1,19 @@
++# 当前评价合同
++
++底层定义逐字节复用LCC审查提交1edb9bc的metrics.py及vendor。完整旧定义原文保存在metric_definition_reference.md，作为来源说明，不将其中旧64图实测数字作为本轮结果。本票正式生成0。
++
++summarize.py通过evaluation_fields.py复用原逐图标量/距离字段提取，只把固定PubMed类型名字改为从各数据集绑定配置读取。主W1、TV、simple path、typed walk、三角、真正四环、legacyK4、闭合、距离及遗留HGEN公式没有改写。
++
++MP1/2/3分别是一、二、三条边；simple paths的节点不重复、反向合并计一次。typed walks允许重复和回溯，按原方向计数约定另列，不能互称。缺失模式计数为0，缺失图或未定义指标为null，两者不同。
++
++W1是每类型所关联四schema列的均值，类型权重固定为192节点参考中该类型比例。LCC经验分布的每类型分母使用实际保留节点。all10兼容值=incident4×0.4，另报实际保留类型权重值。缺少类型时该条件分布及主聚合null，不丢弃类别后重新平均。
++
++三角类别覆盖4类型的全部20个无序多重集。IMDB DAM=(0,1,2)、DAA=(0,1,1)、AAM=(1,1,2)从同一表读取；Genre排序度谱在typed_degree.Genre.sorted_degrees。参考0的类别是观测事实，不是禁边规则。PubMed使用Gene/Disease/Chemical/Species，不改名。
++
++类型化二跳机会有路径实例和去重端点对两种分母，分别保留分子/分母/比例。零分母比例null。LCC=节点数、零孤立点是派生规则后果，不能算训练增益。有限节点对平均距离、LCC条件距离、断开全局直径null分别保留。
++
++每个数值标量保存raw/reference/absolute_error；误差先逐图取绝对值。distribution_error包含W1、jointTV、typed triangleTV、fourcycleTV、MP1/2/3及walk组成TV等，直接比较。raw差、绝对误差差和分布距离差分别输出；严格要求两样本都有定义才计算两图均值。
++
++HGEN原生powerlaw依赖仍缺；现有固定xmin1投影统计另名，不代替原生结果。社区Z_obs无真实社区标签；完整orbit未实现。legacy squares实际K4与真正四环、legacy3T/claws与标准聚类/transitivity都保持不同名字。不安装依赖，不把“适用的全部现有指标”写成无缺项的原生HGEN复现。
++
++同模型两图保留节点/边标签对齐Jaccard、边对称差、度W1、三角/MP2/MP3组成TV，及节点/边数不同导致的非同构证据。节点ID相同的边差不是同构不变多样性；同样大小不自动判定同构。两张图不足以认证总体多样性。
+--- a/README.md
++++ b/README.md
+@@ -1,68 +1,76 @@
+-# PubMed O：八训练seed、三EMA尺度（准备版）
++# 最后一轮192节点架构筛选：准备审查包
+ 
+-基线：`e42c962f03b83c183c17cee09d948c674f2e69b9`。本包只完成接线和工程验收，**没有正式运行授权，没有激活账本**。旧两seed／单EMA／130分钟方案暂停，不复用其审批。
++**当前仅完成准备，正式训练0、完整链0、新生成图0。** 正式执行需要独立补丁审查和用户确认新预算；本包没有可激活审批或正式起止时间。
+ 
+-## 固定科学合同
++准备票：2026-10-29 02:42:42起，03:27:42截止（Asia/Shanghai）。工程使用GPU0/1，八格各2次临时normal2，共16次。所有工程权重留在本票结果目录，正式入口从头构造新科学初态，不读取工程权重。
+ 
+-PubMed attempt02，192节点、926边，O基础网络；package内58份模型、数据、损失、初始化、normal2、后验及评价文件与基线逐文件相同。没有CN、ReFeX或RolX激活路径。完整18336槽查询，FP32，原AdamW及学习率，1000次normal2更新，T1000，不改生成规则。
++## 固定方案
+ 
+-八seed：2026102812、2026102833，以及2026102841—2026102846。本地可用项目记录中未找到新增六seed既往使用；查找范围和限制见seed_manifest.json。旧两seed参与过方案选择，始终与新增六seed分组报告。
++|组|CN|630维一轮分关系ReFeX|冻结RolX|IMDB参数数|PubMed参数数|
++|---|---|---|---|---:|---:|
++|A|有|无|无|6,647,441|6,647,441|
++|C|无|有|有|6,797,489|6,801,585|
++|D|有|有|无|6,808,721|6,808,721|
++|E|有|有|有|6,812,305|6,816,401|
+ 
+-旧两seed按initial_assets.json读取并验证封存的0更新科学权重；新建空AdamW。新六seed调用原package/experiment_contract.py的initialization：原anchor构造、独立模块初始化、实际公共参数复制；之后重置原配对Python／NumPy／Torch CPU／所选CUDA／显式Generator随机流。正式入口在首次前向前保存原始初态、全部EMA、空优化器、RNG和绑定。新增初态本票未提前训练或执行前向。
++共同保留Xt度分支、8层主干、FP32、AdamW及原CE/噪声/后验。不同容量照实报告。只维护EMA0.99，从theta0起每完整normal2后递推一次；EMA不进入优化器。两个半损失分别为sumCE/(2×18336)，独立Xt上下文，累计梯度后一次更新。IMDB完整可动查询13,120，PubMed18,336，均一次前向。
+ 
+-每条轨迹维护三个独立参数副本，β=0.9、0.97、0.99：
++IMDB训练seed2026102911、PubMed2026102912；已检索144份本地封存候选实验绑定，无效果观察冲突，范围见evidence/seed_audit.json。每模型3000更新，保存0/1000/2000/3000的raw、EMA、优化器、完整RNG和绑定。四节点均验证raw及EMA，同一数据集输入固定且不消耗训练流。只导出最终EMA供2026102821/2026102822两个seed生成，共16条T1000链。raw另存，不开展raw生成对照。
+ 
+-`bar_theta[0]=theta[0]`
++IMDB字典K=5/4/3/2，PubMed=8/8/8/6；后一数据集四类命中原搜索上界。字典八份核心文件及两份数据均按旧SHA绑定，未拟合或改K。
+ 
+-`bar_theta[k]=beta*bar_theta[k-1]+(1-beta)*theta[k]`
++## 实现来源与新增接线
+ 
+-第1步也递推，不直接复制theta1。每次完整normal2原参数更新后执行三次独立递推，来源均为同一raw，EMA不进优化器、不参与反向或训练输入。buffer随读出复制当前raw buffer，不做EMA。保存0／500／1000，包括raw、三个EMA及各自计数、优化器与RNG；各读出验证恢复raw与训练随机状态。只导出最终1000更新四个独立文件。
++- 模型、normal2、查询、后验、字典来自e747aa6792884daf2c79ba121bd5ec2cc9474469的DE运行包。package原文件保持原字节。
++- EMA核心来自95b1ee86b1d90a7edb102d2d014a024087237316，保持原字节。
++- LCC和完整适用CPU指标来自1edb9bc17fc20cc790c0af7659d4083fd7211145，metrics和vendor保持原字节。
++- 78份源/资产逐项与固定Git对象比对相同，见source_lineage.json。旧目录和main未改。
++- 新增model_io.py的**未训练**A anchor和E donor：先复制A共有张量到E donor，再将相同语义的张量实际复制给各组。A/D/E共享CN及完整头；C使用原无CN头的共同列前缀。C/D/E共享ReFeX投影，C/E共享角色投影。原零初始化规则不变，不拼接训练后模型。
++- 构造和复制后独立重置Python、全局NumPy、显式Generator、Torch CPU及所用GPU流。初态在首次前向前保存。八格初态逐张量字节核验、同数据集RNG及前三对训练输入一致，见evidence/pairing_audit.json。
++- 新run.py/run_worker.py只适配已有循环和监督器：8训练、16链、3000更新、EMA最终读出、20分钟交付预留。不是一套新采样算法。package旧launcher/worker仅作为冻结来源，不是本票入口。
++- 系统/tmp曾满导致一次CPU模拟测试写入失败；保留失败记录。正式worker及汇总的TMPDIR置于已检查的新输出卷，不清理系统或历史文件。
+ 
+-## 队列与结果
++## 实际工程结果
+ 
+-八卡一卡一seed；所有训练成功封存后，各卡依次执行raw、ema_0.9、ema_0.97、ema_0.99，每种依次采样2026102821／2026102822，共64条链。完整身份为训练seed＋读出＋采样seed。每链验证自己文件的哈希、衰减率、源绑定及最终检查点。原先验、完整查询和逐槽随机消费不变，汇总额外核对各读出的采样初态与RNG一致。队列见evidence/queue.json；dry-run不创建运行目录、不启动worker。
++八格全部通过：同初态raw更新与增加EMA的更新之间，raw参数/全部梯度/优化器/训练RNG一致；本面板实测逐位一致，同时沿用FP32原容差，不将逐位要求扩展为一般计算准入。低/中/高噪声验证切换恢复raw及RNG；模型/EMA/完整优化器/RNG载入正确。每格仅两次更新，没有增加续算更新额度。
+ 
+-主比较仍为ema_0.99−raw；另两种同时完整展示，不事后挑赢家。每图先计算相对926的绝对边数误差，再按训练seed平均两图，分别汇总8个差值、等权均值、中位数及改善／持平／恶化数量；旧2／新6分别报告。跨seed有符号偏差均值、范围、总体标准差仅为次要描述。缺任一必需图不只平均成功项；各类结构指标与null保留。逐seed列出W1增加超过10%、LCC下降超过19.2的预警，不将它们当安全证明或全轮自动否决。两图不重复不等于总体多样性充分。
++另每格一次t500完整查询和原后验组件计时，**没有抽样uniform或提交下一状态**。这是工程普通噪声输入，不是自由生成状态或完整链成本证明。当前2卡交错短测，不声称8卡并发实测。
+ 
+-## 本票实测
++短测normal2+EMA：IMDB约2.56–2.70秒，PubMed约3.43–3.50秒；EMA维护约0.096–0.138秒。峰值allocated约2321/3170MiB，即2.27/3.10GiB；reserved最大3430MiB。梯度/优化器短测没有改变冻结模型源码。工程权重不允许进入正式初始化。
+ 
+-- CPU40项通过、0失败、0跳过（旧测试及新增三EMA／队列／统计测试）。最初5项新增测试引用错了内部属性名，修正测试后完整重跑；失败过程保留在evidence/preparation_report.json。
+-- GPU0 RTX2080Ti：5次临时normal2更新，2次raw、2次三EMA、1次恢复后重复第2步。工程状态已按用户要求删除，仅保留哈希及核验回执，不进入科学初始化。
+-- 本段raw对照与三EMA：输入、训练RNG、模型、梯度、优化器逐位一致；加载模型／优化器／三EMA／RNG／计数精确一致；恢复后续算逐位一致。四种验证后raw、模式、优化器及RNG恢复。
+-- 暖normal2含三EMA3.5585秒，其中原更新3.2592秒、三EMA约0.2993秒；一次完整四读出固定验证7.8948秒。检查点写入2.856秒，恢复1.096秒。
+-- 三份shadow79,591,500字节，实测新增allocated75.99MiB。峰allocated3267.69MiB，reserved3638MiB，CPU RSS4823.38MiB（含取证副本）。这是单卡短段，不是八卡稳定吞吐或完整链成本。
+-- package和科学数据未改；正式训练0、完整链0、新图0。没有八seed GPU复测，没有新跨CPU/GPU等价要求。旧证据不改写。
++CPU测试覆盖任务路由、真实worker循环的3000次**模拟调用**及检查点节点、最终读出身份、EMA公式、异常恢复、缺项与null、指标方向、LCC映射、模拟失败/STOP监督、公开dry-run。模拟调用不是optimizer.step。完整测试和独立解包结果以evidence中的实际JUnit为准，不沿用旧包结论。旧CPU/GPU计算不等价记录保留，本票未复测或宣称解决。
+ 
+-## 正式预算建议，尚待确认
++## 队列与成本建议
+ 
+-固定八卡队列：训练关键路径约60.36分钟；八轮链历史最大621.82秒／条，合计82.91分钟。再计初始化／验证／保存约1.49分钟，计算关键路径144.77分钟；10%未实测并发／状态／进程启动余量14.48分钟；评价、审计、导出及交付20分钟，总规划179.24分钟。建议批准**185分钟**，不是完成保证，也不是八条链只算一轮。
++固定八卡队列：slot0–3 PubMed E/D/A/C；slot4–7 IMDB E/D/A/C。一卡一模型；所有训练结束后，各卡顺序完成自身两条EMA链。预算与实际launcher使用相同阶段屏障和队列。
+ 
+-三EMA固定验证、写盘和恢复已计入；链成本沿用前两轮O的实测，不新跑完整链。8个同模型任务的CPU／IO竞争、EMA自由生成状态成本仍未实测。实际正式启动须重新核实8卡权限、他人进程、显存和至少12GiB输出卷空闲；少于8卡只报告，不自动缩规模。初态／检查点约3.6GiB，加读出约0.8GiB及日志状态，12GiB是保守存储门，不代表持久性认证。
++|阶段|规划分钟|证据性质|
++|---|---:|---|
++|最慢训练卡，含固定验证/保存/构造|179.36|旧八卡warm阶段p95与本次EMA开销、组件短测外推|
++|最慢采样卡，两条T1000链|22.18|旧完整链耗时上界外推；新3000 EMA状态未测|
++|计算主体合计|201.53|阶段屏障后的最长路径之和|
++|并发规划余量|30.23|主体15%，不是实测并发惩罚|
++|完整评价/LCC|5|64图既有CPU实测及本票接口检查的保守规划|
++|交付预留|20|科学计算停止后留出|
++|额外故障余量|15|不代表允许自动重启或补抽|
++|合计|271.76|不能承诺按时完成|
+ 
+-`initial_assets.json`和`prior_evidence/`保留原两seed历史记录（含130分钟旧提案字段），仅作来源证据；本版有效提案为protocol.json与evidence/cost.json。
++**建议正式授权280分钟。** 这不是本票的活动预算，不沿用旧185分钟。每卡参数、单项成本和旧日志路径/SHA见cost.json。实际未来八卡不足、预算不足则启动前报告；不得改为七卡、降更新、删图或缩T。约3.5–4GiB保存载荷，加日志/图/派生评价仍执行输出卷至少12GiB余量门，盘点时/data2约75GiB可用；系统/tmp仅约2MiB可用，已隔离。
+ 
+-## 命令
++## 评价与选择
+ 
+-使用已有sparse_block环境，不安装升级依赖：
++summarize.py对全部16图分别保留original及LCC；LCC同节点数并列按原存储ID序列字典序选取，不按参考相似度。映射、来源、类型/关系保留率均保存。IMDB参考本身为188/2/2三个分量；PubMed参考全连通。两个版本都与同一192节点原参考比较，不偷偷更换参考。
+ 
+-```bash
+-export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
+-CUDA_VISIBLE_DEVICES='' PYTEST_ADDOPTS='' python -m pytest -q test_ema.py test_runtime.py test_multi_ema.py
+-CUDA_VISIBLE_DEVICES='' python run.py dry-run --output /绝对路径/尚不存在的新运行目录
+-```
++主W1为固定**参考类型权重**的incident4，all10=0.4×主值单列；实际保留类型数用于各经验分布及容量分母。缺失类型、零机会闭合等保留null。完整统计保留HGEN legacy K4与真正四环、旧聚类与标准聚类、MP1/2/3正确标签、typed walks与simple paths的不同口径。见METRICS.md。原生powerlaw依赖、社区标签、完整orbit缺项照实披露。
+ 
+-已完成GPU预检不用重复运行。若迁移后必要证据路径变化，只重建cost文件中的证据路径绑定，不改科学设置：
++所有标量先逐图计算参考绝对误差，再作配对差和两样本均值。分布距离直接比较；数量差不自动解释为改善。原图与LCC、类型流失、三角与路径组成及样本差异均报告。没有图也输出8模型/16链的未完成清单，缺失均值null，不只平均成功图。
+ 
+-```bash
+-CUDA_VISIBLE_DEVICES='' python build_cost.py --preflight evidence/gpu_preflight/preflight.json --output /绝对路径/新的cost.json
+-```
++主要比较D−A、E−D、E−C，并保留C−A、E−A。分别评价IMDB和PubMed，不合成跨数据集总分。IMDB保留DAM/DAA/AAM全部类型三角、Genre完整排序度谱；PubMed保留所有自身类型模式。数量/关系度、闭合/路径、类型覆盖和成本一起解释，接近时优先简单方案。有明确且可接受优势才推荐单候选；取舍或差距不清最多保留两个，不自动追加小图seed或模块。
+ 
+-以下正式命令**尚未授权执行**；本票不创建审批文件。将来经审查及用户确认185分钟或新预算后，按runtime_contract.approval_gate要求登记真实授权、最终源码／协议／cost哈希、实际8卡UUID及资源归属、预检environment、旧初态路径、全新输出目录。不能把文档或模板当真实审批。预算变更须明确确认并更新绑定，不能私改截止。
++本轮每数据集一个新训练seed，只是进入完整图的筛选；不证明稳定显著性。不将旧1000步不同seed图混作严格配对样本，也不声称已验证3000步EMA相对raw的生成收益。
+ 
+-```bash
+-python run.py formal --output "$NEW_RUN" --approval "$CONFIRMED_APPROVAL" --cost "$BOUND_COST" --gpu-uuids "$GPU0" "$GPU1" "$GPU2" "$GPU3" "$GPU4" "$GPU5" "$GPU6" "$GPU7"
+-```
++## 停止与后续
+ 
+-唯一入口run.py通过管道票据启动worker；不直接调用worker。STOP为在NEW_RUN创建STOP文件，已运行任务按边界停止并保留证据；无自动重启、补抽或延时。末20分钟用于停止、统一评价与交付。SIGKILL不能捕获。停止／失败结果汇总保留缺图及原错误。
++准备交付后停止。只在新审查通过且用户明确授权正式预算后，运行COMMANDS.md中的formal入口。STOP/信号/科学截止或实质错误留证，监督器只终止本任务子进程，不自动恢复或补抽；不可捕获的SIGKILL/断电仍有边界。
+ 
+-全部检查支持实现接通，不证明EMA改善生成。参数平滑可能保留持续偏差，也同时引入滞后；需正式结果回答准确性、收益覆盖和结构代价。
++完整图CPU静态盘点见FULL_GRAPH_READINESS.md及evidence/full_graph_inventory.json。没有加载完整图模型、前向、拟合新字典或使用其他正在运行的项目。
+--- a/asset_bindings.json
++++ b/asset_bindings.json
+@@ -0,0 +1,60 @@
++{
++  "files": {
++    "dictionaries/dictionary_IMDB/final_basis.npz": "3b5d9207c4a1ee0349385e5f30f6268f4a6fc13df70912f62a7f279f9f0bae50",
++    "dictionaries/dictionary_IMDB/selection.json": "f4daf29fa57b9deb962c66c40d4d9e4a71db75d066b9ccdd5aedc21d16b69e36",
++    "dictionaries/dictionary_IMDB/panel.json": "7b0080817810aa770250501e002de4a5387d88bbbfa0550fc2118956ef1af951",
++    "dictionaries/dictionary_IMDB/frozen_splits.json": "1af6534e1fcda03265a499b93d62131c45e56a2fc1dc79f9caf55b2806d927ee",
++    "package/assets/IMDB.npz": "398d59a0602e14dd0c92b8781e69a3234727d674923275864eec558770dffb5c",
++    "dictionaries/dictionary_PubMed/final_basis.npz": "a852a959c41a8d69dce37a0df542d4852e997450843888ba3c5e46a79e62f14e",
++    "dictionaries/dictionary_PubMed/selection.json": "a51a6d8a4ed47712a3792fac7acb603660e8aee4dc9ba15afef3c8a7ed19cd0d",
++    "dictionaries/dictionary_PubMed/panel.json": "eaf94f3557a87ea76688b20652dfd0e745e0ebc9f877d20f7b6f304750c3413d",
++    "dictionaries/dictionary_PubMed/frozen_splits.json": "2f84b8ddaf18b6336d032c6058b7a22951b74f99c8234892d6e04a58e4a69564",
++    "package/assets/PubMed.npz": "f6ea8ec461052094dd02c6b07d8ebb69e85fb3e595195007563593b9568914ef"
++  },
++  "dictionaries": {
++    "IMDB": {
++      "files": {
++        "final_basis.npz": "3b5d9207c4a1ee0349385e5f30f6268f4a6fc13df70912f62a7f279f9f0bae50",
++        "selection.json": "f4daf29fa57b9deb962c66c40d4d9e4a71db75d066b9ccdd5aedc21d16b69e36",
++        "panel.json": "7b0080817810aa770250501e002de4a5387d88bbbfa0550fc2118956ef1af951",
++        "frozen_splits.json": "1af6534e1fcda03265a499b93d62131c45e56a2fc1dc79f9caf55b2806d927ee"
++      },
++      "K": [
++        5,
++        4,
++        3,
++        2
++      ],
++      "offsets": [
++        0,
++        5,
++        9,
++        12,
++        14
++      ],
++      "dimension": 14
++    },
++    "PubMed": {
++      "files": {
++        "final_basis.npz": "a852a959c41a8d69dce37a0df542d4852e997450843888ba3c5e46a79e62f14e",
++        "selection.json": "a51a6d8a4ed47712a3792fac7acb603660e8aee4dc9ba15afef3c8a7ed19cd0d",
++        "panel.json": "eaf94f3557a87ea76688b20652dfd0e745e0ebc9f877d20f7b6f304750c3413d",
++        "frozen_splits.json": "2f84b8ddaf18b6336d032c6058b7a22951b74f99c8234892d6e04a58e4a69564"
++      },
++      "K": [
++        8,
++        8,
++        8,
++        6
++      ],
++      "offsets": [
++        0,
++        8,
++        16,
++        24,
++        30
++      ],
++      "dimension": 30
++    }
++  }
++}--- a/check_engineering.py
++++ b/check_engineering.py
+@@ -0,0 +1,67 @@
++"""At most two engineering normal2 steps per cell; no chain.
++Compare raw one update with restored-initial + EMA one update.
++"""
++import argparse,time,pathlib,sys,signal,traceback,resource
++from runtime_contract import ROOT,save,source_binding,read
++sys.path.insert(0,str(ROOT/'package'))
++import torch
++from model_io import configure,fresh
++from ema import ParameterEMA,cpu_copy
++from integration import complete_normal2,checkpoint_payload,restore_payload,ema_validation
++from worker import validation,atomic_checkpoint
++from normal2 import normal2,pair_inputs,sync
++from probe import rng_get,rng_set,equal,input_hash,flatten,metric
++def comparison(a,b):
++    x,y=flatten(a),flatten(b);rows={k:metric(v,y[k]) for k,v in x.items()}
++    return dict(exact=equal(a,b),passes=x.keys()==y.keys() and all(v['passes'] for v in rows.values()),tensors=rows)
++def main():
++    p=argparse.ArgumentParser();p.add_argument('--dataset',required=True);p.add_argument('--arm',required=True);p.add_argument('--output',required=True);p.add_argument('--deadline',type=float,required=True);a=p.parse_args()
++    out=pathlib.Path(a.output);out.mkdir(parents=True,exist_ok=False);start=time.time();calls=0
++    r=dict(status='incomplete',dataset=a.dataset,arm=a.arm,formal_updates=0,new_graphs=0,source_sha256=source_binding()[1])
++    def check():
++        if time.time()>=a.deadline or (out/'STOP').exists():raise TimeoutError('preparation deadline/STOP')
++    def stop(*args):raise InterruptedError('engineering signal/deadline')
++    for sig in (signal.SIGALRM,signal.SIGTERM,signal.SIGINT):signal.signal(sig,stop)
++    signal.alarm(max(1,int(a.deadline-time.time())))
++    try:
++        check();r['environment']=configure()
++        seed=read(ROOT/'protocol.json')['train_seeds'][a.dataset]
++        m,o,c,cfg,rng,proof=fresh(a.dataset,a.arm,seed);ema=ParameterEMA(m)
++        initial=checkpoint_payload(m,o,ema,0,rng_get(rng,'cuda'),dict(purpose='engineering only',proof=proof))
++        atomic_checkpoint(out/'initial.pt',initial);save(out/'initialization.json',proof)
++        real=o.step
++        def counted(*args,**kwargs):
++            nonlocal calls
++            check()
++            if calls>=2:raise RuntimeError('engineering cap')
++            calls+=1;save(out/'updates.json',dict(optimizer_step_calls=calls,maximum=2));return real(*args,**kwargs)
++        o.step=counted
++        inp=pair_inputs(c,cfg,1,rng);ih=input_hash(inp)
++        raw_rec=normal2(m,o,c,inp,1000,'cuda',True)
++        expected=cpu_copy(dict(model=m.state_dict(),optimizer=o.state_dict(),grad={n:p.grad for n,p in m.named_parameters()},rng=rng_get(rng,'cuda')))
++        restore_payload(initial,m,o,ema,initial['binding'],lambda s:rng_set(s,rng,'cuda'))
++        inp=pair_inputs(c,cfg,1,rng);r['input_exact']=input_hash(inp)==ih
++        sync('cuda');begin=time.perf_counter();rec=complete_normal2(normal2,m,o,c,inp,1000,'cuda',ema,0);sync('cuda');wall=time.perf_counter()-begin
++        r['transparency']={k:comparison(v,expected[k]) for k,v in dict(model=m.state_dict(),optimizer=o.state_dict(),grad={n:p.grad for n,p in m.named_parameters()}).items()}
++        r['rng_exact']=equal(rng_get(rng,'cuda'),expected['rng'])
++        r['path']=dict(cn=m.common_neighbor is not None,refex=hasattr(m,'refex_projection'),roles=hasattr(m,'role_projection'),feature_calls=m.feature_calls)
++        r['projection_gradients']={n:dict(finite=bool(torch.isfinite(p.grad).all()),norm=float(p.grad.norm())) for n,p in m.named_parameters() if any(k in n for k in ('refex_projection','role_projection','branch.degree_out')) and p.grad is not None}
++        before=checkpoint_payload(m,o,ema,1,rng_get(rng,'cuda'),initial['binding'])
++        begin=time.perf_counter();atomic_checkpoint(out/'after_engineering.pt',before);r['save_seconds']=time.perf_counter()-begin
++        r['validation_raw']=validation(m,c,cfg,seed,rng)
++        r['validation_ema']=ema_validation(validation,m,ema,c,cfg,seed,rng)
++        r['validation_restored']=equal(before,checkpoint_payload(m,o,ema,1,rng_get(rng,'cuda'),initial['binding']))
++        payload=torch.load(out/'after_engineering.pt',map_location='cpu')
++        restore_payload(payload,m,o,ema,initial['binding'],lambda s:rng_set(s,rng,'cuda'))
++        r['loaded_exact']=equal(payload,checkpoint_payload(m,o,ema,1,rng_get(rng,'cuda'),initial['binding']))
++        r['cost']=dict(raw_normal2_seconds=raw_rec['normal2_seconds'],normal2_with_ema_seconds=wall,normal2_seconds=rec['normal2_seconds'],ema_overhead_seconds=wall-rec['normal2_seconds'],note='one-step repeats, not stable throughput')
++        expected_path=dict(cn=a.arm in ('A','D','E'),refex=a.arm in ('C','D','E'),roles=a.arm in ('C','E'))
++        passed=all(r[k] for k in ('input_exact','rng_exact','validation_restored','loaded_exact')) and all(x['passes'] for x in r['transparency'].values()) and all(r['path'][k]==v for k,v in expected_path.items())
++        r['status']='passed' if passed else 'failed'
++    except BaseException as e:r.update(error=repr(e),traceback=traceback.format_exc())
++    finally:
++        signal.alarm(0);r.update(optimizer_step_calls=calls,seconds=time.time()-start,finished_epoch=time.time(),peak_rss_mib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024)
++        if torch.cuda.is_initialized():r.update(peak_allocated_mib=torch.cuda.max_memory_allocated()/2**20,peak_reserved_mib=torch.cuda.max_memory_reserved()/2**20)
++        save(out/'result.json',r)
++    return 0 if r['status']=='passed' else 2
++if __name__=='__main__':raise SystemExit(main())
+--- a/collect_preparation.py
++++ b/collect_preparation.py
+@@ -0,0 +1,74 @@
++"""Recompute CPU-only pairing/lineage/cost receipts from existing engineering files."""
++import argparse,pathlib,json,hashlib,subprocess,math,statistics,sys
++import numpy as np
++import torch
++from runtime_contract import ROOT,jobs,read,save,sha,source_binding
++sys.path.insert(0,str(ROOT/'package'))
++from prepare import load_case
++from normal2 import pair_inputs
++from probe import input_hash,equal
++
++def main():
++    p=argparse.ArgumentParser();p.add_argument('--results',required=True);p.add_argument('--workspace',required=True);a=p.parse_args();out=pathlib.Path(a.results);ws=pathlib.Path(a.workspace)
++    engineering=out/'engineering';proofs={};params={};compute=[]
++    for dataset in ('IMDB','PubMed'):
++        cells={arm:torch.load(engineering/(dataset+'_'+arm)/'initial.pt',map_location='cpu') for arm in ('A','C','D','E')}
++        checks={};inp={};rng={}
++        for arm,x in cells.items():
++            pr=read(engineering/(dataset+'_'+arm)/'initialization.json');params[dataset+'_'+arm]=pr['construction']['parameters'];rng[arm]=pr['rng_reset']
++            assert x['updates']==x['ema']['updates']==0 and not x['optimizer']['state']
++            assert all(hashlib.sha256(v.numpy().tobytes()).hexdigest()==pr['construction']['tensor_sha256'][k] for k,v in x['model'].items())
++            checks[arm]={}
++            for name,v in x['model'].items():
++                y=cells['E']['model'][name]
++                if name=='joint_head.0.weight' and v.shape!=y.shape:y=y[:,:v.shape[1]]
++                assert v.numpy().tobytes()==y.contiguous().numpy().tobytes(),(dataset,arm,name)
++                checks[arm][name]=True
++            case,cfg=load_case(dataset);cfg=dict(cfg,seed=read(ROOT/'protocol.json')['train_seeds'][dataset]);g=np.random.default_rng()
++            g.bit_generator.state=x['rng']['numpy'];inp[arm]=[input_hash(pair_inputs(case,cfg,u,g)) for u in (1,2,3)]
++        assert all(rng[a]==rng['A'] for a in rng)
++        assert all(inp[a]==inp['A'] for a in inp)
++        proofs[dataset]=dict(shared_tensor_bytes=checks,training_rng=rng,first_three_inputs=inp,status='passed')
++    save(out/'pairing_audit.json',dict(status='passed',datasets=proofs,parameter_counts=params,formal_initials_created=False,engineering_initials_only=True))
++    oldroots=[ws/'results/typed_structure_192_oabc_formal_v1_20261028T090624/run',ws/'results/typed_structure_192_oabc_seed2_v1_20261028T110507/run',ws/'results/typed_structure_192_de_formal_v1_20261028T140346/run']
++    for task in jobs()['training']:
++        d,arm=task['dataset'],task['arm'];record=read(engineering/(d+'_'+arm)/'result.json');q=read(engineering/(d+'_'+arm)/'query_cost.json')
++        assert record['status']=='passed' and record['optimizer_step_calls']==2
++        histories=[]
++        for root in oldroots:
++            for path in root.glob(d+'*'+arm):
++                log=path/'training.jsonl'
++                if not log.exists():continue
++                vals=[json.loads(x)['normal2_seconds'] for x in log.read_text().splitlines()][5:]
++                chainfiles=list(path.glob('sample_*/binding.json'));chains=[read(f)['seconds'] for f in chainfiles]
++                if len(chains)!=2:continue
++                histories.append(dict(path=str(path),training_log_sha256=sha(log),normal2_mean=float(np.mean(vals)),normal2_p95=float(np.percentile(vals,95)),chains_seconds=chains,chain_bindings=[dict(path=str(f),sha256=sha(f)) for f in chainfiles]))
++        if not histories:raise ValueError('missing historical cost for '+d+arm)
++        unit=max(record['cost']['normal2_with_ema_seconds'],max(h['normal2_p95'] for h in histories)+record['cost']['ema_overhead_seconds'])
++        chain=max(max(h['chains_seconds']) for h in histories)
++        validation=4*(record['validation_raw']['seconds']+record['validation_ema']['seconds'])
++        saves=6*record['save_seconds'];construction=20.
++        compute.append(dict(task=task,history=histories,engineering=record['cost'],query=q,normal2_planning_seconds=unit,
++            training_3000_seconds=3000*unit,chain_planning_seconds=chain,two_chains_seconds=2*chain,validation_seconds=validation,save_seconds=saves,construction_and_load_allowance_seconds=construction,
++            phase_train_seconds=3000*unit+validation+saves+construction,phase_sampling_seconds=2*chain+10,peak_allocated_mib=record['peak_allocated_mib'],peak_reserved_mib=record['peak_reserved_mib']))
++    # Actual launcher has a barrier after ALL training; then serial chains per GPU.
++    train=max(x['phase_train_seconds'] for x in compute);sample=max(x['phase_sampling_seconds'] for x in compute);body=train+sample
++    concurrent_extra=.15*body;eval_seconds=300.;delivery=1200.;fault=900.;planned=body+concurrent_extra+eval_seconds+delivery+fault
++    requested=math.ceil(planned/600)*600
++    cost=dict(status='passed',proposal_only=True,formal_authorized=False,source_sha256=source_binding()[1],schedule=jobs(),cells=compute,
++        training_phase_seconds=train,sampling_phase_seconds=sample,compute_body_seconds=body,concurrency_planning_extra_seconds=concurrent_extra,
++        evaluation_LCC_seconds=eval_seconds,delivery_reserve_seconds=delivery,fault_allowance_seconds=fault,planned_seconds=planned,requested_budget_seconds=requested,
++        uncertainty='15% planning margin is not measured eight-way performance. Historical full chains use old1000 raw readouts; new3000 EMA state evolution is unmeasured. One-step probes are not stable throughput.',
++        stop_rule='new approved formal start+budget, science stops20minutes before deadline; no automatic resume,restart,redraw or changed scale')
++    save(ROOT/'cost.json',cost);save(out/'cost.json',cost)
++    # Limit seed scan to frozen candidate scientific runs, not arbitrary timestamps.
++    scopes=oldroots+[ws/'results/pubmed_o_multi_ema_formal_v1_20261028T222745/run'];hits=[];checked=0
++    for root in scopes:
++        for file in root.rglob('binding.json'):
++            checked+=1;s=file.read_text()
++            for seed in (2026102911,2026102912):
++                if str(seed) in s:hits.append(dict(file=str(file),seed=seed))
++    save(out/'seed_audit.json',dict(scopes=list(map(str,scopes)),binding_records_checked=checked,seeds=[2026102911,2026102912],effect_observation_conflicts=hits,limitation='local sealed candidate experiment records, not an assertion about unknown remote runs'))
++    if hits:raise ValueError('seed conflict')
++    print(json.dumps(dict(status='passed',parameters=params,body_minutes=body/60,planned_minutes=planned/60,suggested_minutes=requested/60),indent=2))
++if __name__=='__main__':main()
+--- a/cost_query.py
++++ b/cost_query.py
+@@ -0,0 +1,41 @@
++"""One full t500 query + original posterior per supplied engineering cell.
++Zero optimizer updates, uniforms, samples, or state commits.
++"""
++import argparse,time,sys,pathlib,signal
++import numpy as np
++import torch
++from runtime_contract import ROOT,save,read,sha,source_binding
++sys.path.insert(0,str(ROOT/'package'))
++from model_io import configure,fresh
++from normal2 import pair_inputs,sync
++from hsgd.computational import FrozenTypedContext
++from hsgd.bw_preflight.common import check_prob,schedule
++from hsgd.kernel import MarginalKernel
++def main():
++    p=argparse.ArgumentParser();p.add_argument('--engineering-root',required=True);p.add_argument('--dataset',required=True);p.add_argument('--deadline',type=float,required=True);a=p.parse_args()
++    def stop(*args):raise TimeoutError('preparation deadline')
++    signal.signal(signal.SIGALRM,stop);signal.alarm(max(1,int(a.deadline-time.time())))
++    configure()
++    for arm in ('A','C','D','E'):
++        folder=pathlib.Path(a.engineering_root)/(a.dataset+'_'+arm);file=folder/'after_engineering.pt';out=folder/'query_cost.json'
++        if out.exists():raise FileExistsError(out)
++        model,opt,case,cfg,rng,_=fresh(a.dataset,arm,read(ROOT/'protocol.json')['train_seeds'][a.dataset]);del opt
++        payload=torch.load(file,map_location='cpu');model.load_state_dict(payload['model']);model.eval()
++        inp=pair_inputs(case,cfg,1,np.random.default_rng(2026102901),500)[0]
++        expected=np.flatnonzero(np.repeat(case['active'],case['space'].counts));assert np.array_equal(np.sort(inp['ids']),expected)
++        token=('engineering-cost',a.dataset,arm);sync('cuda');begin=time.perf_counter()
++        ctx=FrozenTypedContext(model,case['space'].types,inp['edges'],inp['edge_families'],token)
++        try:
++            with torch.no_grad():p0=check_prob(ctx.predict(inp['query'],inp['f'],.5,token),inp['f'],case)
++            sync('cuda');forward=time.perf_counter()-begin
++            kernel=MarginalKernel(case['prior'],schedule(1000));fam,local=case['space'].encode(inp['edges']);ids=case['space'].offsets[fam]+local
++            xt=np.isin(inp['ids'],ids).astype(np.uint8);begin=time.perf_counter();q=kernel.reverse(p0,xt,inp['f'],499,500);posterior=time.perf_counter()-begin
++            assert np.isfinite(q).all() and ((q>=0)&(q<=1)).all()
++            save(out,dict(dataset=a.dataset,arm=arm,t=500,query_slots=len(inp['ids']),blocks=1,forward_including_context_features_transfers_checks_seconds=forward,
++                posterior_seconds=posterior,feature_seconds=model.feature_seconds,encoding_seconds=model.encoding_seconds,transfer_seconds=model.transfer_seconds,
++                engineering_checkpoint_sha256=sha(file),source_sha256=source_binding()[1],state_commits=0,new_graphs=0,optimizer_steps=0,
++                note='one ordinary forward-noise state; no sampling or full chain; not all-state throughput'))
++        finally:ctx.close()
++        del model,payload;torch.cuda.empty_cache()
++    signal.alarm(0)
++if __name__=='__main__':main()
+--- a/evaluation_fields.py
++++ b/evaluation_fields.py
+@@ -0,0 +1,29 @@
++import numpy as np
++import itertools,math
++def scalar(s,ref,comp,names):
++    raw={k:v for k,v in s.items() if (v is None or isinstance(v,(int,float,np.integer,np.floating))) and k not in ['HGEN_native_powerlaw']}
++    raw['HGEN_native_powerlaw']=None
++    for t,name in enumerate(names):
++        d=s['typed_degree'][name];rd=ref['typed_degree'][name];n=d['count'];threshold=max(1,int(math.ceil(rd['p99'])))
++        for key in ['count','maximum','second','mean','zero','low_le1','p90','p99','gini_standard','top5_degree_share']:raw['type_'+name+'_'+key]=d[key]
++        raw['type_'+name+'_share']=n/s['nodes'];raw['type_'+name+'_zero_fraction']=d['zero']/n if n else None;raw['type_'+name+'_low_le1_fraction']=d['low_le1']/n if n else None
++        raw['type_'+name+'_fixed_ref_P99_ge_count']=sum(v>=threshold for v in d['sorted_degrees']);raw['type_'+name+'_fixed_ref_P99_threshold']=threshold
++        for r,col in enumerate(d['by_relation']):
++            for key in ['mean','max','zero','low_le1','p90','p99']:raw['type_'+name+'_relation'+str(r)+'_'+key]=col[key]
++    for r,(edges,cap) in enumerate(zip(s['family_edges'],s['capacities'])):raw['family'+str(r)+'_edges']=edges;raw['family'+str(r)+'_capacity']=cap;raw['family'+str(r)+'_density']=edges/cap if cap else None
++    for pattern in itertools.combinations_with_replacement(range(4),3):raw['triangle_'+str(pattern)]=s['typed_triangles'].get(str(pattern),0)
++    for label,r in s['typed_twohop_closure'].items():
++        for k,v in r.items():
++            if not k.endswith('reason'):raw['closure_'+label+'_'+k]=v
++    for i in range(3):
++        raw['MP'+str(i+1)+'_total']=s['mp'][i]['total'];raw['MP'+str(i+1)+'_per_node']=s['mp'][i]['per_node'];raw['walk'+str(i+1)+'_total']=s['typed_walks'][i]['total']
++    raw['powerlaw_fixed_xmin1_alpha']=s['powerlaw_fixed_xmin1_project']['alpha'];raw['powerlaw_fixed_xmin1_KS']=s['powerlaw_fixed_xmin1_project']['ks']
++    distance={k:comp[k] for k in ['total_degree_W1','main_incident4_W1','all10_compat_W1','incident4_actual_typeweights','main_joint_degree_TV','triangle_composition_TV','four_cycle_composition_TV']}
++    distance['degree_MMD2_alpha4_raw']=comp['degree_MMD2_alpha4']['raw'];distance['degree_MMD2_alpha4_nonnegative']=comp['degree_MMD2_alpha4']['nonnegative']
++    for t,name in enumerate(names):
++        distance['type_'+name+'_total_degree_W1']=comp['type_total_degree_W1'][name];distance['type_'+name+'_joint_TV']=comp['joint_TV_by_type'][name]
++        for r,v in enumerate(comp['typed_relation_W1'][name]):distance['type_'+name+'_relation'+str(r)+'_W1']=v
++    for i in range(3):distance['MP'+str(i+1)+'_composition_TV']=comp['MP_composition_TV'][i];distance['walk'+str(i+1)+'_composition_TV']=comp['walk_composition_TV'][i]
++    for r,v in comp['family_endpoint_W1'].items():distance['family'+r+'_endpoint_W1']=v
++    for k in ['edge_overlap_count','EO_reference_denominator','EO_generated_denominator','EO_jaccard','edge_novelty_generated_denominator']:raw[k]=comp[k]
++    return raw,distance
+--- a/integration.py
++++ b/integration.py
+@@ -35,8 +35,8 @@
+     return payload['updates']
+ 
+ def final_readouts(model,ema,completed_updates):
+-    if completed_updates!=1000 or ema.updates!=1000:
+-        raise ValueError('only the final1000 readouts may enter the scientific sample plan')
++    if completed_updates!=3000 or ema.updates!=3000:
++        raise ValueError('only the final3000 readouts may enter the scientific sample plan')
+     if hasattr(ema,'readouts'):return dict(raw=cpu_copy(model.state_dict()),**ema.readouts(model))
+     return dict(raw=cpu_copy(model.state_dict()),ema=ema.readout_state_dict(model))
+ 
+--- a/inventory_full_graphs.py
++++ b/inventory_full_graphs.py
+@@ -0,0 +1,34 @@
++"""CPU-only static source/data inventory; never imports graph models or fits bases."""
++import argparse,pathlib,json,hashlib,collections,math
++import numpy as np
++def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
++def main():
++    p=argparse.ArgumentParser();p.add_argument('--source',required=True);p.add_argument('--output',required=True);a=p.parse_args();src=pathlib.Path(a.source);out=pathlib.Path(a.output)
++    if out.exists():raise FileExistsError(out)
++    inventory=json.loads((src/'role_target_scalability_v1/evidence/large_graph_inventory.json').read_text());rows={}
++    for dataset in ('IMDB','PubMed'):
++        path=src/'joint_cn_dual_rounds_v1_1/package/data'/(dataset+'.npz');cp=src/'joint_cn_dual_rounds_v1_1/package/configs'/(dataset+'.json');cfg=json.loads(cp.read_text());expected=cfg['data']['sha256']
++        assert sha(path)==expected==inventory[dataset]['sha256']
++        with np.load(path,allow_pickle=False) as z:types=z['types'];edges=z['edges'];families=z['relations'].astype(int)-1;schema=z['schema']
++        n=len(types);sizes=np.bincount(types,minlength=4);counts=np.bincount(families,minlength=10)
++        assert edges.shape[1]==2 and (edges[:,0]<edges[:,1]).all() and np.unique(edges,axis=0).shape==edges.shape
++        assert edges.min()>=0 and edges.max()<n and np.array_equal(np.sort(types[edges],axis=1),schema[families])
++        assert np.array_equal(edges,edges[np.lexsort((edges[:,1],edges[:,0]))])
++        assert (n,len(edges))==((1653,4079) if dataset=='IMDB' else (1565,12284))
++        caps=np.array([sizes[x]*(sizes[x]-1)//2 if x==y else sizes[x]*sizes[y] for x,y in schema]);prior=counts/caps;active=(prior>0)&(prior<1)
++        deg=np.zeros((n,10),dtype=int);np.add.at(deg,(edges[:,0],families),1);np.add.at(deg,(edges[:,1],families),1)
++        roles=[len(set(map(tuple,deg[types==t]))) for t in range(4)]
++        assert sizes.tolist()==cfg['data']['type_counts'] and counts.tolist()==cfg['data']['family_counts']
++        # Original per-family split yields ceil/floor counts per round.
++        blocks=[int(sum((cap//20+int(i<cap%20)) for cap,on in zip(caps,active) if on)) for i in range(20)]
++        rows[dataset]=dict(path=str(path.resolve()),sha256=expected,bytes=path.stat().st_size,config_path=str(cp.resolve()),config_sha256=sha(cp),
++            nodes=n,edges=len(edges),type_names=cfg['data']['type_names'],type_counts=sizes.tolist(),schema=schema.tolist(),family_edges=counts.tolist(),family_capacities=caps.tolist(),prior=prior.tolist(),active_slots=int(caps[active].sum()),schema_slots=int(caps.sum()),exact_joint_degree_kinds=roles,
++            kernel=dict(T=cfg['T'],rounds=cfg['rounds'],schedule_offset=cfg['schedule_offset']),query_block_sizes=blocks,model=cfg['model'],
++            static_memory_bytes=dict(refex_fp64=n*630*8,refex_fp32_gpu=n*630*4,seven_state_feature_panel=n*630*8*7,
++                input_degree_fp64=n*10*8,adjacency_CSR_lower_bound=(2*len(edges)*12+(n+1)*4),max_candidate_CPU_arrays=caps.sum().item()*32,
++                NNLS_basis_K8_upper_example=32*630*8,NNLS_coeff_K8_upper_example=n*32*8),
++            operation_estimate=dict(refex_egonet_edge_checks=n*len(edges),refex_relation_aggregation_multiply_adds=2*len(edges)*30,nnls_solves_per_state=n,nnls_role_K='not chosen for full graph',nnls_note='per-type K with630 columns; convergence/data dependent, cannot extrapolate time by nodes only'),
++            no_new_feature_extraction=True,no_model_loaded=True,full_graph_dictionary_available=False,
++            dataset_identity='typed Gene/Disease/Chemical/Species graph; NOT PubMed23 paper retrieval corpus' if dataset=='PubMed' else 'typed Director/Actor/Movie/Genre graph')
++    out.write_text(json.dumps(dict(datasets=rows,static_only=True,full_graph_training=0,full_graph_forward=0,dictionary_fits=0),indent=2))
++if __name__=='__main__':main()
+--- a/model_io.py
++++ b/model_io.py
+@@ -1,35 +1,38 @@
+-"""Only construction/loading glue. Scientific model and initial bytes unchanged."""
+-import sys,pathlib,time
++"""Paired fresh A anchor and E feature donor; no trained checkpoint is used."""
++import sys,pathlib,hashlib
+ ROOT=pathlib.Path(__file__).resolve().parent
+ sys.path.insert(0,str(ROOT/'package'))
+ import torch
+ from prepare import load_case
+-from model_variants import StructuralDenoiser
+-from experiment_contract import reset_training_streams,initialization
+-from runtime_contract import initial_path,asset,OLD_SEEDS,NEW_SEEDS
+-from probe import equal
++from model_variants import StructuralDenoiser,copy_common
++from experiment_contract import reset_training_streams,read_dictionary
++from role_dictionary import seed32
++from runtime_contract import dictionary_expected,TRAIN_SEEDS,ARMS,verify_assets
+ from hsgd.bw_preflight.common import environment
+-
+ def configure():
+     torch.set_num_threads(1);torch.set_num_interop_threads(1)
+     torch.use_deterministic_algorithms(True,warn_only=False)
+     torch.backends.cuda.matmul.allow_tf32=False;torch.backends.cudnn.allow_tf32=False
+     if not torch.cuda.is_available() or torch.cuda.device_count()!=1 or '2080 Ti' not in torch.cuda.get_device_name(0):raise RuntimeError('one RTX2080Ti required')
+     return environment('cuda')
+-def fresh(seed,overrides=None):
+-    if seed in NEW_SEEDS:
+-        model,case,cfg,proof=initialization('PubMed','O',seed,None)
+-        model=model.cuda();rng,rng_receipt=reset_training_streams(seed,'PubMed','cuda')
+-        opt=torch.optim.AdamW(model.parameters(),**{k:v for k,v in cfg['optimizer'].items() if k!='type'})
+-        return model,opt,case,dict(cfg,seed=seed),rng,dict(new_scientific_initial=True,construction=proof,rng_reset=rng_receipt,optimizer='new empty AdamW')
+-    if seed not in OLD_SEEDS:raise ValueError('unfrozen seed')
+-    path=initial_path(seed,overrides);p=torch.load(path,map_location='cpu');case,cfg=load_case('PubMed')
+-    if p['updates']!=0 or p['binding']['arm']!='O' or p['binding']['config']['seed']!=seed:raise ValueError('not the bound O scientific initial')
+-    if p['binding']['dataset']['sha256']!=cfg['datasets']['PubMed']['sha256']:raise ValueError('initial data binding')
+-    for key in ['model','optimizer','T','rounds','precision','tf32','schedule_offset']:
+-        if p['binding']['config'][key]!=cfg[key]:raise ValueError('initial scientific config '+key)
+-    model=StructuralDenoiser(case,cfg,'O');model.load_state_dict(p['model'],strict=True)
+-    if not equal(model.state_dict(),p['model']):raise ValueError('initial load differs')
+-    model=model.cuda();rng,rng_receipt=reset_training_streams(seed,'PubMed','cuda')
++def tensor_hash(x):return hashlib.sha256(x.detach().cpu().contiguous().numpy().tobytes()).hexdigest()
++def construct(dataset,arm,seed):
++    if TRAIN_SEEDS.get(dataset)!=seed or arm not in ARMS:raise ValueError('unfrozen initialization identity')
++    verify_assets();case,cfg=load_case(dataset)
++    basis,receipt=read_dictionary(ROOT/'dictionaries',dataset,dictionary_expected(dataset))
++    torch.manual_seed(seed);anchor=StructuralDenoiser(case,cfg,'A')
++    donor_seed=seed32(seed,dataset=dataset,arm='E',purpose='new_module_initialization')
++    torch.manual_seed(donor_seed);donor=StructuralDenoiser(case,cfg,'E',basis);copy_common(anchor,donor)
++    module_seed=seed32(seed,dataset=dataset,arm=arm,purpose='new_module_initialization')
++    torch.manual_seed(module_seed);model=StructuralDenoiser(case,cfg,arm,basis if arm in ('C','E') else None)
++    copied=copy_common(donor,model)
++    proof=dict(seed=seed,module_seed=module_seed,donor_seed=donor_seed,anchor='fresh A',donor='fresh E with A common tensors copied',copied=copied,
++        tensor_sha256={k:tensor_hash(v) for k,v in model.state_dict().items()},parameters=sum(p.numel() for p in model.parameters()),
++        dictionary_sha256=receipt['basis_sha256'],K=receipt['K'],copied_exact=True,engineering_weights_used=False)
++    return model,case,dict(cfg,seed=seed),proof
++def fresh(dataset,arm,seed,device='cuda'):
++    model,case,cfg,proof=construct(dataset,arm,seed);model=model.to(device)
++    rng,rr=reset_training_streams(seed,dataset,device)
+     opt=torch.optim.AdamW(model.parameters(),**{k:v for k,v in cfg['optimizer'].items() if k!='type'})
+-    return model,opt,case,dict(cfg,seed=seed),rng,dict(initial_sha256=asset(seed)['initial_sha256_from_sealed_receipt'],rng_reset=rng_receipt,optimizer='new empty AdamW; no historical state')
++    if {id(p) for g in opt.param_groups for p in g['params']}!={id(p) for p in model.parameters() if p.requires_grad}:raise AssertionError('optimizer coverage')
++    return model,opt,case,cfg,rng,dict(construction=proof,rng_reset=rr,optimizer='new empty AdamW')
+--- a/protocol.json
++++ b/protocol.json
+@@ -1,29 +1,76 @@
+ {
+-  "version": "pubmed_o_multi_ema_v1_preparation_only",
++  "version": "typed_structure_final_screen_v1",
+   "formal_authorized": false,
+-  "dataset": "PubMed",
+-  "arm": "O",
+-  "train_seeds": [2026102812, 2026102833, 2026102841, 2026102842, 2026102843, 2026102844, 2026102845, 2026102846],
+-  "original_development_seeds": [2026102812, 2026102833],
+-  "new_seeds": [2026102841, 2026102842, 2026102843, 2026102844, 2026102845, 2026102846],
+-  "sample_seeds": [2026102821, 2026102822],
+-  "updates": 1000,
+-  "save_updates": [0, 500, 1000],
+-  "validation_updates": [0, 500, 1000],
+-  "validation_times": [1, 500, 1000],
+-  "training_trajectories": 8,
+-  "final_readouts_per_trajectory": ["raw", "ema_0.9", "ema_0.97", "ema_0.99"],
+-  "new_full_chains": 64,
++  "train_seeds": {
++    "IMDB": 2026102911,
++    "PubMed": 2026102912
++  },
++  "arms": [
++    "A",
++    "C",
++    "D",
++    "E"
++  ],
++  "sample_seeds": [
++    2026102821,
++    2026102822
++  ],
++  "updates": 3000,
++  "checkpoints": [
++    0,
++    1000,
++    2000,
++    3000
++  ],
++  "sample_readout": "ema_0.99",
++  "ema_decay": 0.99,
+   "T": 1000,
+-  "query_rounds": 1,
+-  "normal2": "one zero_grad, two sumCE/(2*18336) backwards, one AdamW step",
+-  "precision": "unchanged FP32 network; original float64 posterior",
+-  "ema": {"decays": [0.9, 0.97, 0.99], "primary_comparison": "ema_0.99-raw", "initialize": "independent theta0 copies", "update": "every complete normal2 step from RAW parameters, including step1", "warmup": false, "bias_correction": false, "average_buffers": false, "feedback_to_training": false, "search": false},
+-  "optimizer": {"type": "AdamW", "lr": 0.0002, "weight_decay": 1e-12, "betas": [0.9, 0.999], "eps": 1e-08, "amsgrad": false},
+-  "primary": "per-training-seed mean of per-graph absolute total edge error vs926",
+-  "reporting": "for EACH decay: eight paired differences, equal-seed mean/median/counts, old2 and new6 separately; no selecting best decay; all structural metrics retained",
+-  "structural_warnings_per_seed": {"W1_relative_increase_gt": 0.1, "LCC_drop_gt": 19.2, "meaning": "human warnings, not safety proof or automatic whole-panel rejection"},
+-  "proposed_formal_seconds": 11100,
+-  "queue": "eight GPUs one training seed each; after all finals frozen, eight serial chains per seed GPU",
+-  "prohibited": ["formal training now", "full sampling now", "extra decays", "new features", "new losses", "LR search", "changing inputs", "checkpoint selection", "graph repair", "extra samples"]
++  "rounds": 1,
++  "S": 18336,
++  "normal2": "two sequential sumCE/(2*S) backwards, one optimizer step",
++  "validation_times": [
++    1,
++    500,
++    1000
++  ],
++  "contrasts": [
++    [
++      "D",
++      "A"
++    ],
++    [
++      "E",
++      "D"
++    ],
++    [
++      "E",
++      "C"
++    ],
++    [
++      "C",
++      "A"
++    ],
++    [
++      "E",
++      "A"
++    ]
++  ],
++  "delivery_reserve_seconds": 1200,
++  "budget_seconds": null,
++  "K": {
++    "IMDB": [
++      5,
++      4,
++      3,
++      2
++    ],
++    "PubMed": [
++      8,
++      8,
++      8,
++      6
++    ]
++  },
++  "primary": "per-dataset screen, no cross-dataset composite score; quantities/degrees,typed closure/paths,type coverage,cost; prefer simplicity if comparable; at most two finalists",
++  "raw_generation": false
+ }
+--- a/pytest.ini
++++ b/pytest.ini
+@@ -0,0 +1,2 @@
++[pytest]
++testpaths = test_screen.py
+--- a/resolved_configs.json
++++ b/resolved_configs.json
+@@ -0,0 +1,566 @@
++{
++  "IMDB_A": {
++    "model": {
++      "layers": 8,
++      "width": 256,
++      "edge_width": 64,
++      "global_width": 128,
++      "heads": 8,
++      "ff_node": 256,
++      "ff_edge": 64,
++      "ff_global": 256,
++      "dropout": 0.1,
++      "cn_hidden": 32,
++      "joint_width": 128,
++      "max_wedges": 2000000,
++      "max_query_paths": 2000000
++    },
++    "optimizer": {
++      "type": "AdamW",
++      "lr": 0.0002,
++      "weight_decay": 1e-12,
++      "betas": [
++        0.9,
++        0.999
++      ],
++      "eps": 1e-08,
++      "amsgrad": false
++    },
++    "precision": "FP32 network/stable CE; float64 probability kernel",
++    "T": 1000,
++    "rounds": 1,
++    "loss": "sumCE/(2*18336) each of two inputs,one optimizer step",
++    "dataset": {
++      "file": "assets/IMDB.npz",
++      "sha256": "398d59a0602e14dd0c92b8781e69a3234727d674923275864eec558770dffb5c",
++      "received_sha256": "351d066a702df18a188cff28822ea92182b0b1eb64ad0375e7f70e6a587ae466",
++      "reference_sha256": "10f1dbbbe55c6a069594b2dcb590d1b8295ca5436320ef4597cd30e6b7f73e42",
++      "type_names": [
++        "Director",
++        "Actor",
++        "Movie",
++        "Genre"
++      ],
++      "basis_kind": "pending complete held-out rank selection; no synthetic fallback"
++    },
++    "train_seed": 2026102911,
++    "arm": "A",
++    "features": {
++      "CN": true,
++      "ReFeX": false,
++      "RolX": false
++    },
++    "K": null,
++    "updates": 3000,
++    "checkpoints": [
++      0,
++      1000,
++      2000,
++      3000
++    ],
++    "ema": 0.99,
++    "sample_readout": "final3000_ema0.99",
++    "sample_seeds": [
++      2026102821,
++      2026102822
++    ],
++    "source_config_sha256": "765f452d150fa6f8984cb8db779c0d182fbce384745934c36babec597c74939a",
++    "metadata_note": "inherited config arms/version/engineering flags are historical; actual routing and authorization use protocol and launcher"
++  },
++  "IMDB_C": {
++    "model": {
++      "layers": 8,
++      "width": 256,
++      "edge_width": 64,
++      "global_width": 128,
++      "heads": 8,
++      "ff_node": 256,
++      "ff_edge": 64,
++      "ff_global": 256,
++      "dropout": 0.1,
++      "cn_hidden": 32,
++      "joint_width": 128,
++      "max_wedges": 2000000,
++      "max_query_paths": 2000000
++    },
++    "optimizer": {
++      "type": "AdamW",
++      "lr": 0.0002,
++      "weight_decay": 1e-12,
++      "betas": [
++        0.9,
++        0.999
++      ],
++      "eps": 1e-08,
++      "amsgrad": false
++    },
++    "precision": "FP32 network/stable CE; float64 probability kernel",
++    "T": 1000,
++    "rounds": 1,
++    "loss": "sumCE/(2*18336) each of two inputs,one optimizer step",
++    "dataset": {
++      "file": "assets/IMDB.npz",
++      "sha256": "398d59a0602e14dd0c92b8781e69a3234727d674923275864eec558770dffb5c",
++      "received_sha256": "351d066a702df18a188cff28822ea92182b0b1eb64ad0375e7f70e6a587ae466",
++      "reference_sha256": "10f1dbbbe55c6a069594b2dcb590d1b8295ca5436320ef4597cd30e6b7f73e42",
++      "type_names": [
++        "Director",
++        "Actor",
++        "Movie",
++        "Genre"
++      ],
++      "basis_kind": "pending complete held-out rank selection; no synthetic fallback"
++    },
++    "train_seed": 2026102911,
++    "arm": "C",
++    "features": {
++      "CN": false,
++      "ReFeX": true,
++      "RolX": true
++    },
++    "K": [
++      5,
++      4,
++      3,
++      2
++    ],
++    "updates": 3000,
++    "checkpoints": [
++      0,
++      1000,
++      2000,
++      3000
++    ],
++    "ema": 0.99,
++    "sample_readout": "final3000_ema0.99",
++    "sample_seeds": [
++      2026102821,
++      2026102822
++    ],
++    "source_config_sha256": "765f452d150fa6f8984cb8db779c0d182fbce384745934c36babec597c74939a",
++    "metadata_note": "inherited config arms/version/engineering flags are historical; actual routing and authorization use protocol and launcher"
++  },
++  "IMDB_D": {
++    "model": {
++      "layers": 8,
++      "width": 256,
++      "edge_width": 64,
++      "global_width": 128,
++      "heads": 8,
++      "ff_node": 256,
++      "ff_edge": 64,
++      "ff_global": 256,
++      "dropout": 0.1,
++      "cn_hidden": 32,
++      "joint_width": 128,
++      "max_wedges": 2000000,
++      "max_query_paths": 2000000
++    },
++    "optimizer": {
++      "type": "AdamW",
++      "lr": 0.0002,
++      "weight_decay": 1e-12,
++      "betas": [
++        0.9,
++        0.999
++      ],
++      "eps": 1e-08,
++      "amsgrad": false
++    },
++    "precision": "FP32 network/stable CE; float64 probability kernel",
++    "T": 1000,
++    "rounds": 1,
++    "loss": "sumCE/(2*18336) each of two inputs,one optimizer step",
++    "dataset": {
++      "file": "assets/IMDB.npz",
++      "sha256": "398d59a0602e14dd0c92b8781e69a3234727d674923275864eec558770dffb5c",
++      "received_sha256": "351d066a702df18a188cff28822ea92182b0b1eb64ad0375e7f70e6a587ae466",
++      "reference_sha256": "10f1dbbbe55c6a069594b2dcb590d1b8295ca5436320ef4597cd30e6b7f73e42",
++      "type_names": [
++        "Director",
++        "Actor",
++        "Movie",
++        "Genre"
++      ],
++      "basis_kind": "pending complete held-out rank selection; no synthetic fallback"
++    },
++    "train_seed": 2026102911,
++    "arm": "D",
++    "features": {
++      "CN": true,
++      "ReFeX": true,
++      "RolX": false
++    },
++    "K": null,
++    "updates": 3000,
++    "checkpoints": [
++      0,
++      1000,
++      2000,
++      3000
++    ],
++    "ema": 0.99,
++    "sample_readout": "final3000_ema0.99",
++    "sample_seeds": [
++      2026102821,
++      2026102822
++    ],
++    "source_config_sha256": "765f452d150fa6f8984cb8db779c0d182fbce384745934c36babec597c74939a",
++    "metadata_note": "inherited config arms/version/engineering flags are historical; actual routing and authorization use protocol and launcher"
++  },
++  "IMDB_E": {
++    "model": {
++      "layers": 8,
++      "width": 256,
++      "edge_width": 64,
++      "global_width": 128,
++      "heads": 8,
++      "ff_node": 256,
++      "ff_edge": 64,
++      "ff_global": 256,
++      "dropout": 0.1,
++      "cn_hidden": 32,
++      "joint_width": 128,
++      "max_wedges": 2000000,
++      "max_query_paths": 2000000
++    },
++    "optimizer": {
++      "type": "AdamW",
++      "lr": 0.0002,
++      "weight_decay": 1e-12,
++      "betas": [
++        0.9,
++        0.999
++      ],
++      "eps": 1e-08,
++      "amsgrad": false
++    },
++    "precision": "FP32 network/stable CE; float64 probability kernel",
++    "T": 1000,
++    "rounds": 1,
++    "loss": "sumCE/(2*18336) each of two inputs,one optimizer step",
++    "dataset": {
++      "file": "assets/IMDB.npz",
++      "sha256": "398d59a0602e14dd0c92b8781e69a3234727d674923275864eec558770dffb5c",
++      "received_sha256": "351d066a702df18a188cff28822ea92182b0b1eb64ad0375e7f70e6a587ae466",
++      "reference_sha256": "10f1dbbbe55c6a069594b2dcb590d1b8295ca5436320ef4597cd30e6b7f73e42",
++      "type_names": [
++        "Director",
++        "Actor",
++        "Movie",
++        "Genre"
++      ],
++      "basis_kind": "pending complete held-out rank selection; no synthetic fallback"
++    },
++    "train_seed": 2026102911,
++    "arm": "E",
++    "features": {
++      "CN": true,
++      "ReFeX": true,
++      "RolX": true
++    },
++    "K": [
++      5,
++      4,
++      3,
++      2
++    ],
++    "updates": 3000,
++    "checkpoints": [
++      0,
++      1000,
++      2000,
++      3000
++    ],
++    "ema": 0.99,
++    "sample_readout": "final3000_ema0.99",
++    "sample_seeds": [
++      2026102821,
++      2026102822
++    ],
++    "source_config_sha256": "765f452d150fa6f8984cb8db779c0d182fbce384745934c36babec597c74939a",
++    "metadata_note": "inherited config arms/version/engineering flags are historical; actual routing and authorization use protocol and launcher"
++  },
++  "PubMed_A": {
++    "model": {
++      "layers": 8,
++      "width": 256,
++      "edge_width": 64,
++      "global_width": 128,
++      "heads": 8,
++      "ff_node": 256,
++      "ff_edge": 64,
++      "ff_global": 256,
++      "dropout": 0.1,
++      "cn_hidden": 32,
++      "joint_width": 128,
++      "max_wedges": 2000000,
++      "max_query_paths": 2000000
++    },
++    "optimizer": {
++      "type": "AdamW",
++      "lr": 0.0002,
++      "weight_decay": 1e-12,
++      "betas": [
++        0.9,
++        0.999
++      ],
++      "eps": 1e-08,
++      "amsgrad": false
++    },
++    "precision": "FP32 network/stable CE; float64 probability kernel",
++    "T": 1000,
++    "rounds": 1,
++    "loss": "sumCE/(2*18336) each of two inputs,one optimizer step",
++    "dataset": {
++      "file": "assets/PubMed.npz",
++      "sha256": "f6ea8ec461052094dd02c6b07d8ebb69e85fb3e595195007563593b9568914ef",
++      "received_sha256": "42706434557b4b1fa24bdc71dc9d3ebea3a772689002421e77ad3c4b3b827a94",
++      "reference_sha256": "dacff5a392e23fbcfb695076a14a6db5317f4a4382b69af2a7596a1a217163f8",
++      "type_names": [
++        "Gene",
++        "Disease",
++        "Chemical",
++        "Species"
++      ],
++      "basis_kind": "pending complete held-out rank selection; no synthetic fallback"
++    },
++    "train_seed": 2026102912,
++    "arm": "A",
++    "features": {
++      "CN": true,
++      "ReFeX": false,
++      "RolX": false
++    },
++    "K": null,
++    "updates": 3000,
++    "checkpoints": [
++      0,
++      1000,
++      2000,
++      3000
++    ],
++    "ema": 0.99,
++    "sample_readout": "final3000_ema0.99",
++    "sample_seeds": [
++      2026102821,
++      2026102822
++    ],
++    "source_config_sha256": "765f452d150fa6f8984cb8db779c0d182fbce384745934c36babec597c74939a",
++    "metadata_note": "inherited config arms/version/engineering flags are historical; actual routing and authorization use protocol and launcher"
++  },
++  "PubMed_C": {
++    "model": {
++      "layers": 8,
++      "width": 256,
++      "edge_width": 64,
++      "global_width": 128,
++      "heads": 8,
++      "ff_node": 256,
++      "ff_edge": 64,
++      "ff_global": 256,
++      "dropout": 0.1,
++      "cn_hidden": 32,
++      "joint_width": 128,
++      "max_wedges": 2000000,
++      "max_query_paths": 2000000
++    },
++    "optimizer": {
++      "type": "AdamW",
++      "lr": 0.0002,
++      "weight_decay": 1e-12,
++      "betas": [
++        0.9,
++        0.999
++      ],
++      "eps": 1e-08,
++      "amsgrad": false
++    },
++    "precision": "FP32 network/stable CE; float64 probability kernel",
++    "T": 1000,
++    "rounds": 1,
++    "loss": "sumCE/(2*18336) each of two inputs,one optimizer step",
++    "dataset": {
++      "file": "assets/PubMed.npz",
++      "sha256": "f6ea8ec461052094dd02c6b07d8ebb69e85fb3e595195007563593b9568914ef",
++      "received_sha256": "42706434557b4b1fa24bdc71dc9d3ebea3a772689002421e77ad3c4b3b827a94",
++      "reference_sha256": "dacff5a392e23fbcfb695076a14a6db5317f4a4382b69af2a7596a1a217163f8",
++      "type_names": [
++        "Gene",
++        "Disease",
++        "Chemical",
++        "Species"
++      ],
++      "basis_kind": "pending complete held-out rank selection; no synthetic fallback"
++    },
++    "train_seed": 2026102912,
++    "arm": "C",
++    "features": {
++      "CN": false,
++      "ReFeX": true,
++      "RolX": true
++    },
++    "K": [
++      8,
++      8,
++      8,
++      6
++    ],
++    "updates": 3000,
++    "checkpoints": [
++      0,
++      1000,
++      2000,
++      3000
++    ],
++    "ema": 0.99,
++    "sample_readout": "final3000_ema0.99",
++    "sample_seeds": [
++      2026102821,
++      2026102822
++    ],
++    "source_config_sha256": "765f452d150fa6f8984cb8db779c0d182fbce384745934c36babec597c74939a",
++    "metadata_note": "inherited config arms/version/engineering flags are historical; actual routing and authorization use protocol and launcher"
++  },
++  "PubMed_D": {
++    "model": {
++      "layers": 8,
++      "width": 256,
++      "edge_width": 64,
++      "global_width": 128,
++      "heads": 8,
++      "ff_node": 256,
++      "ff_edge": 64,
++      "ff_global": 256,
++      "dropout": 0.1,
++      "cn_hidden": 32,
++      "joint_width": 128,
++      "max_wedges": 2000000,
++      "max_query_paths": 2000000
++    },
++    "optimizer": {
++      "type": "AdamW",
++      "lr": 0.0002,
++      "weight_decay": 1e-12,
++      "betas": [
++        0.9,
++        0.999
++      ],
++      "eps": 1e-08,
++      "amsgrad": false
++    },
++    "precision": "FP32 network/stable CE; float64 probability kernel",
++    "T": 1000,
++    "rounds": 1,
++    "loss": "sumCE/(2*18336) each of two inputs,one optimizer step",
++    "dataset": {
++      "file": "assets/PubMed.npz",
++      "sha256": "f6ea8ec461052094dd02c6b07d8ebb69e85fb3e595195007563593b9568914ef",
++      "received_sha256": "42706434557b4b1fa24bdc71dc9d3ebea3a772689002421e77ad3c4b3b827a94",
++      "reference_sha256": "dacff5a392e23fbcfb695076a14a6db5317f4a4382b69af2a7596a1a217163f8",
++      "type_names": [
++        "Gene",
++        "Disease",
++        "Chemical",
++        "Species"
++      ],
++      "basis_kind": "pending complete held-out rank selection; no synthetic fallback"
++    },
++    "train_seed": 2026102912,
++    "arm": "D",
++    "features": {
++      "CN": true,
++      "ReFeX": true,
++      "RolX": false
++    },
++    "K": null,
++    "updates": 3000,
++    "checkpoints": [
++      0,
++      1000,
++      2000,
++      3000
++    ],
++    "ema": 0.99,
++    "sample_readout": "final3000_ema0.99",
++    "sample_seeds": [
++      2026102821,
++      2026102822
++    ],
++    "source_config_sha256": "765f452d150fa6f8984cb8db779c0d182fbce384745934c36babec597c74939a",
++    "metadata_note": "inherited config arms/version/engineering flags are historical; actual routing and authorization use protocol and launcher"
++  },
++  "PubMed_E": {
++    "model": {
++      "layers": 8,
++      "width": 256,
++      "edge_width": 64,
++      "global_width": 128,
++      "heads": 8,
++      "ff_node": 256,
++      "ff_edge": 64,
++      "ff_global": 256,
++      "dropout": 0.1,
++      "cn_hidden": 32,
++      "joint_width": 128,
++      "max_wedges": 2000000,
++      "max_query_paths": 2000000
++    },
++    "optimizer": {
++      "type": "AdamW",
++      "lr": 0.0002,
++      "weight_decay": 1e-12,
++      "betas": [
++        0.9,
++        0.999
++      ],
++      "eps": 1e-08,
++      "amsgrad": false
++    },
++    "precision": "FP32 network/stable CE; float64 probability kernel",
++    "T": 1000,
++    "rounds": 1,
++    "loss": "sumCE/(2*18336) each of two inputs,one optimizer step",
++    "dataset": {
++      "file": "assets/PubMed.npz",
++      "sha256": "f6ea8ec461052094dd02c6b07d8ebb69e85fb3e595195007563593b9568914ef",
++      "received_sha256": "42706434557b4b1fa24bdc71dc9d3ebea3a772689002421e77ad3c4b3b827a94",
++      "reference_sha256": "dacff5a392e23fbcfb695076a14a6db5317f4a4382b69af2a7596a1a217163f8",
++      "type_names": [
++        "Gene",
++        "Disease",
++        "Chemical",
++        "Species"
++      ],
++      "basis_kind": "pending complete held-out rank selection; no synthetic fallback"
++    },
++    "train_seed": 2026102912,
++    "arm": "E",
++    "features": {
++      "CN": true,
++      "ReFeX": true,
++      "RolX": true
++    },
++    "K": [
++      8,
++      8,
++      8,
++      6
++    ],
++    "updates": 3000,
++    "checkpoints": [
++      0,
++      1000,
++      2000,
++      3000
++    ],
++    "ema": 0.99,
++    "sample_readout": "final3000_ema0.99",
++    "sample_seeds": [
++      2026102821,
++      2026102822
++    ],
++    "source_config_sha256": "765f452d150fa6f8984cb8db779c0d182fbce384745934c36babec597c74939a",
++    "metadata_note": "inherited config arms/version/engineering flags are historical; actual routing and authorization use protocol and launcher"
++  }
++}--- a/run.py
++++ b/run.py
+@@ -1,6 +1,6 @@
+-"""Eight training trajectories, then64 existing-kernel chains; no auto approval."""
++"""Eight paired architecture models, then16 EMA-only existing-kernel chains; no auto approval."""
+ import argparse,os,pathlib,json,time,subprocess,signal,sys,shutil
+-from runtime_contract import ROOT,jobs,source_binding,sha,read,save,approval_gate,output_check,BUDGET,RESERVE,OLD_SEEDS,asset
++from runtime_contract import ROOT,jobs,source_binding,sha,read,save,approval_gate,output_check,RESERVE,UPDATES
+ 
+ def resources(devices,authority,rows,processes,handles):
+     if len(devices)!=8 or len(set(devices))!=8:raise ValueError('frozen queue requires eight distinct GPUs; report shortages, do not shrink')
+@@ -20,7 +20,7 @@
+         if source_binding()[1]!=binding:raise ValueError('runtime/summary source changed')
+         with (out/'summary_process.log').open('xb') as log:
+             p=subprocess.run([sys.executable,str(ROOT/'summarize.py'),'--run',str(out),'--output',str(out/'unified_evaluation.json'),
+-                              '--deadline',str(deadline-1)],env=dict(os.environ,CUDA_VISIBLE_DEVICES='',OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1',MKL_NUM_THREADS='1'),
++                              '--deadline',str(deadline-1)],env=dict(os.environ,CUDA_VISIBLE_DEVICES='',OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1',MKL_NUM_THREADS='1',TMPDIR=str(out/'tmp')),
+                               stdout=log,stderr=subprocess.STDOUT,timeout=max(.01,deadline-time.time()-1))
+         r=read(out/'unified_evaluation.json');receipt=dict(status=r['status'],exit_code=p.returncode,sha256=sha(out/'unified_evaluation.json'))
+         if source_binding()[1]!=binding:raise ValueError('summary source changed during evaluation')
+@@ -30,6 +30,7 @@
+ 
+ def supervise(out,approval_path,ledger_path,devices,spawn=subprocess.Popen,summarizer=summary_process,poll=.25):
+     ledger=read(ledger_path);stop=[False];running={};finished=[];failures=[];pending=jobs()['training'].copy();stage='training'
++    (out/'tmp').mkdir(exist_ok=True)  # same checked output filesystem, never system /tmp
+     handlers={s:signal.signal(s,lambda s,f:stop.__setitem__(0,True)) for s in [signal.SIGINT,signal.SIGTERM,signal.SIGHUP]}
+     try:
+         while pending or running:
+@@ -41,7 +42,7 @@
+                 pending.remove(job);log=(out/(job['id']+'.log')).open('xb');rd,wr=os.pipe()
+                 ticket=dict(parent_pid=os.getpid(),job=job,device=device,approval_sha256=sha(approval_path),ledger_sha256=sha(ledger_path))
+                 os.write(wr,json.dumps(ticket).encode());os.close(wr)
+-                env=dict(os.environ,CUDA_VISIBLE_DEVICES=device,OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1',MKL_NUM_THREADS='1',CUBLAS_WORKSPACE_CONFIG=':4096:8')
++                env=dict(os.environ,CUDA_VISIBLE_DEVICES=device,OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1',MKL_NUM_THREADS='1',CUBLAS_WORKSPACE_CONFIG=':4096:8',TMPDIR=str(out/'tmp'))
+                 try:process=spawn([sys.executable,str(ROOT/'run_worker.py'),'--approval',str(approval_path),'--ledger',str(ledger_path),'--launch-fd',str(rd)],
+                                   env=env,stdout=log,stderr=subprocess.STDOUT,pass_fds=(rd,),start_new_session=True)
+                 except BaseException:log.close();pending.insert(0,job);raise
+@@ -54,7 +55,7 @@
+                     try:item['receipt']=read(out/j['directory']/'summary.json')
+                     except Exception as e:item['receipt_error']=repr(e)
+                     r=item.get('receipt',{})
+-                    if code!=0 or r.get('status')!='complete' or (j['mode']=='train' and r.get('completed_updates')!=1000) or (j['mode']=='sample' and r.get('completed_chains')!=1):
++                    if code!=0 or r.get('status')!='complete' or (j['mode']=='train' and r.get('completed_updates')!=UPDATES) or (j['mode']=='sample' and r.get('completed_chains')!=1):
+                         failures.append(item);raise RuntimeError('worker failed/incomplete '+j['id'])
+             if not pending and not running and stage=='training':
+                 # All eight final checkpoints must exist before any test chain.
+@@ -80,7 +81,7 @@
+         save(out/'execution_receipt.json',receipt)
+         try:receipt['evaluation']=summarizer(out,ledger['deadline_epoch'],ledger['source_sha256'])
+         except BaseException as e:receipt['evaluation']=dict(status='failed',error=repr(e))
+-        if not failures and len(finished)==72 and receipt['evaluation']['status']=='complete':receipt['status']='complete'
++        if not failures and len(finished)==24 and receipt['evaluation']['status']=='complete':receipt['status']='complete'
+         receipt.update(finished_epoch=time.time(),elapsed_seconds=time.time()-ledger['start_epoch']);save(out/'launcher_summary.json',receipt)
+         for s,h in handlers.items():signal.signal(s,h)
+     return 0 if receipt['status']=='complete' else 2
+@@ -91,7 +92,7 @@
+     if a.mode=='dry-run':print(json.dumps(dict(**jobs(),source_sha256=source_binding()[1],formal_activated=False),indent=2));return 0
+     if not a.approval or not a.cost or not a.gpu_uuids:p.error('formal requires new approved cost, authorization and eight GPU UUIDs')
+     approval,cost=approval_gate(a.approval,a.cost,a.output)
+-    protected=[ROOT]+[pathlib.Path(approval.get('initial_paths',{}).get(str(s),asset(s)['initial_path'])).parent for s in OLD_SEEDS]
++    protected=[ROOT];BUDGET=approval['budget_seconds']
+     out=output_check(a.output,protected);devices=a.gpu_uuids
+     if devices!=approval['gpu_uuids']:raise ValueError('approved GPU/queue identity differs')
+     visibility=os.environ.get('CUDA_VISIBLE_DEVICES')
+--- a/run_worker.py
++++ b/run_worker.py
+@@ -1,6 +1,7 @@
+-"""Adapted frozen O worker: same normal2/validation/reverse_step/evaluate calls.
++"""Adapted frozen worker: unchanged normal2/validation/reverse_step/evaluate.
+ 
+-Train once, export four independent final readouts; each chain authenticates and
++Train3000, preserve raw and EMA; only final EMA is sampled and authenticated.
++Each chain authenticates and
+ loads exactly its selected file. Only launcher-issued pipes admit formal jobs.
+ """
+ import argparse,json,os,pathlib,signal,time,traceback,resource,copy,sys
+@@ -16,15 +17,15 @@
+ from hsgd.kernel import MarginalKernel
+ from hsgd.runtime import reverse_step
+ from evaluation import evaluate
+-from multi_ema import MultiEMA
++from ema import ParameterEMA
+ from runtime_contract import DECAYS
+ from integration import complete_normal2,checkpoint_payload,ema_validation,final_readouts
+ 
+ def paired_validation(model,ema,case,cfg,seed,rng):
+-    return dict(raw=validation(model,case,cfg,seed,rng),**{name:ema_validation(validation,model,e,case,cfg,seed,rng) for name,e in ema.members.items()})
++    return {'raw':validation(model,case,cfg,seed,rng),'ema_0.99':ema_validation(validation,model,ema,case,cfg,seed,rng)}
+ 
+ def export_readouts(out,model,ema,updates,binding):
+-    states=final_readouts(model,ema,updates);receipt=dict(train_seed=binding['train_seed'],updates=updates,
++    states=final_readouts(model,ema,updates);states={'raw':states['raw'],'ema_0.99':states['ema']};receipt=dict(dataset=binding['dataset'],arm=binding['arm'],train_seed=binding['train_seed'],updates=updates,
+         checkpoint_sha256=sha(out/'final.pt'),files={},binding=binding)
+     for kind,state in states.items():
+         path=out/('readout_'+kind+'.pt')
+@@ -34,9 +35,9 @@
+     save(out/'readouts.json',receipt)
+ 
+ def train(job,out,approval,ledger,check,progress):
+-    model,opt,case,cfg,rng,proof=fresh(job['train_seed'],approval.get('initial_paths'));ema=MultiEMA(model)
++    model,opt,case,cfg,rng,proof=fresh(job['dataset'],job['arm'],job['train_seed']);ema=ParameterEMA(model)
+     binding=dict(source_sha256=source_binding()[1],protocol_sha256=sha(ROOT/'protocol.json'),train_seed=job['train_seed'],
+-                 dataset='PubMed',arm='O',config=cfg,initial=proof,updates=1000,approval_sha256=ledger['approval_sha256'])
++                 dataset=job['dataset'],arm=job['arm'],config=cfg,initial=proof,updates=3000,approval_sha256=ledger['approval_sha256'])
+     save(out/'binding.json',binding)
+     completed=0
+     def snapshot(name):atomic_checkpoint(out/name,checkpoint_payload(model,opt,ema,completed,rng_get(rng,'cuda'),binding))
+@@ -44,14 +45,14 @@
+     snapshot('initial.pt');rows=[dict(updates=0,**paired_validation(model,ema,case,cfg,job['train_seed'],rng))]
+     save(out/'validation.json',rows)
+     try:
+-        for position in range(1,1001):
++        for position in range(1,3001):
+             check();inputs=pair_inputs(case,cfg,position,rng);begin=time.perf_counter()
+             rec=complete_normal2(normal2,model,opt,case,inputs,1000,'cuda',ema,completed);completed=position
+             rec.update(update=completed,total_update_seconds=time.perf_counter()-begin,input_sha256=input_hash(inputs),t=[x['t'] for x in inputs])
+             with (out/'training.jsonl').open('a') as f:f.write(json.dumps(rec)+'\n')
+             progress.update(completed_updates=completed,ema_updates=ema.updates);save(out/'progress.json',progress)
+-            if completed in [500,1000]:
+-                check();snapshot('midpoint.pt' if completed==500 else 'final.pt')
++            if completed in [1000,2000,3000]:
++                check();snapshot('final.pt' if completed==3000 else f'checkpoint_u{completed}.pt')
+                 rows.append(dict(updates=completed,**paired_validation(model,ema,case,cfg,job['train_seed'],rng)));save(out/'validation.json',rows)
+         check();export_readouts(out,model,ema,completed,binding)
+     except BaseException:
+@@ -64,10 +65,10 @@
+ def sample(job,out,run,approval,check,progress):
+     path,receipt=verify_readout(run,job)
+     payload=torch.load(path,map_location='cpu')
+-    if (payload['train_seed'],payload['readout'],payload['updates'],payload['checkpoint_sha256'])!=(job['train_seed'],job['readout'],1000,receipt['checkpoint_sha256']):raise ValueError('selected readout metadata mismatch')
++    if (payload['train_seed'],payload['readout'],payload['updates'],payload['checkpoint_sha256'])!=(job['train_seed'],job['readout'],3000,receipt['checkpoint_sha256']):raise ValueError('selected readout metadata mismatch')
+     if payload.get('decay')!=DECAYS.get(job['readout']):raise ValueError('selected decay identity mismatch')
+     if payload['binding']!=receipt['binding'] or payload['binding']['source_sha256']!=source_binding()[1]:raise ValueError('selected readout source')
+-    model,opt,case,cfg,unused,proof=fresh(job['train_seed'],approval.get('initial_paths'));del opt,unused
++    model,opt,case,cfg,unused,proof=fresh(job['dataset'],job['arm'],job['train_seed']);del opt,unused
+     model.load_state_dict(payload['model'],strict=True);model.eval()
+     # Hash of actual loaded selected readout, never raw's hash substituted for EMA.
+     from probe import equal
+@@ -85,7 +86,7 @@
+             if t%100==0 or t==1:state_save('complete_t%04d.pt'%next_t)
+         check();edges,fam=state_edges(case,state)
+         np.savez_compressed(out/'graph.npz',types=case['space'].types,edges=edges,families=fam,schema=np.array(case['space'].pairs))
+-        save(out/'metrics.json',evaluate(case,edges,cfg['datasets']['PubMed']['type_names'],check));check()
++        save(out/'metrics.json',evaluate(case,edges,cfg['datasets'][job['dataset']]['type_names'],check));check()
+         save(out/'binding.json',dict(job=job,readout=job['readout'],model_sha256=sha(path),checkpoint_sha256=receipt['checkpoint_sha256'],
+             graph_sha256=sha(out/'graph.npz'),metrics_sha256=sha(out/'metrics.json'),source_sha256=source_binding()[1],
+             initial_state_sha256=initial_state_sha,initial_rng=initial_rng,seconds=time.perf_counter()-begin))
+--- a/runtime_contract.py
++++ b/runtime_contract.py
+@@ -1,73 +1,63 @@
+ """EMA runtime identities and bindings; deliberately no torch/GPU import."""
+ import hashlib,json,pathlib,os
+ ROOT=pathlib.Path(__file__).resolve().parent
+-SEED_RECORD=json.loads((ROOT/'seed_manifest.json').read_text())
+-SEEDS=tuple(SEED_RECORD['all_seeds'])
+-OLD_SEEDS=tuple(SEED_RECORD['original_development_seeds'])
+-NEW_SEEDS=tuple(SEED_RECORD['new_seeds'])
+-DECAYS={'ema_0.9':0.9,'ema_0.97':0.97,'ema_0.99':0.99}
+-READOUTS=('raw',*DECAYS)
+-SAMPLES=(2026102821,2026102822)
+-BUDGET=11100  # 185-minute proposal only; still requires new explicit approval.
+-RESERVE=1200
++PROTOCOL=json.loads((ROOT/'protocol.json').read_text())
++TRAIN_SEEDS=PROTOCOL['train_seeds']; ARMS=tuple(PROTOCOL['arms'])
++DECAYS={'ema_0.99':.99};READOUTS=('ema_0.99',);SAMPLES=tuple(PROTOCOL['sample_seeds'])
++UPDATES=3000;RESERVE=1200
+ def sha(path):return hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest()
+ def read(path):return json.loads(pathlib.Path(path).read_text())
+ def save(path,value):
+     path=pathlib.Path(path);tmp=path.with_suffix(path.suffix+'.tmp')
+     tmp.write_text(json.dumps(value,indent=2,allow_nan=False));os.replace(tmp,path)
+-def cell(seed):
+-    if seed not in SEEDS:raise ValueError('unknown training seed')
+-    return 'PubMed_s%d_O'%seed
++def cell(dataset,seed,arm):
++    if TRAIN_SEEDS.get(dataset)!=seed or arm not in ARMS:raise ValueError('unfrozen task')
++    return f'{dataset}_s{seed}_{arm}'
+ def jobs():
+     train=[];sample=[]
+-    for slot,seed in enumerate(SEEDS):
+-        train.append(dict(id=cell(seed),mode='train',train_seed=seed,slot=slot,directory=cell(seed),updates=1000))
+-        for r in READOUTS:
+-            for s in SAMPLES:
+-                sample.append(dict(id=f'{cell(seed)}_{r}_{s}',mode='sample',train_seed=seed,readout=r,sample_seed=s,
+-                                   slot=slot,directory=f'{cell(seed)}/{r}/sample_{s}',T=1000,depends_on=cell(seed)))
+-    return dict(training=train,sampling=sample,policy='eight GPUs; all training jobs finish before sampling; eight serial chains on the same seed GPU')
++    for slot,(dataset,arm) in enumerate((d,a) for d in ('PubMed','IMDB') for a in ('E','D','A','C')):
++        seed=TRAIN_SEEDS[dataset];identity=cell(dataset,seed,arm)
++        common=dict(dataset=dataset,arm=arm,train_seed=seed,slot=slot)
++        train.append(dict(**common,id=identity,mode='train',directory=identity,updates=UPDATES))
++        for s in SAMPLES:
++            sample.append(dict(**common,id=f'{identity}_ema_0.99_{s}',mode='sample',readout='ema_0.99',sample_seed=s,directory=f'{identity}/ema_0.99/sample_{s}',T=1000,depends_on=identity))
++    return dict(training=train,sampling=sample,policy='eight cards one model per card; all training finish then two serial EMA chains per card')
+ def source_binding():
+     files={str(p.relative_to(ROOT)):sha(p) for p in sorted(ROOT.rglob('*')) if p.is_file()
+-           and '__pycache__' not in str(p) and '.pytest_cache' not in str(p)
+-           and ((p.suffix=='.py') or p==ROOT/'protocol.json' or p==ROOT/'initial_assets.json' or p==ROOT/'seed_manifest.json'
+-                or p==ROOT/'reference.json' or (ROOT/'package' in p.parents and p.suffix in ('.json','.npz')))}
++           and not any(x in p.parts for x in ('__pycache__','.pytest_cache','historical_multi_ema','evidence','tests'))
++           and p.suffix in ('.py','.json','.npz') and p.name not in ('cost.json','release.json','source_manifest.json')}
+     return files,hashlib.sha256(json.dumps(files,sort_keys=True).encode()).hexdigest()
+-def asset(seed):
+-    return next(x for x in read(ROOT/'initial_assets.json')['records'] if x['train_seed']==seed)
+-def initial_path(seed,overrides=None):
+-    a=asset(seed);p=pathlib.Path((overrides or {}).get(str(seed),a['initial_path']))
+-    if sha(p)!=a['initial_sha256_from_sealed_receipt']:raise ValueError('initial checkpoint hash differs')
+-    return p
+-def readout_path(run,seed,kind):
+-    if kind not in READOUTS:raise ValueError('readout')
+-    return pathlib.Path(run)/cell(seed)/('readout_'+kind+'.pt')
++def dictionary_expected(dataset):
++    return read(ROOT/'asset_bindings.json')['dictionaries'][dataset]
++def verify_assets():
++    for name,h in read(ROOT/'asset_bindings.json')['files'].items():
++        if sha(ROOT/name)!=h:raise ValueError('frozen asset changed: '+name)
++def readout_path(run,job):
++    if job['readout']!='ema_0.99':raise ValueError('only final EMA generates')
++    return pathlib.Path(run)/cell(job['dataset'],job['train_seed'],job['arm'])/'readout_ema_0.99.pt'
+ def verify_readout(run,job):
+-    folder=pathlib.Path(run)/cell(job['train_seed']);receipt=read(folder/'readouts.json')
+-    if receipt['train_seed']!=job['train_seed'] or receipt['updates']!=1000:raise ValueError('readout identity/count')
+-    p=readout_path(run,job['train_seed'],job['readout'])
+-    if sha(p)!=receipt['files'][job['readout']]['sha256']:raise ValueError('readout bytes differ')
+-    if sha(folder/'final.pt')!=receipt['checkpoint_sha256']:raise ValueError('readout final checkpoint differs')
++    folder=pathlib.Path(run)/cell(job['dataset'],job['train_seed'],job['arm']);receipt=read(folder/'readouts.json')
++    if (receipt['dataset'],receipt['arm'],receipt['train_seed'],receipt['updates'])!=(job['dataset'],job['arm'],job['train_seed'],UPDATES):raise ValueError('readout identity/count')
++    p=readout_path(run,job)
++    if sha(p)!=receipt['files'][job['readout']]['sha256'] or sha(folder/'final.pt')!=receipt['checkpoint_sha256']:raise ValueError('readout/checkpoint bytes differ')
+     if read(folder/'summary.json')['status']!='complete':raise ValueError('training incomplete')
+     return p,receipt
+ def approval_gate(path,cost_path,output):
+-    a=read(path);c=read(cost_path)
+-    if a.get('user_formal_authorized') is not True or a.get('independent_review')!='passed' or not a.get('authorization_reference'):raise PermissionError('explicit formal approval missing')
++    a=read(path);c=read(cost_path);verify_assets()
++    if a.get('user_formal_authorized') is not True or a.get('independent_review')!='passed' or not a.get('authorization_reference'):raise PermissionError('new formal authorization and review required')
+     if a['source_sha256']!=source_binding()[1] or a['protocol_sha256']!=sha(ROOT/'protocol.json'):raise ValueError('source/protocol binding')
+-    if a['budget_seconds']!=BUDGET or a['updates']!=1000 or a['cost_sha256']!=sha(cost_path):raise ValueError('budget/count/cost binding')
++    if a['updates']!=UPDATES or a['cost_sha256']!=sha(cost_path) or a['budget_seconds']!=c['requested_budget_seconds']:raise ValueError('budget/count/cost binding')
+     if pathlib.Path(a['output']).resolve()!=pathlib.Path(output).resolve():raise ValueError('output binding')
+-    if c['source_sha256']!=a['source_sha256'] or c['status']!='passed' or c['schedule']!=jobs():raise ValueError('cost/source/queue mismatch')
+-    if c['planned_seconds']>BUDGET:raise ValueError('budget insufficient')
+-    evidence=read(c['preflight_path'])
+-    if sha(c['preflight_path'])!=c['preflight_sha256'] or evidence['status']!='passed' or evidence['source_sha256']!=a['source_sha256']:raise ValueError('preflight evidence binding')
+-    for seed in OLD_SEEDS:initial_path(seed,a.get('initial_paths'))
++    if c['source_sha256']!=a['source_sha256'] or c['schedule']!=jobs() or c['status']!='passed':raise ValueError('cost/source/queue mismatch')
++    if c['planned_seconds']>a['budget_seconds']:raise ValueError('budget insufficient')
++    if a['asset_bindings_sha256']!=sha(ROOT/'asset_bindings.json'):raise ValueError('external asset approval binding')
+     return a,c
+ def verify_ticket(ticket,job,approval,ledger,device,parent):
+     if ticket.get('parent_pid')!=parent or ticket.get('job')!=job or ticket.get('device')!=device:raise PermissionError('launcher ticket mismatch')
+     if ticket['approval_sha256']!=sha(approval) or ticket['ledger_sha256']!=sha(ledger):raise ValueError('launch binding differs')
+     l=read(ledger);a=read(approval)
+     if l['approval_sha256']!=sha(approval) or l['source_sha256']!=source_binding()[1] or a['source_sha256']!=l['source_sha256']:raise ValueError('activated source/approval mismatch')
+-    if l['deadline_epoch']!=l['start_epoch']+BUDGET:raise ValueError('deadline changed')
++    if l['deadline_epoch']!=l['start_epoch']+a['budget_seconds']:raise ValueError('deadline changed')
+ def output_check(path,protected):
+     p=pathlib.Path(path).resolve()
+     if p.exists():raise FileExistsError('new output only, no automatic restart')
+--- a/summarize.py
++++ b/summarize.py
+@@ -1,84 +1,117 @@
+-"""Identity-based raw/EMA comparison using unchanged graph metric definitions."""
+-import argparse,pathlib,time,json
++"""Final EMA A/C/D/E evaluation; original and induced LCC always separate.
++Frozen pure metric functions; no model import. Missing/failed cells remain.
++"""
++import argparse,pathlib,time,json,itertools,math,collections,csv
+ import numpy as np
+-from runtime_contract import ROOT,SEEDS,SAMPLES,READOUTS,DECAYS,jobs,cell,read,sha,save,source_binding,verify_readout
+-from summary_metrics import graph_summary,paired,strict_mean
+-from assessment import assess
++from runtime_contract import ROOT,jobs,read,save,sha,source_binding
++from lcc_eval import metrics as M
++from evaluation_fields import scalar
++Counter=collections.Counter
+ 
+-def assemble(records,reference):
+-    template=graph_summary(reference,reference);cells={};contrasts=[];assessment_rows=[]
+-    index={}
+-    for row in records:
+-        k=(row['train_seed'],row['readout'],row['sample_seed'])
+-        if k in index:raise ValueError('duplicate identity')
+-        index[k]=row
+-    expected={(s,r,k) for s in SEEDS for r in READOUTS for k in SAMPLES}
+-    if set(index)!=expected:raise ValueError('must explicitly record all64 results, including missing ones')
+-    for seed in SEEDS:
+-        for r in READOUTS:
+-            rows=[index[seed,r,k] for k in SAMPLES];ready=all(x['status']=='complete' for x in rows)
+-            diversity=None
+-            if ready:
+-                a,b=[set(map(tuple,x['edge_set'])) for x in rows];union=len(a|b)
+-                diversity=dict(labelled_graphs_equal=a==b,edge_symmetric_difference=len(a^b),edge_jaccard=len(a&b)/union if union else 1.,scope='two labelled samples only; no topology/population diversity guarantee')
+-            cells[f'{cell(seed)}_{r}']=dict(graphs=rows,mean=strict_mean([x['values'] for x in rows]) if ready else None,
+-                                          mean_reason=None if ready else 'required_graph_missing_or_failed',diversity=diversity)
+-        for kind in DECAYS:
+-            diffs=[]
+-            for k in SAMPLES:
+-                left,right=index[seed,kind,k],index[seed,'raw',k]
+-                ready=left['status']==right['status']=='complete'
+-                diffs.append(dict(sample_seed=k,status='complete' if ready else 'incomplete',difference=paired(left.get('values'),right.get('values'),template)))
+-            contrasts.append(dict(train_seed=seed,contrast=kind+'-raw',per_sample=diffs,mean=strict_mean([x['difference'] for x in diffs]) if all(x['status']=='complete' for x in diffs) else None))
+-    for row in records:
+-        a={k:row[k] for k in ['train_seed','readout','sample_seed','status']}
+-        if row['status']=='complete':
+-            m=row['metrics'];a.update(edges=m['edges'],W1_incident4=m['W1_definitions']['incident4'],LCC=m['lcc'],family_edges=m['family_edges'],other_metrics=m)
+-        assessment_rows.append(a)
+-    return dict(status='complete' if all(x['status']=='complete' for x in records) else 'incomplete',cells=cells,contrasts=contrasts,
+-                assessment=assess(assessment_rows),scope='one trajectory per training seed; old2 and new6 separately; three EMA scales are repeated readouts, not independent trainings or cross-dataset evidence')
+-
+-def collect(run,check=lambda:None):
+-    reference=read(ROOT/'reference.json');records=[]
+-    with np.load(ROOT/'package/assets/PubMed.npz',allow_pickle=False) as z:types=z['types'];schema=z['schema']
+-    for job in jobs()['sampling']:
+-        check();folder=run/job['directory'];row=dict(train_seed=job['train_seed'],readout=job['readout'],sample_seed=job['sample_seed'],status='incomplete',path=str(folder))
+-        try:
+-            if (folder/'summary.json').exists():row['worker_receipt']=read(folder/'summary.json')
+-            else:row['worker_receipt']=dict(status='not_started' if not folder.exists() else 'incomplete_no_receipt')
+-            if row['worker_receipt']['status']!='complete':raise ValueError('worker not complete')
+-            path,receipt=verify_readout(run,job);b=read(folder/'binding.json');m=read(folder/'metrics.json')
+-            if b['job']!=job or b['readout']!=job['readout'] or b['model_sha256']!=sha(path) or b['checkpoint_sha256']!=receipt['checkpoint_sha256']:raise ValueError('sample/readout identity mismatch')
+-            if b['source_sha256']!=source_binding()[1] or sha(folder/'graph.npz')!=b['graph_sha256'] or sha(folder/'metrics.json')!=b['metrics_sha256']:raise ValueError('sample/source hashes differ')
+-            if m['reference_metrics']!=reference:raise ValueError('reference differs')
+-            with np.load(folder/'graph.npz',allow_pickle=False) as z:
+-                np.testing.assert_array_equal(z['types'],types);np.testing.assert_array_equal(z['schema'],schema);edges=z['edges'];fam=z['families']
+-            if edges.shape!=(2,m['edges']) or fam.shape!=(m['edges'],) or np.any(edges<0) or np.any(edges>=len(types)) or np.any(edges[0]>=edges[1]) or len(set(map(tuple,edges.T)))!=m['edges']:raise ValueError('graph contract')
+-            if np.any(fam<0) or np.any(fam>=len(schema)):raise ValueError('family bounds')
+-            np.testing.assert_array_equal(np.sort(types[edges],axis=0).T,schema[fam])
+-            np.testing.assert_array_equal(np.bincount(fam,minlength=len(schema)),m['family_edges'])
+-            if not np.isclose(m['W1_definitions']['all10_compat'],.4*m['W1_definitions']['incident4'],atol=1e-12,rtol=1e-12):raise ValueError('W1 conventions differ')
+-            row.update(status='complete',values=graph_summary(m,reference),metrics=m,edge_set=edges.T.tolist(),binding=b)
+-        except (TimeoutError,InterruptedError):raise
+-        except Exception as e:row['reason']=repr(e)
+-        records.append(row)
+-    # Initial state/random stream pairing must match across readouts and training seeds.
+-    for k in SAMPLES:
+-        rows=[x for x in records if x['sample_seed']==k and x['status']=='complete']
+-        if rows:
+-            first=rows[0]['binding']
+-            for row in rows:
+-                if row['binding']['initial_state_sha256']!=first['initial_state_sha256'] or row['binding']['initial_rng']!=first['initial_rng']:
+-                    row.update(status='incomplete',reason='sampling initial state/RNG pairing differs');row.pop('values',None)
+-    return assemble(records,reference)
+-
++def mean(values):
++    return sum(values)/len(values) if values and all(v is not None and math.isfinite(float(v)) for v in values) else None
++def delta(a,b):return a-b if a is not None and b is not None else None
++def write_json(path,value):
++    path=pathlib.Path(path);path.parent.mkdir(parents=True,exist_ok=True)
++    path.write_text(json.dumps(value,indent=2,allow_nan=False,default=lambda x:x.tolist() if isinstance(x,np.ndarray) else x.item()))
++def factory():
++    v=ROOT/'lcc_eval/vendor';return M.frozen(v/'frozen_metrics.py',v/'aligned_evaluate.py',v/'hgen_utils.py')
++def load_graph(path,reference=False):
++    with np.load(path,allow_pickle=False) as z:
++        g=M.make_graph(z['types'],z['edges'].T if reference else z['edges'],z['schema'])
++        if 'families' in z:np.testing.assert_array_equal(g['families'],z['families'])
++    return g
++def evaluate_graph(g,ref,rs,F,names,check):
++    s=M.stats(g,F,names,check);comp=M.compare(g,s,ref,rs,F,names)
++    raw,dist=scalar(s,rs,comp,names);rv,_=scalar(rs,rs,M.compare(ref,rs,ref,rs,F,names),names)
++    value=dict(statistics=s,comparison=comp,raw=raw,reference=rv,absolute_error={k:None if v is None or rv.get(k) is None else abs(v-rv[k]) for k,v in raw.items()},distribution_error=dist)
++    value['undefined']={group:{k:'undefined_zero_denominator_missing_type_or_unimplemented_metric' for k,v in value[group].items() if v is None} for group in ('raw','reference','absolute_error','distribution_error')}
++    return value
++def aggregate(records,templates):
++    index={(r['dataset'],r['arm'],r['sample_seed'],r['version']):r for r in records};means=[];pairs=[];pairmeans=[];clean=[]
++    protocol=read(ROOT/'protocol.json');samples=protocol['sample_seeds']
++    for dataset in protocol['train_seeds']:
++        seed=protocol['train_seeds'][dataset]
++        for version in ('original','lcc'):
++            for group in ('raw','absolute_error','distribution_error'):
++                keys=set(templates[dataset][group])
++                for r in records:
++                    if r['dataset']==dataset:keys.update(r.get(group,{}))
++                for metric in sorted(keys):
++                    def value(arm,sample,v=version):return index.get((dataset,arm,sample,v),{}).get(group,{}).get(metric)
++                    for arm in protocol['arms']:
++                        vals=[value(arm,s) for s in samples];m=mean(vals)
++                        means.append(dict(dataset=dataset,train_seed=seed,arm=arm,version=version,group=group,metric=metric,value=m,reason=None if m is not None else 'both_samples_required_and_defined'))
++                        if version=='lcc':
++                            for s in samples:clean.append(dict(dataset=dataset,train_seed=seed,arm=arm,sample_seed=s,group=group,metric=metric,difference=delta(value(arm,s),value(arm,s,'original'))))
++                    for left,right in protocol['contrasts']:
++                        vals=[]
++                        for s in samples:
++                            d=delta(value(left,s),value(right,s));vals.append(d)
++                            pairs.append(dict(dataset=dataset,train_seed=seed,sample_seed=s,contrast=left+'-'+right,version=version,group=group,metric=metric,difference=d,reason=None if d is not None else 'missing_or_undefined_required_pair'))
++                        pairmeans.append(dict(dataset=dataset,train_seed=seed,contrast=left+'-'+right,version=version,group=group,metric=metric,difference=mean(vals),reason=None if mean(vals) is not None else 'both_pairs_required_and_defined'))
++    return dict(cell_means=means,paired=pairs,paired_means=pairmeans,lcc_minus_original=clean)
++def diversity(a,b,sa=None,sb=None,F=None):
++    x=set(map(tuple,a['original_ids'][a['edges']].T));y=set(map(tuple,b['original_ids'][b['edges']].T))
++    na,nb=set(a['original_ids']),set(b['original_ids'])
++    value=dict(node_jaccard=len(na&nb)/len(na|nb),labeled_edge_symmetric_difference=len(x^y),labeled_edge_jaccard=len(x&y)/len(x|y) if x|y else None,
++        nodes=[len(a['types']),len(b['types'])],edges=[len(x),len(y)],degree_W1=M.w1(a['total'],b['total']),
++        exact_labeled_duplicate=np.array_equal(a['original_ids'],b['original_ids']) and x==y,
++        nonisomorphic_by_size=len(a['types'])!=len(b['types']) or len(x)!=len(y),
++        limitation='labeled edge difference is not an isomorphism-invariant diversity guarantee; only two samples')
++    if sa is not None and sb is not None and F is not None:
++        value.update(triangle_composition_TV=F['tv'](Counter(sa['typed_triangles']),Counter(sb['typed_triangles'])),
++            MP2_composition_TV=F['tv'](Counter(sa['mp'][1]['counts']),Counter(sb['mp'][1]['counts'])),
++            MP3_composition_TV=F['tv'](Counter(sa['mp'][2]['counts']),Counter(sb['mp'][2]['counts'])))
++    return value
+ def main():
+     p=argparse.ArgumentParser();p.add_argument('--run',required=True);p.add_argument('--output',required=True);p.add_argument('--deadline',type=float,required=True);a=p.parse_args()
+-    run=pathlib.Path(a.run);out=pathlib.Path(a.output)
+-    if out.exists():raise FileExistsError('do not overwrite summary')
++    run=pathlib.Path(a.run);out=pathlib.Path(a.output);derived=run/'derived_lcc_evaluation';derived.mkdir(exist_ok=False)
++    started=time.time();records=[];inventory=[];graphs={};templates={};errors=[]
+     def check():
+-        if time.time()>=a.deadline:raise TimeoutError('summary deadline')
+-    try:check();r=collect(run,check);check()
+-    except BaseException as e:r=dict(status='incomplete',summary_error=repr(e))
+-    save(out,r);return 0 if r['status']=='complete' else 2
++        if time.time()>=a.deadline:raise TimeoutError('evaluation deadline')
++    try:
++        cfg=read(ROOT/'package/config.json');F=factory();refs={}
++        for dataset in ('IMDB','PubMed'):
++            check();ref=load_graph(ROOT/'package'/cfg['datasets'][dataset]['file'],True);names=cfg['datasets'][dataset]['type_names'];rs=M.stats(ref,F,names,check)
++            refs[dataset]=(ref,rs,names);templates[dataset]=evaluate_graph(ref,ref,rs,F,names,check);write_json(derived/(dataset+'_reference.json'),templates[dataset])
++        for job in jobs()['sampling']:
++            check();folder=run/job['directory'];item=dict(job=job,status='missing',reason='sampling output absent');inventory.append(item)
++            if (folder/'summary.json').exists():item['worker']=read(folder/'summary.json')
++            if not (folder/'graph.npz').exists():continue
++            if item.get('worker',{}).get('status')!='complete':item.update(status='incomplete',reason='worker not complete');continue
++            binding=read(folder/'binding.json')
++            if binding['job']!=job or sha(folder/'graph.npz')!=binding['graph_sha256']:raise ValueError('graph identity/hash mismatch')
++            ref,rs,names=refs[job['dataset']];g=load_graph(folder/'graph.npz');kept,mapping=M.lcc(g)
++            target=derived/job['id'];target.mkdir();mapping.update(source_sha256=sha(folder/'graph.npz'),source=str(folder/'graph.npz'))
++            np.testing.assert_array_equal(kept['degree'],g['degree'][mapping['selected_local_ids']])
++            np.savez_compressed(target/'lcc.npz',types=kept['types'],edges=kept['edges'],families=kept['families'],schema=kept['schema'],new_to_original=kept['original_ids'],old_to_new=np.array(mapping['old_to_new']))
++            mapping['derived_sha256']=sha(target/'lcc.npz');write_json(target/'mapping.json',mapping)
++            for version,graph in [('original',g),('lcc',kept)]:
++                check();value=evaluate_graph(graph,ref,rs,F,names,check);value.update(dataset=job['dataset'],arm=job['arm'],train_seed=job['train_seed'],sample_seed=job['sample_seed'],version=version)
++                records.append(value);write_json(target/(version+'.json'),value);graphs[job['dataset'],job['arm'],job['sample_seed'],version]=graph
++            type_counts=np.bincount(g['types'],minlength=4);kept_counts=np.bincount(kept['types'],minlength=4)
++            before=np.bincount(g['families'],minlength=10);after=np.bincount(kept['families'],minlength=10)
++            item.update(status='complete',reason=None,node_retention=len(kept['types'])/len(g['types']),edge_retention=kept['edges'].shape[1]/g['edges'].shape[1] if g['edges'].shape[1] else None,mapping=str(target/'mapping.json'),
++                type_counts_original=type_counts.tolist(),type_counts_lcc=kept_counts.tolist(),type_nodes_lost=(type_counts-kept_counts).tolist(),
++                type_retention=[int(b)/int(a) if a else None for a,b in zip(type_counts,kept_counts)],
++                family_edges_original=before.tolist(),family_edges_lcc=after.tolist(),family_retention=[int(b)/int(a) if a else None for a,b in zip(before,after)])
++    except BaseException as e:errors.append(repr(e))
++    seen={x['job']['id'] for x in inventory}
++    inventory.extend(dict(job=j,status='not_evaluated',reason='earlier_failure_or_deadline') for j in jobs()['sampling'] if j['id'] not in seen)
++    aggregation=aggregate(records,templates) if len(templates)==2 else dict(reason='reference evaluation incomplete')
++    ds=[];record_index={(r['dataset'],r['arm'],r['sample_seed'],r['version']):r for r in records}
++    for job in jobs()['training']:
++        for version in ('original','lcc'):
++            x=[graphs.get((job['dataset'],job['arm'],s,version)) for s in (2026102821,2026102822)]
++            keys=[(job['dataset'],job['arm'],s,version) for s in (2026102821,2026102822)]
++            valid=all(k in record_index for k in keys)
++            ds.append(dict(job=job,version=version,metrics=diversity(*x,record_index[keys[0]]['statistics'],record_index[keys[1]]['statistics'],F) if valid else None,reason=None if valid else 'both_graphs_required'))
++    result=dict(status='complete' if len(records)==32 and not errors and all(x['status']=='complete' for x in inventory) else 'incomplete',records=records,inventory=inventory,diversity=ds,errors=errors,seconds=time.time()-started,source_sha256=source_binding()[1],**aggregation)
++    write_json(out,result)
++    for name in ('cell_means','paired','paired_means','lcc_minus_original'):
++        rows=result.get(name,[])
++        if rows:
++            with (derived/(name+'.csv')).open('w',newline='') as f:w=csv.DictWriter(f,fieldnames=list(rows[0]));w.writeheader();w.writerows(rows)
++    return 0 if result['status']=='complete' else 2
+ if __name__=='__main__':raise SystemExit(main())
+--- a/test_screen.py
++++ b/test_screen.py
+@@ -0,0 +1,162 @@
++import json,sys,pathlib,copy,os,subprocess,time
++import numpy as np
++import pytest
++import torch
++import runtime_contract as R
++import run
++from ema import ParameterEMA
++from integration import final_readouts,restore_payload,checkpoint_payload,ema_validation
++from summarize import aggregate,mean,factory,load_graph,evaluate_graph,diversity
++from lcc_eval import metrics as M
++
++def test_exact_queue_and_dependencies():
++    j=R.jobs();assert len(j['training'])==8 and len(j['sampling'])==16
++    assert len({x['id'] for x in j['training']+j['sampling']})==24
++    assert len({x['directory'] for x in j['training']+j['sampling']})==24
++    for t in j['training']:
++        c=[s for s in j['sampling'] if s['depends_on']==t['id']]
++        assert t['updates']==3000 and len(c)==2 and all(s['slot']==t['slot'] and s['readout']=='ema_0.99' and s['T']==1000 for s in c)
++    assert {x['train_seed'] for x in j['training']}=={2026102911,2026102912}
++
++def test_asset_dictionary_bindings():
++    R.verify_assets()
++    assert R.dictionary_expected('IMDB')['K']==[5,4,3,2]
++    assert R.dictionary_expected('PubMed')['K']==[8,8,8,6]
++
++def test_no_formal_budget_or_approval():
++    assert R.read(R.ROOT/'protocol.json')['budget_seconds'] is None
++    assert R.read(R.ROOT/'protocol.json')['formal_authorized'] is False
++
++def test_ema_formula_theta0_and_rng():
++    m=torch.nn.Linear(2,1);e=ParameterEMA(m);old={k:v.clone() for k,v in e.shadow.items()};rng=torch.get_rng_state()
++    with torch.no_grad():
++        for p in m.parameters():p.add_(1)
++    e.update(m,1)
++    for n,p in m.named_parameters():torch.testing.assert_close(e.shadow[n],old[n]*.99+p*.01)
++    assert torch.equal(rng,torch.get_rng_state())
++
++def test_final3000_only_and_independent_exports():
++    m=torch.nn.Linear(1,1);e=ParameterEMA(m)
++    with pytest.raises(ValueError):final_readouts(m,e,1000)
++    e.updates=3000;x=final_readouts(m,e,3000);x['ema']['weight'].zero_()
++    assert not torch.equal(x['ema']['weight'],e.shadow['weight'])
++
++def test_ema_validation_exception_restores():
++    m=torch.nn.Linear(1,1);e=ParameterEMA(m);old=copy.deepcopy(m.state_dict());mode=m.training
++    def broken(*args):raise RuntimeError('mock')
++    with pytest.raises(RuntimeError):ema_validation(broken,m,e)
++    assert all(torch.equal(v,m.state_dict()[k]) for k,v in old.items()) and mode==m.training
++
++def test_mock_real_train_loop_milestones(monkeypatch,tmp_path):
++    import run_worker as w
++    m=torch.nn.Linear(1,1);o=torch.optim.AdamW(m.parameters());j=R.jobs()['training'][0];snaps=[];valid=[]
++    monkeypatch.setattr(w,'fresh',lambda *a:(m,o,{}, {},None,{}))
++    monkeypatch.setattr(w,'rng_get',lambda *a:{})
++    monkeypatch.setattr(w,'atomic_checkpoint',lambda p,x:snaps.append((p.name,x['updates'],x['ema']['updates'])))
++    monkeypatch.setattr(w,'paired_validation',lambda m,e,*a:valid.append(e.updates) or {})
++    monkeypatch.setattr(w,'pair_inputs',lambda *a:[{'t':1},{'t':500}])
++    monkeypatch.setattr(w,'input_hash',lambda *a:'mock')
++    def step(fn,m,o,c,inp,T,device,e,u):e.updates=u+1;return {'optimizer_steps':1}
++    monkeypatch.setattr(w,'complete_normal2',step)
++    monkeypatch.setattr(w,'export_readouts',lambda out,m,e,u,b:valid.append(('export',u,e.updates)))
++    w.train(j,tmp_path,{},dict(approval_sha256='mock'),lambda:None,{})
++    assert snaps==[('initial.pt',0,0),('checkpoint_u1000.pt',1000,1000),('checkpoint_u2000.pt',2000,2000),('final.pt',3000,3000)]
++    assert valid==[0,1000,2000,3000,('export',3000,3000)]
++
++def test_readout_wrong_identity_or_bytes_rejected(tmp_path):
++    j=R.jobs()['sampling'][0];folder=tmp_path/j['depends_on'];folder.mkdir()
++    p=folder/'readout_ema_0.99.pt';p.write_bytes(b'EMA');(folder/'final.pt').write_bytes(b'checkpoint')
++    receipt=dict(dataset=j['dataset'],arm=j['arm'],train_seed=j['train_seed'],updates=3000,checkpoint_sha256=R.sha(folder/'final.pt'),files={'ema_0.99':{'sha256':R.sha(p)}})
++    R.save(folder/'readouts.json',receipt);R.save(folder/'summary.json',{'status':'complete'})
++    assert R.verify_readout(tmp_path,j)[0]==p
++    p.write_bytes(b'raw')
++    with pytest.raises(ValueError):R.verify_readout(tmp_path,j)
++    p.write_bytes(b'EMA');receipt['arm']='D';R.save(folder/'readouts.json',receipt)
++    with pytest.raises(ValueError):R.verify_readout(tmp_path,j)
++
++def test_summary_is_in_source_binding():
++    f,_=R.source_binding();assert 'summarize.py' in f and 'evaluation_fields.py' in f and 'lcc_eval/metrics.py' in f
++
++def test_output_overlap_rejected(tmp_path):
++    protected=tmp_path/'input';protected.mkdir()
++    with pytest.raises(ValueError):R.output_check(protected/'new',[protected])
++    assert not (protected/'new').exists()
++
++def test_original_lcc_induced_and_actual_capacities():
++    types=np.array([0,1,2,3,0]);edges=np.array([[0,1,3],[1,2,4]])
++    schema=np.array([(a,b) for a in range(4) for b in range(a,4)])
++    g=M.make_graph(types,edges,schema);k,m=M.lcc(g)
++    assert m['selected_local_ids']==[0,1,2] and k['edges'].shape[1]==2
++    assert sum(M.capacity(k))==3 and sum(M.capacity(g))==10
++    np.testing.assert_array_equal(k['degree'],g['degree'][m['selected_local_ids']])
++
++def test_scalar_error_first_and_null_propagation():
++    templates={d:{'raw':{'edges':10},'absolute_error':{'edges':0},'distribution_error':{'W1':0}} for d in R.TRAIN_SEEDS}
++    rows=[]
++    for s,n in zip(R.SAMPLES,[8,12]):
++        rows.append(dict(dataset='IMDB',arm='A',sample_seed=s,version='original',raw={'edges':n},absolute_error={'edges':abs(n-10)},distribution_error={'W1':1}))
++    out=aggregate(rows,templates)
++    row=next(x for x in out['cell_means'] if x['dataset']=='IMDB' and x['arm']=='A' and x['version']=='original' and x['group']=='absolute_error' and x['metric']=='edges');assert row['value']==2
++    assert all(x['difference'] is None for x in out['paired'])
++    assert mean([1,None]) is None
++
++def test_mp_labels_and_zero_denominator():
++    names=['a','b','c','d'];types=np.arange(4);schema=np.array([(a,b) for a in range(4) for b in range(a,4)])
++    g=M.make_graph(types,np.array([[0,1,2],[1,2,3]]),schema);F=factory();s=M.stats(g,F,names,lambda:None);v=evaluate_graph(g,g,s,F,names,lambda:None)
++    assert [v['raw'][f'MP{i}_total'] for i in (1,2,3)]==[3,2,1]
++    assert v['distribution_error']['MP2_composition_TV']==0
++    assert any(r['path_ratio'] is None for r in s['typed_twohop_closure'].values())
++
++def test_missing_type_distribution_is_null():
++    schema=np.array([(a,b) for a in range(4) for b in range(a,4)]);F=factory();names=['a','b','c','d']
++    ref=M.make_graph(np.arange(4),np.array([[0,1,2],[1,2,3]]),schema);g=M.make_graph(np.array([0,1]),np.array([[0],[1]]),schema)
++    rs=M.stats(ref,F,names,lambda:None);v=evaluate_graph(g,ref,rs,F,names,lambda:None)
++    assert v['distribution_error']['main_incident4_W1'] is None and len(v['comparison']['missing_types'])==2
++
++def test_w1_compatibility_and_exact_self_reference():
++    g=load_graph(R.ROOT/'package/assets/IMDB.npz',True);F=factory();names=['Director','Actor','Movie','Genre'];s=M.stats(g,F,names,lambda:None);v=evaluate_graph(g,g,s,F,names,lambda:None)
++    assert v['distribution_error']['main_incident4_W1']==0 and v['distribution_error']['all10_compat_W1']==0
++    assert s['component_sizes']==[188,2,2]
++
++@pytest.mark.parametrize('fail',[False,True])
++def test_supervisor_mock_success_failure(monkeypatch,tmp_path,fail):
++    ap=tmp_path/'approval.json';lp=tmp_path/'ledger.json';R.save(ap,{});R.save(lp,dict(start_epoch=time.time(),deadline_epoch=time.time()+2000,source_sha256='mock'))
++    launched=[]
++    class P:
++        def __init__(self,cmd,**kw):
++            ticket=json.loads(os.read(kw['pass_fds'][0],32768));j=ticket['job'];launched.append(j);self.returncode=2 if fail else 0
++            folder=tmp_path/j['directory'];folder.mkdir(parents=True)
++            R.save(folder/'summary.json',dict(status='failed' if fail else 'complete',completed_updates=3000 if j['mode']=='train' else 0,completed_chains=1 if j['mode']=='sample' else 0))
++        def poll(self):return self.returncode
++        def wait(self,timeout=None):return self.returncode
++    code=run.supervise(tmp_path,ap,lp,list(map(str,range(8))),spawn=P,summarizer=lambda *a:dict(status='complete'),poll=0)
++    assert code==(2 if fail else 0)
++    assert len(launched)==(8 if fail else 24)
++    if not fail:assert all(j['mode']=='train' for j in launched[:8])
++
++def test_stop_does_not_spawn(tmp_path):
++    ap=tmp_path/'a';lp=tmp_path/'l';R.save(ap,{});R.save(lp,dict(start_epoch=time.time(),deadline_epoch=time.time()+2000,source_sha256='mock'));(tmp_path/'STOP').touch()
++    def forbidden(*a,**kw):raise AssertionError('spawned after STOP')
++    assert run.supervise(tmp_path,ap,lp,list(map(str,range(8))),spawn=forbidden,summarizer=lambda *a:dict(status='incomplete'),poll=0)==2
++
++def test_public_dry_run_never_creates_output(tmp_path):
++    out=tmp_path/'not_created';p=subprocess.run([sys.executable,str(R.ROOT/'run.py'),'dry-run','--output',str(out)],capture_output=True,text=True,check=True)
++    v=json.loads(p.stdout);assert not v['formal_activated'] and len(v['sampling'])==16 and not out.exists()
++
++def test_public_missing_run_summary_keeps_all16(tmp_path):
++    target=tmp_path/'summary.json'
++    p=subprocess.run([sys.executable,str(R.ROOT/'summarize.py'),'--run',str(tmp_path),'--output',str(target),'--deadline',str(time.time()+60)],capture_output=True,text=True)
++    assert p.returncode==2,p.stderr
++    v=json.loads(target.read_text());assert v['status']=='incomplete' and len(v['inventory'])==16 and len(v['records'])==0
++    assert all(x['value'] is None for x in v['cell_means'])
++    assert all(x['difference'] is None for x in v['paired_means'])
++
++def test_loaded_ema_then_next_formula_matches():
++    m=torch.nn.Linear(1,1);e=ParameterEMA(m);opt=torch.optim.AdamW(m.parameters())
++    with torch.no_grad():m.weight.add_(2)
++    e.update(m,1);p=checkpoint_payload(m,opt,e,1,{},dict(test=True))
++    other=torch.nn.Linear(1,1);oe=ParameterEMA(other);oo=torch.optim.AdamW(other.parameters())
++    restore_payload(p,other,oo,oe,dict(test=True),lambda s:None)
++    with torch.no_grad():m.weight.add_(1);other.weight.add_(1)
++    e.update(m,2);oe.update(other,2)
++    assert all(torch.equal(e.shadow[k],oe.shadow[k]) for k in e.shadow)

@@ -1,0 +1,89 @@
+file,line,patterns,text
+evaluation/source/build.py,9,/data2/,REPO = pathlib.Path('/data2/lyh/gnn_project/DiHug')
+snapshots/ac_screen/collect_preparation.py,33,192,"oldroots=[ws/'results/typed_structure_192_oabc_formal_v1_20261028T090624/run',ws/'results/typed_structure_192_oabc_seed2_v1_20261028T110507/run',ws/'results/typed_structure_192_de_formal_v1_20261028T140346/run']"
+snapshots/ac_screen/model_io.py,16,2080 Ti,if not torch.cuda.is_available() or torch.cuda.device_count()!=1 or '2080 Ti' not in torch.cuda.get_device_name(0):raise RuntimeError('one RTX2080Ti required')
+snapshots/ac_screen/package/engineering_de.py,36,2080 Ti,if not torch.cuda.is_available() or torch.cuda.device_count()!=1 or '2080 Ti' not in torch.cuda.get_device_name(0):
+snapshots/ac_screen/package/engineering_real.py,27,2080 Ti,if not torch.cuda.is_available() or torch.cuda.device_count()!=1 or '2080 Ti' not in torch.cuda.get_device_name(0):raise RuntimeError('one RTX2080Ti required')
+snapshots/ac_screen/package/launch.py,16,2080 Ti,if d not in rows or '2080 Ti' not in rows[d][2]:raise RuntimeError('selected RTX2080Ti not present: '+d)
+snapshots/ac_screen/package/model_variants.py,32,192,architecture_version='typed_structure_192_oabc_v1'
+snapshots/ac_screen/package/prepare.py,32,192,"cfg.update(version='typed_refex_rolx_192_v1',arms=['A','B','C'],formal_authorized=False,"
+snapshots/ac_screen/package/prepare.py,39,192,"for name,expected in [('IMDB',(323,[48,56,78,10],3,188)),('PubMed',(926,[40,74,66,12],1,192))]:"
+snapshots/ac_screen/package/prepare.py,46,192,"assert types.shape==(192,) and len(np.unique(ids))==192 and np.array_equal(ids,np.load(path.parent/'original_node_ids.npy'))"
+snapshots/ac_screen/package/prepare.py,50,192,"reverse=np.full(len(ref['types']),-1,dtype=np.int64);reverse[ids]=np.arange(192)"
+snapshots/ac_screen/package/prepare.py,55,192,g=nx.Graph();g.add_nodes_from(range(192));g.add_edges_from(edges)
+snapshots/ac_screen/package/prepare.py,66,192,"result['datasets'][name]=dict(nodes=192,edges=len(edges),type_counts=expected[1],components=comps,"
+snapshots/ac_screen/package/probe.py,83,192,"resource='one GPU; full query normal2 activation memory estimate <8GiB at192; no retained first graph; fail on OOM, no shrink',input_rule='same dataset pair t500 seed2026102801 for ALL arms'))"
+snapshots/ac_screen/package/runtime_plan.py,34,18336 | rounds=1,"for key, value in dict(updates_per_model=1000, models=8, complete_chains=16, T=1000, rounds=1, S=18336).items():"
+snapshots/ac_screen/package/setup_engineering.py,7,192 | rounds=1,"cfg.update(version='typed_refex_rolx_192_v2',rounds=1,inputs_per_update=2,"
+snapshots/ac_screen/package/setup_engineering.py,9,18336,"query_contract='ALL active slots in ONE forward per input; S=18336, loss=(sum CE input1 + sum CE input2)/(2*S)',"
+snapshots/ac_screen/package/test_engineering.py,134,192,"c,cfg=load_case(name);self.assertEqual(len(c['space'].types),192)"
+snapshots/ac_screen/package/worker.py,67,2080 Ti,if not torch.cuda.is_available() or torch.cuda.device_count()!=1 or '2080 Ti' not in torch.cuda.get_device_name(0):raise RuntimeError('one frozen RTX2080Ti required')
+snapshots/ac_screen/run.py,12,2080 Ti,if '2080 Ti' not in r[2] or float(r[3])<authority['minimum_free_mib']:raise RuntimeError('GPU model/free-memory gate')
+snapshots/early_count_length/check_final_scale.py,23,18336,"ce=supported_binary_ce(l,torch.as_tensor(inp['labels'],device=device),m.prior[g.query_families]).sum()/18336"
+snapshots/early_count_length/check_prepare.py,51,18336,"ce=supported_binary_ce(logits,torch.as_tensor(inp['labels'],device='cuda'),m.prior[graph.query_families]).sum()/18336"
+snapshots/early_count_length/model_io.py,16,2080 Ti,if not torch.cuda.is_available() or torch.cuda.device_count()!=1 or '2080 Ti' not in torch.cuda.get_device_name(0):raise RuntimeError('one RTX2080Ti required')
+snapshots/early_count_length/package/engineering_de.py,36,2080 Ti,if not torch.cuda.is_available() or torch.cuda.device_count()!=1 or '2080 Ti' not in torch.cuda.get_device_name(0):
+snapshots/early_count_length/package/engineering_real.py,27,2080 Ti,if not torch.cuda.is_available() or torch.cuda.device_count()!=1 or '2080 Ti' not in torch.cuda.get_device_name(0):raise RuntimeError('one RTX2080Ti required')
+snapshots/early_count_length/package/launch.py,16,2080 Ti,if d not in rows or '2080 Ti' not in rows[d][2]:raise RuntimeError('selected RTX2080Ti not present: '+d)
+snapshots/early_count_length/package/model_variants.py,32,192,architecture_version='typed_structure_192_oabc_v1'
+snapshots/early_count_length/package/prepare.py,32,192,"cfg.update(version='typed_refex_rolx_192_v1',arms=['A','B','C'],formal_authorized=False,"
+snapshots/early_count_length/package/prepare.py,39,192,"for name,expected in [('IMDB',(323,[48,56,78,10],3,188)),('PubMed',(926,[40,74,66,12],1,192))]:"
+snapshots/early_count_length/package/prepare.py,46,192,"assert types.shape==(192,) and len(np.unique(ids))==192 and np.array_equal(ids,np.load(path.parent/'original_node_ids.npy'))"
+snapshots/early_count_length/package/prepare.py,50,192,"reverse=np.full(len(ref['types']),-1,dtype=np.int64);reverse[ids]=np.arange(192)"
+snapshots/early_count_length/package/prepare.py,55,192,g=nx.Graph();g.add_nodes_from(range(192));g.add_edges_from(edges)
+snapshots/early_count_length/package/prepare.py,66,192,"result['datasets'][name]=dict(nodes=192,edges=len(edges),type_counts=expected[1],components=comps,"
+snapshots/early_count_length/package/probe.py,83,192,"resource='one GPU; full query normal2 activation memory estimate <8GiB at192; no retained first graph; fail on OOM, no shrink',input_rule='same dataset pair t500 seed2026102801 for ALL arms'))"
+snapshots/early_count_length/package/runtime_plan.py,34,18336 | rounds=1,"for key, value in dict(updates_per_model=1000, models=8, complete_chains=16, T=1000, rounds=1, S=18336).items():"
+snapshots/early_count_length/package/setup_engineering.py,7,192 | rounds=1,"cfg.update(version='typed_refex_rolx_192_v2',rounds=1,inputs_per_update=2,"
+snapshots/early_count_length/package/setup_engineering.py,9,18336,"query_contract='ALL active slots in ONE forward per input; S=18336, loss=(sum CE input1 + sum CE input2)/(2*S)',"
+snapshots/early_count_length/package/test_engineering.py,134,192,"c,cfg=load_case(name);self.assertEqual(len(c['space'].types),192)"
+snapshots/early_count_length/package/worker.py,70,2080 Ti,if not torch.cuda.is_available() or torch.cuda.device_count()!=1 or '2080 Ti' not in torch.cuda.get_device_name(0):raise RuntimeError('one frozen RTX2080Ti required')
+snapshots/early_count_length/run.py,13,2080 Ti,if '2080 Ti' not in r[2] or float(r[3])<authority['minimum_free_mib']:raise RuntimeError('GPU model/free-memory gate')
+snapshots/early_count_length/test_count_aux.py,30,18336,"x=torch.tensor([[.2,.9],[.5,-.3]],requires_grad=True);labels=torch.tensor([1,0]);ce=torch.nn.functional.cross_entropy(x,labels,reduction='sum')/18336"
+snapshots/early_count_length/test_count_aux.py,124,2080 Ti,"rows={d:[str(i),d,'NVIDIA GeForce RTX 2080 Ti','11011','0','1'] for i,d in enumerate(devices)}"
+snapshots/early_count_stage500/check_final_scale.py,23,18336,"ce=supported_binary_ce(l,torch.as_tensor(inp['labels'],device=device),m.prior[g.query_families]).sum()/18336"
+snapshots/early_count_stage500/check_prepare.py,51,18336,"ce=supported_binary_ce(logits,torch.as_tensor(inp['labels'],device='cuda'),m.prior[graph.query_families]).sum()/18336"
+snapshots/early_count_stage500/model_io.py,16,2080 Ti,if not torch.cuda.is_available() or torch.cuda.device_count()!=1 or '2080 Ti' not in torch.cuda.get_device_name(0):raise RuntimeError('one RTX2080Ti required')
+snapshots/early_count_stage500/package/engineering_de.py,36,2080 Ti,if not torch.cuda.is_available() or torch.cuda.device_count()!=1 or '2080 Ti' not in torch.cuda.get_device_name(0):
+snapshots/early_count_stage500/package/engineering_real.py,27,2080 Ti,if not torch.cuda.is_available() or torch.cuda.device_count()!=1 or '2080 Ti' not in torch.cuda.get_device_name(0):raise RuntimeError('one RTX2080Ti required')
+snapshots/early_count_stage500/package/launch.py,16,2080 Ti,if d not in rows or '2080 Ti' not in rows[d][2]:raise RuntimeError('selected RTX2080Ti not present: '+d)
+snapshots/early_count_stage500/package/model_variants.py,32,192,architecture_version='typed_structure_192_oabc_v1'
+snapshots/early_count_stage500/package/prepare.py,32,192,"cfg.update(version='typed_refex_rolx_192_v1',arms=['A','B','C'],formal_authorized=False,"
+snapshots/early_count_stage500/package/prepare.py,39,192,"for name,expected in [('IMDB',(323,[48,56,78,10],3,188)),('PubMed',(926,[40,74,66,12],1,192))]:"
+snapshots/early_count_stage500/package/prepare.py,46,192,"assert types.shape==(192,) and len(np.unique(ids))==192 and np.array_equal(ids,np.load(path.parent/'original_node_ids.npy'))"
+snapshots/early_count_stage500/package/prepare.py,50,192,"reverse=np.full(len(ref['types']),-1,dtype=np.int64);reverse[ids]=np.arange(192)"
+snapshots/early_count_stage500/package/prepare.py,55,192,g=nx.Graph();g.add_nodes_from(range(192));g.add_edges_from(edges)
+snapshots/early_count_stage500/package/prepare.py,66,192,"result['datasets'][name]=dict(nodes=192,edges=len(edges),type_counts=expected[1],components=comps,"
+snapshots/early_count_stage500/package/probe.py,83,192,"resource='one GPU; full query normal2 activation memory estimate <8GiB at192; no retained first graph; fail on OOM, no shrink',input_rule='same dataset pair t500 seed2026102801 for ALL arms'))"
+snapshots/early_count_stage500/package/runtime_plan.py,34,18336 | rounds=1,"for key, value in dict(updates_per_model=1000, models=8, complete_chains=16, T=1000, rounds=1, S=18336).items():"
+snapshots/early_count_stage500/package/setup_engineering.py,7,192 | rounds=1,"cfg.update(version='typed_refex_rolx_192_v2',rounds=1,inputs_per_update=2,"
+snapshots/early_count_stage500/package/setup_engineering.py,9,18336,"query_contract='ALL active slots in ONE forward per input; S=18336, loss=(sum CE input1 + sum CE input2)/(2*S)',"
+snapshots/early_count_stage500/package/test_engineering.py,134,192,"c,cfg=load_case(name);self.assertEqual(len(c['space'].types),192)"
+snapshots/early_count_stage500/package/worker.py,70,2080 Ti,if not torch.cuda.is_available() or torch.cuda.device_count()!=1 or '2080 Ti' not in torch.cuda.get_device_name(0):raise RuntimeError('one frozen RTX2080Ti required')
+snapshots/early_count_stage500/run.py,13,2080 Ti,if '2080 Ti' not in r[2] or float(r[3])<authority['minimum_free_mib']:raise RuntimeError('GPU model/free-memory gate')
+snapshots/early_count_stage500/test_count_aux.py,30,18336,"x=torch.tensor([[.2,.9],[.5,-.3]],requires_grad=True);labels=torch.tensor([1,0]);ce=torch.nn.functional.cross_entropy(x,labels,reduction='sum')/18336"
+snapshots/early_count_stage500/test_count_aux.py,124,2080 Ti,"rows={d:[str(i),d,'NVIDIA GeForce RTX 2080 Ti','11011','0','1'] for i,d in enumerate(devices)}"
+snapshots/imdb_continue/common.py,2,/data2/,SOURCE=pathlib.Path('/data2/lyh/gnn_project/DiHug/research_branches/count_aux_length_run/experiments/typed_structure_count_aux_length_v1')
+snapshots/imdb_continue/common.py,3,/data2/,PARENT=pathlib.Path('/data2/lyh/gnn_project/DiHug/results/count_aux_length_20261029T231348/run')
+snapshots/imdb_continue/common.py,4,/data2/,OUT=pathlib.Path('/data2/lyh/gnn_project/DiHug/results/imdb_count_aux_u6000_20261030T050209')
+snapshots/imdb_continue/common.py,6,DEADLINE | SCIENCE,START=1793307729.;SCIENCE=1793320200.;DEADLINE=1793322000.
+snapshots/imdb_continue/common.py,7,SOURCE_HASH,SOURCE_HASH='c0f5d92db2f891ebde70befb4e0e29adc50bcb632bdeff5866173d79aa56ed16'
+snapshots/imdb_continue/common.py,28,SOURCE_HASH,files['scientific_parent_combined']=SOURCE_HASH
+snapshots/imdb_continue/common.py,33,DEADLINE | SCIENCE,if time.time()>=(SCIENCE if science else DEADLINE):raise TimeoutError('IMDB science stop08:30; delivery09:00')
+snapshots/imdb_continue/continue_worker.py,20,SOURCE_HASH,if x['binding']!=expected or expected['config']!=cfg or expected['source_sha256']!=SOURCE_HASH:raise ValueError('parent scientific/source compatibility')
+snapshots/imdb_continue/delivery_tools/audit_outputs.py,19,/data2/,"binding=read(f.parent/'binding.json');parent=pathlib.Path('/data2/lyh/gnn_project/DiHug/results/count_aux_length_20261029T231348/run')/f""IMDB_s{rec['train_seed']}_{rec['arm']}""/'u3000/ema_0.99'/f""sample_{rec['sample_seed']}""/'binding.json'"
+snapshots/imdb_continue/delivery_tools/write_summary.py,18,192,"'- 本票参考是IMDB192节点323边、分量188/2/2。LCC派生指标沿用此前固定参考合同，不偷偷把参考也裁成LCC；派生图自身连通和无孤立点不算模型能力。',"
+snapshots/imdb_continue/delivery_tools/write_summary.py,24,/data2/,source=pathlib.Path('/data2/lyh/gnn_project/DiHug/research_branches/imdb_count_aux_u6000/experiments/imdb_count_aux_continue_v1')
+snapshots/imdb_continue/launch.py,6,SCIENCE,if time.time()+pre['planned_remaining_science_seconds']>SCIENCE:raise RuntimeError('queue no longer fits before08:30')
+snapshots/imdb_continue/launch.py,13,DEADLINE | SCIENCE,"ledger=dict(start_epoch=START,science_stop_epoch=SCIENCE,deadline_epoch=DEADLINE,source_sha256=source_binding()[1],output=str(OUT/'run'),gpu_uuids=DEVICES,"
+snapshots/imdb_continue/launch.py,17,DEADLINE,"environment=read(PARENT.parent/'approval.json')['environment'],preflight_sha256=sha(OUT/'preflight.json'),gpu_uuids=DEVICES,deadline_epoch=DEADLINE)"
+snapshots/imdb_continue/launch.py,25,DEADLINE | SCIENCE,"save(OUT/'startup.json',dict(launcher_pid=os.getpid(),actual_launch_epoch=time.time(),ticket_start_epoch=START,science_stop_epoch=SCIENCE,deadline_epoch=DEADLINE,"
+snapshots/imdb_continue/launch.py,37,DEADLINE,"if time.time()>DEADLINE-30:save(OUT/'delivery_failure.json',dict(reason='delivery deadline',script=name));break"
+snapshots/imdb_continue/launch.py,40,DEADLINE,"p=subprocess.run([sys.executable,'-B',str(file)],env=env,cwd=HERE,capture_output=True,text=True,timeout=max(1,DEADLINE-time.time()-20))"
+snapshots/imdb_continue/preflight.py,12,SOURCE_HASH,assert scientific_binding()[1]==SOURCE_HASH
+snapshots/imdb_continue/preflight.py,18,SOURCE_HASH,"assert b['source_sha256']==SOURCE_HASH and (b['dataset'],b['train_seed'],b['arm'])==('IMDB',job['train_seed'],job['arm'])"
+snapshots/imdb_continue/preflight.py,31,SCIENCE,if time.time()+planned>SCIENCE:raise RuntimeError('remaining budget cannot contain fixed4 tasks8 chains plus reserve')
+snapshots/imdb_continue/preflight.py,34,SOURCE_HASH,"scientific_parent_source_sha256=SOURCE_HASH,temporary_optimizer_steps=0,model_forwards=0,training_jobs=train_jobs(),sampling_jobs=jobs()))"
+snapshots/imdb_continue/preflight.py,35,SCIENCE,"print(json.dumps(dict(status='passed',parents=4,new_updates=12000,chains=8,planned_science_minutes=planned/60,latest_allowed_science=SCIENCE)))"
+snapshots/imdb_continue/report.py,29,SOURCE_HASH,if b['job']!=j or b['source_sha256']!=SOURCE_HASH or sha(g)!=b['graph_sha256']:raise ValueError('main graph identity/source/hash')
+snapshots/imdb_continue/report.py,111,DEADLINE,"sys.argv=['summarize','--run',str(OUT/'run'),'--output',str(OUT/'evaluation.json'),'--deadline',str(DEADLINE-70)]"

@@ -1,0 +1,114 @@
+{
+  "version": "joint_cn_dual_rounds_v1",
+  "dataset": "IMDB",
+  "base_commit": "dd53b6431303263e740abedf67e01d7dfc13d15b",
+  "backend": "upstream",
+  "T": 1000,
+  "rounds": 20,
+  "schedule_offset": 0.008,
+  "model": {
+    "layers": 8,
+    "width": 256,
+    "edge_width": 64,
+    "global_width": 128,
+    "heads": 8,
+    "ff_node": 256,
+    "ff_edge": 64,
+    "ff_global": 256,
+    "dropout": 0.1,
+    "cn_hidden": 32,
+    "joint_width": 128,
+    "max_wedges": 2000000,
+    "max_query_paths": 2000000
+  },
+  "optimizer": {
+    "type": "AdamW",
+    "lr": 0.0002,
+    "weight_decay": 1e-12,
+    "betas": [
+      0.9,
+      0.999
+    ],
+    "eps": 1e-08,
+    "amsgrad": false
+  },
+  "scheduler": null,
+  "microbatch": 1,
+  "gradient_accumulation": 1,
+  "gradient_clipping": null,
+  "lr_warmup": null,
+  "precision": "FP32 network/stable CE; float64 probability kernel",
+  "train_seed": 2026101901,
+  "validation_seed": 2026101911,
+  "sample_seed": 2026101921,
+  "validation_times": [
+    1,
+    250,
+    500,
+    750,
+    1000
+  ],
+  "validation_every_updates": 1000,
+  "max_updates": 12000,
+  "checkpoint_every_updates": 1000,
+  "evaluation_updates": [
+    3000,
+    6000,
+    9000,
+    10000,
+    12000
+  ],
+  "samples_per_checkpoint": 1,
+  "deterministic_training": false,
+  "tf32": false,
+  "torch_threads": 1,
+  "role_guidance": false,
+  "postprocessing": false,
+  "data": {
+    "file": "data/IMDB.npz",
+    "sha256": "10f1dbbbe55c6a069594b2dcb590d1b8295ca5436320ef4597cd30e6b7f73e42",
+    "nodes": 1653,
+    "edges": 4079,
+    "type_counts": [
+      410,
+      494,
+      726,
+      23
+    ],
+    "type_names": [
+      "Director",
+      "Actor",
+      "Movie",
+      "Genre"
+    ],
+    "family_counts": [
+      0,
+      604,
+      642,
+      0,
+      15,
+      739,
+      0,
+      0,
+      2079,
+      0
+    ],
+    "relation_storage": "one-based in NPZ, zero-based in model; one relation per unordered type pair"
+  },
+  "provenance": {
+    "confirmed": "Baseline model, stable CE, cosine kernel and engineering entry optimizer",
+    "formal_6000_entry_verified": false,
+    "missing": [
+      "old formal 6000-update launcher",
+      "old formal resolved_config and optimizer/seed receipt"
+    ],
+    "optimizer_source": "dd53 hsgd/fusion_preflight.py AdamW; default betas/eps expanded explicitly",
+    "dropout": "configured 0.1; vendor forward contains no active dropout operation",
+    "new_engineering_choices": [
+      "new train/validation/sample seeds",
+      "12000-update schedule and permanent milestones",
+      "full-cover fixed validation panel",
+      "no scheduler or LR warmup, per engineering entry; old formal setup not independently verified"
+    ]
+  }
+}

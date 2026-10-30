@@ -1,0 +1,1 @@
+Source base: 89320ada4d58b133884f62360e9662e713d872f2; E-early scientific architecture inherits dbe96f519443e8f8937d43cd191803658bf83464 / 472e533fd28cfc067702b1b75082ac5105140a2d. Historical artifacts retained under historical_metadata are NOT active instructions, approvals, or current test evidence. No training or generated graphs authorized by this package.

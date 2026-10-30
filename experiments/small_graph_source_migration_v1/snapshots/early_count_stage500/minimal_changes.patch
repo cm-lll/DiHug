@@ -1,0 +1,1241 @@
+--- a/typed_structure_early_cn_expansion_v1/package/count_aux.py
++++ b/typed_structure_count_aux_v1/package/count_aux.py
+@@ -0,0 +1,43 @@
++"""Differentiable whole-query p0 relation counts. No inference modification."""
++import torch
++
++LAMBDA = 0.01
++
++def count_loss(p0, families, targets, movable_counts, fixed_present=None):
++    # Each probability MUST represent one unique unordered active slot. The
++    # caller verifies complete unique slot IDs before constructing this tensor.
++    p = p0.to(torch.float64)
++    f = torch.as_tensor(families, device=p.device, dtype=torch.long)
++    target = torch.as_tensor(targets, device=p.device, dtype=torch.float64)
++    slots = torch.as_tensor(movable_counts, device=p.device, dtype=torch.long)
++    fixed = torch.zeros_like(target) if fixed_present is None else torch.as_tensor(fixed_present, device=p.device, dtype=torch.float64)
++    if p.ndim != 1 or f.shape != p.shape or slots.shape != target.shape or fixed.shape != target.shape:
++        raise ValueError('count shapes')
++    if not torch.isfinite(p).all() or not torch.isfinite(target).all() or not torch.isfinite(fixed).all():
++        raise FloatingPointError('nonfinite count input')
++    if (p < 0).any() or (p > 1).any() or (slots < 0).any() or (target < 0).any() or (fixed < 0).any():
++        raise ValueError('invalid probability/count')
++    if f.numel() and ((f < 0).any() or (f >= target.numel()).any()):raise ValueError('family range')
++    if not torch.equal(torch.bincount(f, minlength=len(target)), slots):raise ValueError('not full relation coverage')
++    if ((target < fixed) | (target > fixed + slots)).any():raise ValueError('target inconsistent with support')
++    # Per-family reductions avoid a GPU atomic floating scatter dependency.
++    mu = torch.stack([p[f == r].sum() for r in range(len(target))]) + fixed
++    included = slots > 0
++    error = (mu - target) / target.clamp_min(1)
++    # Squared density error divided by target density (floor one edge/K).
++    # This prevents rare relations with huge candidate sets from dominating
++    # solely through an unbounded relative count error at initialization.
++    terms = (mu-target).square() / (slots.clamp_min(1)*target.clamp_min(1))
++    loss = terms[included].mean() if included.any() else p.sum() * 0
++    return loss, {'expected_edges': mu, 'target_edges': target, 'signed_error': mu-target,
++                  'relative_error': error, 'normalized_square': terms,
++                  'included': included, 'relation_denominator': int(included.sum())}
++
++def case_contract(case, inp):
++    import numpy as np
++    # train_input labels are full clean X0 labels for active slots; fixed
++    # relations retain their exact supported presence count.
++    fixed = np.where((~case['active']) & (case['prior'] == 1), case['space'].counts, 0)
++    movable = np.where(case['active'], case['space'].counts, 0)
++    target = np.bincount(inp['f'], weights=inp['labels'], minlength=case['n_families']) + fixed
++    return target, movable, fixed
+--- a/typed_structure_early_cn_expansion_v1/package/normal2.py
++++ b/typed_structure_count_aux_v1/package/normal2.py
+@@ -0,0 +1,58 @@
++"""Full-query sequential normal2: one zero_grad, two half backwards, one step."""
++import time,numpy as np,torch
++from hsgd.bw_preflight.common import train_input,check_prob_device,cpu_tree
++from hsgd.computational import FrozenTypedContext
++from hsgd.losses import supported_binary_ce
++from count_aux import count_loss,case_contract,LAMBDA
++def pair_inputs(case,cfg,position,rng,force_t=None):
++    return [train_input(case,cfg['T'],1,cfg['seed'],2*position+j,rng,force_t=force_t) for j in range(2)]
++def sync(device):
++    if str(device).startswith('cuda'):torch.cuda.synchronize(device)
++def update_observation(before,after,step):
++    """A watched tensor is a diagnostic, not an every-update success criterion."""
++    changed=float((after.detach()-before).abs().max())
++    if not np.isfinite(changed):raise FloatingPointError('nonfinite observed parameter change')
++    return dict(changed=changed,observed_parameter='backbone.lin_out_E.weight',
++                observed_parameter_changed=bool(changed>0) if step else None,
++                update_note='watched_parameter_unchanged_not_failure' if step and changed==0 else None)
++def normal2(model,opt,case,inputs,T,device,step=True,diagnostics=None,lambda_count=None):
++    if len(inputs)!=2:raise ValueError('exactly two inputs')
++    sync(device);start=time.perf_counter();opt.zero_grad(set_to_none=True);model.train()
++    weight=float(getattr(model,'count_aux_weight',0.) if lambda_count is None else lambda_count)
++    if weight not in (0.,LAMBDA):raise ValueError('unfrozen auxiliary weight')
++    total=0.;ce_total=0.;aux_total=0.;rows=[];expected=np.flatnonzero(np.repeat(case['active'],case['space'].counts))
++    for index,inp in enumerate(inputs):
++        if not np.array_equal(np.sort(inp['ids']),expected) or inp['ce_weight']!=1/case['space'].total:
++            raise ValueError('full query once / whole-schema denominator required')
++        token=('normal2',index,id(inp));ctx=FrozenTypedContext(model,case['space'].types,inp['edges'],inp['edge_families'],token)
++        sync(device);begin=time.perf_counter()
++        try:
++            graph,logits,p=ctx.predict(inp['query'],inp['f'],inp['t']/T,token,details=True)
++            check_prob_device(p,inp['f'],case,model.prior)
++            labels=torch.as_tensor(inp['labels'],device=device)
++            ce=supported_binary_ce(logits,labels,model.prior[graph.query_families]).sum()/case['space'].total
++            target,slots,fixed=case_contract(case,inp)
++            aux,counts=count_loss(p,graph.query_families,target,slots,fixed)
++            # Preserve the original CE arithmetic and gradient when lambda=0.
++            loss=ce/2 if weight==0 else ce/2+(weight/2)*aux
++            ce_total+=float(ce.detach())/2;aux_total+=float(aux.detach())/2
++            count_record={k:(v.detach().cpu().tolist() if torch.is_tensor(v) else v) for k,v in counts.items()}
++            if not torch.isfinite(loss):raise FloatingPointError('nonfinite half loss')
++            sync(device);forward=time.perf_counter()-begin
++            if diagnostics is not None:
++                diagnostics.setdefault('inputs',[]).append(dict(logits=cpu_tree(logits),p0=cpu_tree(p),loss=cpu_tree(loss)))
++            begin=time.perf_counter();loss.backward();sync(device);backward=time.perf_counter()-begin
++            total+=float(loss.detach());rows.append(dict(t=inp['t'],slots=len(inp['ids']),forward_seconds=forward,backward_seconds=backward,ce=float(ce.detach()),auxiliary=float(aux.detach()),weighted_auxiliary=weight*float(aux.detach()),counts=count_record))
++        finally:ctx.close()
++        del graph,logits,p,loss,labels,ctx,ce,aux,counts
++    gradients={n:p.grad for n,p in model.named_parameters()}
++    live=[v for v in gradients.values() if v is not None]
++    if not live or not all(torch.isfinite(v).all() for v in live):raise FloatingPointError('nonfinite/no gradient')
++    norm=float(torch.linalg.vector_norm(torch.stack([torch.linalg.vector_norm(v) for v in live])))
++    if diagnostics is not None:diagnostics.update(gradients=cpu_tree(gradients),loss=torch.tensor(total,dtype=torch.float64))
++    before=model.backbone.lin_out_E.weight.detach().clone();begin=time.perf_counter()
++    if step:opt.step()
++    sync(device);optimizer_seconds=time.perf_counter()-begin
++    observation=update_observation(before,model.backbone.lin_out_E.weight,step)
++    return dict(loss=total,ce=ce_total,auxiliary=aux_total,weighted_auxiliary=weight*aux_total,lambda_count=weight,inputs=rows,gradient_norm=norm,optimizer_seconds=optimizer_seconds,
++                **observation,normal2_seconds=time.perf_counter()-start,optimizer_steps=int(step),feature_calls=model.feature_calls)
+--- a/typed_structure_early_cn_expansion_v1/package/worker.py
++++ b/typed_structure_count_aux_v1/package/worker.py
+@@ -0,0 +1,125 @@
++"""Review-gated single-GPU worker; not executed on scientific models in this ticket.
++Initial/mid/final saves, paired normal2 inputs, final-only original full sampling.
++"""
++import argparse,pathlib,json,time,os,copy,signal,traceback,resource
++import numpy as np
++import torch
++from prepare import save,sha
++from experiment_contract import read_dictionary,scientific_gate,source_binding,initialization,reset_training_streams
++from role_dictionary import seed32
++from normal2 import normal2,pair_inputs,sync
++from probe import rng_get,rng_set,equal,input_hash
++from hsgd.bw_preflight.common import cpu_tree,environment,schedule,check_prob_device,state_edges
++from hsgd.computational import FrozenTypedContext
++from hsgd.losses import supported_binary_ce
++from count_aux import count_loss,case_contract,LAMBDA
++from hsgd.kernel import MarginalKernel
++from hsgd.runtime import reverse_step
++from evaluation import evaluate
++
++def atomic_checkpoint(path,payload):
++    path=pathlib.Path(path)
++    if path.exists():raise FileExistsError('checkpoint conflict '+str(path))
++    temp=path.with_suffix('.tmp');torch.save(payload,temp)
++    with temp.open('rb') as f:os.fsync(f.fileno())
++    temp.replace(path);save(path.with_suffix('.sha256.json'),dict(sha256=sha(path),updates=payload.get('updates')))
++
++def validation(model,case,cfg,seed,rng):
++    before=rng_get(rng,'cuda');rows=[];start=time.perf_counter();mode=model.training;model.eval()
++    try:
++        for t in [1,500,1000]:
++            private=np.random.default_rng(seed32(seed,purpose='fixed_validation_noise',time=t));inp=pair_inputs(case,cfg,10000+t,private,t)[0]
++            ctx=FrozenTypedContext(model,case['space'].types,inp['edges'],inp['edge_families'],('validation',t))
++            try:
++                with torch.no_grad():
++                    graph,logits,p=ctx.predict(inp['query'],inp['f'],t/cfg['T'],('validation',t),details=True)
++                    check_prob_device(p,inp['f'],case,model.prior);labels=torch.as_tensor(inp['labels'],device='cuda');ce=supported_binary_ce(logits,labels,model.prior[graph.query_families]).cpu().numpy();prob=p.cpu().numpy()
++                    aux,aux_counts=count_loss(p,graph.query_families,*case_contract(case,inp));aux_value=float(aux)
++                family=[]
++                for f in range(case['n_families']):
++                    ix=inp['f']==f;pos=ix&(inp['labels']==1);neg=ix&(inp['labels']==0)
++                    family.append(dict(family=f,positive_count=int(pos.sum()),negative_count=int(neg.sum()),positive_ce=float(ce[pos].mean()) if pos.any() else None,negative_ce=float(ce[neg].mean()) if neg.any() else None,expected_edges=float(prob[ix].sum()),true_edges=int(pos.sum()),signed_count_error=float(prob[ix].sum())-int(pos.sum())))
++                rows.append(dict(t=t,input_sha256=input_hash([inp]),ce_sum_over_S=float(ce.sum()/case['space'].total),auxiliary=aux_value,weighted_auxiliary=float(getattr(model,'count_aux_weight',0))*aux_value,total_loss=float(ce.sum()/case['space'].total)+float(getattr(model,'count_aux_weight',0))*aux_value,family=family))
++            finally:ctx.close()
++    finally:model.train(mode);rng_set(before,rng,'cuda')
++    if not equal(before,rng_get(rng,'cuda')):raise AssertionError('validation changed training RNG')
++    return dict(seconds=time.perf_counter()-start,rows=rows,rng_unchanged=True,same_reference_only=True)
++
++def main():
++    ap=argparse.ArgumentParser();ap.add_argument('--dataset',choices=['IMDB','PubMed'],required=True);ap.add_argument('--arm',choices=list('DE'),required=True);ap.add_argument('--train-seed',type=int,required=True);ap.add_argument('--output',required=True);ap.add_argument('--dictionary-dir',required=True);ap.add_argument('--ledger',required=True);ap.add_argument('--approval',required=True);ap.add_argument('--protocol',required=True);ap.add_argument('--cost',required=True);ap.add_argument('--launch-fd',type=int,required=True);args=ap.parse_args()
++    from launch import gate
++    from prepare import ROOT
++    ticket=json.loads(os.read(args.launch_fd,16384));os.close(args.launch_fd)
++    from runtime_plan import verify_ticket,initialization_for_task,task_id
++    verify_ticket(ticket,args,os.getppid(),os.environ.get('CUDA_VISIBLE_DEVICES'),time.time())
++    gate(ROOT,args.ledger,args.approval,args.protocol,args.dictionary_dir,args.cost)
++    source,source_hash=source_binding();ledger,approval=scientific_gate(args.ledger,args.approval,args.protocol,args.dictionary_dir,source_hash)
++    # Both datasets retain approved dictionaries; only E supplies the basis to the model.
++    protocol=json.loads(pathlib.Path(args.protocol).read_text());dataset=args.dataset;arm=args.arm;out=pathlib.Path(args.output)
++    if out.resolve()!=pathlib.Path(ledger['output']).resolve()/task_id(dataset,args.train_seed,arm):raise ValueError('task output not under activated run')
++    out.mkdir(parents=True,exist_ok=False)
++    stop=[False];in_update=False;completed=0;status=dict(status='initializing',formal_training_authorized=True,completed_updates=0,completed_chains=0)
++    def requested(s,f):stop[0]=True
++    for sig in [signal.SIGINT,signal.SIGTERM,signal.SIGHUP]:signal.signal(sig,requested)
++    def check():
++        if stop[0] or (out/'STOP').exists():raise InterruptedError('safe stop')
++        if time.time()>=ledger['deadline_epoch']-1200:raise TimeoutError('evaluation/delivery reserve reached')
++    try:
++        check();torch.set_num_threads(1);torch.set_num_interop_threads(1);torch.use_deterministic_algorithms(True,warn_only=False);torch.backends.cuda.matmul.allow_tf32=False;torch.backends.cudnn.allow_tf32=False
++        if not torch.cuda.is_available() or torch.cuda.device_count()!=1 or '2080 Ti' not in torch.cuda.get_device_name(0):raise RuntimeError('one frozen RTX2080Ti required')
++        env=environment('cuda');save(out/'environment.json',env)
++        # Numerical dependency and GPU-model equality is a required approval binding.
++        for key in ['python_version','torch_runtime_version','device_name']:
++            if approval['environment'][key]!=env[key]:raise ValueError('environment mismatch '+key)
++        if approval['environment']['packages']!=env['packages']:raise ValueError('dependency versions differ')
++        basis,receipt=read_dictionary(args.dictionary_dir,dataset,approval['dictionaries'][dataset]);seed=args.train_seed
++        if seed not in protocol['train_seeds'][dataset]:raise ValueError('training seed not approved')
++        model,case,cfg,proof=initialization_for_task(initialization,dataset,arm,seed,basis);cfg=dict(cfg,seed=seed)
++        model=model.cuda();rng,rng_proof=reset_training_streams(seed,dataset,'cuda');save(out/'training_rng_reset.json',rng_proof)
++        binding=dict(task_id=task_id(dataset,seed,arm),dataset_name=dataset,train_seed=seed,source_sha256=source_hash,source=source,protocol_sha256=sha(args.protocol),ledger_sha256=sha(args.ledger),dictionary_sha256=receipt['basis_sha256'],dataset=cfg['datasets'][dataset],arm=arm,config=cfg,environment=env,updates=approval['updates'])
++        save(out/'binding.json',binding);save(out/'initialization.json',proof)
++        # Entire initial state and RNG saved before any forward, isolated from engineering.
++        initial=dict(model=cpu_tree(model.state_dict()),rng=rng_get(rng,'cuda'),updates=0,binding=binding,purpose='fresh scientific initial, never engineering weights')
++        atomic_checkpoint(out/'initial.pt',initial);model=model.cuda();opt=torch.optim.AdamW(model.parameters(),**{k:v for k,v in cfg['optimizer'].items() if k!='type'})
++        if {id(p) for g in opt.param_groups for p in g['params']}!={id(p) for p in model.parameters() if p.requires_grad}:raise AssertionError('optimizer membership')
++        validation_rows=[dict(updates=0,**validation(model,case,cfg,seed,rng))];save(out/'validation.json',validation_rows)
++        def snapshot(name):
++            if in_update:raise RuntimeError('not an update boundary')
++            atomic_checkpoint(out/name,dict(model=cpu_tree(model.state_dict()),optimizer=cpu_tree(opt.state_dict()),rng=rng_get(rng,'cuda'),updates=completed,binding=binding,elapsed_since_activation=time.time()-ledger['start_epoch']))
++        target=approval['updates'];save(out/'progress.json',status)
++        for position in range(1,target+1):
++            check();inputs=pair_inputs(case,cfg,position,rng);in_update=True;rec=normal2(model,opt,case,inputs,1000,'cuda',True);in_update=False;completed=position
++            rec.update(update=position,input_sha256=input_hash(inputs),t=[x['t'] for x in inputs],slots=[len(x['ids']) for x in inputs],utc=time.time(),warmup=position<=5)
++            with (out/'training.jsonl').open('a') as f:f.write(json.dumps(rec)+'\n')
++            status.update(status='training',completed_updates=completed,peak_allocated_mib=torch.cuda.max_memory_allocated()/2**20,peak_reserved_mib=torch.cuda.max_memory_reserved()/2**20);save(out/'progress.json',status)
++            if position in [target//2,target]:
++                snapshot('midpoint.pt' if position==target//2 else 'final.pt');validation_rows.append(dict(updates=position,**validation(model,case,cfg,seed,rng)));save(out/'validation.json',validation_rows)
++        # Only the final weights are evaluated. Original runtime performs atomic full sweeps.
++        model.eval();kernel=MarginalKernel(case['prior'],schedule(1000));families=np.repeat(np.arange(case['n_families']),case['space'].counts)
++        next_t=None
++        for sample_seed in protocol['sample_seeds']:
++            check();folder=out/('sample_'+str(sample_seed));folder.mkdir();sample_rng=np.random.default_rng(sample_seed)
++            state=(sample_rng.random(case['space'].total)<case['prior'][families]).astype(np.uint8);initial_rng=copy.deepcopy(sample_rng.bit_generator.state);begin=time.perf_counter();next_t=1000
++            for t in range(1000,0,-1):
++                check();candidate,rec=reverse_step(model,case,state,kernel,t,1,sample_seed,sample_rng,'cuda',check_time=check,trace=False)
++                state=candidate;next_t=t-1 # commit only after exact full query coverage
++                with (folder/'steps.jsonl').open('a') as f:f.write(json.dumps(rec)+'\n')
++                if t%100==0 or t==1:
++                    atomic_checkpoint(folder/('complete_t%04d.pt'%next_t),dict(state=state,next_t=next_t,rng=rng_get(sample_rng,'cuda'),binding=binding,sample_seed=sample_seed,model_sha256=sha(out/'final.pt')))
++            edges,fam=state_edges(case,state);np.savez_compressed(folder/'graph.npz',types=case['space'].types,edges=edges,families=fam,schema=np.array(case['space'].pairs))
++            save(folder/'metrics.json',evaluate(case,edges,cfg['datasets'][dataset]['type_names'],check));save(folder/'binding.json',dict(checkpoint_sha256=sha(out/'final.pt'),graph_sha256=sha(folder/'graph.npz'),metrics_sha256=sha(folder/'metrics.json'),seed=sample_seed,initial_rng=initial_rng,seconds=time.perf_counter()-begin,binding=binding))
++            status['completed_chains']+=1
++        status['status']='complete'
++    except BaseException as exc:
++        status.update(status='failed_or_incomplete',error=repr(exc),traceback=traceback.format_exc(),incomplete_update_not_saved=in_update)
++        if 'next_t' in locals() and next_t is not None:
++            try:atomic_checkpoint(folder/'stopped_chain.pt',dict(state=state,next_t=next_t,rng=rng_get(sample_rng,'cuda'),binding=binding,sample_seed=sample_seed,model_sha256=sha(out/'final.pt')))
++            except BaseException as save_error:status['chain_save_error']=repr(save_error)
++        # No partial optimizer state is presented as a completed update.
++        if 'opt' in locals() and not in_update:
++            try:snapshot('stopped_u%d.pt'%completed)
++            except BaseException as save_error:status['stop_save_error']=repr(save_error)
++    finally:
++        status.update(completed_updates=completed,finished_epoch=time.time(),elapsed_since_activation=time.time()-ledger['start_epoch'],peak_rss_mib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024);save(out/'summary.json',status)
++    return 0 if status['status']=='complete' else 2
++if __name__=='__main__':raise SystemExit(main())
+--- a/typed_structure_early_cn_expansion_v1/model_io.py
++++ b/typed_structure_count_aux_v1/model_io.py
+@@ -0,0 +1,44 @@
++"""Both loss arms copy the same sealed untrained E-early state; new AdamW."""
++import sys,pathlib,hashlib
++ROOT=pathlib.Path(__file__).resolve().parent
++sys.path.insert(0,str(ROOT/'package'))
++import torch
++from prepare import load_case
++from model_variants import StructuralDenoiser
++from experiment_contract import reset_training_streams,read_dictionary
++from runtime_contract import dictionary_expected,verify_assets,read,sha,PROTOCOL
++from hsgd.bw_preflight.common import environment
++from early_cn import install
++def configure():
++    torch.set_num_threads(1);torch.set_num_interop_threads(1)
++    torch.use_deterministic_algorithms(True,warn_only=False)
++    torch.backends.cuda.matmul.allow_tf32=False;torch.backends.cudnn.allow_tf32=False
++    if not torch.cuda.is_available() or torch.cuda.device_count()!=1 or '2080 Ti' not in torch.cuda.get_device_name(0):raise RuntimeError('one RTX2080Ti required')
++    return environment('cuda')
++def tensor_hash(x):return hashlib.sha256(x.detach().cpu().contiguous().numpy().tobytes()).hexdigest()
++def fresh(dataset,arm,seed,device='cuda'):
++    from probe import rng_get,equal
++    if (dataset,arm,seed) not in [(t['dataset'],t['arm'],t['train_seed']) for t in PROTOCOL['tasks']]:raise ValueError('unfrozen identity')
++    verify_assets();case,cfg=load_case(dataset);cfg=dict(cfg,seed=seed)
++    b=read(ROOT/'initial_bindings.json')[f'{dataset}_{seed}']
++    if sha(b['path'])!=b['sha256']:raise ValueError('theta0 bytes')
++    p=torch.load(b['path'],map_location='cpu')
++    if p['updates']!=0 or p['ema']['updates']!=0 or p['optimizer']['state']:raise ValueError('only untrained theta0')
++    if (p['binding']['dataset'],p['binding']['train_seed'])!=(dataset,seed) or p['binding']['config']!=cfg:raise ValueError('theta0 scientific configuration')
++    basis,receipt=read_dictionary(ROOT/'dictionaries',dataset,dictionary_expected(dataset))
++    torch.manual_seed(seed);model=install(StructuralDenoiser(case,cfg,'E',basis))
++    if not torch.equal(model.prior,p['model']['prior']):raise ValueError('prior')
++    model.load_state_dict(p['model'],strict=True)
++    if not equal(model.state_dict(),p['model']):raise ValueError('initial tensors')
++    model=model.to(device);model.count_aux_weight=0. if arm=='CE' else PROTOCOL['loss']['lambda_count']
++    opt=torch.optim.AdamW(model.parameters(),**{k:v for k,v in cfg['optimizer'].items() if k!='type'})
++    if {id(q) for g in opt.param_groups for q in g['params']}!={id(q) for q in model.parameters() if q.requires_grad}:raise ValueError('optimizer coverage')
++    rng,rr=reset_training_streams(seed,dataset,device)
++    now=rng_get(rng,device)
++    for k in now:
++        if device=='cpu' and k=='device':continue
++        if not equal(now[k],p['rng'][k]):raise ValueError('original paired training RNG '+k)
++    proof=dict(sealed_theta0=b,parameters=sum(q.numel() for q in model.parameters()),
++               tensor_sha256={k:tensor_hash(v) for k,v in model.state_dict().items()},
++               copied_exact=True,new_empty_optimizer=True,rng_reset=rr,engineering_weights_used=False)
++    return model,opt,case,cfg,rng,proof
+--- a/typed_structure_early_cn_expansion_v1/stage.py
++++ b/typed_structure_count_aux_v1/stage.py
+@@ -0,0 +1,18 @@
++"""Intermediate readout isolation; training model/optimizer/EMA/RNG restored."""
++from contextlib import contextmanager
++from ema import cpu_copy
++from probe import rng_get,rng_set,equal
++
++@contextmanager
++def isolated_readout(model,opt,ema,rng,device):
++    raw=cpu_copy(model.state_dict());optimizer=cpu_copy(opt.state_dict())
++    averaged=ema.state_dict();random=rng_get(rng,device);mode=model.training
++    try:
++        yield
++    finally:
++        model.load_state_dict(raw,strict=True);model.train(mode)
++        rng_set(random,rng,device)
++        if not equal(opt.state_dict(),optimizer) or not equal(ema.state_dict(),averaged):
++            raise AssertionError('intermediate inference modified optimizer/EMA')
++        if not equal(model.state_dict(),raw) or not equal(rng_get(rng,device),random):
++            raise AssertionError('intermediate inference restore failed')
+--- a/typed_structure_early_cn_expansion_v1/run_worker.py
++++ b/typed_structure_count_aux_v1/run_worker.py
+@@ -0,0 +1,145 @@
++"""Adapted frozen worker: unchanged normal2/validation/reverse_step/evaluate.
++
++Continuous 9000 updates, checkpoint EMA samples at3000/6000/9000.
++Each chain authenticates and
++loads exactly its selected file. Only launcher-issued pipes admit formal jobs.
++"""
++import argparse,json,os,pathlib,signal,time,traceback,resource,copy,sys
++from runtime_contract import ROOT,read,save,sha,source_binding,verify_ticket,verify_readout,cell,RESERVE
++sys.path.insert(0,str(ROOT/'package'))
++import numpy as np
++import torch
++from model_io import configure,fresh
++from worker import validation,atomic_checkpoint
++from normal2 import normal2,pair_inputs
++from probe import rng_get,input_hash
++from hsgd.bw_preflight.common import schedule,state_edges,cpu_tree
++from hsgd.kernel import MarginalKernel
++from hsgd.runtime import reverse_step
++from evaluation import evaluate
++from ema import ParameterEMA
++from runtime_contract import DECAYS,UPDATES,PROTOCOL,jobs
++from stage import isolated_readout
++SAVE_EVERY=1000
++from integration import complete_normal2,checkpoint_payload,ema_validation
++
++def paired_validation(model,ema,case,cfg,seed,rng):
++    return {'raw':validation(model,case,cfg,seed,rng),'ema_0.99':ema_validation(validation,model,ema,case,cfg,seed,rng)}
++
++def export_readouts(out,model,ema,updates,binding):
++    states={'ema_0.99':ema.readout_state_dict(model)};receipt=dict(dataset=binding['dataset'],arm=binding['arm'],train_seed=binding['train_seed'],updates=updates,
++        checkpoint_sha256=sha(out/f'checkpoint_u{updates}.pt'),files={},binding=binding)
++    for kind,state in states.items():
++        path=out/(f'readout_u{updates}_'+kind+'.pt')
++        atomic_checkpoint(path,dict(model=state,readout=kind,decay=DECAYS.get(kind),updates=updates,train_seed=binding['train_seed'],
++                                   binding=binding,checkpoint_sha256=receipt['checkpoint_sha256']))
++        receipt['files'][kind]=dict(file=path.name,sha256=sha(path))
++    save(out/f'readouts_u{updates}.json',receipt)
++
++def train(job,out,approval,ledger,check,progress):
++    model,opt,case,cfg,rng,proof=fresh(job['dataset'],job['arm'],job['train_seed']);ema=ParameterEMA(model)
++    binding=dict(source_sha256=source_binding()[1],protocol_sha256=sha(ROOT/'protocol.json'),train_seed=job['train_seed'],
++                 dataset=job['dataset'],arm=job['arm'],config=cfg,initial=proof,updates=UPDATES,loss=PROTOCOL['loss'],lambda_count=model.count_aux_weight,approval_sha256=ledger['approval_sha256'])
++    save(out/'binding.json',binding)
++    completed=0
++    def snapshot(name):atomic_checkpoint(out/name,checkpoint_payload(model,opt,ema,completed,rng_get(rng,'cuda'),binding))
++    # theta0, fresh empty optimizer, all RNG saved BEFORE any forward.
++    snapshot('initial.pt');rows=[dict(updates=0,**paired_validation(model,ema,case,cfg,job['train_seed'],rng))]
++    save(out/'validation.json',rows)
++    try:
++        for position in range(1,UPDATES+1):
++            check();inputs=pair_inputs(case,cfg,position,rng);begin=time.perf_counter()
++            rec=complete_normal2(normal2,model,opt,case,inputs,1000,'cuda',ema,completed);completed=position
++            rec.update(update=completed,total_update_seconds=time.perf_counter()-begin,input_sha256=input_hash(inputs),t=[x['t'] for x in inputs])
++            with (out/'training.jsonl').open('a') as f:f.write(json.dumps(rec)+'\n')
++            progress.update(completed_updates=completed,ema_updates=ema.updates);save(out/'progress.json',progress)
++            if completed%SAVE_EVERY==0:
++                check();snapshot(f'checkpoint_u{completed}.pt')
++                rows.append(dict(updates=completed,**paired_validation(model,ema,case,cfg,job['train_seed'],rng)));save(out/'validation.json',rows)
++            if completed in PROTOCOL['generation_checkpoints']:
++                check();export_readouts(out,model,ema,completed,binding)
++                # Same live optimizer remains; all train RNGs restore in finally.
++                with isolated_readout(model,opt,ema,rng,'cuda'):
++                    for sj in jobs()['sampling']:
++                        if sj['depends_on']!=job['id'] or sj['checkpoint']!=completed:continue
++                        check();folder=pathlib.Path(ledger['output'])/sj['directory'];folder.mkdir(parents=True,exist_ok=False)
++                        sp=dict(job=sj,status='running',completed_chains=0)
++                        try:
++                            sample(sj,folder,pathlib.Path(ledger['output']),approval,check,sp,loaded=(model,case,cfg))
++                            sp['status']='complete';progress['completed_chains']+=1
++                        except BaseException as exc:
++                            sp.update(status='incomplete',error=repr(exc));raise
++                        finally:save(folder/'summary.json',sp)
++                progress.update(last_completed_generation_checkpoint=completed,training_state_restored=True)
++                save(out/'progress.json',progress)
++        check()
++    except BaseException:
++        if ema.at_update_boundary:
++            try:snapshot('stopped_u%d.pt'%completed)
++            except BaseException as e:progress['stop_save_error']=repr(e)
++        else:progress['incomplete_update_not_saved']=True
++        raise
++
++def sample(job,out,run,approval,check,progress,loaded=None):
++    path,receipt=verify_readout(run,job)
++    payload=torch.load(path,map_location='cpu')
++    if (payload['train_seed'],payload['readout'],payload['updates'],payload['checkpoint_sha256'])!=(job['train_seed'],job['readout'],job['checkpoint'],receipt['checkpoint_sha256']):raise ValueError('selected readout metadata mismatch')
++    if payload.get('decay')!=DECAYS.get(job['readout']):raise ValueError('selected decay identity mismatch')
++    if payload['binding']!=receipt['binding'] or payload['binding']['source_sha256']!=source_binding()[1]:raise ValueError('selected readout source')
++    if loaded is None:raise RuntimeError('sampling only inside isolated trajectory')
++    model,case,cfg=loaded
++    model.load_state_dict(payload['model'],strict=True);model.eval()
++    # Hash of actual loaded selected readout, never raw's hash substituted for EMA.
++    from probe import equal
++    if not equal(model.state_dict(),payload['model']):raise ValueError('readout load mismatch')
++    del payload
++    kernel=MarginalKernel(case['prior'],schedule(1000));families=np.repeat(np.arange(case['n_families']),case['space'].counts)
++    sample_rng=np.random.default_rng(job['sample_seed']);state=(sample_rng.random(case['space'].total)<case['prior'][families]).astype(np.uint8)
++    initial_rng=copy.deepcopy(sample_rng.bit_generator.state);initial_state_sha=__import__('hashlib').sha256(state.tobytes()).hexdigest();next_t=1000;begin=time.perf_counter()
++    def state_save(name):atomic_checkpoint(out/name,dict(state=state,next_t=next_t,rng=rng_get(sample_rng,'cuda'),job=job,model_sha256=sha(path)))
++    try:
++        for t in range(1000,0,-1):
++            check();candidate,rec=reverse_step(model,case,state,kernel,t,1,job['sample_seed'],sample_rng,'cuda',check_time=check,trace=False)
++            state=candidate;next_t=t-1
++            with (out/'steps.jsonl').open('a') as f:f.write(json.dumps(rec)+'\n')
++            if t%100==0 or t==1:state_save('complete_t%04d.pt'%next_t)
++        check();edges,fam=state_edges(case,state)
++        np.savez_compressed(out/'graph.npz',types=case['space'].types,edges=edges,families=fam,schema=np.array(case['space'].pairs))
++        save(out/'metrics.json',evaluate(case,edges,cfg['datasets'][job['dataset']]['type_names'],check));check()
++        save(out/'binding.json',dict(job=job,readout=job['readout'],model_sha256=sha(path),checkpoint_sha256=receipt['checkpoint_sha256'],
++            graph_sha256=sha(out/'graph.npz'),metrics_sha256=sha(out/'metrics.json'),source_sha256=source_binding()[1],
++            initial_state_sha256=initial_state_sha,initial_rng=initial_rng,seconds=time.perf_counter()-begin))
++        progress['completed_chains']=1
++    except BaseException:
++        try:state_save('stopped_chain.pt')
++        except BaseException as e:progress['chain_save_error']=repr(e)
++        raise
++
++def main():
++    p=argparse.ArgumentParser();p.add_argument('--launch-fd',type=int,required=True);p.add_argument('--approval',required=True);p.add_argument('--ledger',required=True);a=p.parse_args()
++    ticket=json.loads(os.read(a.launch_fd,32768));os.close(a.launch_fd);job=ticket['job']
++    from runtime_contract import jobs
++    if job not in jobs()['training']:raise ValueError('noncanonical job')
++    verify_ticket(ticket,job,a.approval,a.ledger,os.environ.get('CUDA_VISIBLE_DEVICES'),os.getppid())
++    approval=read(a.approval);ledger=read(a.ledger);run=pathlib.Path(ledger['output']);out=run/job['directory'];out.mkdir(parents=True,exist_ok=False)
++    stop=[False]
++    for sig in [signal.SIGINT,signal.SIGTERM,signal.SIGHUP]:signal.signal(sig,lambda s,f:stop.__setitem__(0,True))
++    def check():
++        if stop[0] or (run/'STOP').exists() or (out/'STOP').exists():raise InterruptedError('STOP/signal')
++        if time.time()>=ledger['deadline_epoch']-RESERVE:raise TimeoutError('delivery reserve reached')
++    progress=dict(status='running',job=job,completed_updates=0,completed_chains=0,started_epoch=time.time())
++    try:
++        check();env=configure()
++        for k in ['python_version','torch_runtime_version','packages','device_name']:
++            if env[k]!=approval['environment'][k]:raise ValueError('environment mismatch '+k)
++        save(out/'environment.json',env)
++        if job['mode']=='train':train(job,out,approval,ledger,check,progress)
++        else:raise PermissionError('standalone sampling worker forbidden')
++        progress['status']='complete'
++    except BaseException as e:progress.update(status='incomplete',error=repr(e),traceback=traceback.format_exc())
++    finally:
++        progress.update(finished_epoch=time.time(),peak_rss_mib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024)
++        if torch.cuda.is_initialized():progress.update(peak_allocated_mib=torch.cuda.max_memory_allocated()/2**20,peak_reserved_mib=torch.cuda.max_memory_reserved()/2**20)
++        save(out/'summary.json',progress)
++    return 0 if progress['status']=='complete' else 2
++if __name__=='__main__':raise SystemExit(main())
+--- a/typed_structure_early_cn_expansion_v1/runtime_contract.py
++++ b/typed_structure_count_aux_v1/runtime_contract.py
+@@ -0,0 +1,73 @@
++"""EMA runtime identities and bindings; deliberately no torch/GPU import."""
++import hashlib,json,pathlib,os
++ROOT=pathlib.Path(__file__).resolve().parent
++PROTOCOL=json.loads((ROOT/'protocol.json').read_text())
++TRAIN_SEEDS=PROTOCOL['train_seeds']; ARMS=tuple(PROTOCOL['arms'])
++DECAYS={'ema_0.99':.99};READOUTS=('ema_0.99',);SAMPLES=tuple(PROTOCOL['sample_seeds'])
++UPDATES=PROTOCOL['updates'];RESERVE=1200
++def sha(path):return hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest()
++def read(path):return json.loads(pathlib.Path(path).read_text())
++def save(path,value):
++    path=pathlib.Path(path);tmp=path.with_suffix(path.suffix+'.tmp')
++    tmp.write_text(json.dumps(value,indent=2,allow_nan=False));os.replace(tmp,path)
++def cell(dataset,seed,arm):
++    if (dataset,seed,arm) not in [(x['dataset'],x['train_seed'],x['arm']) for x in PROTOCOL['tasks']]:raise ValueError('unfrozen task')
++    return f'{dataset}_s{seed}_{arm}'
++def jobs():
++    train=[];sample=[]
++    for task in PROTOCOL['tasks']:
++        dataset,arm,seed,slot=(task[k] for k in ('dataset','arm','train_seed','slot'))
++        identity=cell(dataset,seed,arm)
++        common=dict(dataset=dataset,arm=arm,train_seed=seed,slot=slot,model='E',fusion='early')
++        train.append(dict(**common,id=identity,mode='train',directory=identity,updates=UPDATES))
++        for u in PROTOCOL['generation_checkpoints']:
++            if u>UPDATES:continue
++            for seed_sample in SAMPLES:
++                sample.append(dict(**common,id=f'{identity}_u{u}_ema_0.99_{seed_sample}',mode='sample',readout='ema_0.99',sample_seed=seed_sample,checkpoint=u,directory=f'{identity}/u{u}/ema_0.99/sample_{seed_sample}',T=1000,depends_on=identity))
++    return dict(training=train,sampling=sample,policy='8 cards, one trajectory per card; at each 3000-step checkpoint run its two serial chains in isolated inference context, restore train state, continue without global barriers')
++def source_binding():
++    files={str(p.relative_to(ROOT)):sha(p) for p in sorted(ROOT.rglob('*')) if p.is_file()
++           and not any(x in p.parts for x in ('__pycache__','.pytest_cache','historical_multi_ema','historical_metadata','evidence','tests'))
++           and p.suffix in ('.py','.json','.npz') and p.name not in ('cost.json','release.json','source_manifest.json','PAYLOAD_SHA256.json')}
++    return files,hashlib.sha256(json.dumps(files,sort_keys=True).encode()).hexdigest()
++def dictionary_expected(dataset):
++    return read(ROOT/'asset_bindings.json')['dictionaries'][dataset]
++def verify_assets():
++    for name,h in read(ROOT/'asset_bindings.json')['files'].items():
++        if sha(ROOT/name)!=h:raise ValueError('frozen asset changed: '+name)
++    for b in read(ROOT/'initial_bindings.json').values():
++        if sha(b['path'])!=b['sha256']:raise ValueError('sealed theta0 changed')
++def readout_path(run,job):
++    if job['readout']!='ema_0.99' or job['checkpoint'] not in PROTOCOL['generation_checkpoints']:raise ValueError('unapproved readout')
++    return pathlib.Path(run)/cell(job['dataset'],job['train_seed'],job['arm'])/f"readout_u{job['checkpoint']}_ema_0.99.pt"
++def verify_readout(run,job):
++    folder=pathlib.Path(run)/cell(job['dataset'],job['train_seed'],job['arm'])
++    receipt=read(folder/f"readouts_u{job['checkpoint']}.json")
++    if (receipt['dataset'],receipt['arm'],receipt['train_seed'],receipt['updates'])!=(job['dataset'],job['arm'],job['train_seed'],job['checkpoint']):raise ValueError('readout identity/count')
++    path=readout_path(run,job)
++    if sha(path)!=receipt['files'][job['readout']]['sha256'] or sha(folder/f"checkpoint_u{job['checkpoint']}.pt")!=receipt['checkpoint_sha256']:raise ValueError('readout/checkpoint bytes differ')
++    return path,receipt
++def approval_gate(path,cost_path,output):
++    a=read(path);c=read(cost_path);verify_assets()
++    if a.get('user_formal_authorized') is not True or a.get('independent_review')!='passed' or not a.get('authorization_reference'):raise PermissionError('new formal authorization and review required')
++    if a['source_sha256']!=source_binding()[1] or a['protocol_sha256']!=sha(ROOT/'protocol.json'):raise ValueError('source/protocol binding')
++    if a['updates']!=UPDATES or a['cost_sha256']!=sha(cost_path) or a['budget_seconds']!=c['requested_budget_seconds']:raise ValueError('budget/count/cost binding')
++    if pathlib.Path(a['output']).resolve()!=pathlib.Path(output).resolve():raise ValueError('output binding')
++    if c['source_sha256']!=a['source_sha256'] or c['schedule']!=jobs() or c['status']!='passed':raise ValueError('cost/source/queue mismatch')
++    if a['gpu_uuids']!=c['proposed_gpu_uuids']:raise ValueError('cost and actual physical queue differ')
++    if c['planned_seconds']>a['budget_seconds']:raise ValueError('budget insufficient')
++    if a['initial_bindings_sha256']!=sha(ROOT/'initial_bindings.json'):raise ValueError('initial bindings')
++    if not isinstance(a.get('environment'),dict) or not all(k in a['environment'] for k in ['python_version','torch_runtime_version','packages','device_name']):raise ValueError('complete environment required')
++    if a['asset_bindings_sha256']!=sha(ROOT/'asset_bindings.json'):raise ValueError('external asset approval binding')
++    return a,c
++def verify_ticket(ticket,job,approval,ledger,device,parent):
++    if ticket.get('parent_pid')!=parent or ticket.get('job')!=job or ticket.get('device')!=device:raise PermissionError('launcher ticket mismatch')
++    if ticket['approval_sha256']!=sha(approval) or ticket['ledger_sha256']!=sha(ledger):raise ValueError('launch binding differs')
++    l=read(ledger);a=read(approval)
++    if l['approval_sha256']!=sha(approval) or l['source_sha256']!=source_binding()[1] or a['source_sha256']!=l['source_sha256']:raise ValueError('activated source/approval mismatch')
++    if l['deadline_epoch']!=l['start_epoch']+a['budget_seconds']:raise ValueError('deadline changed')
++def output_check(path,protected):
++    p=pathlib.Path(path).resolve()
++    if p.exists():raise FileExistsError('new output only, no automatic restart')
++    if any(p==q or q in p.parents or p in q.parents for q in [pathlib.Path(x).resolve() for x in protected]):raise ValueError('output overlaps source/input')
++    return p
+--- a/typed_structure_early_cn_expansion_v1/run.py
++++ b/typed_structure_count_aux_v1/run.py
+@@ -0,0 +1,122 @@
++"""Eight continuous trajectories with checkpoint generation; authorization required."""
++import argparse,os,pathlib,json,time,subprocess,signal,sys,shutil
++from runtime_contract import ROOT,jobs,source_binding,sha,read,save,approval_gate,output_check,RESERVE,UPDATES
++
++def resources(devices,authority,rows,processes,handles):
++    if len(devices)!=8 or len(set(devices))!=8:raise ValueError('eight distinct allowed GPUs required')
++    from runtime_contract import PROTOCOL
++    if not authority.get('allocation_check_complete') or authority.get('reservation_conflicts') or not set(devices)<=set(authority.get('allowed_uuids',[])):raise PermissionError('GPU allocation not explicitly verified')
++    if handles.strip() or any(x.split(',')[0].strip() in devices for x in processes.splitlines() if x.strip()):raise RuntimeError('selected device has another process')
++    selected=[]
++    for d in devices:
++        r=rows[d]
++        if '2080 Ti' not in r[2] or float(r[3])<authority['minimum_free_mib']:raise RuntimeError('GPU model/free-memory gate')
++        selected.append(dict(index=r[0],uuid=d,name=r[2],free_mib=float(r[3]),used_mib=float(r[4]),utilization_percent=float(r[5])))
++    return selected
++
++def summary_process(out,deadline,binding):
++    receipt=dict(status='not_started')
++    try:
++        if time.time()+2>=deadline:return dict(status='not_completed_insufficient_time')
++        if source_binding()[1]!=binding:raise ValueError('runtime/summary source changed')
++        with (out/'summary_process.log').open('ab') as log:
++            p=subprocess.run([sys.executable,str(ROOT/'summarize.py'),'--run',str(out),'--output',str(out/'unified_evaluation.json'),
++                              '--deadline',str(deadline-1)],env=dict(os.environ,CUDA_VISIBLE_DEVICES='',OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1',MKL_NUM_THREADS='1',TMPDIR=str(out/'tmp')),
++                              stdout=log,stderr=subprocess.STDOUT,timeout=max(.01,deadline-time.time()-1))
++        r=read(out/'unified_evaluation.json');receipt=dict(status=r['status'],exit_code=p.returncode,sha256=sha(out/'unified_evaluation.json'))
++        if source_binding()[1]!=binding:raise ValueError('summary source changed during evaluation')
++        if p.returncode not in (0,2):raise ValueError('summary process failed')
++    except BaseException as e:receipt=dict(status='failed_or_incomplete',error=repr(e))
++    return receipt
++
++def supervise(out,approval_path,ledger_path,devices,spawn=subprocess.Popen,summarizer=summary_process,poll=.25):
++    ledger=read(ledger_path);stop=[False];running={};finished=[];failures=[];pending=jobs()['training'].copy();stage='independent_trajectory_with_checkpoint_chains';reported_stages=set()
++    (out/'tmp').mkdir(exist_ok=True)  # same checked output filesystem, never system /tmp
++    handlers={s:signal.signal(s,lambda s,f:stop.__setitem__(0,True)) for s in [signal.SIGINT,signal.SIGTERM,signal.SIGHUP]}
++    try:
++        while pending or running:
++            if stop[0] or (out/'STOP').exists() or time.time()>=ledger['deadline_epoch']-RESERVE:raise InterruptedError('signal/STOP/delivery reserve')
++            for slot,device in enumerate(devices):
++                if slot in running:continue
++                job=next((j for j in pending if j['slot']==slot),None)
++                if job is None:continue
++                pending.remove(job);log=(out/(job['id']+'.log')).open('xb');rd,wr=os.pipe()
++                ticket=dict(parent_pid=os.getpid(),job=job,device=device,approval_sha256=sha(approval_path),ledger_sha256=sha(ledger_path))
++                os.write(wr,json.dumps(ticket).encode());os.close(wr)
++                env=dict(os.environ,CUDA_VISIBLE_DEVICES=device,OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1',MKL_NUM_THREADS='1',CUBLAS_WORKSPACE_CONFIG=':4096:8',TMPDIR=str(out/'tmp'))
++                try:process=spawn([sys.executable,str(ROOT/'run_worker.py'),'--approval',str(approval_path),'--ledger',str(ledger_path),'--launch-fd',str(rd)],
++                                  env=env,stdout=log,stderr=subprocess.STDOUT,pass_fds=(rd,),start_new_session=True)
++                except BaseException:log.close();pending.insert(0,job);raise
++                finally:os.close(rd)
++                running[slot]=(process,log,job)
++            for slot,(p,log,j) in list(running.items()):
++                code=p.poll()
++                if code is not None:
++                    log.close();del running[slot];item=dict(job=j,exit_code=code);finished.append(item)
++                    try:item['receipt']=read(out/j['directory']/'summary.json')
++                    except Exception as e:item['receipt_error']=repr(e)
++                    r=item.get('receipt',{})
++                    if code!=0 or r.get('status')!='complete' or (j['mode']=='train' and r.get('completed_updates')!=UPDATES) or r.get('completed_chains')!=len([x for x in jobs()['sampling'] if x['depends_on']==j['id']]):
++                        failures.append(item);raise RuntimeError('worker failed/incomplete '+j['id'])
++                    # This worker already executed its checkpoint chains, without a global barrier.
++            save(out/'launcher_progress.json',dict(stage=stage,finished=finished,pending=pending,running=[x[2] for x in running.values()]))
++            from runtime_contract import PROTOCOL
++            for checkpoint in PROTOCOL['generation_checkpoints']:
++                subset=[x for x in jobs()['sampling'] if x['checkpoint']==checkpoint]
++                if checkpoint not in reported_stages and all((out/x['directory']/'summary.json').exists() for x in subset):
++                    # CPU summary only; GPU workers continue independently.
++                    sr=summarizer(out,ledger['deadline_epoch'],ledger['source_sha256'])
++                    save(out/f'stage_u{checkpoint}_summary_receipt.json',sr);reported_stages.add(checkpoint)
++            if pending or running:time.sleep(poll)
++    except BaseException as e:failures.append(dict(stage=stage,error=repr(e)))
++    finally:
++        for p,log,j in running.values():
++            try:
++                if p.poll() is None:os.killpg(p.pid,signal.SIGTERM)
++            except ProcessLookupError:pass
++        cleanup_deadline=min(time.time()+30,ledger['deadline_epoch'])
++        for p,log,j in running.values():
++            try:p.wait(timeout=max(.01,cleanup_deadline-time.time()))
++            except subprocess.TimeoutExpired:
++                try:os.killpg(p.pid,signal.SIGKILL)
++                except ProcessLookupError:pass
++                p.wait()
++            log.close();finished.append(dict(job=j,exit_code=p.returncode,terminated=True))
++        all_jobs=jobs()['training'];done={x['job']['id'] for x in finished}
++        receipt=dict(status='incomplete',jobs=finished,unstarted=[j for j in all_jobs if j['id'] not in done],primary_failures=failures)
++        save(out/'execution_receipt.json',receipt)
++        try:receipt['evaluation']=summarizer(out,ledger['deadline_epoch'],ledger['source_sha256'])
++        except BaseException as e:receipt['evaluation']=dict(status='failed',error=repr(e))
++        if not failures and len(finished)==8 and receipt['evaluation']['status']=='complete':receipt['status']='complete'
++        receipt.update(finished_epoch=time.time(),elapsed_seconds=time.time()-ledger['start_epoch']);save(out/'launcher_summary.json',receipt)
++        for s,h in handlers.items():signal.signal(s,h)
++    return 0 if receipt['status']=='complete' else 2
++
++def main():
++    entered=time.time();p=argparse.ArgumentParser();p.add_argument('mode',choices=['dry-run','formal']);p.add_argument('--output',required=True)
++    p.add_argument('--approval');p.add_argument('--cost');p.add_argument('--gpu-uuids',nargs='+');a=p.parse_args()
++    if a.mode=='dry-run':print(json.dumps(dict(**jobs(),source_sha256=source_binding()[1],formal_activated=False),indent=2));return 0
++    if not a.approval or not a.cost or not a.gpu_uuids:p.error('formal requires new approved cost, authorization and eight GPU UUIDs')
++    approval,cost=approval_gate(a.approval,a.cost,a.output)
++    protected=[ROOT];BUDGET=approval['budget_seconds']
++    out=output_check(a.output,protected);devices=a.gpu_uuids
++    if devices!=approval['gpu_uuids']:raise ValueError('approved GPU/queue identity differs')
++    visibility=os.environ.get('CUDA_VISIBLE_DEVICES')
++    if visibility and (not all(v.startswith('GPU-') for v in visibility.split(',')) or not set(devices)<=set(visibility.split(','))):raise PermissionError('cannot override restricted/ambiguous platform visibility')
++    rows={r.split(',')[1].strip():[x.strip() for x in r.split(',')] for r in subprocess.check_output(['nvidia-smi','--query-gpu=index,uuid,name,memory.free,memory.used,utilization.gpu','--format=csv,noheader,nounits'],text=True).splitlines()}
++    processes=subprocess.check_output(['nvidia-smi','--query-compute-apps=gpu_uuid,pid,used_memory','--format=csv,noheader,nounits'],text=True)
++    handles=subprocess.run(['fuser']+['/dev/nvidia'+rows[d][0] for d in devices],capture_output=True,text=True)
++    if handles.returncode not in (0,1) or (handles.returncode==1 and handles.stderr.strip()):raise RuntimeError('device owner check unavailable')
++    from resource_handles import filter_passive
++    unresolved,passive=filter_passive(handles.stdout,devices)
++    resource=resources(devices,approval['resource_authorization'],rows,processes,unresolved)
++    existing=out.parent
++    while not existing.exists():existing=existing.parent
++    if shutil.disk_usage(existing).free<cost['required_free_bytes']:raise RuntimeError('insufficient output space for checkpoint retention and reserve')
++    if cost['planned_seconds']>BUDGET-(time.time()-entered):raise TimeoutError('approved queue no longer fits')
++    # Formal entry time includes all launch checks, never reset after admission.
++    ledger=dict(start_epoch=entered,deadline_epoch=entered+BUDGET,timezone='Asia/Shanghai',budget_seconds=BUDGET,output=str(out),
++                source_sha256=source_binding()[1],approval_sha256=sha(a.approval),cost_sha256=sha(a.cost))
++    out.mkdir(parents=True);save(out/'activation.json',ledger);save(out/'resources.json',resource);save(out/'passive_handles.json',passive);save(out/'queue.json',jobs())
++    return supervise(out,pathlib.Path(a.approval),out/'activation.json',devices)
++if __name__=='__main__':raise SystemExit(main())
+--- a/typed_structure_early_cn_expansion_v1/resource_handles.py
++++ b/typed_structure_count_aux_v1/resource_handles.py
+@@ -0,0 +1,9 @@
++"""No protected legacy workers in this new eight-card queue."""
++import pathlib
++def filter_passive(handles,devices):
++    unresolved=[];exited=[]
++    for pid in sorted(set(handles.split())):
++        if not pid.isdecimal():raise ValueError('unexpected fuser output')
++        if (pathlib.Path('/proc')/pid).exists():unresolved.append(pid)
++        else:exited.append(dict(pid=int(pid),reason='exited_before_inspection'))
++    return ' '.join(unresolved),exited
+--- a/typed_structure_early_cn_expansion_v1/cross_batch.py
++++ b/typed_structure_count_aux_v1/cross_batch.py
+@@ -0,0 +1,45 @@
++"""Identity-safe loss and length comparisons. No historical controls mixed in."""
++import math
++from runtime_contract import PROTOCOL,jobs
++def mean(x):return sum(x)/len(x) if x and all(v is not None and math.isfinite(float(v)) for v in x) else None
++def difference(a,b):return a-b if a is not None and b is not None else None
++def key(r):return (r['dataset'],r['train_seed'],r['arm'],r['checkpoint'],r['sample_seed'],r['version'])
++def aggregate(records,templates):
++    expected={key(dict(**j,version=v)) for j in jobs()['sampling'] for v in ('original','lcc')}
++    index={}
++    for r in records:
++        k=key(r)
++        if k not in expected or k in index:raise ValueError('unexpected/duplicate identity')
++        index[k]=r
++    missing=[dict(dataset=d,train_seed=s,arm=a,checkpoint=u,sample_seed=z,version=v,reason='not_present_or_failed') for d,s,a,u,z,v in sorted(expected-set(index))]
++    means=[];paired=[];paired_means=[];length=[];length_means=[];cleanup=[]
++    for d,seeds in PROTOCOL['train_seeds'].items():
++        for v in ('original','lcc'):
++            for g in ('raw','absolute_error','distribution_error'):
++                metrics=set(templates.get(d,{}).get(g,{}))
++                for r in records:
++                    if r['dataset']==d:metrics.update(r.get(g,{}))
++                for metric in sorted(metrics):
++                    def get(seed,arm,u,z,version=v):return index.get((d,seed,arm,u,z,version),{}).get(g,{}).get(metric)
++                    def base(seed):return dict(dataset=d,train_seed=seed,version=v,group=g,metric=metric)
++                    for seed in seeds:
++                        for u in PROTOCOL['generation_checkpoints']:
++                            for arm in PROTOCOL['arms']:
++                                vals=[get(seed,arm,u,z) for z in PROTOCOL['sample_seeds']];m=mean(vals)
++                                means.append(dict(**base(seed),arm=arm,checkpoint=u,value=m,reason=None if m is not None else 'both_samples_required_and_defined'))
++                                if v=='lcc':
++                                    for z in PROTOCOL['sample_seeds']:cleanup.append(dict(**base(seed),arm=arm,checkpoint=u,sample_seed=z,difference=difference(get(seed,arm,u,z),get(seed,arm,u,z,'original'))))
++                            vals=[]
++                            for z in PROTOCOL['sample_seeds']:
++                                diff=difference(get(seed,'CE_COUNT',u,z),get(seed,'CE',u,z));vals.append(diff)
++                                paired.append(dict(**base(seed),checkpoint=u,sample_seed=z,contrast='CE_COUNT-CE',difference=diff,reason=None if diff is not None else 'missing_or_undefined_pair'))
++                            m=mean(vals);paired_means.append(dict(**base(seed),checkpoint=u,contrast='CE_COUNT-CE',difference=m,reason=None if m is not None else 'both_pairs_required_and_defined'))
++                        for arm in PROTOCOL['arms']:
++                            cps=PROTOCOL['generation_checkpoints']
++                            for later,earlier in [(cps[i],cps[i-1]) for i in range(1,len(cps))]:
++                                vals=[]
++                                for z in PROTOCOL['sample_seeds']:
++                                    diff=difference(get(seed,arm,later,z),get(seed,arm,earlier,z));vals.append(diff)
++                                    length.append(dict(**base(seed),arm=arm,later=later,earlier=earlier,sample_seed=z,difference=diff,reason=None if diff is not None else 'missing_or_undefined_pair'))
++                                m=mean(vals);length_means.append(dict(**base(seed),arm=arm,later=later,earlier=earlier,difference=m,reason=None if m is not None else 'both_pairs_required_and_defined'))
++    return dict(cell_means=means,paired=paired,paired_means=paired_means,length_paired=length,length_means=length_means,lcc_minus_original=cleanup,missing_identities=missing,comparison_status='complete' if not missing else 'incomplete')
+--- a/typed_structure_early_cn_expansion_v1/summarize.py
++++ b/typed_structure_count_aux_v1/summarize.py
+@@ -0,0 +1,111 @@
++"""Final EMA A/C/D/E evaluation; original and induced LCC always separate.
++Frozen pure metric functions; no model import. Missing/failed cells remain.
++"""
++import argparse,pathlib,time,json,itertools,math,collections,csv
++import numpy as np
++from runtime_contract import ROOT,jobs,read,save,sha,source_binding
++from lcc_eval import metrics as M
++from evaluation_fields import scalar
++Counter=collections.Counter
++
++def mean(values):
++    return sum(values)/len(values) if values and all(v is not None and math.isfinite(float(v)) for v in values) else None
++def delta(a,b):return a-b if a is not None and b is not None else None
++def write_json(path,value):
++    path=pathlib.Path(path);path.parent.mkdir(parents=True,exist_ok=True)
++    path.write_text(json.dumps(value,indent=2,allow_nan=False,default=lambda x:x.tolist() if isinstance(x,np.ndarray) else x.item()))
++def factory():
++    v=ROOT/'lcc_eval/vendor';return M.frozen(v/'frozen_metrics.py',v/'aligned_evaluate.py',v/'hgen_utils.py')
++def load_graph(path,reference=False):
++    with np.load(path,allow_pickle=False) as z:
++        g=M.make_graph(z['types'],z['edges'].T if reference else z['edges'],z['schema'])
++        if 'families' in z:np.testing.assert_array_equal(g['families'],z['families'])
++    return g
++def evaluate_graph(g,ref,rs,F,names,check):
++    s=M.stats(g,F,names,check);comp=M.compare(g,s,ref,rs,F,names)
++    raw,dist=scalar(s,rs,comp,names);rv,_=scalar(rs,rs,M.compare(ref,rs,ref,rs,F,names),names)
++    value=dict(statistics=s,comparison=comp,raw=raw,reference=rv,absolute_error={k:None if v is None or rv.get(k) is None else abs(v-rv[k]) for k,v in raw.items()},distribution_error=dist)
++    value['undefined']={group:{k:'undefined_zero_denominator_missing_type_or_unimplemented_metric' for k,v in value[group].items() if v is None} for group in ('raw','reference','absolute_error','distribution_error')}
++    return value
++def aggregate(records,templates):
++    from cross_batch import aggregate as combine
++    return combine(records,templates)
++def diversity(a,b,sa=None,sb=None,F=None):
++    x=set(map(tuple,a['original_ids'][a['edges']].T));y=set(map(tuple,b['original_ids'][b['edges']].T))
++    na,nb=set(a['original_ids']),set(b['original_ids'])
++    value=dict(node_jaccard=len(na&nb)/len(na|nb),labeled_edge_symmetric_difference=len(x^y),labeled_edge_jaccard=len(x&y)/len(x|y) if x|y else None,
++        nodes=[len(a['types']),len(b['types'])],edges=[len(x),len(y)],degree_W1=M.w1(a['total'],b['total']),
++        exact_labeled_duplicate=np.array_equal(a['original_ids'],b['original_ids']) and x==y,
++        nonisomorphic_by_size=len(a['types'])!=len(b['types']) or len(x)!=len(y),
++        limitation='labeled edge difference is not an isomorphism-invariant diversity guarantee; only two samples')
++    if sa is not None and sb is not None and F is not None:
++        value.update(triangle_composition_TV=F['tv'](Counter(sa['typed_triangles']),Counter(sb['typed_triangles'])),
++            MP2_composition_TV=F['tv'](Counter(sa['mp'][1]['counts']),Counter(sb['mp'][1]['counts'])),
++            MP3_composition_TV=F['tv'](Counter(sa['mp'][2]['counts']),Counter(sb['mp'][2]['counts'])))
++    return value
++def main():
++    p=argparse.ArgumentParser();p.add_argument('--run',required=True);p.add_argument('--output',required=True);p.add_argument('--deadline',type=float,required=True);a=p.parse_args()
++    run=pathlib.Path(a.run);out=pathlib.Path(a.output);derived=run/'derived_lcc_evaluation';derived.mkdir(exist_ok=True)
++    started=time.time();records=[];inventory=[];graphs={};templates={};errors=[]
++    def check():
++        if time.time()>=a.deadline:raise TimeoutError('evaluation deadline')
++    try:
++        cfg=read(ROOT/'package/config.json');F=factory();refs={}
++        for dataset in ('IMDB','PubMed'):
++            check();ref=load_graph(ROOT/'package'/cfg['datasets'][dataset]['file'],True);names=cfg['datasets'][dataset]['type_names'];rs=M.stats(ref,F,names,check)
++            refs[dataset]=(ref,rs,names);templates[dataset]=evaluate_graph(ref,ref,rs,F,names,check);write_json(derived/(dataset+'_reference.json'),templates[dataset])
++        for job in jobs()['sampling']:
++            check();folder=run/job['directory'];item=dict(job=job,status='missing',reason='sampling output absent');inventory.append(item)
++            if (folder/'summary.json').exists():item['worker']=read(folder/'summary.json')
++            if not (folder/'graph.npz').exists():continue
++            if item.get('worker',{}).get('status')!='complete':item.update(status='incomplete',reason='worker not complete');continue
++            binding=read(folder/'binding.json')
++            if binding['job']!=job or sha(folder/'graph.npz')!=binding['graph_sha256']:raise ValueError('graph identity/hash mismatch')
++            ref,rs,names=refs[job['dataset']];g=load_graph(folder/'graph.npz');kept,mapping=M.lcc(g)
++            target=derived/job['id'];target.mkdir(exist_ok=True);mapping.update(source_sha256=sha(folder/'graph.npz'),source=str(folder/'graph.npz'))
++            np.testing.assert_array_equal(kept['degree'],g['degree'][mapping['selected_local_ids']])
++            np.savez_compressed(target/'lcc.npz',types=kept['types'],edges=kept['edges'],families=kept['families'],schema=kept['schema'],new_to_original=kept['original_ids'],old_to_new=np.array(mapping['old_to_new']))
++            mapping['derived_sha256']=sha(target/'lcc.npz');write_json(target/'mapping.json',mapping)
++            for version,graph in [('original',g),('lcc',kept)]:
++                check();cache=target/(version+'.json')
++                if cache.exists():
++                    value=read(cache)
++                    if value['graph_source_sha256']!=sha(folder/'graph.npz') or value['evaluation_source_sha256']!=source_binding()[1]:raise ValueError('stale evaluation cache')
++                else:value=evaluate_graph(graph,ref,rs,F,names,check)
++                value.update(dataset=job['dataset'],arm=job['arm'],model=job['model'],fusion=job['fusion'],checkpoint=job['checkpoint'],batch='count_aux',train_seed=job['train_seed'],sample_seed=job['sample_seed'],version=version,graph_source_sha256=sha(folder/'graph.npz'),evaluation_source_sha256=source_binding()[1])
++                records.append(value);write_json(target/(version+'.json'),value);graphs[job['dataset'],job['train_seed'],job['arm'],job['checkpoint'],job['sample_seed'],version]=graph
++            type_counts=np.bincount(g['types'],minlength=4);kept_counts=np.bincount(kept['types'],minlength=4)
++            before=np.bincount(g['families'],minlength=10);after=np.bincount(kept['families'],minlength=10)
++            item.update(status='complete',reason=None,node_retention=len(kept['types'])/len(g['types']),edge_retention=kept['edges'].shape[1]/g['edges'].shape[1] if g['edges'].shape[1] else None,mapping=str(target/'mapping.json'),
++                type_counts_original=type_counts.tolist(),type_counts_lcc=kept_counts.tolist(),type_nodes_lost=(type_counts-kept_counts).tolist(),
++                type_retention=[int(b)/int(a) if a else None for a,b in zip(type_counts,kept_counts)],
++                family_edges_original=before.tolist(),family_edges_lcc=after.tolist(),family_retention=[int(b)/int(a) if a else None for a,b in zip(before,after)])
++    except BaseException as e:errors.append(repr(e))
++    seen={x['job']['id'] for x in inventory}
++    inventory.extend(dict(job=j,status='not_evaluated',reason='earlier_failure_or_deadline') for j in jobs()['sampling'] if j['id'] not in seen)
++    new_record_count=len(records)
++    external_inventory=[];cross_errors=[] # no old scientific results used as new controls
++    aggregation=aggregate(records,templates) if len(templates)==2 else dict(reason='reference evaluation incomplete')
++    ds=[];record_index={(r['dataset'],r['train_seed'],r['arm'],r['checkpoint'],r['sample_seed'],r['version']):r for r in records}
++    from runtime_contract import PROTOCOL
++    for job in [dict(t,checkpoint=u) for t in jobs()['training'] for u in PROTOCOL['generation_checkpoints']]:
++        for version in ('original','lcc'):
++            x=[graphs.get((job['dataset'],job['train_seed'],job['arm'],job['checkpoint'],s,version)) for s in (2026102821,2026102822)]
++            keys=[(job['dataset'],job['train_seed'],job['arm'],job['checkpoint'],s,version) for s in (2026102821,2026102822)]
++            valid=all(k in record_index for k in keys) and all(g is not None for g in x)
++            ds.append(dict(job=job,version=version,metrics=diversity(*x,record_index[keys[0]]['statistics'],record_index[keys[1]]['statistics'],F) if valid else None,reason=None if valid else 'both_graphs_required'))
++    result=dict(status='complete' if new_record_count==2*len(jobs()['sampling']) and not errors and all(x['status']=='complete' for x in inventory) else 'incomplete',records=records,inventory=inventory,external_inventory=external_inventory,cross_batch_errors=cross_errors,diversity=ds,errors=errors,seconds=time.time()-started,source_sha256=source_binding()[1],**aggregation)
++    write_json(out,result)
++    stage_counts={u:sum(r['checkpoint']==u and r['version']=='original' for r in records) for u in PROTOCOL['generation_checkpoints']}
++    write_json(run/'stage_status.json',dict(completed_graphs_by_checkpoint=stage_counts,expected_per_checkpoint=16,errors=errors))
++    for u,n in stage_counts.items():
++        target=run/f'stage_u{u}_brief.json'
++        if n==16 and not target.exists():
++            chosen=[x for x in result['paired_means'] if x['checkpoint']==u and x['version']=='original' and x['metric'] in ('edges','main_incident4_W1','main_joint_degree_TV','triangles','triangle_composition_TV')]
++            write_json(target,dict(checkpoint=u,complete_graphs=n,paired_means=chosen,source_sha256=source_binding()[1]))
++    for name in ('cell_means','paired','paired_means','length_paired','length_means','lcc_minus_original'):
++        rows=result.get(name,[])
++        if rows:
++            with (derived/(name+'.csv')).open('w',newline='') as f:w=csv.DictWriter(f,fieldnames=list(rows[0]));w.writeheader();w.writerows(rows)
++    return 0 if result['status']=='complete' else 2
++if __name__=='__main__':raise SystemExit(main())
+--- a/typed_structure_early_cn_expansion_v1/integration.py
++++ b/typed_structure_count_aux_v1/integration.py
+@@ -0,0 +1,56 @@
++"""Small hooks around existing normal2/checkpoint/sampling machinery.
++
++No new scientific training loop, sampler or automatic execution entrypoint.
++The reviewed launcher must supply the existing functions and authorization.
++"""
++from ema import ParameterEMA,cpu_copy
++
++def complete_normal2(normal2_fn,model,opt,case,inputs,T,device,ema,completed_updates):
++    if completed_updates!=ema.updates or not ema.at_update_boundary:raise ValueError('raw/EMA counter or boundary mismatch before update')
++    # Existing function does zero_grad ONCE, two half-loss backwards, one step.
++    # An exception after a raw step must not save an apparently complete old
++    # counter with new raw parameters and old/partial EMA parameters.
++    ema.at_update_boundary=False
++    result=normal2_fn(model,opt,case,inputs,T,device,step=True)
++    if result.get('optimizer_steps')!=1:raise ValueError('normal2 did not report one complete step')
++    ema.update(model,completed_updates+1)
++    ema.at_update_boundary=True
++    return dict(result,ema_updates=ema.updates)
++
++def checkpoint_payload(model,opt,ema,updates,rng,binding):
++    if updates!=ema.updates:raise ValueError('save only at complete raw/EMA boundary')
++    return dict(model=cpu_copy(model.state_dict()),optimizer=cpu_copy(opt.state_dict()),
++                ema=ema.state_dict(),updates=updates,rng=cpu_copy(rng),binding=cpu_copy(binding))
++
++def restore_payload(payload,model,opt,ema,binding,restore_rng):
++    # The existing checkpoint loader still authenticates bytes and paths.
++    if payload['binding']!=binding:raise ValueError('checkpoint binding mismatch')
++    # Validate EMA fully before mutating model/optimizer/RNG.
++    check=type(ema)(model)
++    check.load_state_dict(payload['ema'],model,payload['updates'])
++    model.load_state_dict(payload['model'],strict=True)
++    opt.load_state_dict(payload['optimizer'])
++    ema.load_state_dict(payload['ema'],model,payload['updates'])
++    restore_rng(cpu_copy(payload['rng']))
++    return payload['updates']
++
++def final_readouts(model,ema,completed_updates):
++    from runtime_contract import PROTOCOL
++    if completed_updates not in PROTOCOL['generation_checkpoints'] or ema.updates!=completed_updates:
++        raise ValueError('only a predeclared checkpoint EMA may enter the sample plan')
++    if hasattr(ema,'readouts'):return dict(raw=cpu_copy(model.state_dict()),**ema.readouts(model))
++    return dict(raw=cpu_copy(model.state_dict()),ema=ema.readout_state_dict(model))
++
++def ema_validation(validation_fn,model,ema,*args,**kwargs):
++    """Call the existing RNG-preserving validation with EMA, restore raw in finally.
++
++    The existing validation closes each FrozenTypedContext. No learned output
++    cache may survive this weight swap. No second model construction is needed.
++    """
++    raw=cpu_copy(model.state_dict());mode=model.training
++    try:
++        model.load_state_dict(ema.readout_state_dict(model),strict=True)
++        return validation_fn(model,*args,**kwargs)
++    finally:
++        model.load_state_dict(raw,strict=True)
++        model.train(mode)
+--- a/typed_structure_early_cn_expansion_v1/protocol.json
++++ b/typed_structure_count_aux_v1/protocol.json
+@@ -0,0 +1,147 @@
++{
++  "version": "typed_structure_count_aux_v1",
++  "formal_authorized": false,
++  "train_seeds": {
++    "IMDB": [
++      2026102911,
++      2026102931
++    ],
++    "PubMed": [
++      2026102912,
++      2026102932
++    ]
++  },
++  "arms": [
++    "CE",
++    "CE_COUNT"
++  ],
++  "sample_seeds": [
++    2026102821,
++    2026102822
++  ],
++  "updates": 9000,
++  "checkpoints": [
++    0,
++    1000,
++    2000,
++    3000,
++    4000,
++    5000,
++    6000,
++    7000,
++    8000,
++    9000
++  ],
++  "sample_readout": "ema_0.99",
++  "ema_decay": 0.99,
++  "T": 1000,
++  "rounds": 1,
++  "S": 18336,
++  "normal2": "one zero_grad; each input (sumCE/18336 + lambda*count_aux)/2 backward; one AdamW step and one EMA update",
++  "validation_times": [
++    1,
++    500,
++    1000
++  ],
++  "delivery_reserve_seconds": 1200,
++  "budget_seconds": null,
++  "K": {
++    "IMDB": [
++      5,
++      4,
++      3,
++      2
++    ],
++    "PubMed": [
++      8,
++      8,
++      8,
++      6
++    ]
++  },
++  "primary": "per-seed length contrasts and CE_COUNT minus CE at each checkpoint; original primary, LCC secondary",
++  "raw_generation": false,
++  "candidate": "E-earlyCN + fixed relation-count auxiliary loss from theta0",
++  "cn_injection": "unchanged reviewed E earlyCN; no late shortcut; no dropout or gradient isolation",
++  "tasks": [
++    {
++      "dataset": "PubMed",
++      "train_seed": 2026102912,
++      "arm": "CE",
++      "model": "E",
++      "fusion": "early",
++      "slot": 0
++    },
++    {
++      "dataset": "PubMed",
++      "train_seed": 2026102912,
++      "arm": "CE_COUNT",
++      "model": "E",
++      "fusion": "early",
++      "slot": 1
++    },
++    {
++      "dataset": "PubMed",
++      "train_seed": 2026102932,
++      "arm": "CE",
++      "model": "E",
++      "fusion": "early",
++      "slot": 2
++    },
++    {
++      "dataset": "PubMed",
++      "train_seed": 2026102932,
++      "arm": "CE_COUNT",
++      "model": "E",
++      "fusion": "early",
++      "slot": 3
++    },
++    {
++      "dataset": "IMDB",
++      "train_seed": 2026102911,
++      "arm": "CE",
++      "model": "E",
++      "fusion": "early",
++      "slot": 4
++    },
++    {
++      "dataset": "IMDB",
++      "train_seed": 2026102911,
++      "arm": "CE_COUNT",
++      "model": "E",
++      "fusion": "early",
++      "slot": 5
++    },
++    {
++      "dataset": "IMDB",
++      "train_seed": 2026102931,
++      "arm": "CE",
++      "model": "E",
++      "fusion": "early",
++      "slot": 6
++    },
++    {
++      "dataset": "IMDB",
++      "train_seed": 2026102931,
++      "arm": "CE_COUNT",
++      "model": "E",
++      "fusion": "early",
++      "slot": 7
++    }
++  ],
++  "generation_checkpoints": [
++    3000,
++    6000,
++    9000
++  ],
++  "alternative_updates": 6000,
++  "loss": {
++    "formula": "mean_r((sum_active_p0+fixed_present-target_edges)**2/(movable_slots*max(target_edges,1)))",
++    "lambda_count": 0.01,
++    "relations": "active movable-slot families only; exclude no-movable families after fixed-support consistency check",
++    "accumulation": "float64 differentiable sums",
++    "ce_denominator": 18336,
++    "normalization": "squared density error / max(target_density,1/movable_slots), with fixed supported edges accounted separately",
++    "engineering_revision": "initial pure-relative form rejected on fixed t500 engineering scale; lambda remains0.01; no generation used"
++  }
++}
+--- a/typed_structure_early_cn_expansion_v1/build_cost.py
++++ b/typed_structure_count_aux_v1/build_cost.py
+@@ -0,0 +1,40 @@
++"""Read-only cost extrapolation, never activates a run or grants approval."""
++import argparse,pathlib,json,datetime,math
++from runtime_contract import ROOT,PROTOCOL,jobs,source_binding,save
++
++def main():
++    ap=argparse.ArgumentParser();ap.add_argument('--project',required=True);ap.add_argument('--evidence',required=True);a=ap.parse_args()
++    project=pathlib.Path(a.project);ev=pathlib.Path(a.evidence)
++    history=project/'results/typed_structure_early_cn_expansion_formal_v1_20261029T1242/run_retry1'
++    rates={};components={}
++    for d,seed in [('IMDB',2026102931),('PubMed',2026102932)]:
++        folder=history/f'{d}_s{seed}_E_earlyCN';receipt=json.loads((folder/'summary.json').read_text())
++        hist=(receipt['finished_epoch']-receipt['started_epoch'])/3000
++        probe=json.loads((ev/f'engineering_{d}.json').read_text())
++        # Initial loss form used these updates; final formula has same graph and
++        # adds only a per-family denominator. No final-form updated GPU timing.
++        new=max(x['wall_seconds'] for x in probe['updates'] if x['arm']=='CE_COUNT')
++        rate=max(hist,new)*1.02
++        chains=[json.loads(p.read_text())['seconds'] for p in folder.glob('ema_0.99/sample_*/binding.json')]
++        rates[d]=(rate,max(chains));components[d]=dict(historical_update_with_validation_seconds=hist,engineering_aux_update_max_seconds=new,additional_unmeasured_formula_allowance=1.02,planned_update_seconds=rate,historical_chain_seconds=chains,planned_chain_seconds=max(chains),evidence=str(folder))
++    alternatives={}
++    for steps in [9000,6000]:
++        rows=[]
++        for task in PROTOCOL['tasks']:
++            rate,chain=rates[task['dataset']];stages=steps//3000
++            # Per trajectory extra validations, CPU snapshots, readout swaps and IO.
++            extra=240 if steps==9000 else 180
++            rows.append(dict(**task,updates=steps,chains=stages*2,training_seconds=rate*steps,sampling_seconds=chain*stages*2,extra_validation_save_io_seconds=extra,serial_seconds=rate*steps+chain*stages*2+extra))
++        compute=max(x['serial_seconds'] for x in rows)
++        planned=compute*1.20+15*60+20*60
++        proposed=780*60 if steps==9000 else 540*60
++        alternatives[str(steps)]=dict(queue=rows,total_updates=8*steps,total_chains=8*(steps//3000)*2,compute_wall_seconds=compute,concurrency_planning_multiplier=1.20,concurrency_multiplier_measured=False,fault_reserve_seconds=900,evaluation_audit_publication_reserve_seconds=1200,planned_seconds=planned,requested_budget_seconds=proposed,fits_proposal=planned<proposed,task_compute_seconds_sum=sum(x['serial_seconds'] for x in rows))
++    uuids=['GPU-12b85b68-69e6-12fa-76ce-986c0b46e8a7','GPU-cf73267c-774a-dada-fc26-ada91ccc27c1','GPU-dda1721a-d053-7371-3434-4c3c8502a1d4','GPU-994be766-a8bd-b90c-bf87-c667dfa8ab4d','GPU-e2284395-dd00-1e74-3eed-7f406fa69d5c','GPU-2db6cf6a-a8b5-58af-4e89-22bfc863a0fb','GPU-cddbf2e5-1af7-7219-ff58-38e6f4c44f69','GPU-360156ae-7a75-37f4-eaed-9a5500275409']
++    value=dict(status='passed' if all(x['fits_proposal'] for x in alternatives.values()) else 'insufficient',formal_authorized=False,source_sha256=source_binding()[1],schedule=jobs(),proposed_gpu_uuids=uuids,components=components,alternatives=alternatives,**{k:alternatives['9000'][k] for k in ('planned_seconds','requested_budget_seconds')},required_free_bytes=32*2**30,
++        disk_estimate=dict(checkpoints_80_at_111MB=80*111000000,readouts_24_at_28MB=24*28000000,logs_graphs_audit_allowance_bytes=4*2**30,required_free_with_reserve_bytes=32*2**30),
++        limitations=['historical full chains only; new auxiliary-driven states may differ in cost','no 9000-step or eight-card new-candidate throughput measured','8 engineer optimizer calls used rejected initial loss normalization; final scale/backward no steps','formal start/deadline not yet activated'])
++    zone=datetime.timezone(datetime.timedelta(hours=8));example=datetime.datetime(2026,10,29,20,0,tzinfo=zone)
++    value['illustrative_timetable']={k:dict(start=example.isoformat(),science_stop=(example+datetime.timedelta(seconds=v['requested_budget_seconds']-1200)).isoformat(),delivery=(example+datetime.timedelta(seconds=v['requested_budget_seconds'])).isoformat()) for k,v in alternatives.items()}
++    value['latest_start_for_09_delivery_9000']='2026-10-29T20:00:00+08:00 (planning only, no guarantee)'
++    save(ROOT/'cost.json',value);print(json.dumps({k:{q:v[q] for q in ['total_updates','total_chains','compute_wall_seconds','planned_seconds','requested_budget_seconds']} for k,v in alternatives.items()},indent=2))
++if __name__=='__main__':main()
+--- a/typed_structure_early_cn_expansion_v1/test_count_aux.py
++++ b/typed_structure_count_aux_v1/test_count_aux.py
+@@ -0,0 +1,160 @@
++import sys,pathlib,copy,json,importlib.util
++import pytest
++ROOT=pathlib.Path(__file__).resolve().parent;sys.path.insert(0,str(ROOT/'package'))
++import torch
++from count_aux import count_loss
++from runtime_contract import jobs,PROTOCOL,approval_gate
++from cross_batch import aggregate
++
++def test_hand_count_and_gradient():
++    p=torch.tensor([.2,.8,.4],dtype=torch.float64,requires_grad=True)
++    loss,r=count_loss(p,[0,0,1],[1,0],[2,1])
++    assert float(loss)==pytest.approx(.08)
++    loss.backward();torch.testing.assert_close(p.grad,torch.tensor([0,0,.4],dtype=torch.float64))
++    assert r['relation_denominator']==2
++def test_empty_family_excluded_and_fixed_one():
++    p=torch.tensor([.5],dtype=torch.float64,requires_grad=True)
++    loss,r=count_loss(p,[0],[1,3,0],[1,0,0],[0,3,0])
++    assert float(loss)==.25 and r['relation_denominator']==1
++def test_capacity_normalization():
++    loss,_=count_loss(torch.tensor([.25,.25],dtype=torch.float64),[0,0],[1],[2])
++    assert float(loss)==.125
++def test_no_active():
++    p=torch.empty(0,dtype=torch.float64,requires_grad=True)
++    loss,r=count_loss(p,[],[0,2],[0,0],[0,2]);loss.backward()
++    assert loss==0 and r['relation_denominator']==0
++@pytest.mark.parametrize('p,f,t,n', [([.5,.5],[0,0],[1],[1]),([float('nan')],[0],[1],[1]),([1.2],[0],[1],[1]),([.5],[1],[1],[1]),([.5],[0],[2],[1])])
++def test_invalid_count(p,f,t,n):
++    with pytest.raises((ValueError,FloatingPointError)):count_loss(torch.tensor(p),f,t,n)
++def test_zero_lambda_formula():
++    x=torch.tensor([[.2,.9],[.5,-.3]],requires_grad=True);labels=torch.tensor([1,0]);ce=torch.nn.functional.cross_entropy(x,labels,reduction='sum')/18336
++    aux,_=count_loss(x.softmax(-1)[:,1],[0,0],[1],[2])
++    g=torch.autograd.grad(ce/2,x,retain_graph=True)[0]
++    gg=torch.autograd.grad(ce/2+0*aux/2,x)[0]
++    assert torch.equal(g,gg)
++def test_queue():
++    j=jobs();assert len(j['training'])==8 and len(j['sampling'])==48
++    alljobs=j['training']+j['sampling']
++    assert len({x['id'] for x in alljobs})==56 and len({x['directory'] for x in alljobs})==56
++    for t in j['training']:
++        s=[x for x in j['sampling'] if x['depends_on']==t['id']]
++        assert t['updates']==9000 and len(s)==6 and {x['checkpoint'] for x in s}=={3000,6000,9000}
++        assert all(x['slot']==t['slot'] and x['train_seed']==t['train_seed'] for x in s)
++def test_aggregation_identity_null_direction():
++    templates={d:{'absolute_error':{'edges':0},'distribution_error':{'main_incident4_W1':0},'raw':{'edges':0}} for d in PROTOCOL['train_seeds']}
++    rows=[]
++    for j in jobs()['sampling']:
++        for v in ('original','lcc'):
++            value=j['checkpoint']/1000+(10 if j['arm']=='CE' else 2)+(j['train_seed']%10)*100+(j['sample_seed']%10)
++            rows.append(dict(**j,version=v,absolute_error={'edges':value},raw={'edges':value},distribution_error={'main_incident4_W1':None}))
++    a=aggregate(rows,templates)
++    assert all(x['difference']==-8 for x in a['paired_means'] if x['metric']=='edges')
++    assert all(x['difference']==3 for x in a['length_means'] if x['metric']=='edges')
++    assert all(x['difference'] is None for x in a['paired_means'] if x['metric']=='main_incident4_W1')
++    first=rows.pop(0);a=aggregate(rows,templates)
++    assert len(a['missing_identities'])==1
++    assert any(x['value'] is None for x in a['cell_means'] if x['dataset']==first['dataset'] and x['train_seed']==first['train_seed'] and x['arm']==first['arm'] and x['checkpoint']==first['checkpoint'] and x['version']==first['version'])
++def test_scientific_source_frozen():
++    import hashlib
++    for rel,expected in json.loads((ROOT/'frozen_science_bindings.json').read_text()).items():
++        assert hashlib.sha256((ROOT/rel).read_bytes()).hexdigest()==expected,rel
++def test_inference_isolation_and_exception():
++    from ema import ParameterEMA,cpu_copy
++    from probe import rng_get,equal
++    from stage import isolated_readout
++    import numpy as np
++    m=torch.nn.Linear(2,2);opt=torch.optim.AdamW(m.parameters());ema=ParameterEMA(m);rng=np.random.default_rng(7)
++    before=cpu_copy(m.state_dict());r=rng_get(rng,'cpu')
++    with pytest.raises(RuntimeError):
++        with isolated_readout(m,opt,ema,rng,'cpu'):
++            with torch.no_grad():m.weight.add_(1)
++            rng.random();torch.rand(3);raise RuntimeError('simulated sampling failure')
++    assert equal(before,m.state_dict()) and equal(r,rng_get(rng,'cpu'))
++
++def test_mock_continuous_three_checkpoint_worker(tmp_path,monkeypatch):
++    # Actual run_worker.train orchestration; scientific update/sampler replaced.
++    # No optimizer.step and no generated graph, even in this simulation.
++    import run_worker as w
++    import numpy as np
++    from probe import rng_get,equal
++    from runtime_contract import jobs,verify_readout
++    from ema import cpu_copy
++    job=jobs()['training'][0];out=tmp_path/job['directory'];out.mkdir()
++    model=torch.nn.Linear(2,2);model.count_aux_weight=0.;opt=torch.optim.AdamW(model.parameters())
++    rng=np.random.default_rng(123);expected=np.random.default_rng(123).random(3).tolist();seen=[];sampled=[];weights=[]
++    monkeypatch.setattr(w,'UPDATES',3);monkeypatch.setattr(w,'SAVE_EVERY',1)
++    monkeypatch.setitem(w.PROTOCOL,'generation_checkpoints',[1,2,3])
++    monkeypatch.setattr(w,'fresh',lambda *a:(model,opt,{}, {'T':1000},rng,{}))
++    monkeypatch.setattr(w,'rng_get',lambda r,d:rng_get(r,'cpu'))
++    monkeypatch.setattr(w,'paired_validation',lambda *a:{'raw':{'test_only':True},'ema_0.99':{'test_only':True}})
++    monkeypatch.setattr(w,'input_hash',lambda i:str(i))
++    def inputs(*a):
++        seen.append(float(rng.random()));return [{'t':500},{'t':500}]
++    monkeypatch.setattr(w,'pair_inputs',inputs)
++    def update(fn,m,opt,case,inputs,T,device,ema,completed):
++        if weights:assert equal(m.state_dict(),weights[-1])
++        with torch.no_grad():m.weight.add_(.01)
++        ema.update(m,completed+1);weights.append(cpu_copy(m.state_dict()))
++        return {'optimizer_steps':1,'simulated':True}
++    monkeypatch.setattr(w,'complete_normal2',update)
++    from stage import isolated_readout
++    monkeypatch.setattr(w,'isolated_readout',lambda m,o,e,r,d:isolated_readout(m,o,e,r,'cpu'))
++    def sample(j,folder,run,approval,check,progress,loaded):
++        path,receipt=verify_readout(run,j);p=torch.load(path,map_location='cpu')
++        assert p['updates']==j['checkpoint'] and p['readout']=='ema_0.99'
++        loaded[0].load_state_dict(p['model']);rng.random();torch.rand(2)
++        sampled.append((j['checkpoint'],j['sample_seed']));progress['completed_chains']=1
++    monkeypatch.setattr(w,'sample',sample)
++    progress={'completed_chains':0};ledger={'output':str(tmp_path),'approval_sha256':'simulation'}
++    w.train(job,out,{},ledger,lambda:None,progress)
++    assert seen==expected and len(sampled)==6 and progress['completed_updates']==3 and progress['completed_chains']==6
++    assert len(list(out.glob('checkpoint_u*.pt')))==3 and (out/'initial.pt').exists()
++    assert opt.state_dict()['state']=={}
++
++def test_dry_run_never_spawns(monkeypatch,tmp_path,capsys):
++    import run,sys
++    monkeypatch.setattr(run.subprocess,'Popen',lambda *a,**k:(_ for _ in ()).throw(AssertionError('spawned')))
++    monkeypatch.setattr(sys,'argv',['run.py','dry-run','--output',str(tmp_path/'not_created')])
++    assert run.main()==0 and not (tmp_path/'not_created').exists()
++    value=json.loads(capsys.readouterr().out);assert not value['formal_activated'] and len(value['sampling'])==48
++
++def test_allocation_not_utilization_gate():
++    from run import resources
++    devices=['GPU-'+str(i) for i in range(8)]
++    rows={d:[str(i),d,'NVIDIA GeForce RTX 2080 Ti','11011','0','1'] for i,d in enumerate(devices)}
++    authority=dict(allocation_check_complete=True,reservation_conflicts=[],allowed_uuids=devices,minimum_free_mib=8000)
++    assert len(resources(devices,authority,rows,'',''))==8
++    with pytest.raises(PermissionError):resources(devices,dict(authority,allocation_check_complete=False),rows,'','')
++    with pytest.raises(RuntimeError):resources(devices,authority,rows,devices[0]+',123,100','')
++
++@pytest.mark.parametrize('failure',[False,True])
++def test_supervisor_mock_no_restart(tmp_path,failure):
++    import run,os,time
++    from runtime_contract import save
++    output=tmp_path/'run';output.mkdir();a=tmp_path/'NOT_AN_AUTHORIZATION.json';save(a,{'simulation_only':True})
++    ledger=output/'activation.json';save(ledger,{'start_epoch':time.time(),'deadline_epoch':time.time()+3600,'source_sha256':'simulation'})
++    calls=[]
++    class Fake:
++        def __init__(self,command,**kw):
++            ticket=json.loads(os.read(kw['pass_fds'][0],32768));job=ticket['job'];calls.append(job)
++            folder=output/job['directory'];folder.mkdir()
++            self.returncode=2 if failure and len(calls)==1 else 0;self.pid=-1
++            save(folder/'summary.json',dict(status='incomplete' if self.returncode else 'complete',completed_updates=9000,completed_chains=6,error='simulated_worker_failure' if self.returncode else None))
++        def poll(self):return self.returncode
++        def wait(self,**kw):return self.returncode
++    def summary(*args):
++        if failure:raise RuntimeError('simulated_summary_failure')
++        return {'status':'complete','simulation_only':True}
++    result=run.supervise(output,a,ledger,['test'+str(i) for i in range(8)],spawn=Fake,summarizer=summary,poll=0)
++    receipt=json.loads((output/'launcher_summary.json').read_text())
++    assert len(calls)==8 and len({x['id'] for x in calls})==8
++    assert result==(2 if failure else 0)
++    if failure:
++        assert receipt['primary_failures'] and receipt['evaluation']['status']=='failed'
++        assert 'simulated_worker_failure' in json.dumps(receipt['primary_failures'])
++
++def test_no_approval_refused_before_launch(tmp_path,monkeypatch):
++    import runtime_contract as c
++    monkeypatch.setattr(c,'verify_assets',lambda:None)
++    a=tmp_path/'not_approval.json';b=tmp_path/'cost.json';a.write_text('{"user_formal_authorized":false}');b.write_text('{}')
++    with pytest.raises(PermissionError):c.approval_gate(a,b,tmp_path/'output')

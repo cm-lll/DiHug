@@ -1,0 +1,76 @@
+{
+  "version": "typed_structure_final_screen_v1",
+  "formal_authorized": false,
+  "train_seeds": {
+    "IMDB": 2026102911,
+    "PubMed": 2026102912
+  },
+  "arms": [
+    "A",
+    "C",
+    "D",
+    "E"
+  ],
+  "sample_seeds": [
+    2026102821,
+    2026102822
+  ],
+  "updates": 3000,
+  "checkpoints": [
+    0,
+    1000,
+    2000,
+    3000
+  ],
+  "sample_readout": "ema_0.99",
+  "ema_decay": 0.99,
+  "T": 1000,
+  "rounds": 1,
+  "S": 18336,
+  "normal2": "two sequential sumCE/(2*S) backwards, one optimizer step",
+  "validation_times": [
+    1,
+    500,
+    1000
+  ],
+  "contrasts": [
+    [
+      "D",
+      "A"
+    ],
+    [
+      "E",
+      "D"
+    ],
+    [
+      "E",
+      "C"
+    ],
+    [
+      "C",
+      "A"
+    ],
+    [
+      "E",
+      "A"
+    ]
+  ],
+  "delivery_reserve_seconds": 1200,
+  "budget_seconds": null,
+  "K": {
+    "IMDB": [
+      5,
+      4,
+      3,
+      2
+    ],
+    "PubMed": [
+      8,
+      8,
+      8,
+      6
+    ]
+  },
+  "primary": "per-dataset screen, no cross-dataset composite score; quantities/degrees,typed closure/paths,type coverage,cost; prefer simplicity if comparable; at most two finalists",
+  "raw_generation": false
+}

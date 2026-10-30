@@ -1,0 +1,133 @@
+{
+  "status": "passed",
+  "requested_budget_seconds": 6000,
+  "source_sha256": "5e81a49ae1d6afebbae7fed54e4898f4f29a05e02e9cb67637a802af89b82636",
+  "schedule": {
+    "training": [
+      {
+        "dataset": "PubMed",
+        "arm": "CE",
+        "train_seed": 2026102912,
+        "slot": 0,
+        "model": "E",
+        "fusion": "early",
+        "id": "PubMed_s2026102912_CE",
+        "mode": "train",
+        "directory": "PubMed_s2026102912_CE",
+        "updates": 500
+      },
+      {
+        "dataset": "PubMed",
+        "arm": "CE_COUNT",
+        "train_seed": 2026102912,
+        "slot": 1,
+        "model": "E",
+        "fusion": "early",
+        "id": "PubMed_s2026102912_CE_COUNT",
+        "mode": "train",
+        "directory": "PubMed_s2026102912_CE_COUNT",
+        "updates": 500
+      },
+      {
+        "dataset": "PubMed",
+        "arm": "CE",
+        "train_seed": 2026102932,
+        "slot": 2,
+        "model": "E",
+        "fusion": "early",
+        "id": "PubMed_s2026102932_CE",
+        "mode": "train",
+        "directory": "PubMed_s2026102932_CE",
+        "updates": 500
+      },
+      {
+        "dataset": "PubMed",
+        "arm": "CE_COUNT",
+        "train_seed": 2026102932,
+        "slot": 3,
+        "model": "E",
+        "fusion": "early",
+        "id": "PubMed_s2026102932_CE_COUNT",
+        "mode": "train",
+        "directory": "PubMed_s2026102932_CE_COUNT",
+        "updates": 500
+      },
+      {
+        "dataset": "IMDB",
+        "arm": "CE",
+        "train_seed": 2026102911,
+        "slot": 4,
+        "model": "E",
+        "fusion": "early",
+        "id": "IMDB_s2026102911_CE",
+        "mode": "train",
+        "directory": "IMDB_s2026102911_CE",
+        "updates": 500
+      },
+      {
+        "dataset": "IMDB",
+        "arm": "CE_COUNT",
+        "train_seed": 2026102911,
+        "slot": 5,
+        "model": "E",
+        "fusion": "early",
+        "id": "IMDB_s2026102911_CE_COUNT",
+        "mode": "train",
+        "directory": "IMDB_s2026102911_CE_COUNT",
+        "updates": 500
+      },
+      {
+        "dataset": "IMDB",
+        "arm": "CE",
+        "train_seed": 2026102931,
+        "slot": 6,
+        "model": "E",
+        "fusion": "early",
+        "id": "IMDB_s2026102931_CE",
+        "mode": "train",
+        "directory": "IMDB_s2026102931_CE",
+        "updates": 500
+      },
+      {
+        "dataset": "IMDB",
+        "arm": "CE_COUNT",
+        "train_seed": 2026102931,
+        "slot": 7,
+        "model": "E",
+        "fusion": "early",
+        "id": "IMDB_s2026102931_CE_COUNT",
+        "mode": "train",
+        "directory": "IMDB_s2026102931_CE_COUNT",
+        "updates": 500
+      }
+    ],
+    "sampling": [],
+    "policy": "8 cards; 500 updates only; checkpoints 0/100/250/500; no sampling or continuation"
+  },
+  "proposed_gpu_uuids": [
+    "GPU-12b85b68-69e6-12fa-76ce-986c0b46e8a7",
+    "GPU-cf73267c-774a-dada-fc26-ada91ccc27c1",
+    "GPU-dda1721a-d053-7371-3434-4c3c8502a1d4",
+    "GPU-994be766-a8bd-b90c-bf87-c667dfa8ab4d",
+    "GPU-e2284395-dd00-1e74-3eed-7f406fa69d5c",
+    "GPU-2db6cf6a-a8b5-58af-4e89-22bfc863a0fb",
+    "GPU-cddbf2e5-1af7-7219-ff58-38e6f4c44f69",
+    "GPU-360156ae-7a75-37f4-eaed-9a5500275409"
+  ],
+  "planned_seconds": 3521.343954593176,
+  "required_free_bytes": 17179869184,
+  "update_seconds": {
+    "IMDB": 2.7275067633017898,
+    "PubMed": 3.5321783060207963
+  },
+  "validation_raw_ema_seconds": {
+    "IMDB": 3.3915198612958193,
+    "PubMed": 4.461471377871931
+  },
+  "critical_path_compute_estimate": 1857.0751636745408,
+  "concurrency_planning_multiplier": 1.25,
+  "fault_margin_seconds": 300,
+  "delivery_seconds": 900,
+  "measurement_limitation": "one repeated temporary update per dataset; two-GPU measurement;25% is planning margin not measured eight-card throughput",
+  "engineering_step_calls": 6
+}

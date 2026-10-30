@@ -1,0 +1,566 @@
+{
+  "IMDB_A": {
+    "model": {
+      "layers": 8,
+      "width": 256,
+      "edge_width": 64,
+      "global_width": 128,
+      "heads": 8,
+      "ff_node": 256,
+      "ff_edge": 64,
+      "ff_global": 256,
+      "dropout": 0.1,
+      "cn_hidden": 32,
+      "joint_width": 128,
+      "max_wedges": 2000000,
+      "max_query_paths": 2000000
+    },
+    "optimizer": {
+      "type": "AdamW",
+      "lr": 0.0002,
+      "weight_decay": 1e-12,
+      "betas": [
+        0.9,
+        0.999
+      ],
+      "eps": 1e-08,
+      "amsgrad": false
+    },
+    "precision": "FP32 network/stable CE; float64 probability kernel",
+    "T": 1000,
+    "rounds": 1,
+    "loss": "sumCE/(2*18336) each of two inputs,one optimizer step",
+    "dataset": {
+      "file": "assets/IMDB.npz",
+      "sha256": "398d59a0602e14dd0c92b8781e69a3234727d674923275864eec558770dffb5c",
+      "received_sha256": "351d066a702df18a188cff28822ea92182b0b1eb64ad0375e7f70e6a587ae466",
+      "reference_sha256": "10f1dbbbe55c6a069594b2dcb590d1b8295ca5436320ef4597cd30e6b7f73e42",
+      "type_names": [
+        "Director",
+        "Actor",
+        "Movie",
+        "Genre"
+      ],
+      "basis_kind": "pending complete held-out rank selection; no synthetic fallback"
+    },
+    "train_seed": 2026102911,
+    "arm": "A",
+    "features": {
+      "CN": true,
+      "ReFeX": false,
+      "RolX": false
+    },
+    "K": null,
+    "updates": 3000,
+    "checkpoints": [
+      0,
+      1000,
+      2000,
+      3000
+    ],
+    "ema": 0.99,
+    "sample_readout": "final3000_ema0.99",
+    "sample_seeds": [
+      2026102821,
+      2026102822
+    ],
+    "source_config_sha256": "765f452d150fa6f8984cb8db779c0d182fbce384745934c36babec597c74939a",
+    "metadata_note": "inherited config arms/version/engineering flags are historical; actual routing and authorization use protocol and launcher"
+  },
+  "IMDB_C": {
+    "model": {
+      "layers": 8,
+      "width": 256,
+      "edge_width": 64,
+      "global_width": 128,
+      "heads": 8,
+      "ff_node": 256,
+      "ff_edge": 64,
+      "ff_global": 256,
+      "dropout": 0.1,
+      "cn_hidden": 32,
+      "joint_width": 128,
+      "max_wedges": 2000000,
+      "max_query_paths": 2000000
+    },
+    "optimizer": {
+      "type": "AdamW",
+      "lr": 0.0002,
+      "weight_decay": 1e-12,
+      "betas": [
+        0.9,
+        0.999
+      ],
+      "eps": 1e-08,
+      "amsgrad": false
+    },
+    "precision": "FP32 network/stable CE; float64 probability kernel",
+    "T": 1000,
+    "rounds": 1,
+    "loss": "sumCE/(2*18336) each of two inputs,one optimizer step",
+    "dataset": {
+      "file": "assets/IMDB.npz",
+      "sha256": "398d59a0602e14dd0c92b8781e69a3234727d674923275864eec558770dffb5c",
+      "received_sha256": "351d066a702df18a188cff28822ea92182b0b1eb64ad0375e7f70e6a587ae466",
+      "reference_sha256": "10f1dbbbe55c6a069594b2dcb590d1b8295ca5436320ef4597cd30e6b7f73e42",
+      "type_names": [
+        "Director",
+        "Actor",
+        "Movie",
+        "Genre"
+      ],
+      "basis_kind": "pending complete held-out rank selection; no synthetic fallback"
+    },
+    "train_seed": 2026102911,
+    "arm": "C",
+    "features": {
+      "CN": false,
+      "ReFeX": true,
+      "RolX": true
+    },
+    "K": [
+      5,
+      4,
+      3,
+      2
+    ],
+    "updates": 3000,
+    "checkpoints": [
+      0,
+      1000,
+      2000,
+      3000
+    ],
+    "ema": 0.99,
+    "sample_readout": "final3000_ema0.99",
+    "sample_seeds": [
+      2026102821,
+      2026102822
+    ],
+    "source_config_sha256": "765f452d150fa6f8984cb8db779c0d182fbce384745934c36babec597c74939a",
+    "metadata_note": "inherited config arms/version/engineering flags are historical; actual routing and authorization use protocol and launcher"
+  },
+  "IMDB_D": {
+    "model": {
+      "layers": 8,
+      "width": 256,
+      "edge_width": 64,
+      "global_width": 128,
+      "heads": 8,
+      "ff_node": 256,
+      "ff_edge": 64,
+      "ff_global": 256,
+      "dropout": 0.1,
+      "cn_hidden": 32,
+      "joint_width": 128,
+      "max_wedges": 2000000,
+      "max_query_paths": 2000000
+    },
+    "optimizer": {
+      "type": "AdamW",
+      "lr": 0.0002,
+      "weight_decay": 1e-12,
+      "betas": [
+        0.9,
+        0.999
+      ],
+      "eps": 1e-08,
+      "amsgrad": false
+    },
+    "precision": "FP32 network/stable CE; float64 probability kernel",
+    "T": 1000,
+    "rounds": 1,
+    "loss": "sumCE/(2*18336) each of two inputs,one optimizer step",
+    "dataset": {
+      "file": "assets/IMDB.npz",
+      "sha256": "398d59a0602e14dd0c92b8781e69a3234727d674923275864eec558770dffb5c",
+      "received_sha256": "351d066a702df18a188cff28822ea92182b0b1eb64ad0375e7f70e6a587ae466",
+      "reference_sha256": "10f1dbbbe55c6a069594b2dcb590d1b8295ca5436320ef4597cd30e6b7f73e42",
+      "type_names": [
+        "Director",
+        "Actor",
+        "Movie",
+        "Genre"
+      ],
+      "basis_kind": "pending complete held-out rank selection; no synthetic fallback"
+    },
+    "train_seed": 2026102911,
+    "arm": "D",
+    "features": {
+      "CN": true,
+      "ReFeX": true,
+      "RolX": false
+    },
+    "K": null,
+    "updates": 3000,
+    "checkpoints": [
+      0,
+      1000,
+      2000,
+      3000
+    ],
+    "ema": 0.99,
+    "sample_readout": "final3000_ema0.99",
+    "sample_seeds": [
+      2026102821,
+      2026102822
+    ],
+    "source_config_sha256": "765f452d150fa6f8984cb8db779c0d182fbce384745934c36babec597c74939a",
+    "metadata_note": "inherited config arms/version/engineering flags are historical; actual routing and authorization use protocol and launcher"
+  },
+  "IMDB_E": {
+    "model": {
+      "layers": 8,
+      "width": 256,
+      "edge_width": 64,
+      "global_width": 128,
+      "heads": 8,
+      "ff_node": 256,
+      "ff_edge": 64,
+      "ff_global": 256,
+      "dropout": 0.1,
+      "cn_hidden": 32,
+      "joint_width": 128,
+      "max_wedges": 2000000,
+      "max_query_paths": 2000000
+    },
+    "optimizer": {
+      "type": "AdamW",
+      "lr": 0.0002,
+      "weight_decay": 1e-12,
+      "betas": [
+        0.9,
+        0.999
+      ],
+      "eps": 1e-08,
+      "amsgrad": false
+    },
+    "precision": "FP32 network/stable CE; float64 probability kernel",
+    "T": 1000,
+    "rounds": 1,
+    "loss": "sumCE/(2*18336) each of two inputs,one optimizer step",
+    "dataset": {
+      "file": "assets/IMDB.npz",
+      "sha256": "398d59a0602e14dd0c92b8781e69a3234727d674923275864eec558770dffb5c",
+      "received_sha256": "351d066a702df18a188cff28822ea92182b0b1eb64ad0375e7f70e6a587ae466",
+      "reference_sha256": "10f1dbbbe55c6a069594b2dcb590d1b8295ca5436320ef4597cd30e6b7f73e42",
+      "type_names": [
+        "Director",
+        "Actor",
+        "Movie",
+        "Genre"
+      ],
+      "basis_kind": "pending complete held-out rank selection; no synthetic fallback"
+    },
+    "train_seed": 2026102911,
+    "arm": "E",
+    "features": {
+      "CN": true,
+      "ReFeX": true,
+      "RolX": true
+    },
+    "K": [
+      5,
+      4,
+      3,
+      2
+    ],
+    "updates": 3000,
+    "checkpoints": [
+      0,
+      1000,
+      2000,
+      3000
+    ],
+    "ema": 0.99,
+    "sample_readout": "final3000_ema0.99",
+    "sample_seeds": [
+      2026102821,
+      2026102822
+    ],
+    "source_config_sha256": "765f452d150fa6f8984cb8db779c0d182fbce384745934c36babec597c74939a",
+    "metadata_note": "inherited config arms/version/engineering flags are historical; actual routing and authorization use protocol and launcher"
+  },
+  "PubMed_A": {
+    "model": {
+      "layers": 8,
+      "width": 256,
+      "edge_width": 64,
+      "global_width": 128,
+      "heads": 8,
+      "ff_node": 256,
+      "ff_edge": 64,
+      "ff_global": 256,
+      "dropout": 0.1,
+      "cn_hidden": 32,
+      "joint_width": 128,
+      "max_wedges": 2000000,
+      "max_query_paths": 2000000
+    },
+    "optimizer": {
+      "type": "AdamW",
+      "lr": 0.0002,
+      "weight_decay": 1e-12,
+      "betas": [
+        0.9,
+        0.999
+      ],
+      "eps": 1e-08,
+      "amsgrad": false
+    },
+    "precision": "FP32 network/stable CE; float64 probability kernel",
+    "T": 1000,
+    "rounds": 1,
+    "loss": "sumCE/(2*18336) each of two inputs,one optimizer step",
+    "dataset": {
+      "file": "assets/PubMed.npz",
+      "sha256": "f6ea8ec461052094dd02c6b07d8ebb69e85fb3e595195007563593b9568914ef",
+      "received_sha256": "42706434557b4b1fa24bdc71dc9d3ebea3a772689002421e77ad3c4b3b827a94",
+      "reference_sha256": "dacff5a392e23fbcfb695076a14a6db5317f4a4382b69af2a7596a1a217163f8",
+      "type_names": [
+        "Gene",
+        "Disease",
+        "Chemical",
+        "Species"
+      ],
+      "basis_kind": "pending complete held-out rank selection; no synthetic fallback"
+    },
+    "train_seed": 2026102912,
+    "arm": "A",
+    "features": {
+      "CN": true,
+      "ReFeX": false,
+      "RolX": false
+    },
+    "K": null,
+    "updates": 3000,
+    "checkpoints": [
+      0,
+      1000,
+      2000,
+      3000
+    ],
+    "ema": 0.99,
+    "sample_readout": "final3000_ema0.99",
+    "sample_seeds": [
+      2026102821,
+      2026102822
+    ],
+    "source_config_sha256": "765f452d150fa6f8984cb8db779c0d182fbce384745934c36babec597c74939a",
+    "metadata_note": "inherited config arms/version/engineering flags are historical; actual routing and authorization use protocol and launcher"
+  },
+  "PubMed_C": {
+    "model": {
+      "layers": 8,
+      "width": 256,
+      "edge_width": 64,
+      "global_width": 128,
+      "heads": 8,
+      "ff_node": 256,
+      "ff_edge": 64,
+      "ff_global": 256,
+      "dropout": 0.1,
+      "cn_hidden": 32,
+      "joint_width": 128,
+      "max_wedges": 2000000,
+      "max_query_paths": 2000000
+    },
+    "optimizer": {
+      "type": "AdamW",
+      "lr": 0.0002,
+      "weight_decay": 1e-12,
+      "betas": [
+        0.9,
+        0.999
+      ],
+      "eps": 1e-08,
+      "amsgrad": false
+    },
+    "precision": "FP32 network/stable CE; float64 probability kernel",
+    "T": 1000,
+    "rounds": 1,
+    "loss": "sumCE/(2*18336) each of two inputs,one optimizer step",
+    "dataset": {
+      "file": "assets/PubMed.npz",
+      "sha256": "f6ea8ec461052094dd02c6b07d8ebb69e85fb3e595195007563593b9568914ef",
+      "received_sha256": "42706434557b4b1fa24bdc71dc9d3ebea3a772689002421e77ad3c4b3b827a94",
+      "reference_sha256": "dacff5a392e23fbcfb695076a14a6db5317f4a4382b69af2a7596a1a217163f8",
+      "type_names": [
+        "Gene",
+        "Disease",
+        "Chemical",
+        "Species"
+      ],
+      "basis_kind": "pending complete held-out rank selection; no synthetic fallback"
+    },
+    "train_seed": 2026102912,
+    "arm": "C",
+    "features": {
+      "CN": false,
+      "ReFeX": true,
+      "RolX": true
+    },
+    "K": [
+      8,
+      8,
+      8,
+      6
+    ],
+    "updates": 3000,
+    "checkpoints": [
+      0,
+      1000,
+      2000,
+      3000
+    ],
+    "ema": 0.99,
+    "sample_readout": "final3000_ema0.99",
+    "sample_seeds": [
+      2026102821,
+      2026102822
+    ],
+    "source_config_sha256": "765f452d150fa6f8984cb8db779c0d182fbce384745934c36babec597c74939a",
+    "metadata_note": "inherited config arms/version/engineering flags are historical; actual routing and authorization use protocol and launcher"
+  },
+  "PubMed_D": {
+    "model": {
+      "layers": 8,
+      "width": 256,
+      "edge_width": 64,
+      "global_width": 128,
+      "heads": 8,
+      "ff_node": 256,
+      "ff_edge": 64,
+      "ff_global": 256,
+      "dropout": 0.1,
+      "cn_hidden": 32,
+      "joint_width": 128,
+      "max_wedges": 2000000,
+      "max_query_paths": 2000000
+    },
+    "optimizer": {
+      "type": "AdamW",
+      "lr": 0.0002,
+      "weight_decay": 1e-12,
+      "betas": [
+        0.9,
+        0.999
+      ],
+      "eps": 1e-08,
+      "amsgrad": false
+    },
+    "precision": "FP32 network/stable CE; float64 probability kernel",
+    "T": 1000,
+    "rounds": 1,
+    "loss": "sumCE/(2*18336) each of two inputs,one optimizer step",
+    "dataset": {
+      "file": "assets/PubMed.npz",
+      "sha256": "f6ea8ec461052094dd02c6b07d8ebb69e85fb3e595195007563593b9568914ef",
+      "received_sha256": "42706434557b4b1fa24bdc71dc9d3ebea3a772689002421e77ad3c4b3b827a94",
+      "reference_sha256": "dacff5a392e23fbcfb695076a14a6db5317f4a4382b69af2a7596a1a217163f8",
+      "type_names": [
+        "Gene",
+        "Disease",
+        "Chemical",
+        "Species"
+      ],
+      "basis_kind": "pending complete held-out rank selection; no synthetic fallback"
+    },
+    "train_seed": 2026102912,
+    "arm": "D",
+    "features": {
+      "CN": true,
+      "ReFeX": true,
+      "RolX": false
+    },
+    "K": null,
+    "updates": 3000,
+    "checkpoints": [
+      0,
+      1000,
+      2000,
+      3000
+    ],
+    "ema": 0.99,
+    "sample_readout": "final3000_ema0.99",
+    "sample_seeds": [
+      2026102821,
+      2026102822
+    ],
+    "source_config_sha256": "765f452d150fa6f8984cb8db779c0d182fbce384745934c36babec597c74939a",
+    "metadata_note": "inherited config arms/version/engineering flags are historical; actual routing and authorization use protocol and launcher"
+  },
+  "PubMed_E": {
+    "model": {
+      "layers": 8,
+      "width": 256,
+      "edge_width": 64,
+      "global_width": 128,
+      "heads": 8,
+      "ff_node": 256,
+      "ff_edge": 64,
+      "ff_global": 256,
+      "dropout": 0.1,
+      "cn_hidden": 32,
+      "joint_width": 128,
+      "max_wedges": 2000000,
+      "max_query_paths": 2000000
+    },
+    "optimizer": {
+      "type": "AdamW",
+      "lr": 0.0002,
+      "weight_decay": 1e-12,
+      "betas": [
+        0.9,
+        0.999
+      ],
+      "eps": 1e-08,
+      "amsgrad": false
+    },
+    "precision": "FP32 network/stable CE; float64 probability kernel",
+    "T": 1000,
+    "rounds": 1,
+    "loss": "sumCE/(2*18336) each of two inputs,one optimizer step",
+    "dataset": {
+      "file": "assets/PubMed.npz",
+      "sha256": "f6ea8ec461052094dd02c6b07d8ebb69e85fb3e595195007563593b9568914ef",
+      "received_sha256": "42706434557b4b1fa24bdc71dc9d3ebea3a772689002421e77ad3c4b3b827a94",
+      "reference_sha256": "dacff5a392e23fbcfb695076a14a6db5317f4a4382b69af2a7596a1a217163f8",
+      "type_names": [
+        "Gene",
+        "Disease",
+        "Chemical",
+        "Species"
+      ],
+      "basis_kind": "pending complete held-out rank selection; no synthetic fallback"
+    },
+    "train_seed": 2026102912,
+    "arm": "E",
+    "features": {
+      "CN": true,
+      "ReFeX": true,
+      "RolX": true
+    },
+    "K": [
+      8,
+      8,
+      8,
+      6
+    ],
+    "updates": 3000,
+    "checkpoints": [
+      0,
+      1000,
+      2000,
+      3000
+    ],
+    "ema": 0.99,
+    "sample_readout": "final3000_ema0.99",
+    "sample_seeds": [
+      2026102821,
+      2026102822
+    ],
+    "source_config_sha256": "765f452d150fa6f8984cb8db779c0d182fbce384745934c36babec597c74939a",
+    "metadata_note": "inherited config arms/version/engineering flags are historical; actual routing and authorization use protocol and launcher"
+  }
+}
