@@ -1,0 +1,8 @@
+# Sources and attribution
+
+- SparseDiff: <https://github.com/qym7/SparseDiff>, local inspected upstream commit `d9c4b20cf6e6e2c59913165c1d7eaaf70a9174de`. Sparse query enumeration, the sparse graph Transformer and inherited utilities are prior work, not new claims of this review. Root `LICENSE` and the vendored backbone `LICENSE` preserve the original MIT notice. The current typed model, degree branch and joint head mean A is not an untouched official SparseDiff baseline.
+- ReFeX and RolX are existing structural-feature and role-discovery approaches. The actual implementation here is a typed one-round 630-column feature design plus frozen per-type NMF dictionaries and dynamic NNLS, rather than a claim to have invented these algorithms or exactly replicated every original algorithm step.
+- EMA is conventional exponential parameter averaging. The implementation explicitly starts from theta0; it is not evidence of a new role mechanism or guaranteed stability.
+- Evaluation vendor files retain existing HGEN-related and historical project source. Only the functions explicitly selected by the CPU evaluator are used. Legacy K4, genuine four-cycles, legacy clustering and standard clustering retain distinct names; optional native dependencies are not silently substituted. These files are not a claim of reproducing every HGEN metric or publishing an HGEN model.
+
+Provenance hashes identify the actual copied files, including existing modifications to upstream code. This snapshot adds documentation, configuration extraction, static audit tooling and disclosed deployment-path substitutions; it does not introduce a new scientific algorithm.
