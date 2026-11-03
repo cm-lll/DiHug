@@ -1,0 +1,107 @@
+{
+  "scientific_commit": "175373c83202b6c8b80aa570e0092c4652031ce6",
+  "status": "passed",
+  "diagnostic_records": 30,
+  "separate_worker_imports": 3,
+  "fixed_Python_file_hashes": 90,
+  "GPU_model": "NVIDIA GeForce RTX 2080 Ti",
+  "driver": "530.30.02",
+  "torch": "2.1.0+cu121",
+  "cuda": "12.1",
+  "pyg": "2.3.1",
+  "strict_deterministic": true,
+  "CPU_threads": 1,
+  "synthetic_nodes": 12,
+  "synthetic_slots": 66,
+  "full_actual_model_layouts": [
+    "O",
+    "A",
+    "D",
+    "E"
+  ],
+  "normal_mathematics_changed": false,
+  "benchmark": [
+    {
+      "arm": "A",
+      "component": "training",
+      "median_seconds": {
+        "baseline": 0.5285453633405268,
+        "transaction": 0.5334394322708249
+      },
+      "delta_seconds": 0.00489406893029809,
+      "extra_peak_allocated_MiB": 0.00048828125,
+      "retained_pairs": 4,
+      "warmup_pairs": 1
+    },
+    {
+      "arm": "A",
+      "component": "validation",
+      "median_seconds": {
+        "baseline": 0.4627735959365964,
+        "transaction": 0.5434249015524983
+      },
+      "delta_seconds": 0.08065130561590195,
+      "extra_peak_allocated_MiB": 0.0,
+      "retained_pairs": 4,
+      "warmup_pairs": 1
+    },
+    {
+      "arm": "A",
+      "component": "sampling",
+      "median_seconds": {
+        "baseline": 0.14732639864087105,
+        "transaction": 0.1472588125616312
+      },
+      "delta_seconds": -6.758607923984528e-05,
+      "extra_peak_allocated_MiB": 0.0,
+      "retained_pairs": 4,
+      "warmup_pairs": 1
+    },
+    {
+      "arm": "E",
+      "component": "training",
+      "median_seconds": {
+        "baseline": 0.4490767205134034,
+        "transaction": 0.463660697452724
+      },
+      "delta_seconds": 0.014583976939320564,
+      "extra_peak_allocated_MiB": 0.1455078125,
+      "retained_pairs": 4,
+      "warmup_pairs": 1
+    },
+    {
+      "arm": "E",
+      "component": "validation",
+      "median_seconds": {
+        "baseline": 0.4003166020847857,
+        "transaction": 0.4709371174685657
+      },
+      "delta_seconds": 0.07062051538378,
+      "extra_peak_allocated_MiB": 0.0,
+      "retained_pairs": 4,
+      "warmup_pairs": 1
+    },
+    {
+      "arm": "E",
+      "component": "sampling",
+      "median_seconds": {
+        "baseline": 0.12734787724912167,
+        "transaction": 0.12768504349514842
+      },
+      "delta_seconds": 0.0003371662460267544,
+      "extra_peak_allocated_MiB": 0.0,
+      "retained_pairs": 4,
+      "warmup_pairs": 1
+    }
+  ],
+  "completed_test_seconds": 126.06047248840332,
+  "first_attempt_seconds": 14.843963146209717,
+  "first_attempt": "failed test fixture: CPU AdamW step-tensor alias; copied/reloaded fixture corrected; production unchanged",
+  "new_formal_training": false,
+  "new_complete_generated_graphs": 0,
+  "limits": [
+    "Python-level fault injection only; no CUDA device loss/illegal access/async kernel fault/OOM or disk corruption simulation",
+    "No full GPU T1000 chain; one-step GPU checks plus earlier full-chain CPU evidence",
+    "12-node engineering measurements do not establish 192-node or complete-graph throughput"
+  ]
+}
