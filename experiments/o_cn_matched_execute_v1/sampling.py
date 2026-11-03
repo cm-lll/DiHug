@@ -11,6 +11,7 @@ from hsgd.kernel import MarginalKernel
 from hsgd.runtime import reverse_step
 from evaluation import evaluate
 from observers import RecordedGenerator,RecordedPlan,digest
+from boundary_transactions import SamplingBoundary
 def authenticate_readout(modelrow,case,cfg):
     path=pathlib.Path(modelrow['readout_file']);receipt=read(path.with_suffix('.sha256.json'));actual=sha(path)
     if receipt['sha256']!=actual or (modelrow.get('readout_sha256') and actual!=modelrow['readout_sha256']):raise ValueError('readout SHA256 mismatch')
@@ -23,7 +24,7 @@ def authenticate_readout(modelrow,case,cfg):
     if not final.exists() or read(final)['sha256']!=z['checkpoint_sha256']:raise ValueError('final checkpoint receipt binding')
     if modelrow.get('parent_approval_sha256') and b.get('approval_sha256')!=modelrow['parent_approval_sha256']:raise ValueError('protected parent approval binding')
     return z,actual
-def sample_one(modelrow,ss,folder,case,cfg,basis,out,check,event):
+def sample_one(modelrow,ss,folder,case,cfg,basis,out,check,event,resume_chain=None):
     folder=pathlib.Path(folder);folder.mkdir(parents=True,exist_ok=False);payload,readout_sha=authenticate_readout(modelrow,case,cfg)
     model=make_model(case,dict(cfg,seed=modelrow['train_seed']),modelrow['configuration'],basis);model.load_state_dict(payload['model'],strict=True)
     expected={k:tensor_sha(v) for k,v in payload['model'].items()};model=model.cuda().eval()
@@ -37,18 +38,30 @@ def sample_one(modelrow,ss,folder,case,cfg,basis,out,check,event):
     save(folder/'identity.json',identity);next_t=1000;began=time.perf_counter();plans=[];original_plan=common.plan_for
     def planned(*args,**kwargs):
         p=RecordedPlan(original_plan(*args,**kwargs));plans.append(p);return p
-    common.plan_for=planned
     kernel=MarginalKernel(case['prior'],common.schedule(1000))
-    def snapshot(name):atomic_checkpoint(folder/name,dict(state=state.copy(),next_t=next_t,rng=rng_get(rng,'cuda'),draw_calls=rng.calls,binding=identity))
+    chain=SamplingBoundary(state,next_t,rng,next(model.parameters()).device.type)
+    resumed=None
+    if resume_chain is not None:
+        parent=pathlib.Path(resume_chain);parent_sha=sha(parent)
+        if read(parent.with_suffix('.sha256.json'))['sha256']!=parent_sha:raise ValueError('resume chain SHA256 mismatch')
+        restored=torch.load(parent,map_location='cpu');proposed=restored['state']
+        if proposed.shape!=state.shape or (proposed[case['prior'][family]==0]!=0).any() or (proposed[case['prior'][family]==1]!=1).any():raise ValueError('resume chain violates fixed support')
+        chain.restore(restored,identity)
+        state,next_t=chain.state,chain.next_t
+        resumed=dict(file=str(parent),sha256=parent_sha,next_t=next_t)
+    start_t=chain.next_t
+    def snapshot(name):atomic_checkpoint(folder/name,chain.checkpoint(identity))
+    common.plan_for=planned
     try:
-        snapshot('Xt1000.pt')
-        for t in range(1000,0,-1):
+        snapshot('Xt1000.pt' if resumed is None else 'resumed_t%04d.pt'%chain.next_t)
+        for t in range(chain.next_t,0,-1):
             check();plans.clear();calls=rng.calls
-            candidate,rec=reverse_step(model,case,state,kernel,t,1,ss,rng,'cuda',check_time=check,trace=False)
-            target=contract_by_t[t]
-            if len(plans)!=1 or plans[0].blocks!=1 or plans[0].h.hexdigest()!=target['query_plan_sha256'] or rng.calls!=calls+1 or rng.last_sha!=target['uniform_sha256']:raise ValueError('canonical per-step plan/draw pairing')
-            if rec['blocks']!=1 or rec['covered_slots']!=int(np.repeat(case['active'],case['space'].counts).sum()) or not rec['exact_coverage']:raise ValueError('complete R1 query coverage')
-            state=candidate;next_t=t-1
+            def validate(candidate,record):
+                target=contract_by_t[t]
+                if len(plans)!=1 or plans[0].blocks!=1 or plans[0].h.hexdigest()!=target['query_plan_sha256'] or rng.calls!=calls+1 or rng.last_sha!=target['uniform_sha256']:raise ValueError('canonical per-step plan/draw pairing')
+                if record['blocks']!=1 or record['covered_slots']!=int(np.repeat(case['active'],case['space'].counts).sum()) or not record['exact_coverage']:raise ValueError('complete R1 query coverage')
+            rec=chain.advance(lambda frozen,at:reverse_step(model,case,frozen,kernel,at,1,ss,rng,'cuda',check_time=check,trace=False),validate)
+            state,next_t=chain.state,chain.next_t
             rec.update(uniform_sha256=rng.last_sha,query_plan_sha256=plans[0].h.hexdigest(),canonical_pairing=True)
             with (folder/'steps.jsonl').open('a') as f:f.write(json.dumps(rec)+'\n')
             if t%100==0 or t==1:snapshot('complete_t%04d.pt'%next_t)
@@ -58,13 +71,13 @@ def sample_one(modelrow,ss,folder,case,cfg,basis,out,check,event):
             if t%25==0:event(status='sampling',sample_seed=ss,next_t=next_t)
         check();edges,fam=common.state_edges(case,state);np.savez_compressed(folder/'graph.npz',types=case['space'].types,edges=edges,families=fam,schema=np.array(case['space'].pairs))
         save(folder/'metrics.json',evaluate(case,edges,cfg['datasets'][modelrow['dataset']]['type_names'],check))
-        result=dict(identity,status='complete',steps=1000,graph_sha256=sha(folder/'graph.npz'),metrics_sha256=sha(folder/'metrics.json'),seconds=time.perf_counter()-began,finished=now(),canonical_all1000_plans_and_draws=True)
+        result=dict(identity,status='complete',steps=1000,executed_steps=start_t,resumed_from=resumed,graph_sha256=sha(folder/'graph.npz'),metrics_sha256=sha(folder/'metrics.json'),seconds=time.perf_counter()-began,finished=now(),canonical_all1000_plans_and_draws=True)
         save(folder/'binding.json',result);save(folder/'summary.json',result);return result
     except BaseException as exc:
-        rng.calls=1001-next_t
+        state,next_t=chain.state,chain.next_t
         try:snapshot('stopped_chain.pt')
         except BaseException as e:save(folder/'save_failure.json',dict(error=repr(e)))
-        save(folder/'failure.json',dict(identity,next_t=next_t,error=repr(exc),at=now()));raise
+        save(folder/'failure.json',dict(identity,next_t=next_t,error=repr(exc),at=now(),exact_resume_allowed=chain.resumable,recovery=chain.last_failure));raise
     finally:
         common.plan_for=original_plan;del model;torch.cuda.empty_cache()
 

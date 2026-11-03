@@ -25,6 +25,7 @@ from integration import checkpoint_payload, ema_validation, final_readouts
 from ema import ParameterEMA
 from single_input import one_input, update
 from sampling import sample_one
+from boundary_transactions import TrainingBoundary
 
 
 def setup():
@@ -58,7 +59,7 @@ def main():
     folder = OUT/'run'/job['task_id']
     folder.mkdir(parents=True, exist_ok=False)
     completed = chains = 0
-    model = optimizer = ema = rng = None
+    model = optimizer = ema = rng = training = None
     stopping = False
     status = dict(task_id=job['task_id'], dataset='PubMed', method=job['method'],
                   train_seed=job['train_seed'], GPU=job['gpu_slot'], GPU_UUID=ticket['GPU_UUID'],
@@ -81,7 +82,7 @@ def main():
         save(folder/'progress.json', status)
 
     def snapshot(name):
-        atomic_checkpoint(folder/name, checkpoint_payload(model, optimizer, ema, completed, rng_get(rng, 'cuda'), binding))
+        atomic_checkpoint(folder/name, training.checkpoint(binding))
 
     def stream_hashes():
         state = rng_get(rng, 'cuda')
@@ -134,6 +135,7 @@ def main():
         save(folder/'training_rng_reset.json', streams)
         save(folder/'initialization.json', dict(proof=z['initialization'], all_initial_tensors_exact=True,
              saved_before_first_forward=True, new_optimizer_empty=True, new_EMA_theta0=True, parameters=job['parameters']))
+        training = TrainingBoundary(model, optimizer, ema, rng, 'cuda', completed)
         snapshot('initial.pt')
         del z
         from hsgd.bw_preflight.common import environment
@@ -152,17 +154,18 @@ def main():
         event(status='training')
         for position in range(1,3001):
             check()
-            inp = one_input(case,cfg,position,rng)
-            ih = input_hash([inp])
-            expected = contracts[position-1]
-            if ih != expected['sha256'] or inp['t'] != expected['t'] or len(inp['ids']) != expected['slots']:
-                raise ValueError('paired input mismatch before update '+str(position))
-            began = time.perf_counter()
-            before = stream_hashes()
-            if historical_streams is not None and before != historical_streams[position-1]['training_streams_before']:
-                raise ValueError('archived common training streams differ before update '+str(position))
-            rec = update(model,optimizer,case,inp,1000,'cuda',ema,completed)
-            completed = position
+            with training.step(position):
+                inp = one_input(case,cfg,position,rng)
+                ih = input_hash([inp])
+                expected = contracts[position-1]
+                if ih != expected['sha256'] or inp['t'] != expected['t'] or len(inp['ids']) != expected['slots']:
+                    raise ValueError('paired input mismatch before update '+str(position))
+                began = time.perf_counter()
+                before = stream_hashes()
+                if historical_streams is not None and before != historical_streams[position-1]['training_streams_before']:
+                    raise ValueError('archived common training streams differ before update '+str(position))
+                rec = update(model,optimizer,case,inp,1000,'cuda',ema,completed,transaction=training)
+            completed = training.completed
             after = stream_hashes()
             rec.update(update=completed,t=inp['t'],input_sha256=ih,paired_input_exact=True,
                 training_streams_before=before,training_streams_after=after,at=now(),
@@ -183,7 +186,7 @@ def main():
                 decay=.99 if kind != 'raw' else None,updates=3000,train_seed=seed,binding=binding,
                 checkpoint_sha256=checkpoint_hash))
         del model,optimizer,ema,states
-        model = optimizer = ema = None
+        model = optimizer = ema = training = None
         torch.cuda.empty_cache()
         row = dict(id=job['task_id'],dataset='PubMed',train_seed=seed,configuration=job['configuration'],
             readout_file=str(folder/'readout_ema_0.99.pt'),readout_sha256=sha(folder/'readout_ema_0.99.pt'),
@@ -196,13 +199,18 @@ def main():
         event(status='complete')
     except BaseException as exc:
         status.update(status='failed_or_incomplete',error=repr(exc),traceback=traceback.format_exc())
-        if model is not None and optimizer is not None and ema is not None and ema.at_update_boundary:
+        if training is not None:
+            completed = training.completed
+            status['recovery'] = training.last_failure
+        if model is not None and training is not None and training.resumable and training.phase == 'idle':
             try:
                 snapshot(f'stopped_u{completed}.pt')
             except BaseException as save_error:
                 status['checkpoint_save_error'] = repr(save_error)
         else:
             status['incomplete_update_not_presented_as_complete'] = True
+            status['exact_resume_allowed'] = False
+            status['use_previous_complete_checkpoint_only'] = True
         event()
     finally:
         status.update(completed_updates=completed,completed_chains=chains,finished=now(),

@@ -15,11 +15,17 @@ def digest(data):
 
 def main():
     manifest = json.loads((ROOT / 'provenance/source_files.json').read_text())
+    patch_path=ROOT/'provenance/abort_boundary_patch.json'
+    changes=json.loads(patch_path.read_text())['files'] if patch_path.exists() else {}
     errors, sensitive, parsed = [], [], 0
     for row in manifest['files']:
         path = ROOT / row['path']
-        if not path.is_file() or digest(path.read_bytes()) != row['published_sha256']:
+        expected=changes.get(row['path'],{}).get('current_sha256',row['published_sha256'])
+        if not path.is_file() or digest(path.read_bytes()) != expected:
             errors.append('copied-source hash mismatch: ' + row['path'])
+    for name,row in changes.items():
+        if not (ROOT/name).is_file() or digest((ROOT/name).read_bytes())!=row['current_sha256']:
+            errors.append('boundary-fix hash mismatch: '+name)
     files = sorted(p for p in ROOT.rglob('*') if p.is_file() and '.git' not in p.parts)
     for path in files:
         rel = path.relative_to(ROOT).as_posix()

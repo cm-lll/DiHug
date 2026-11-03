@@ -12,13 +12,14 @@ from ema import ParameterEMA
 from single_input import one_input,update
 from sampling import sample_one
 from integration_check import setup
+from boundary_transactions import TrainingBoundary
 def main():
  p=argparse.ArgumentParser();p.add_argument('--ticket',required=True);a=p.parse_args();ticket=read(a.ticket);approval=read(OUT/'approval.json');job=ticket['job'];folder=OUT/'run'/job['task_id'];folder.mkdir(exist_ok=False)
  if not approval['authorized'] or os.getppid()!=approval['launcher_pid'] or socket.gethostname()!=approval['host'] or os.environ.get('CUDA_VISIBLE_DEVICES')!=str(job['gpu_slot']):raise PermissionError('launcher/host/device binding')
  for f,h in approval['source_files'].items():
   if sha(f)!=h:raise ValueError('source/config binding changed '+f)
  status=dict(status='initializing',task_id=job['task_id'],dataset=job['dataset'],train_seed=job['train_seed'],arm=job['arm'],GPU=job['gpu_slot'],GPU_UUID=ticket['GPU_UUID'],pid=os.getpid(),started=now(),completed_updates=0,completed_chains=0)
- completed=chains=0;model=opt=ema=rng=None;stopping=False
+ completed=chains=0;model=opt=ema=rng=training=None;stopping=False
  def stop(*a):
   nonlocal stopping
   stopping=True
@@ -29,7 +30,7 @@ def main():
  def event(**kw):
   status.update(kw,completed_updates=completed,completed_chains=chains,last_event=now());save(folder/'progress.json',status)
  def snapshot(name):
-  atomic_checkpoint(folder/name,checkpoint_payload(model,opt,ema,completed,rng_get(rng,'cuda'),binding))
+  atomic_checkpoint(folder/name,training.checkpoint(binding))
  event()
  try:
   setup();check();ds=job['dataset'];seed=job['train_seed'];cfg=job['config'];case,_=load_case(ds)
@@ -45,6 +46,7 @@ def main():
   rng,rr=reset_training_streams(seed,ds,'cuda')
   if any(rr['state_sha256'][k]!=v for k,v in z['CPU_training_rng']['state_sha256'].items() if k!='device'):raise ValueError('paired training stream reset')
   binding=dict(dataset=ds,train_seed=seed,arm=job['arm'],configuration=job['arm']+'_late',config=cfg,updates=3000,inputs_per_update=1,initial_bank=bank,approval_sha256=sha(OUT/'approval.json'),source_manifest_sha256=sha(OUT/'source_manifest.json'))
+  training=TrainingBoundary(model,opt,ema,rng,'cuda',completed)
   save(folder/'binding.json',binding);save(folder/'training_rng_reset.json',rr);snapshot('initial.pt')
   save(folder/'initialization.json',dict(proof=z['initialization'],all_initial_tensors_exact=True,saved_before_first_forward=True,new_optimizer_empty=True,new_EMA_theta0=True,parameters=job['parameters']))
   del z
@@ -55,14 +57,17 @@ def main():
    vals.append(dict(updates=u,raw=validation(model,case,cfg,seed,rng),ema_0_99=ema_validation(validation,model,ema,case,cfg,seed,rng)));save(folder/'validation.json',vals)
   validate(0);contracts=read(OUT/'prepared'/f'input_contract_{ds}_{seed}.json');event(status='training')
   for position in range(1,3001):
-   check();inp=one_input(case,cfg,position,rng);ih=input_hash([inp]);expected=contracts[position-1]
-   if ih!=expected['sha256'] or inp['t']!=expected['t'] or len(inp['ids'])!=expected['slots']:raise ValueError('paired input contract before update '+str(position))
-   tick=time.perf_counter()
-   # Tensor pickle storage identifiers are not stable across processes; hash tensor bytes explicitly.
-   def stream_hashes():
-    state=rng_get(rng,'cuda')
-    return {k:hashlib.sha256(v.cpu().numpy().tobytes() if torch.is_tensor(v) else pickle.dumps(v,protocol=4)).hexdigest() for k,v in state.items()}
-   before_streams=stream_hashes();rec=update(model,opt,case,inp,1000,'cuda',ema,completed);completed=position
+   check()
+   with training.step(position):
+    inp=one_input(case,cfg,position,rng);ih=input_hash([inp]);expected=contracts[position-1]
+    if ih!=expected['sha256'] or inp['t']!=expected['t'] or len(inp['ids'])!=expected['slots']:raise ValueError('paired input contract before update '+str(position))
+    tick=time.perf_counter()
+    # Tensor pickle storage identifiers are not stable across processes; hash tensor bytes explicitly.
+    def stream_hashes():
+     state=rng_get(rng,'cuda')
+     return {k:hashlib.sha256(v.cpu().numpy().tobytes() if torch.is_tensor(v) else pickle.dumps(v,protocol=4)).hexdigest() for k,v in state.items()}
+    before_streams=stream_hashes();rec=update(model,opt,case,inp,1000,'cuda',ema,completed,transaction=training)
+   completed=training.completed
    rec.update(update=completed,t=inp['t'],input_sha256=ih,paired_input_exact=True,training_streams_before=before_streams,training_streams_after=stream_hashes(),at=now(),total_update_seconds=time.perf_counter()-tick)
    import json
    with (folder/'training.jsonl').open('a') as f:f.write(json.dumps(rec)+'\n')
@@ -72,17 +77,18 @@ def main():
   states=final_readouts(model,ema,completed);cp=sha(folder/'final.pt')
   for kind,sd in [('raw',states['raw']),('ema_0.99',states['ema'])]:
    atomic_checkpoint(folder/f'readout_{kind}.pt',dict(model=sd,readout=kind,decay=.99 if kind!='raw' else None,updates=3000,train_seed=seed,binding=binding,checkpoint_sha256=cp))
-  del model,opt,ema,states;model=opt=ema=None;torch.cuda.empty_cache()
+  del model,opt,ema,states;model=opt=ema=training=None;torch.cuda.empty_cache()
   row=dict(id=job['task_id'],dataset=ds,train_seed=seed,configuration=job['arm']+'_late',readout_file=str(folder/'readout_ema_0.99.pt'),readout_sha256=sha(folder/'readout_ema_0.99.pt'))
   for ss in [2026102821,2026102822]:
    check();event(status='sampling',sample_seed=ss);sample_one(row,ss,folder/'ema_0.99'/f'sample_{ss}',case,cfg,basis,OUT,check,event);chains+=1
   event(status='complete')
  except BaseException as exc:
   status.update(status='failed_or_incomplete',error=repr(exc),traceback=traceback.format_exc())
-  if model is not None and opt is not None and ema is not None and ema.at_update_boundary:
+  if training is not None:completed=training.completed;status['recovery']=training.last_failure
+  if model is not None and training is not None and training.resumable and training.phase=='idle':
    try:snapshot(f'stopped_u{completed}.pt')
    except BaseException as e:status['checkpoint_save_error']=repr(e)
-  else:status['incomplete_update_not_presented_as_complete']=True
+  else:status.update(incomplete_update_not_presented_as_complete=True,exact_resume_allowed=False,use_previous_complete_checkpoint_only=True)
   event()
  finally:
   status.update(completed_updates=completed,completed_chains=chains,finished=now(),peak_rss_mib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024)

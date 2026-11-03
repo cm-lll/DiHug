@@ -1,0 +1,87 @@
+{
+  "tests": {
+    "status": "passed",
+    "tests_run": 10,
+    "failures": 0,
+    "errors": 0,
+    "records": [
+      {
+        "test": "test_abort_boundaries.SamplingTests.test_AE_sampling_uses_same_transaction_and_O_normal_matches_legacy",
+        "status": "passed",
+        "seconds": 9.130679739639163
+      },
+      {
+        "test": "test_abort_boundaries.SamplingTests.test_actual_O_sampling_outer_checks_and_resume",
+        "status": "passed",
+        "seconds": 23.214257343672216
+      },
+      {
+        "test": "test_abort_boundaries.SamplingTests.test_legacy_mixed_checkpoint_and_rng_restore_failure_rejected",
+        "status": "passed",
+        "seconds": 0.002136383205652237
+      },
+      {
+        "test": "test_abort_boundaries.TrainingTests.test_all_three_worker_loops_wrap_input_before_update",
+        "status": "passed",
+        "seconds": 0.0201034564524889
+      },
+      {
+        "test": "test_abort_boundaries.TrainingTests.test_committed_counter_survives_exception_before_worker_assignment",
+        "status": "passed",
+        "seconds": 0.3899586694315076
+      },
+      {
+        "test": "test_abort_boundaries.TrainingTests.test_legacy_input_failure_would_save_advanced_rng_with_old_weights",
+        "status": "passed",
+        "seconds": 0.03428277187049389
+      },
+      {
+        "test": "test_abort_boundaries.TrainingTests.test_normal_path_and_three_failure_sites_both_actual_updates",
+        "status": "passed",
+        "seconds": 0.49030708987265825
+      },
+      {
+        "test": "test_abort_boundaries.TrainingTests.test_optimizer_partial_write_is_not_resumable",
+        "status": "passed",
+        "seconds": 0.00910510215908289
+      },
+      {
+        "test": "test_abort_boundaries.TrainingTests.test_partial_ema_and_failed_rng_restore_are_not_resumable",
+        "status": "passed",
+        "seconds": 0.01354312989860773
+      },
+      {
+        "test": "test_abort_boundaries.TrainingTests.test_unexpected_parameter_or_buffer_replacement_fails_closed",
+        "status": "passed",
+        "seconds": 0.005995661951601505
+      }
+    ],
+    "seconds": 33.311593068763614,
+    "peak_rss_mib": 481.52734375,
+    "GPU_used": false,
+    "CUDA_initialized": false,
+    "CPU_threads": 1,
+    "reference_commit": "2f2cb300c1c7efc3dd6a28d462d5cb7584e88919",
+    "scope": "Actual two update functions and actual outer sampling entry; tiny synthetic context/predictor, real AdamW/EMA/noise/CE/query/reverse/serialization; three worker input-to-update wiring AST checks. No formal model or dataset loaded.",
+    "at": "2026-11-04T00:38:35.794399+08:00"
+  },
+  "historical_impact": {
+    "training_tasks": 26,
+    "chains": 160,
+    "unique_chain_identities": 144,
+    "reused_identical_chain_records": 16,
+    "confirmed_affected": [],
+    "training_unknown": [],
+    "chains_unknown": []
+  },
+  "historical_stopped_files_outside_scope": 5,
+  "historical_relevant_source_hash_checks": 94,
+  "all_historical_relevant_source_hashes_unchanged": true,
+  "GPU_hours": 0,
+  "limitations": [
+    "CPU synthetic network/context only; no new GPU test or formal execution",
+    "Legacy unmarked stopped checkpoints not automatically certified",
+    "Partial optimizer/EMA write is non-resumable; prior independent complete checkpoint required",
+    "Other historical algorithms and undocumented manual resumes not fully audited"
+  ]
+}

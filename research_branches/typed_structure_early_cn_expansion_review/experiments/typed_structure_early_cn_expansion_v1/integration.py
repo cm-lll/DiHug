@@ -22,8 +22,13 @@ def checkpoint_payload(model,opt,ema,updates,rng,binding):
     return dict(model=cpu_copy(model.state_dict()),optimizer=cpu_copy(opt.state_dict()),
                 ema=ema.state_dict(),updates=updates,rng=cpu_copy(rng),binding=cpu_copy(binding))
 
-def restore_payload(payload,model,opt,ema,binding,restore_rng):
+def restore_payload(payload,model,opt,ema,binding,restore_rng,*,legacy_complete_boundary_verified=False):
     # The existing checkpoint loader still authenticates bytes and paths.
+    recovery=payload.get('recovery')
+    if recovery is None and not legacy_complete_boundary_verified:
+        raise ValueError('legacy checkpoint requires independent complete-boundary verification; a stopped filename is not evidence')
+    if recovery is not None and (recovery.get('format')!='dihug_complete_boundary_v2' or recovery.get('exact_resume_allowed') is not True or recovery.get('phase')!='committed' or recovery.get('completed_updates')!=payload['updates']):
+        raise ValueError('checkpoint is not a complete resumable training boundary')
     if payload['binding']!=binding:raise ValueError('checkpoint binding mismatch')
     # Validate EMA fully before mutating model/optimizer/RNG.
     check=type(ema)(model)

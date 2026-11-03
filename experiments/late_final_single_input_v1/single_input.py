@@ -6,7 +6,7 @@ from hsgd.losses import supported_binary_ce
 from normal2 import sync,update_observation
 def one_input(case,cfg,position,rng,force_t=None):
  return train_input(case,cfg['T'],1,cfg['seed'],position,rng,force_t=force_t)
-def update(model,opt,case,inp,T,device,ema,completed):
+def update(model,opt,case,inp,T,device,ema,completed,transaction=None):
  if completed!=ema.updates or not ema.at_update_boundary:raise ValueError('raw/EMA boundary')
  expected=np.flatnonzero(np.repeat(case['active'],case['space'].counts))
  if not np.array_equal(np.sort(inp['ids']),expected) or inp['ce_weight']!=1/case['space'].total:raise ValueError('full query / schema denominator')
@@ -22,7 +22,9 @@ def update(model,opt,case,inp,T,device,ema,completed):
   live=[p.grad for p in model.parameters() if p.grad is not None]
   if not live or not all(torch.isfinite(x).all() for x in live):raise FloatingPointError('nonfinite/no gradients')
   norm=float(torch.linalg.vector_norm(torch.stack([torch.linalg.vector_norm(x) for x in live])))
-  before=model.backbone.lin_out_E.weight.detach().clone();ema.at_update_boundary=False
+  before=model.backbone.lin_out_E.weight.detach().clone()
+  if transaction is not None:transaction.mark_optimizer_started()
+  ema.at_update_boundary=False
   tick=time.perf_counter();opt.step();sync(device);opt_seconds=time.perf_counter()-tick
   observation=update_observation(before,model.backbone.lin_out_E.weight,True)
   tick=time.perf_counter();ema.update(model,completed+1);ema.at_update_boundary=True;sync(device)

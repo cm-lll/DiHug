@@ -240,14 +240,14 @@
   "experiments/d_late_ard_runtime_v1/generation_worker.py": [
     {
       "name": "setup",
-      "line": 30,
-      "end_line": 37,
+      "line": 31,
+      "end_line": 38,
       "kind": "FunctionDef"
     },
     {
       "name": "main",
-      "line": 40,
-      "end_line": 214,
+      "line": 41,
+      "end_line": 222,
       "kind": "FunctionDef"
     }
   ],
@@ -277,7 +277,7 @@
     {
       "name": "main",
       "line": 14,
-      "end_line": 60,
+      "end_line": 63,
       "kind": "FunctionDef"
     }
   ],
@@ -532,14 +532,14 @@
   "experiments/late_final_single_input_v1/sampling.py": [
     {
       "name": "authenticate_readout",
-      "line": 14,
-      "end_line": 25,
+      "line": 15,
+      "end_line": 26,
       "kind": "FunctionDef"
     },
     {
       "name": "sample_one",
-      "line": 26,
-      "end_line": 69,
+      "line": 27,
+      "end_line": 82,
       "kind": "FunctionDef"
     }
   ],
@@ -553,7 +553,7 @@
     {
       "name": "update",
       "line": 9,
-      "end_line": 33,
+      "end_line": 35,
       "kind": "FunctionDef"
     }
   ],
@@ -574,8 +574,8 @@
   "experiments/late_final_single_input_v1/worker_run.py": [
     {
       "name": "main",
-      "line": 15,
-      "end_line": 91,
+      "line": 16,
+      "end_line": 97,
       "kind": "FunctionDef"
     }
   ],
@@ -742,14 +742,14 @@
   "experiments/o_cn_matched_execute_v1/sampling.py": [
     {
       "name": "authenticate_readout",
-      "line": 14,
-      "end_line": 25,
+      "line": 15,
+      "end_line": 26,
       "kind": "FunctionDef"
     },
     {
       "name": "sample_one",
-      "line": 26,
-      "end_line": 69,
+      "line": 27,
+      "end_line": 82,
       "kind": "FunctionDef"
     }
   ],
@@ -763,7 +763,7 @@
     {
       "name": "update",
       "line": 9,
-      "end_line": 33,
+      "end_line": 35,
       "kind": "FunctionDef"
     }
   ],
@@ -784,9 +784,41 @@
   "experiments/o_cn_matched_execute_v1/worker_run.py": [
     {
       "name": "main",
-      "line": 15,
-      "end_line": 94,
+      "line": 16,
+      "end_line": 100,
       "kind": "FunctionDef"
+    }
+  ],
+  "research_branches/typed_structure_early_cn_expansion_review/experiments/typed_structure_early_cn_expansion_v1/boundary_transactions.py": [
+    {
+      "name": "rng_capture",
+      "line": 17,
+      "end_line": 24,
+      "kind": "FunctionDef"
+    },
+    {
+      "name": "rng_restore",
+      "line": 27,
+      "end_line": 39,
+      "kind": "FunctionDef"
+    },
+    {
+      "name": "_stamp",
+      "line": 42,
+      "end_line": 51,
+      "kind": "FunctionDef"
+    },
+    {
+      "name": "TrainingBoundary",
+      "line": 54,
+      "end_line": 137,
+      "kind": "ClassDef"
+    },
+    {
+      "name": "SamplingBoundary",
+      "line": 140,
+      "end_line": 195,
+      "kind": "ClassDef"
     }
   ],
   "research_branches/typed_structure_early_cn_expansion_review/experiments/typed_structure_early_cn_expansion_v1/ema.py": [
@@ -833,19 +865,19 @@
     {
       "name": "restore_payload",
       "line": 25,
-      "end_line": 35,
+      "end_line": 40,
       "kind": "FunctionDef"
     },
     {
       "name": "final_readouts",
-      "line": 37,
-      "end_line": 41,
+      "line": 42,
+      "end_line": 46,
       "kind": "FunctionDef"
     },
     {
       "name": "ema_validation",
-      "line": 43,
-      "end_line": 55,
+      "line": 48,
+      "end_line": 60,
       "kind": "FunctionDef"
     }
   ],
@@ -2463,6 +2495,82 @@
       "kind": "FunctionDef"
     }
   ],
+  "tests/run_cpu_fault_tests.py": [
+    {
+      "name": "Result",
+      "line": 13,
+      "end_line": 26,
+      "kind": "ClassDef"
+    },
+    {
+      "name": "main",
+      "line": 29,
+      "end_line": 43,
+      "kind": "FunctionDef"
+    }
+  ],
+  "tests/test_abort_boundaries.py": [
+    {
+      "name": "load",
+      "line": 40,
+      "end_line": 44,
+      "kind": "FunctionDef"
+    },
+    {
+      "name": "legacy_path",
+      "line": 47,
+      "end_line": 52,
+      "kind": "FunctionDef"
+    },
+    {
+      "name": "stable",
+      "line": 55,
+      "end_line": 70,
+      "kind": "FunctionDef"
+    },
+    {
+      "name": "reset",
+      "line": 73,
+      "end_line": 75,
+      "kind": "FunctionDef"
+    },
+    {
+      "name": "TinyModel",
+      "line": 78,
+      "end_line": 85,
+      "kind": "ClassDef"
+    },
+    {
+      "name": "TinyContext",
+      "line": 88,
+      "end_line": 102,
+      "kind": "ClassDef"
+    },
+    {
+      "name": "TrainingTests",
+      "line": 105,
+      "end_line": 252,
+      "kind": "ClassDef"
+    },
+    {
+      "name": "TinySampler",
+      "line": 255,
+      "end_line": 259,
+      "kind": "ClassDef"
+    },
+    {
+      "name": "TinyPredictor",
+      "line": 262,
+      "end_line": 272,
+      "kind": "ClassDef"
+    },
+    {
+      "name": "SamplingTests",
+      "line": 275,
+      "end_line": 384,
+      "kind": "ClassDef"
+    }
+  ],
   "tools/audit_source.py": [
     {
       "name": "digest",
@@ -2473,7 +2581,7 @@
     {
       "name": "main",
       "line": 16,
-      "end_line": 72,
+      "end_line": 78,
       "kind": "FunctionDef"
     }
   ]

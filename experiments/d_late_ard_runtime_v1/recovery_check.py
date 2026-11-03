@@ -39,7 +39,10 @@ def main():
   del model,opt,ema;torch.cuda.empty_cache()
   model,opt,ema,rng=objects();loaded=torch.load(folder/'engineering_u1.pt',map_location='cpu')
   assert sha(folder/'engineering_u1.pt')==read(folder/'engineering_u1.sha256.json')['sha256']
-  assert restore_payload(loaded,model,opt,ema,binding,lambda s:rng_set(s,rng,'cuda'))==1
+  # This engineering fixture was saved above immediately after successful update1,
+  # before drawing input2, and its bytes are authenticated. Never use this opt-in
+  # for a legacy abnormal-stop snapshot merely because EMA counters match.
+  assert restore_payload(loaded,model,opt,ema,binding,lambda s:rng_set(s,rng,'cuda'),legacy_complete_boundary_verified=True)==1
   assert equal(state(1),saved),'restored checkpoint differs'
   inp2=one_input(case,cfg,2,rng);assert ih==input_hash([inp2]) and equal(before,rng_get(rng,'cuda'))
   replay=update(model,opt,case,inp2,1000,'cuda',ema,1);count+=1;actual=state(2)
