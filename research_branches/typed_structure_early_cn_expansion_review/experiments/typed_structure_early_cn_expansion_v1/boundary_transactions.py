@@ -51,9 +51,45 @@ def _stamp(value):
     return value
 
 
+def _check_role_cache(model):
+    # StructuralDenoiser defines _role_identity for EVERY arm. Only C/E
+    # actually register these buffers, so method presence is not a role test.
+    fields={'role_basis','role_offsets'}
+    present=fields.intersection(dict(model.named_buffers()))
+    if not present:
+        if any(hasattr(model,k) for k in ('_basis_cpu','_offsets_cpu','_basis_tensor_identity')):
+            raise RuntimeError('role cache exists without registered role buffers')
+        return
+    if present!=fields or not all(hasattr(model,k) for k in ('_basis_cpu','_offsets_cpu','_basis_tensor_identity','_basis_hash','_role_identity')):
+        raise RuntimeError('incomplete role buffer/cache state')
+    if model._role_identity()!=model._basis_tensor_identity:
+        raise RuntimeError('frozen dictionary identity changed; cache rollback unverified')
+    if (not np.array_equal(model._basis_cpu,model.role_basis.detach().cpu().numpy())
+            or not np.array_equal(model._offsets_cpu,model.role_offsets.detach().cpu().numpy())):
+        raise RuntimeError('role CPU cache differs from registered buffers')
+    from features import digest
+    if digest(model._basis_cpu,model._offsets_cpu)!=model._basis_hash:
+        raise RuntimeError('role CPU cache digest changed')
+
+
+def _optimizer_stamp(optimizer):
+    # Loading EMA/raw bumps parameter versions even when AdamW is untouched.
+    # Guard optimizer tensors normally, but refer to group parameters by identity.
+    groups=tuple(tuple((k,tuple(id(p) for p in v) if k=='params' else _stamp(v))
+                       for k,v in group.items()) for group in optimizer.param_groups)
+    return (_stamp(optimizer.state),groups)
+
+
+def _same_model_state(model,saved):
+    actual=model.state_dict()
+    return actual.keys()==saved.keys() and all(
+        value.shape==saved[k].shape and value.dtype==saved[k].dtype
+        and torch.equal(value.detach().cpu(),saved[k]) for k,value in actual.items())
+
+
 class TrainingBoundary:
     def __init__(self, model, optimizer, ema, rng, device, completed):
-        if completed != ema.updates or not ema.at_update_boundary:
+        if completed != ema.updates or not ema.at_update_boundary or getattr(model,'_dihug_checkpoint_invalid',None) or getattr(model,'_dihug_validation_in_flight',False):
             raise ValueError('initial model/optimizer/EMA boundary required')
         self.model, self.optimizer, self.ema = model, optimizer, ema
         self.rng, self.device = rng, device
@@ -61,6 +97,60 @@ class TrainingBoundary:
         self.phase, self.resumable = 'idle', True
         self.boundary_rng = rng_capture(rng, device)
         self.last_failure = None
+
+    def invalidate(self,error,phase):
+        self.resumable,self.phase=False,'invalid'
+        self.ema.at_update_boundary=False
+        self.last_failure=dict(error=repr(error),phase=phase,exact_resume_allowed=False,
+                               use_previous_complete_checkpoint_only=True)
+
+    @contextlib.contextmanager
+    def validation(self):
+        """Do not certify any checkpoint while temporary readout weights are live.
+
+        A validation error is recoverable only if full raw contents, optimizer,
+        EMA, role caches, modes and RNG are certified/restored. An uncertain raw
+        restore is sticky-invalid; no second blind load can declare it healthy.
+        """
+        from ema import cpu_copy
+        if not self.resumable or self.phase!='idle' or getattr(self.model,'_dihug_checkpoint_invalid',None) or getattr(self.model,'_dihug_validation_in_flight',False):
+            raise RuntimeError('validation requires a complete training boundary')
+        raw=cpu_copy(self.model.state_dict());before=rng_capture(self.rng,self.device)
+        optimizer=_optimizer_stamp(self.optimizer);shadow=_stamp(self.ema.shadow)
+        updates,decay=self.ema.updates,self.ema.decay
+        parameter_ids={k:id(p) for k,p in self.model.named_parameters()}
+        modes=[(m,m.training) for m in self.model.modules()]
+        self.phase='validation_in_flight'
+        self.model._dihug_validation_in_flight=True
+        def certify():
+            if (not self.resumable or self.phase!='validation_in_flight'
+                    or getattr(self.model,'_dihug_checkpoint_invalid',None)
+                    or not self.ema.at_update_boundary or self.ema.updates!=updates
+                    or self.completed!=updates or self.ema.decay!=decay
+                    or parameter_ids!={k:id(p) for k,p in self.model.named_parameters()}
+                    or optimizer!=_optimizer_stamp(self.optimizer) or shadow!=_stamp(self.ema.shadow)
+                    or not _same_model_state(self.model,raw)):
+                raise RuntimeError('raw/AdamW/EMA validation restore not certified')
+            _check_role_cache(self.model)
+            for module,mode in modes:module.training=mode
+            rng_restore(before,self.rng,self.device)
+            self.model._dihug_validation_in_flight=False
+            self.boundary_rng,self.phase=before,'idle'
+        try:
+            yield
+        except BaseException as exc:
+            try:certify()
+            except BaseException as check_error:
+                if self.resumable:self.invalidate(check_error,'validation_restore_unverified')
+            else:
+                self.last_failure=dict(error=repr(exc),phase='validation',restored_raw=True,
+                                       restored_real_rng=True,exact_resume_allowed=True)
+            raise
+        else:
+            try:certify()
+            except BaseException as exc:
+                self.invalidate(exc,'validation_restore_unverified')
+                raise
 
     def mark_optimizer_started(self):
         if self.phase != 'pre_optimizer':
@@ -108,8 +198,7 @@ class TrainingBoundary:
                         # Do not bump unchanged frozen-dictionary buffer versions.
                         if not torch.equal(value, buffers[k]):
                             value.copy_(buffers[k])
-                if hasattr(self.model, '_role_identity') and self.model._role_identity() != self.model._basis_tensor_identity:
-                    raise RuntimeError('frozen dictionary identity changed; cache rollback unverified')
+                _check_role_cache(self.model)
                 self.optimizer.zero_grad(set_to_none=True)
                 for module, mode in modes:
                     module.training = mode
@@ -128,7 +217,7 @@ class TrainingBoundary:
 
     def checkpoint(self, binding):
         from integration import checkpoint_payload
-        if not self.resumable or self.phase != 'idle':
+        if not self.resumable or self.phase != 'idle' or getattr(self.model,'_dihug_checkpoint_invalid',None):
             raise RuntimeError('in-flight/invalid training state must not be saved as resumable')
         payload = checkpoint_payload(self.model, self.optimizer, self.ema,
                                      self.completed, self.boundary_rng, binding)

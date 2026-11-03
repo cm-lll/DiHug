@@ -8,6 +8,7 @@ import time
 import unittest
 
 import test_abort_boundaries as cases
+import test_role_validation_boundaries as followup
 
 
 class Result(unittest.TextTestResult):
@@ -29,14 +30,17 @@ class Result(unittest.TextTestResult):
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--output',required=True);a=parser.parse_args()
     began=time.perf_counter()
-    result=unittest.TextTestRunner(verbosity=2,resultclass=Result).run(unittest.defaultTestLoader.loadTestsFromModule(cases))
+    suite=unittest.TestSuite(unittest.defaultTestLoader.loadTestsFromModule(module)
+                             for module in (cases,followup))
+    result=unittest.TextTestRunner(verbosity=2,resultclass=Result).run(suite)
     import torch
     receipt=dict(status='passed' if result.wasSuccessful() else 'failed',tests_run=result.testsRun,
       failures=len(result.failures),errors=len(result.errors),records=result.records,
       seconds=time.perf_counter()-began,peak_rss_mib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024,
       GPU_used=False,CUDA_initialized=torch.cuda.is_initialized(),CPU_threads=torch.get_num_threads(),
       reference_commit='2f2cb300c1c7efc3dd6a28d462d5cb7584e88919',
-      scope='Actual two update functions and actual outer sampling entry; tiny synthetic context/predictor, real AdamW/EMA/noise/CE/query/reverse/serialization; three worker input-to-update wiring AST checks. No formal model or dataset loaded.',
+      followup_parent=followup.PARENT,followup_evidence=followup.EVIDENCE,
+      scope='Retains all ten original fault tests. Eight follow-up tests reproduce both parent bugs and exercise actual O/A/D/E eight-layer layouts on a synthetic 12-node graph, real AdamW/EMA/CE and complete next-update recovery; no formal datasets, trained weights, fitted dictionaries or GPU loaded.',
       at=datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).isoformat())
     p=pathlib.Path(a.output);p.parent.mkdir(parents=True,exist_ok=True);p.write_text(json.dumps(receipt,ensure_ascii=False,indent=2)+'\n')
     if receipt['CUDA_initialized']:raise RuntimeError('CPU-only test unexpectedly initialized CUDA')

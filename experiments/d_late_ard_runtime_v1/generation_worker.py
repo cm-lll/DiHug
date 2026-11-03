@@ -143,8 +143,9 @@ def main():
         validations = []
 
         def validate(position):
-            validations.append(dict(updates=position, raw=validation(model,case,cfg,seed,rng),
-                ema_0_99=ema_validation(validation,model,ema,case,cfg,seed,rng)))
+            with training.validation():
+                validations.append(dict(updates=position, raw=validation(model,case,cfg,seed,rng),
+                    ema_0_99=ema_validation(validation,model,ema,case,cfg,seed,rng,boundary=training)))
             save(folder/'validation.json', validations)
 
         contracts = read(OUT/'prepared'/f'input_contract_PubMed_{seed}.json')

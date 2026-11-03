@@ -57,7 +57,9 @@ def main():
   save(folder/'environment.json',environment('cuda'))
   vals=[]
   def validate(u):
-   vals.append(dict(updates=u,raw=validation(model,case,cfg,seed,rng),ema_0_99=ema_validation(validation,model,ema,case,cfg,seed,rng)));save(folder/'validation.json',vals)
+   with training.validation():
+    vals.append(dict(updates=u,raw=validation(model,case,cfg,seed,rng),ema_0_99=ema_validation(validation,model,ema,case,cfg,seed,rng,boundary=training)))
+   save(folder/'validation.json',vals)
   validate(0);contracts=read(OUT/'prepared'/f'input_contract_{ds}_{seed}.json');event(status='training')
   for position in range(1,3001):
    check()

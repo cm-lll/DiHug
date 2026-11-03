@@ -1,0 +1,223 @@
+{
+  "parent": "4b6764174d18b4713c2836e5524f78eb5b7895b2",
+  "tests": {
+    "status": "passed",
+    "tests_run": 18,
+    "failures": 0,
+    "errors": 0,
+    "records": [
+      {
+        "test": "test_abort_boundaries.SamplingTests.test_AE_sampling_uses_same_transaction_and_O_normal_matches_legacy",
+        "status": "passed",
+        "seconds": 8.976415453478694
+      },
+      {
+        "test": "test_abort_boundaries.SamplingTests.test_actual_O_sampling_outer_checks_and_resume",
+        "status": "passed",
+        "seconds": 23.505300016142428
+      },
+      {
+        "test": "test_abort_boundaries.SamplingTests.test_legacy_mixed_checkpoint_and_rng_restore_failure_rejected",
+        "status": "passed",
+        "seconds": 0.0023655053228139877
+      },
+      {
+        "test": "test_abort_boundaries.TrainingTests.test_all_three_worker_loops_wrap_input_before_update",
+        "status": "passed",
+        "seconds": 0.02144848369061947
+      },
+      {
+        "test": "test_abort_boundaries.TrainingTests.test_committed_counter_survives_exception_before_worker_assignment",
+        "status": "passed",
+        "seconds": 0.4294417668133974
+      },
+      {
+        "test": "test_abort_boundaries.TrainingTests.test_legacy_input_failure_would_save_advanced_rng_with_old_weights",
+        "status": "passed",
+        "seconds": 0.029128857888281345
+      },
+      {
+        "test": "test_abort_boundaries.TrainingTests.test_normal_path_and_three_failure_sites_both_actual_updates",
+        "status": "passed",
+        "seconds": 0.543084335513413
+      },
+      {
+        "test": "test_abort_boundaries.TrainingTests.test_optimizer_partial_write_is_not_resumable",
+        "status": "passed",
+        "seconds": 0.010125523433089256
+      },
+      {
+        "test": "test_abort_boundaries.TrainingTests.test_partial_ema_and_failed_rng_restore_are_not_resumable",
+        "status": "passed",
+        "seconds": 0.01423137541860342
+      },
+      {
+        "test": "test_abort_boundaries.TrainingTests.test_unexpected_parameter_or_buffer_replacement_fails_closed",
+        "status": "passed",
+        "seconds": 0.006481243297457695
+      },
+      {
+        "test": "test_role_validation_boundaries.ActualLayoutRollback.test_real_O_A_D_E_input_forward_gradient_failures_resume_identically",
+        "status": "passed",
+        "seconds": 47.575964350253344
+      },
+      {
+        "test": "test_role_validation_boundaries.ReproduceReviewedBugs.test_reviewed_O_A_D_role_method_without_buffers_misclassifies_rollback",
+        "status": "passed",
+        "seconds": 1.0866870796307921
+      },
+      {
+        "test": "test_role_validation_boundaries.ReproduceReviewedBugs.test_reviewed_partial_raw_restore_can_be_checkpointed_as_exact",
+        "status": "passed",
+        "seconds": 0.34704349376261234
+      },
+      {
+        "test": "test_role_validation_boundaries.ValidationBoundaries.test_all_formal_validation_helpers_are_inside_boundary",
+        "status": "passed",
+        "seconds": 0.019996621645987034
+      },
+      {
+        "test": "test_role_validation_boundaries.ValidationBoundaries.test_direct_ema_helper_also_refuses_mixed_raw_state_without_owner",
+        "status": "passed",
+        "seconds": 0.5783368265256286
+      },
+      {
+        "test": "test_role_validation_boundaries.ValidationBoundaries.test_partial_raw_restore_is_poisoned_and_checkpoint_is_forbidden",
+        "status": "passed",
+        "seconds": 2.7187165869399905
+      },
+      {
+        "test": "test_role_validation_boundaries.ValidationBoundaries.test_real_models_normal_and_failed_validation_with_verified_restore",
+        "status": "passed",
+        "seconds": 31.73263966757804
+      },
+      {
+        "test": "test_role_validation_boundaries.ValidationBoundaries.test_unreported_restore_mutation_or_optimizer_mutation_is_not_certified",
+        "status": "passed",
+        "seconds": 1.8056455226615071
+      }
+    ],
+    "seconds": 119.40528407413512,
+    "peak_rss_mib": 939.91015625,
+    "GPU_used": false,
+    "CUDA_initialized": false,
+    "CPU_threads": 1,
+    "reference_commit": "2f2cb300c1c7efc3dd6a28d462d5cb7584e88919",
+    "followup_parent": "4b6764174d18b4713c2836e5524f78eb5b7895b2",
+    "followup_evidence": {
+      "reproductions": [
+        {
+          "bug": "role_method_without_buffers",
+          "arm": "O",
+          "resumable": false,
+          "failure": {
+            "error": "ValueError('injected after real input sampling')",
+            "phase": "pre_optimizer",
+            "rollback_error": "AttributeError(\"'StructuralDenoiser' object has no attribute 'role_basis'\")",
+            "exact_resume_allowed": false,
+            "use_previous_complete_checkpoint_only": true
+          }
+        },
+        {
+          "bug": "role_method_without_buffers",
+          "arm": "A",
+          "resumable": false,
+          "failure": {
+            "error": "ValueError('injected after real input sampling')",
+            "phase": "pre_optimizer",
+            "rollback_error": "AttributeError(\"'StructuralDenoiser' object has no attribute 'role_basis'\")",
+            "exact_resume_allowed": false,
+            "use_previous_complete_checkpoint_only": true
+          }
+        },
+        {
+          "bug": "role_method_without_buffers",
+          "arm": "D",
+          "resumable": false,
+          "failure": {
+            "error": "ValueError('injected after real input sampling')",
+            "phase": "pre_optimizer",
+            "rollback_error": "AttributeError(\"'StructuralDenoiser' object has no attribute 'role_basis'\")",
+            "exact_resume_allowed": false,
+            "use_previous_complete_checkpoint_only": true
+          }
+        },
+        {
+          "bug": "role_method_without_buffers",
+          "arm": "E",
+          "resumable": true,
+          "failure": {
+            "error": "ValueError('injected after real input sampling')",
+            "phase": "pre_optimizer",
+            "rolled_back_to_update": 0,
+            "exact_resume_allowed": true,
+            "restored_real_rng": true
+          }
+        },
+        {
+          "bug": "partial_raw_restore",
+          "mixed_state": true,
+          "checkpoint_marked_exact": true
+        }
+      ],
+      "real_layouts": {
+        "O": {
+          "parameters": 6632625,
+          "layers": 8,
+          "joint_head_input": 739,
+          "has_role_method": true,
+          "role_buffers": [],
+          "graph_nodes": 12,
+          "legal_slots": 66,
+          "synthetic_dictionary": false
+        },
+        "A": {
+          "parameters": 6647441,
+          "layers": 8,
+          "joint_head_input": 776,
+          "has_role_method": true,
+          "role_buffers": [],
+          "graph_nodes": 12,
+          "legal_slots": 66,
+          "synthetic_dictionary": false
+        },
+        "D": {
+          "parameters": 6808721,
+          "layers": 8,
+          "joint_head_input": 776,
+          "has_role_method": true,
+          "role_buffers": [],
+          "graph_nodes": 12,
+          "legal_slots": 66,
+          "synthetic_dictionary": false
+        },
+        "E": {
+          "parameters": 6816401,
+          "layers": 8,
+          "joint_head_input": 776,
+          "has_role_method": true,
+          "role_buffers": [
+            "role_basis",
+            "role_offsets"
+          ],
+          "graph_nodes": 12,
+          "legal_slots": 66,
+          "synthetic_dictionary": true
+        }
+      }
+    },
+    "scope": "Retains all ten original fault tests. Eight follow-up tests reproduce both parent bugs and exercise actual O/A/D/E eight-layer layouts on a synthetic 12-node graph, real AdamW/EMA/CE and complete next-update recovery; no formal datasets, trained weights, fitted dictionaries or GPU loaded.",
+    "at": "2026-11-04T01:55:40.286326+08:00"
+  },
+  "original_ten_test_file_unchanged": true,
+  "original_runtime_files_unchanged": 90,
+  "formal_training": false,
+  "model_generation": false,
+  "GPU_hours": 0,
+  "limitations": [
+    "Full actual O/A/D/E architecture, synthetic 12-node graph and synthetic E dictionary",
+    "CUDA device faults, asynchronous CUDA errors and runtime overhead not measured",
+    "No hot replacement of original runtime or alteration of historical science results",
+    "Prior complete checkpoint must be loaded into fresh objects after uncertain raw restore"
+  ]
+}

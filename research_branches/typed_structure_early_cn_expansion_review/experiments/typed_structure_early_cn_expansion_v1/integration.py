@@ -18,6 +18,7 @@ def complete_normal2(normal2_fn,model,opt,case,inputs,T,device,ema,completed_upd
     return dict(result,ema_updates=ema.updates)
 
 def checkpoint_payload(model,opt,ema,updates,rng,binding):
+    if getattr(model,'_dihug_checkpoint_invalid',None) or getattr(model,'_dihug_validation_in_flight',False):raise RuntimeError('unverified/in-flight raw restore: checkpoint forbidden')
     if updates!=ema.updates:raise ValueError('save only at complete raw/EMA boundary')
     return dict(model=cpu_copy(model.state_dict()),optimizer=cpu_copy(opt.state_dict()),
                 ema=ema.state_dict(),updates=updates,rng=cpu_copy(rng),binding=cpu_copy(binding))
@@ -45,16 +46,27 @@ def final_readouts(model,ema,completed_updates):
     if hasattr(ema,'readouts'):return dict(raw=cpu_copy(model.state_dict()),**ema.readouts(model))
     return dict(raw=cpu_copy(model.state_dict()),ema=ema.readout_state_dict(model))
 
-def ema_validation(validation_fn,model,ema,*args,**kwargs):
+def ema_validation(validation_fn,model,ema,*args,boundary=None,**kwargs):
     """Call the existing RNG-preserving validation with EMA, restore raw in finally.
 
     The existing validation closes each FrozenTypedContext. No learned output
     cache may survive this weight swap. No second model construction is needed.
     """
     raw=cpu_copy(model.state_dict());mode=model.training
+    prior_in_flight=getattr(model,'_dihug_validation_in_flight',False)
+    model._dihug_validation_in_flight=True
     try:
         model.load_state_dict(ema.readout_state_dict(model),strict=True)
         return validation_fn(model,*args,**kwargs)
     finally:
-        model.load_state_dict(raw,strict=True)
-        model.train(mode)
+        try:
+            model.load_state_dict(raw,strict=True)
+            model.train(mode)
+            model._dihug_validation_in_flight=prior_in_flight
+        except BaseException as exc:
+            # A matching EMA counter cannot certify partially restored raw
+            # parameters. Poison both direct and boundary-managed save paths.
+            model._dihug_checkpoint_invalid=dict(reason='raw_restore_failed',error=repr(exc))
+            ema.at_update_boundary=False
+            if boundary is not None:boundary.invalidate(exc,'ema_validation_raw_restore_failed')
+            raise
