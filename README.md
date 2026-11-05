@@ -1,6 +1,6 @@
 # 单参考异质图离散扩散：源码审查快照
 
-**2026-11-06 输入增强候选审查分支：** 新增A晚CN上的类型化三角/分量节点输入及同分量候选对输入，保持CE、后验和采样算法。请先阅读 [调整目的、公式、完整路径、CPU检查、限制及待批准预算](review/structure_input_v1/REVIEW_ZH.md)。候选类位于 [StructureInputA](experiments/structure_input_v1/model.py)，**未接入正式launcher、未做GPU或生成效果验证**。下文为继承的历史正式入口说明，不能把历史结果当新候选结果。
+**2026-11-06 输入增强候选审查分支：** 新增A晚CN上的类型化三角/分量节点输入及同分量候选对输入，保持CE、后验和采样算法。请先阅读 [调整目的、公式、完整路径、CPU检查、限制及待批准预算](review/structure_input_v1/REVIEW_ZH.md)。候选类位于 [StructureInputA](experiments/structure_input_v1/model.py)，**未接入正式launcher、未做生成效果验证**。[GPU工程检查部分完成但未通过完整验收](review/structure_input_v1/GPU_ENGINEERING_ZH.md)：精确重载通过，重复更新差异超出沿用浮点容差，保留失败与未完成项。下文为继承的历史正式入口说明，不能把历史结果当新候选结果。
 
 **2026-11-04边界修复：** 本分支在固定审查版本2f2cb300之上修复异常事务，并继续核查4b676417的两个遗漏：O/A/D无角色buffer时的回滚、验证临时权重未完整恢复时的快照拒绝。见 [异常边界、测试及历史影响](ABORT_BOUNDARIES.md)；没有更改正常科学公式或启动正式实验。原十项及新增八项CPU测试由同一runner执行，GPU故障与开销未测。`provenance/source_files.json`仍保存原执行来源，补丁清单单独记录当前文件变化，不把修复后的代码冒称为旧实验已执行版本。
 

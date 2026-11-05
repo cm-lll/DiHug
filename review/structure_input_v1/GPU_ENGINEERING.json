@@ -1,0 +1,869 @@
+{
+  "status": "incomplete_stopped_at_continuation_tolerance",
+  "attempt1": {
+    "status": "failed",
+    "start_epoch": 1793910043.5400004,
+    "hard_stop_epoch": 1793910883.5400004,
+    "GPU_used": true,
+    "formal_training": false,
+    "complete_generated_graphs": 0,
+    "records": [
+      {
+        "kind": "binding",
+        "dataset": "IMDB",
+        "train_seed": 2026110411,
+        "data_sha256": "398d59a0602e14dd0c92b8781e69a3234727d674923275864eec558770dffb5c",
+        "parent_sha256": "2086e308a7c571957b0d92482ae9cec79eb18b53e95702bb347b3311db10f877",
+        "type_names": [
+          "Director",
+          "Actor",
+          "Movie",
+          "Genre"
+        ],
+        "schema": [
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            1
+          ],
+          [
+            0,
+            2
+          ],
+          [
+            0,
+            3
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            2
+          ],
+          [
+            1,
+            3
+          ],
+          [
+            2,
+            2
+          ],
+          [
+            2,
+            3
+          ],
+          [
+            3,
+            3
+          ]
+        ],
+        "slots": 18336,
+        "node_count": 192,
+        "reference_edges": 323
+      },
+      {
+        "kind": "update",
+        "dataset": "IMDB",
+        "arm": "A",
+        "stage": "update",
+        "position": 1,
+        "t": 25,
+        "loss": 0.4780220091342926,
+        "gradient_norm": 4.9685258865356445,
+        "optimizer_seconds": 0.04345439653843641,
+        "EMA_seconds": 0.11623689718544483,
+        "forward_seconds": 0.2241725604981184,
+        "update_seconds": 1.172726641409099,
+        "optimizer_steps": 1,
+        "ema_updates": 1,
+        "inputs": 1,
+        "slots": 13120,
+        "S": 18336,
+        "CE_coefficient": 5.453752181500873e-05,
+        "changed": 0.00019999966025352478,
+        "observed_parameter": "backbone.lin_out_E.weight",
+        "observed_parameter_changed": true,
+        "update_note": null,
+        "outer_seconds": 3.4941669199615717,
+        "input_sha256": "3b0073099b30e246f4d087cb96b7e88ea7ccedcbde64f92a06a94ec08e043617",
+        "peak_allocated_mib": 1983.07470703125,
+        "peak_reserved_mib": 2142.0
+      },
+      {
+        "kind": "save",
+        "dataset": "IMDB",
+        "arm": "A",
+        "seconds": 0.38298085797578096
+      },
+      {
+        "kind": "update",
+        "dataset": "IMDB",
+        "arm": "A",
+        "stage": "update",
+        "position": 2,
+        "t": 500,
+        "loss": 0.15483993291854858,
+        "gradient_norm": 1.2791812419891357,
+        "optimizer_seconds": 0.008963100612163544,
+        "EMA_seconds": 0.11433762218803167,
+        "forward_seconds": 0.12913228943943977,
+        "update_seconds": 0.994001992046833,
+        "optimizer_steps": 1,
+        "ema_updates": 2,
+        "inputs": 1,
+        "slots": 13120,
+        "S": 18336,
+        "CE_coefficient": 5.453752181500873e-05,
+        "changed": 0.00020026694983243942,
+        "observed_parameter": "backbone.lin_out_E.weight",
+        "observed_parameter_changed": true,
+        "update_note": null,
+        "outer_seconds": 1.0068495366722345,
+        "input_sha256": "031d73716bef63195f3f6981d30b26886c5add710b0a2567435db30df255a605",
+        "peak_allocated_mib": 2069.134765625,
+        "peak_reserved_mib": 2152.0
+      },
+      {
+        "kind": "update",
+        "dataset": "IMDB",
+        "arm": "A",
+        "stage": "update",
+        "position": 3,
+        "t": 950,
+        "loss": 0.1034851148724556,
+        "gradient_norm": 0.5779784321784973,
+        "optimizer_seconds": 0.008444290608167648,
+        "EMA_seconds": 0.11228955630213022,
+        "forward_seconds": 0.12866760976612568,
+        "update_seconds": 0.9822723949328065,
+        "optimizer_steps": 1,
+        "ema_updates": 3,
+        "inputs": 1,
+        "slots": 13120,
+        "S": 18336,
+        "CE_coefficient": 5.453752181500873e-05,
+        "changed": 0.0002002716064453125,
+        "observed_parameter": "backbone.lin_out_E.weight",
+        "observed_parameter_changed": true,
+        "update_note": null,
+        "outer_seconds": 0.9945195922628045,
+        "input_sha256": "3f7a478a422bfc3a85e8092d4caacf7b8d1f69dab367c1d213fe819ce1f7f891",
+        "peak_allocated_mib": 2069.49755859375,
+        "peak_reserved_mib": 2154.0
+      },
+      {
+        "kind": "EMA_validation",
+        "dataset": "IMDB",
+        "arm": "A",
+        "full_state_unchanged": true
+      },
+      {
+        "kind": "reverse_step",
+        "dataset": "IMDB",
+        "arm": "A",
+        "stage": "reverse_step",
+        "t": 25,
+        "seconds": 0.12307031732052565,
+        "coverage": 13120,
+        "exact_coverage": true,
+        "peak_allocated_mib": 2069.49755859375
+      },
+      {
+        "kind": "reverse_step",
+        "dataset": "IMDB",
+        "arm": "A",
+        "stage": "reverse_step",
+        "t": 500,
+        "seconds": 0.1241293316707015,
+        "coverage": 13120,
+        "exact_coverage": true,
+        "peak_allocated_mib": 2069.49755859375
+      },
+      {
+        "kind": "reverse_step",
+        "dataset": "IMDB",
+        "arm": "A",
+        "stage": "reverse_step",
+        "t": 950,
+        "seconds": 0.1225790036842227,
+        "coverage": 13120,
+        "exact_coverage": true,
+        "peak_allocated_mib": 2069.49755859375
+      },
+      {
+        "kind": "sampling_isolation",
+        "dataset": "IMDB",
+        "arm": "A",
+        "full_training_state_unchanged": true
+      },
+      {
+        "kind": "new_projection",
+        "dataset": "IMDB",
+        "arm": "A",
+        "node_norm": null,
+        "pair_norm": null
+      },
+      {
+        "kind": "feature",
+        "dataset": "IMDB",
+        "arm": "candidate",
+        "stage": "update",
+        "position": 1,
+        "t": 25,
+        "seconds": 0.004882996901869774,
+        "nodes": 192,
+        "physical_edges": 323,
+        "frozen_Xt_verified": true,
+        "components": 3,
+        "largest_component": 188,
+        "triangles": 45,
+        "component_fraction_std": 0.138362820711219
+      }
+    ],
+    "environment": {
+      "python": "3.9.23 | packaged by conda-forge | (main, Jun  4 2025, 17:57:12) \n[GCC 13.3.0]",
+      "python_version": "3.9.23",
+      "system": "Linux-5.4.0-216-generic-x86_64-with-glibc2.31",
+      "machine": "x86_64",
+      "packages": {
+        "torch": "2.1.0",
+        "torch-geometric": "2.3.1",
+        "numpy": "1.26.4",
+        "scipy": "1.11.0",
+        "pytest": "7.4.4",
+        "networkx": "2.8.7"
+      },
+      "hip": null,
+      "cuda": "12.1",
+      "requested_device": "cuda",
+      "torch_runtime_version": "2.1.0",
+      "float32_matmul_precision": "highest",
+      "matmul_allow_tf32": false,
+      "deterministic_algorithms": false,
+      "deterministic_warn_only": false,
+      "torch_threads": 1,
+      "utc": "2026-11-05T20:20:43Z",
+      "device_name": "NVIDIA GeForce RTX 2080 Ti",
+      "visible_devices": 1,
+      "device_memory_bytes": 11546394624,
+      "device_type": "CUDA"
+    },
+    "source_hashes": {
+      "experiments/structure_input_v1/__init__.py": "890cc1767c1dc4d196fc837c586c5d324539c3950312ba25da68e050e5f7dec5",
+      "experiments/structure_input_v1/features_cpu.py": "aaa7bd3e137366cfef8d0e0fe9b005b5d06ef03b2e238336901c76d6504693fc",
+      "experiments/structure_input_v1/gpu_engineering.py": "63532bca78d1bd527a281e08d26704399421a0a1268447cbc6cdddc748b077d6",
+      "experiments/structure_input_v1/model.py": "f2c2fdff5045f2d324f99dcad96384455660da81894dcbc4415c53963923352d",
+      "experiments/structure_input_v1/test_features_cpu.py": "3089ee864721e96277bd897d7527c1460d2cd8abd50779a602f784a70c81ee84"
+    },
+    "production_entry_note": "isolated candidate construction; original production launcher remains A/O only",
+    "error": "AssertionError()",
+    "end_epoch": 1793910060.7525306,
+    "process_seconds": 17.212530612945557
+  },
+  "followup": {
+    "status": "failed",
+    "start_epoch": 1793910296.1767125,
+    "hard_stop_epoch": 1793911030.190749,
+    "GPU_used": true,
+    "formal_training": false,
+    "complete_generated_graphs": 0,
+    "records": [
+      {
+        "kind": "binding",
+        "dataset": "IMDB",
+        "train_seed": 2026110411,
+        "data_sha256": "398d59a0602e14dd0c92b8781e69a3234727d674923275864eec558770dffb5c",
+        "parent_sha256": "2086e308a7c571957b0d92482ae9cec79eb18b53e95702bb347b3311db10f877",
+        "type_names": [
+          "Director",
+          "Actor",
+          "Movie",
+          "Genre"
+        ],
+        "schema": [
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            1
+          ],
+          [
+            0,
+            2
+          ],
+          [
+            0,
+            3
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            2
+          ],
+          [
+            1,
+            3
+          ],
+          [
+            2,
+            2
+          ],
+          [
+            2,
+            3
+          ],
+          [
+            3,
+            3
+          ]
+        ],
+        "slots": 18336,
+        "node_count": 192,
+        "reference_edges": 323
+      },
+      {
+        "kind": "update",
+        "dataset": "IMDB",
+        "arm": "A",
+        "stage": "update",
+        "position": 1,
+        "t": 25,
+        "loss": 0.4780220687389374,
+        "gradient_norm": 4.968526363372803,
+        "optimizer_seconds": 0.028215991333127022,
+        "EMA_seconds": 0.07780382130295038,
+        "forward_seconds": 0.13758474867790937,
+        "update_seconds": 0.9852691991254687,
+        "optimizer_steps": 1,
+        "ema_updates": 1,
+        "inputs": 1,
+        "slots": 13120,
+        "S": 18336,
+        "CE_coefficient": 5.453752181500873e-05,
+        "changed": 0.00019999966025352478,
+        "observed_parameter": "backbone.lin_out_E.weight",
+        "observed_parameter_changed": true,
+        "update_note": null,
+        "outer_seconds": 1.9843473741784692,
+        "input_sha256": "3b0073099b30e246f4d087cb96b7e88ea7ccedcbde64f92a06a94ec08e043617",
+        "peak_allocated_mib": 1983.07470703125,
+        "peak_reserved_mib": 2142.0
+      },
+      {
+        "kind": "save",
+        "dataset": "IMDB",
+        "arm": "A",
+        "seconds": 0.33179848175495863
+      },
+      {
+        "kind": "update",
+        "dataset": "IMDB",
+        "arm": "A",
+        "stage": "update",
+        "position": 2,
+        "t": 500,
+        "loss": 0.1548401415348053,
+        "gradient_norm": 1.2791880369186401,
+        "optimizer_seconds": 0.007212566211819649,
+        "EMA_seconds": 0.07693825755268335,
+        "forward_seconds": 0.11127047054469585,
+        "update_seconds": 0.9121690392494202,
+        "optimizer_steps": 1,
+        "ema_updates": 2,
+        "inputs": 1,
+        "slots": 13120,
+        "S": 18336,
+        "CE_coefficient": 5.453752181500873e-05,
+        "changed": 0.00020026694983243942,
+        "observed_parameter": "backbone.lin_out_E.weight",
+        "observed_parameter_changed": true,
+        "update_note": null,
+        "outer_seconds": 0.9231874197721481,
+        "input_sha256": "031d73716bef63195f3f6981d30b26886c5add710b0a2567435db30df255a605",
+        "peak_allocated_mib": 2069.134765625,
+        "peak_reserved_mib": 2152.0
+      },
+      {
+        "kind": "update",
+        "dataset": "IMDB",
+        "arm": "A",
+        "stage": "update",
+        "position": 3,
+        "t": 950,
+        "loss": 0.10348496586084366,
+        "gradient_norm": 0.5779753923416138,
+        "optimizer_seconds": 0.0073871491476893425,
+        "EMA_seconds": 0.07750236336141825,
+        "forward_seconds": 0.11151313968002796,
+        "update_seconds": 0.9143449580296874,
+        "optimizer_steps": 1,
+        "ema_updates": 3,
+        "inputs": 1,
+        "slots": 13120,
+        "S": 18336,
+        "CE_coefficient": 5.453752181500873e-05,
+        "changed": 0.0002002716064453125,
+        "observed_parameter": "backbone.lin_out_E.weight",
+        "observed_parameter_changed": true,
+        "update_note": null,
+        "outer_seconds": 0.9259142363443971,
+        "input_sha256": "3f7a478a422bfc3a85e8092d4caacf7b8d1f69dab367c1d213fe819ce1f7f891",
+        "peak_allocated_mib": 2069.49755859375,
+        "peak_reserved_mib": 2154.0
+      },
+      {
+        "kind": "EMA_validation",
+        "dataset": "IMDB",
+        "arm": "A",
+        "full_state_unchanged": true
+      },
+      {
+        "kind": "reverse_step",
+        "dataset": "IMDB",
+        "arm": "A",
+        "stage": "reverse_step",
+        "t": 25,
+        "seconds": 0.10985021851956844,
+        "coverage": 13120,
+        "exact_coverage": true,
+        "peak_allocated_mib": 2069.49755859375
+      },
+      {
+        "kind": "reverse_step",
+        "dataset": "IMDB",
+        "arm": "A",
+        "stage": "reverse_step",
+        "t": 500,
+        "seconds": 0.1084873965010047,
+        "coverage": 13120,
+        "exact_coverage": true,
+        "peak_allocated_mib": 2069.49755859375
+      },
+      {
+        "kind": "reverse_step",
+        "dataset": "IMDB",
+        "arm": "A",
+        "stage": "reverse_step",
+        "t": 950,
+        "seconds": 0.10819236189126968,
+        "coverage": 13120,
+        "exact_coverage": true,
+        "peak_allocated_mib": 2069.49755859375
+      },
+      {
+        "kind": "sampling_isolation",
+        "dataset": "IMDB",
+        "arm": "A",
+        "full_training_state_unchanged": true
+      },
+      {
+        "kind": "new_projection",
+        "dataset": "IMDB",
+        "arm": "A",
+        "node_norm": null,
+        "pair_norm": null
+      },
+      {
+        "kind": "feature",
+        "dataset": "IMDB",
+        "arm": "candidate",
+        "stage": "update",
+        "position": 1,
+        "t": 25,
+        "seconds": 0.005227227695286274,
+        "nodes": 192,
+        "physical_edges": 323,
+        "frozen_Xt_verified": true,
+        "components": 3,
+        "largest_component": 188,
+        "triangles": 45,
+        "component_fraction_std": 0.138362820711219
+      },
+      {
+        "kind": "zero_initial_parity",
+        "dataset": "IMDB",
+        "bitwise_equal": false,
+        "max_abs": 4.76837158203125e-07,
+        "atol": 2e-06,
+        "rtol": 1e-05
+      },
+      {
+        "kind": "feature",
+        "dataset": "IMDB",
+        "arm": "candidate",
+        "stage": "update",
+        "position": 1,
+        "t": 25,
+        "seconds": 0.004748956300318241,
+        "nodes": 192,
+        "physical_edges": 323,
+        "frozen_Xt_verified": true,
+        "components": 3,
+        "largest_component": 188,
+        "triangles": 45,
+        "component_fraction_std": 0.138362820711219
+      },
+      {
+        "kind": "update",
+        "dataset": "IMDB",
+        "arm": "candidate",
+        "stage": "update",
+        "position": 1,
+        "t": 25,
+        "loss": 0.4780220687389374,
+        "gradient_norm": 4.969681739807129,
+        "optimizer_seconds": 0.025608589872717857,
+        "EMA_seconds": 0.07724587619304657,
+        "forward_seconds": 0.1331946598365903,
+        "update_seconds": 0.956263036467135,
+        "optimizer_steps": 1,
+        "ema_updates": 1,
+        "inputs": 1,
+        "slots": 13120,
+        "S": 18336,
+        "CE_coefficient": 5.453752181500873e-05,
+        "changed": 0.00019999966025352478,
+        "observed_parameter": "backbone.lin_out_E.weight",
+        "observed_parameter_changed": true,
+        "update_note": null,
+        "outer_seconds": 1.080936735495925,
+        "input_sha256": "3b0073099b30e246f4d087cb96b7e88ea7ccedcbde64f92a06a94ec08e043617",
+        "peak_allocated_mib": 2016.04833984375,
+        "peak_reserved_mib": 2140.0
+      },
+      {
+        "kind": "save",
+        "dataset": "IMDB",
+        "arm": "candidate",
+        "seconds": 0.272423954680562
+      },
+      {
+        "kind": "feature",
+        "dataset": "IMDB",
+        "arm": "candidate",
+        "stage": "update",
+        "position": 2,
+        "t": 500,
+        "seconds": 0.004726257175207138,
+        "nodes": 192,
+        "physical_edges": 332,
+        "frozen_Xt_verified": true,
+        "components": 14,
+        "largest_component": 178,
+        "triangles": 5,
+        "component_fraction_std": 0.2394942457388333
+      },
+      {
+        "kind": "update",
+        "dataset": "IMDB",
+        "arm": "candidate",
+        "stage": "update",
+        "position": 2,
+        "t": 500,
+        "loss": 0.15482574701309204,
+        "gradient_norm": 1.2790417671203613,
+        "optimizer_seconds": 0.007446892559528351,
+        "EMA_seconds": 0.07866122387349606,
+        "forward_seconds": 0.11997212190181017,
+        "update_seconds": 0.9185517150908709,
+        "optimizer_steps": 1,
+        "ema_updates": 2,
+        "inputs": 1,
+        "slots": 13120,
+        "S": 18336,
+        "CE_coefficient": 5.453752181500873e-05,
+        "changed": 0.00020026694983243942,
+        "observed_parameter": "backbone.lin_out_E.weight",
+        "observed_parameter_changed": true,
+        "update_note": null,
+        "outer_seconds": 0.9299303004518151,
+        "input_sha256": "031d73716bef63195f3f6981d30b26886c5add710b0a2567435db30df255a605",
+        "peak_allocated_mib": 2069.25830078125,
+        "peak_reserved_mib": 2150.0
+      },
+      {
+        "kind": "feature",
+        "dataset": "IMDB",
+        "arm": "candidate",
+        "stage": "update",
+        "position": 2,
+        "t": 500,
+        "seconds": 0.0046563539654016495,
+        "nodes": 192,
+        "physical_edges": 332,
+        "frozen_Xt_verified": true,
+        "components": 14,
+        "largest_component": 178,
+        "triangles": 5,
+        "component_fraction_std": 0.2394942457388333
+      },
+      {
+        "kind": "update",
+        "dataset": "IMDB",
+        "arm": "candidate",
+        "stage": "update",
+        "position": 2,
+        "t": 500,
+        "loss": 0.15482574701309204,
+        "gradient_norm": 1.2790417671203613,
+        "optimizer_seconds": 0.007641864940524101,
+        "EMA_seconds": 0.0788894658908248,
+        "forward_seconds": 0.12976827286183834,
+        "update_seconds": 0.9451205767691135,
+        "optimizer_steps": 1,
+        "ema_updates": 2,
+        "inputs": 1,
+        "slots": 13120,
+        "S": 18336,
+        "CE_coefficient": 5.453752181500873e-05,
+        "changed": 0.00020026694983243942,
+        "observed_parameter": "backbone.lin_out_E.weight",
+        "observed_parameter_changed": true,
+        "update_note": null,
+        "outer_seconds": 0.9565329672768712,
+        "input_sha256": "031d73716bef63195f3f6981d30b26886c5add710b0a2567435db30df255a605",
+        "peak_allocated_mib": 2069.25830078125,
+        "peak_reserved_mib": 2188.0
+      },
+      {
+        "kind": "training_restore",
+        "dataset": "IMDB",
+        "exact_load": true,
+        "input_failure_rollback": true,
+        "bitwise_equal": false,
+        "within_existing_tolerance": false,
+        "atol": 2e-06,
+        "rtol": 1e-05,
+        "largest_differences": [
+          {
+            "path": "model/backbone.tf_layers.1.linX2.weight",
+            "exact": false,
+            "within_tolerance": false,
+            "max_abs": 2.1092593669891357e-05
+          },
+          {
+            "path": "model/backbone.tf_layers.0.linX2.weight",
+            "exact": false,
+            "within_tolerance": false,
+            "max_abs": 8.225440979003906e-06
+          },
+          {
+            "path": "model/backbone.tf_layers.1.linX1.weight",
+            "exact": false,
+            "within_tolerance": false,
+            "max_abs": 8.065253496170044e-06
+          },
+          {
+            "path": "model/backbone.tf_layers.2.self_attn.lin_key.weight",
+            "exact": false,
+            "within_tolerance": false,
+            "max_abs": 4.7869980335235596e-06
+          },
+          {
+            "path": "model/backbone.tf_layers.3.self_attn.lin_key.weight",
+            "exact": false,
+            "within_tolerance": false,
+            "max_abs": 3.378838300704956e-06
+          },
+          {
+            "path": "model/backbone.tf_layers.0.linX1.weight",
+            "exact": false,
+            "within_tolerance": false,
+            "max_abs": 3.159046173095703e-06
+          },
+          {
+            "path": "model/structure_node_projection.weight",
+            "exact": false,
+            "within_tolerance": false,
+            "max_abs": 2.7877395041286945e-06
+          },
+          {
+            "path": "model/backbone.tf_layers.2.self_attn.lin_query.weight",
+            "exact": false,
+            "within_tolerance": false,
+            "max_abs": 2.6673078536987305e-06
+          },
+          {
+            "path": "model/branch.degree_out.weight",
+            "exact": false,
+            "within_tolerance": false,
+            "max_abs": 2.312619471922517e-06
+          },
+          {
+            "path": "model/backbone.tf_layers.3.self_attn.lin_query.weight",
+            "exact": false,
+            "within_tolerance": true,
+            "max_abs": 2.2687017917633057e-06
+          }
+        ]
+      }
+    ],
+    "environment": {
+      "python": "3.9.23 | packaged by conda-forge | (main, Jun  4 2025, 17:57:12) \n[GCC 13.3.0]",
+      "python_version": "3.9.23",
+      "system": "Linux-5.4.0-216-generic-x86_64-with-glibc2.31",
+      "machine": "x86_64",
+      "packages": {
+        "torch": "2.1.0",
+        "torch-geometric": "2.3.1",
+        "numpy": "1.26.4",
+        "scipy": "1.11.0",
+        "pytest": "7.4.4",
+        "networkx": "2.8.7"
+      },
+      "hip": null,
+      "cuda": "12.1",
+      "requested_device": "cuda",
+      "torch_runtime_version": "2.1.0",
+      "float32_matmul_precision": "highest",
+      "matmul_allow_tf32": false,
+      "deterministic_algorithms": false,
+      "deterministic_warn_only": false,
+      "torch_threads": 1,
+      "utc": "2026-11-05T20:24:56Z",
+      "device_name": "NVIDIA GeForce RTX 2080 Ti",
+      "visible_devices": 1,
+      "device_memory_bytes": 11546394624,
+      "device_type": "CUDA"
+    },
+    "source_hashes": {
+      "experiments/structure_input_v1/__init__.py": "890cc1767c1dc4d196fc837c586c5d324539c3950312ba25da68e050e5f7dec5",
+      "experiments/structure_input_v1/features_cpu.py": "aaa7bd3e137366cfef8d0e0fe9b005b5d06ef03b2e238336901c76d6504693fc",
+      "experiments/structure_input_v1/gpu_engineering.py": "36438fa913d7bad52070582141872037cfe68045c1674155196bf550602154b5",
+      "experiments/structure_input_v1/gpu_parity.py": "98742074dfe36f9d03ae0e7a31c7e429616a8119a746ce79aeafae1c6009d4d9",
+      "experiments/structure_input_v1/model.py": "f2c2fdff5045f2d324f99dcad96384455660da81894dcbc4415c53963923352d",
+      "experiments/structure_input_v1/test_features_cpu.py": "3089ee864721e96277bd897d7527c1460d2cd8abd50779a602f784a70c81ee84"
+    },
+    "production_entry_note": "isolated candidate construction; original production launcher remains A/O only",
+    "error": "AssertionError()",
+    "end_epoch": 1793910316.6594784,
+    "process_seconds": 20.4827663898468
+  },
+  "forward_only_diagnostic": {
+    "status": "diagnostic_only",
+    "start_epoch": 1793910180.3560236,
+    "end_epoch": 1793910192.094006,
+    "records": [
+      {
+        "dataset": "IMDB",
+        "RNG_unchanged": {
+          "A1": true,
+          "A2": true,
+          "candidate1": true,
+          "candidate2": true
+        },
+        "tolerances": {
+          "float64_features": 1e-10,
+          "fp32_atol": 2e-06,
+          "fp32_rtol": 1e-05
+        },
+        "comparisons": [
+          {
+            "left": "A1",
+            "right": "A2",
+            "bitwise_equal": false,
+            "max_abs": 5.960464477539062e-07,
+            "nonzero_elements": 24945,
+            "total_elements": 26240,
+            "allclose_original_config": true
+          },
+          {
+            "left": "candidate1",
+            "right": "candidate2",
+            "bitwise_equal": false,
+            "max_abs": 4.6193599700927734e-07,
+            "nonzero_elements": 24912,
+            "total_elements": 26240,
+            "allclose_original_config": true
+          },
+          {
+            "left": "A1",
+            "right": "candidate1",
+            "bitwise_equal": false,
+            "max_abs": 5.662441253662109e-07,
+            "nonzero_elements": 25033,
+            "total_elements": 26240,
+            "allclose_original_config": true
+          }
+        ]
+      },
+      {
+        "dataset": "PubMed",
+        "RNG_unchanged": {
+          "A1": true,
+          "A2": true,
+          "candidate1": true,
+          "candidate2": true
+        },
+        "tolerances": {
+          "float64_features": 1e-10,
+          "fp32_atol": 2e-06,
+          "fp32_rtol": 1e-05
+        },
+        "comparisons": [
+          {
+            "left": "A1",
+            "right": "A2",
+            "bitwise_equal": false,
+            "max_abs": 4.0978193283081055e-07,
+            "nonzero_elements": 34094,
+            "total_elements": 36672,
+            "allclose_original_config": true
+          },
+          {
+            "left": "candidate1",
+            "right": "candidate2",
+            "bitwise_equal": false,
+            "max_abs": 3.5762786865234375e-07,
+            "nonzero_elements": 33820,
+            "total_elements": 36672,
+            "allclose_original_config": true
+          },
+          {
+            "left": "A1",
+            "right": "candidate1",
+            "bitwise_equal": false,
+            "max_abs": 3.7997961044311523e-07,
+            "nonzero_elements": 34072,
+            "total_elements": 36672,
+            "allclose_original_config": true
+          }
+        ]
+      }
+    ]
+  },
+  "resource": {
+    "host": "GPU-Node01",
+    "GPU": "GPU-12b85b68-69e6-12fa-76ce-986c0b46e8a7",
+    "tracked_lease_seconds": 62.45105791091919,
+    "parity_process_seconds": 11.737982511520386,
+    "parity_charge_seconds_conservative": 120,
+    "GPU_hours_conservative": 0.05068085001574622,
+    "tracked_workers_released": true
+  },
+  "counts": {
+    "temporary_updates": 9,
+    "reverse_steps": 6,
+    "diagnostic_forward_calls": 8,
+    "full_chains": 0,
+    "formal_models": 0
+  },
+  "limitations": [
+    "Candidate sampling and PubMed update/cost checks did not run",
+    "Exact state loading passed; CUDA continuation was not bitwise reproducible and exceeded reused generic FP32 tolerance",
+    "No matched A repeated-update control in this ticket; cannot attribute continuation drift to new feature branch",
+    "Baseline self-forward differences also occurred; no proof of a specific nondeterministic operator",
+    "CUDA async hardware faults not injected",
+    "First exact parity failure retained; followup used existing config atol/rtol, not a scientific config change"
+  ]
+}

@@ -1,7 +1,6 @@
 import random
 import unittest
 import pathlib
-import subprocess
 from itertools import combinations, combinations_with_replacement
 from features_cpu import extract, same_component
 
@@ -28,8 +27,8 @@ class Features(unittest.TestCase):
 
     def test_component_histogram_optimization_matches_reviewed_reference(self):
         root = pathlib.Path(__file__).resolve().parents[2]
-        old = subprocess.check_output(['git','show',
-            '9c721ecc7ea08fd0db238bee977120da16dde990:experiments/structure_input_v1/features_cpu.py'],cwd=root)
+        # Vendored exact reference: works in a source ZIP without Git history.
+        old = (root/'tests/fixtures/structure_input_reference_9c721ec.py').read_bytes()
         namespace = {}
         exec(compile(old,'reviewed_reference','exec'),namespace)
         types = [0,1,2,0,1]

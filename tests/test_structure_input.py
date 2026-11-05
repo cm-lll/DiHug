@@ -1,11 +1,13 @@
 """Actual A class, full parameter widths, 12 synthetic nodes, CPU only."""
 import copy
+import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+os.environ.setdefault('DIHUG_TEST_TMP', str(Path(__file__).resolve().parents[1]/'results/structure_input_cpu_tests/temporary'))
 import test_abort_boundaries as base
 from test_role_validation_boundaries import fixtures
 import torch
