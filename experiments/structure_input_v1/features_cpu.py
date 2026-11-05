@@ -90,4 +90,3 @@ def same_component(result, queries):
             raise ValueError('canonical query required')
         out.append(float(ids[u] == ids[v]))
     return out
-
