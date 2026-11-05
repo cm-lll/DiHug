@@ -55,6 +55,9 @@ def extract(types, edges, families, relation_pairs, n_types):
                     component[v] = cid
                     stack.append(v)
         groups.append(nodes)
+    # Count each component once, not once per member (quadratic on a large
+    # connected component). This leaves the exact feature values unchanged.
+    compositions = [Counter(types[j] for j in group) for group in groups]
     inventory = Counter(types)
     features = []
     for i in range(n):
@@ -63,7 +66,8 @@ def extract(types, edges, families, relation_pairs, n_types):
         row = []
         for j, (a, b) in enumerate(channels):
             capacity = remaining[a] * remaining[b] if a != b else remaining[a] * (remaining[a] - 1) // 2
-            # Schema-infeasible closure channels are exactly zero.
+            # Declared-schema inventory bound, not a bound tightened using
+            # fixed-zero relation priors. This is not a closure rate.
             if any(tuple(sorted(pair)) not in pairs for pair in ((types[i], a), (types[i], b), (a, b))):
                 capacity = 0
             if capacity == 0:
@@ -73,7 +77,7 @@ def extract(types, edges, families, relation_pairs, n_types):
             else:
                 row.append(log1p(counts[i][j]) / log1p(capacity))
         group = groups[component[i]]
-        composition = Counter(types[j] for j in group)
+        composition = compositions[component[i]]
         row += [len(group) / n] + [composition[t] / len(group) for t in range(n_types)]
         features.append(row)
     return dict(node_features=features, triangle_counts=counts,

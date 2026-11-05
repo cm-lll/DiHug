@@ -41,6 +41,15 @@ class StructureInputA(StructuralDenoiser):
             raise ValueError('requires the declared untrained ordinary A state')
         if hasattr(source, 'cn_edge_projection'):
             raise ValueError('early CN is not this baseline')
+        # Tensor shapes cannot establish relation semantics. Validate the ordered
+        # schema and exact relation prior before copying any source tensors.
+        pairs = tuple(tuple(int(v) for v in p) for p in case['space'].pairs)
+        if (source.n_types != case['n_types'] or source.n_families != case['n_families']
+                or tuple(source.family_pairs) != pairs):
+            raise ValueError('ordered schema or type/relation inventory differs')
+        prior = torch.as_tensor(case['prior'], dtype=source.prior.dtype, device=source.prior.device)
+        if not torch.equal(source.prior, prior):
+            raise ValueError('relation prior/support differs')
         with torch.random.fork_rng(devices=[]):
             target = cls(case, cfg)
         state = target.state_dict()

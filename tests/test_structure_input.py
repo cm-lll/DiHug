@@ -76,6 +76,45 @@ class InputIntegration(unittest.TestCase):
         ctx.close()
         with self.assertRaises(ValueError): model._structure_inputs(ctx)
 
+    def test_nonzero_pair_projection_reorder_partition_and_extension(self):
+        case, cfg, _, model, rng = setup()
+        # Components: {0,3,6}, {1,4}, plus isolated vertices. Expected flags
+        # below come from this construction, not from the extractor under test.
+        edges = base.np.array([(0,3), (1,4), (3,6)], dtype=base.np.int64).T
+        types = case['space'].types
+        pairs = [tuple(p) for p in case['space'].pairs]
+        families = base.np.array([pairs.index(tuple(sorted((types[u],types[v])))) for u,v in edges.T])
+        with torch.no_grad():
+            model.structure_pair_projection.weight.copy_(torch.arange(1,65).float()[:,None])
+        ctx = FrozenTypedContext(model, types, edges, families, 'nonzero')
+        queries = torch.tensor([(0,6),(0,1),(1,4),(2,5),(3,6),(4,6)]).T
+        flags = torch.tensor([1.,0.,1.,0.,1.,0.])
+        expected = flags[:,None] * torch.arange(1,65).float()[None,:]
+        before = base.stable(rng_capture(rng,'cpu'))
+        try:
+            self.assertTrue(torch.equal(model.structure_pair_residual(ctx,queries[:,:2]),expected[:2]))
+            self.assertTrue(torch.equal(model.structure_pair_residual(ctx,queries),expected))
+            order = torch.tensor([5,2,0,4,1,3])
+            self.assertTrue(torch.equal(model.structure_pair_residual(ctx,queries[:,order]),expected[order]))
+            chunks = [model.structure_pair_residual(ctx,queries[:,s]) for s in (slice(0,1),slice(1,4),slice(4,6))]
+            self.assertTrue(torch.equal(torch.cat(chunks),expected))
+            self.assertEqual(before,base.stable(rng_capture(rng,'cpu')))
+        finally:
+            ctx.close()
+
+    def test_reject_same_shape_schema_reordering_and_prior_change(self):
+        case, cfg, ordinary, _, rng = setup()
+        before = base.stable(rng_capture(rng,'cpu'))
+        pairs = ordinary.family_pairs
+        ordinary.family_pairs = tuple(reversed(pairs))
+        with self.assertRaisesRegex(ValueError,'ordered schema'):
+            StructureInputA.from_initial_A(ordinary,case,cfg,completed_updates=0)
+        ordinary.family_pairs = pairs
+        with torch.no_grad(): ordinary.prior[0].add_(.01)
+        with self.assertRaisesRegex(ValueError,'prior/support'):
+            StructureInputA.from_initial_A(ordinary,case,cfg,completed_updates=0)
+        self.assertEqual(before,base.stable(rng_capture(rng,'cpu')))
+
     def test_save_restore_next_update_and_preforward_rollback(self):
         case, cfg, _, model, rng = setup()
         opt = torch.optim.AdamW(model.parameters(), **{k:v for k,v in cfg['optimizer'].items() if k!='type'})
