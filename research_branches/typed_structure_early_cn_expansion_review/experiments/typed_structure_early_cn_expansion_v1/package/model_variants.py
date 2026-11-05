@@ -71,6 +71,9 @@ class StructuralDenoiser(TypedSparseDenoiser):
     def joint_predict(self,ctx,graph,time,mask_cn=False,return_features=False):
         if not hasattr(ctx,'degree_input'):ctx.degree_input=self.branch.input(ctx,time)
         ctx.node_residual=self.branch(ctx.degree_input)
+        input_hook = getattr(self, 'structure_node_residual', None)
+        if input_hook is not None:
+            ctx.node_residual = ctx.node_residual + input_hook(ctx)
         if self.arm in ('B','C','D','E'):
             key=(ctx.state_version,float(time),self.arm)
             if hasattr(ctx,'structural_key') and ctx.structural_key!=key:raise ValueError('stale structural cache')

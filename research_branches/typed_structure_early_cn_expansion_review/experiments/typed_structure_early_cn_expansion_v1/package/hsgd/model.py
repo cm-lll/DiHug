@@ -80,7 +80,11 @@ class TypedSparseDenoiser(nn.Module):
         if self.common_neighbor is not None and not mask_cn and not early:
             cn=self.common_neighbor.aggregate(ctx,query,family,time)
         state=(graph.states[index]>0).long()
-        fields=[hidden["edge"][index],(left+right)*.5,(left-right).abs(),
+        edge_readout = hidden["edge"][index]
+        input_hook = getattr(self, 'structure_pair_residual', None)
+        if input_hook is not None:
+            edge_readout = edge_readout + input_hook(ctx, query)
+        fields=[edge_readout,(left+right)*.5,(left-right).abs(),
             hidden["global_state"].expand(len(index),-1),ctx.x.new_full((len(index),1),float(time)),
             ctx.global_statistics.expand(len(index),-1),
             torch.nn.functional.one_hot(family,self.n_families).float(),
