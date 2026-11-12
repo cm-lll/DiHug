@@ -1,0 +1,883 @@
+{
+  "start_epoch": 1794466800.0,
+  "science_stop_epoch": 1794479400.0,
+  "delivery_epoch": 1794481200.0,
+  "max_GPU_hours": 12,
+  "max_GPUs": 4,
+  "allowed_GPU_indices": [
+    4,
+    5,
+    6,
+    7
+  ],
+  "preflight_GPU_hours": 0.014080178538958231,
+  "jobs": [
+    {
+      "id": "DBLP_HGEN_2026111211",
+      "dataset": "DBLP_HGEN",
+      "train_seed": 2026111211,
+      "config": {
+        "model": {
+          "layers": 8,
+          "width": 256,
+          "edge_width": 64,
+          "global_width": 128,
+          "heads": 8,
+          "ff_node": 256,
+          "ff_edge": 64,
+          "ff_global": 256,
+          "dropout": 0.1,
+          "cn_hidden": 32,
+          "joint_width": 128,
+          "max_wedges": 2000000,
+          "max_query_paths": 2000000
+        },
+        "optimizer": {
+          "type": "AdamW",
+          "lr": 0.0002,
+          "weight_decay": 1e-12,
+          "betas": [
+            0.9,
+            0.999
+          ],
+          "eps": 1e-08,
+          "amsgrad": false
+        },
+        "precision": "FP32 network/stable CE; float64 probability kernel",
+        "T": 1000,
+        "rounds": 1,
+        "schedule_offset": 0.008,
+        "tf32": false,
+        "version": "typed_structure_192_oabc_v1_1",
+        "formal_authorized": true,
+        "inputs_per_update": 1,
+        "engineering_only": false,
+        "max_updates_per_dataset_arm": 3000,
+        "seed": 2026111211,
+        "noise_times": [
+          1,
+          500,
+          1000
+        ],
+        "threads": 1,
+        "tolerances": {
+          "float64_features": 1e-10,
+          "fp32_atol": 2e-06,
+          "fp32_rtol": 1e-05
+        },
+        "query_contract": "R1 complete movable slots; CE sum/full schema S; one input/update",
+        "runtime": "late_final_single_input_v1",
+        "dataset": "DBLP_HGEN",
+        "steps": 3000,
+        "readout": "EMA0.99",
+        "arms": [
+          "A"
+        ],
+        "source_note": "Original A scientific settings; new data from bound small_192.npz; no roles/dictionary. Inactive historical E and dataset metadata removed before training."
+      },
+      "data": "data/external/new_hetero_20261112/prepared/DBLP_HGEN/small_192.npz",
+      "type_names": [
+        "Paper",
+        "Author",
+        "Term",
+        "Conference"
+      ],
+      "terminal_plan": {
+        "1": [
+          {
+            "seed": 1785323133,
+            "times": [
+              914,
+              784,
+              543,
+              504,
+              492,
+              76,
+              31,
+              6
+            ]
+          },
+          {
+            "seed": 1843108705,
+            "times": [
+              941,
+              834,
+              494,
+              476,
+              455,
+              349,
+              302,
+              234
+            ]
+          }
+        ],
+        "2": [
+          {
+            "seed": 1886098781,
+            "times": [
+              866,
+              719,
+              596,
+              556,
+              209,
+              196,
+              104,
+              88
+            ]
+          },
+          {
+            "seed": 1736645977,
+            "times": [
+              865,
+              660,
+              544,
+              315,
+              259,
+              141,
+              129,
+              74
+            ]
+          }
+        ],
+        "3": [
+          {
+            "seed": 1117143846,
+            "times": [
+              770,
+              551,
+              509,
+              492,
+              409,
+              388,
+              168,
+              114
+            ]
+          },
+          {
+            "seed": 231425605,
+            "times": [
+              897,
+              880,
+              841,
+              764,
+              750,
+              594,
+              160,
+              68
+            ]
+          }
+        ],
+        "4": [
+          {
+            "seed": 1219631061,
+            "times": [
+              915,
+              760,
+              758,
+              574,
+              569,
+              483,
+              107,
+              21
+            ]
+          },
+          {
+            "seed": 130895988,
+            "times": [
+              922,
+              813,
+              803,
+              517,
+              280,
+              243,
+              213,
+              29
+            ]
+          }
+        ]
+      },
+      "nominal_seconds": 7882.2954177856445,
+      "planning_seconds": 10452.869272232056,
+      "measured_update_seconds": 0.9564542770385742,
+      "measured_reverse_step_seconds": 0.3133082866668701,
+      "whole_chain_cost_is_extrapolated": true
+    },
+    {
+      "id": "DBLP_HGEN_2026111212",
+      "dataset": "DBLP_HGEN",
+      "train_seed": 2026111212,
+      "config": {
+        "model": {
+          "layers": 8,
+          "width": 256,
+          "edge_width": 64,
+          "global_width": 128,
+          "heads": 8,
+          "ff_node": 256,
+          "ff_edge": 64,
+          "ff_global": 256,
+          "dropout": 0.1,
+          "cn_hidden": 32,
+          "joint_width": 128,
+          "max_wedges": 2000000,
+          "max_query_paths": 2000000
+        },
+        "optimizer": {
+          "type": "AdamW",
+          "lr": 0.0002,
+          "weight_decay": 1e-12,
+          "betas": [
+            0.9,
+            0.999
+          ],
+          "eps": 1e-08,
+          "amsgrad": false
+        },
+        "precision": "FP32 network/stable CE; float64 probability kernel",
+        "T": 1000,
+        "rounds": 1,
+        "schedule_offset": 0.008,
+        "tf32": false,
+        "version": "typed_structure_192_oabc_v1_1",
+        "formal_authorized": true,
+        "inputs_per_update": 1,
+        "engineering_only": false,
+        "max_updates_per_dataset_arm": 3000,
+        "seed": 2026111212,
+        "noise_times": [
+          1,
+          500,
+          1000
+        ],
+        "threads": 1,
+        "tolerances": {
+          "float64_features": 1e-10,
+          "fp32_atol": 2e-06,
+          "fp32_rtol": 1e-05
+        },
+        "query_contract": "R1 complete movable slots; CE sum/full schema S; one input/update",
+        "runtime": "late_final_single_input_v1",
+        "dataset": "DBLP_HGEN",
+        "steps": 3000,
+        "readout": "EMA0.99",
+        "arms": [
+          "A"
+        ],
+        "source_note": "Original A scientific settings; new data from bound small_192.npz; no roles/dictionary. Inactive historical E and dataset metadata removed before training."
+      },
+      "data": "data/external/new_hetero_20261112/prepared/DBLP_HGEN/small_192.npz",
+      "type_names": [
+        "Paper",
+        "Author",
+        "Term",
+        "Conference"
+      ],
+      "terminal_plan": {
+        "1": [
+          {
+            "seed": 1605695214,
+            "times": [
+              944,
+              394,
+              391,
+              327,
+              223,
+              162,
+              133,
+              32
+            ]
+          },
+          {
+            "seed": 193093006,
+            "times": [
+              895,
+              779,
+              700,
+              234,
+              154,
+              149,
+              118,
+              108
+            ]
+          }
+        ],
+        "2": [
+          {
+            "seed": 361537703,
+            "times": [
+              993,
+              787,
+              738,
+              700,
+              449,
+              184,
+              83,
+              72
+            ]
+          },
+          {
+            "seed": 1978073613,
+            "times": [
+              772,
+              747,
+              743,
+              654,
+              171,
+              166,
+              74,
+              53
+            ]
+          }
+        ],
+        "3": [
+          {
+            "seed": 400936348,
+            "times": [
+              967,
+              732,
+              562,
+              407,
+              344,
+              325,
+              272,
+              105
+            ]
+          },
+          {
+            "seed": 1632445755,
+            "times": [
+              643,
+              546,
+              513,
+              504,
+              354,
+              303,
+              98,
+              13
+            ]
+          }
+        ],
+        "4": [
+          {
+            "seed": 944724066,
+            "times": [
+              999,
+              720,
+              708,
+              610,
+              545,
+              445,
+              305,
+              212
+            ]
+          },
+          {
+            "seed": 1402866723,
+            "times": [
+              878,
+              814,
+              584,
+              340,
+              252,
+              90,
+              75,
+              24
+            ]
+          }
+        ]
+      },
+      "nominal_seconds": 7882.2954177856445,
+      "planning_seconds": 10452.869272232056,
+      "measured_update_seconds": 0.9564542770385742,
+      "measured_reverse_step_seconds": 0.3133082866668701,
+      "whole_chain_cost_is_extrapolated": true
+    },
+    {
+      "id": "ACM_HAN_full7_2026111211",
+      "dataset": "ACM_HAN_full7",
+      "train_seed": 2026111211,
+      "config": {
+        "model": {
+          "layers": 8,
+          "width": 256,
+          "edge_width": 64,
+          "global_width": 128,
+          "heads": 8,
+          "ff_node": 256,
+          "ff_edge": 64,
+          "ff_global": 256,
+          "dropout": 0.1,
+          "cn_hidden": 32,
+          "joint_width": 128,
+          "max_wedges": 2000000,
+          "max_query_paths": 2000000
+        },
+        "optimizer": {
+          "type": "AdamW",
+          "lr": 0.0002,
+          "weight_decay": 1e-12,
+          "betas": [
+            0.9,
+            0.999
+          ],
+          "eps": 1e-08,
+          "amsgrad": false
+        },
+        "precision": "FP32 network/stable CE; float64 probability kernel",
+        "T": 1000,
+        "rounds": 1,
+        "schedule_offset": 0.008,
+        "tf32": false,
+        "version": "typed_structure_192_oabc_v1_1",
+        "formal_authorized": true,
+        "inputs_per_update": 1,
+        "engineering_only": false,
+        "max_updates_per_dataset_arm": 3000,
+        "seed": 2026111211,
+        "noise_times": [
+          1,
+          500,
+          1000
+        ],
+        "threads": 1,
+        "tolerances": {
+          "float64_features": 1e-10,
+          "fp32_atol": 2e-06,
+          "fp32_rtol": 1e-05
+        },
+        "query_contract": "R1 complete movable slots; CE sum/full schema S; one input/update",
+        "runtime": "late_final_single_input_v1",
+        "dataset": "ACM_HAN_full7",
+        "steps": 3000,
+        "readout": "EMA0.99",
+        "arms": [
+          "A"
+        ],
+        "source_note": "Original A scientific settings; new data from bound small_192.npz; no roles/dictionary. Inactive historical E and dataset metadata removed before training."
+      },
+      "data": "data/external/new_hetero_20261112/prepared/ACM_HAN_full7/small_192.npz",
+      "type_names": [
+        "Paper",
+        "Author",
+        "Term",
+        "Venue",
+        "Affiliation",
+        "Subject",
+        "Conference"
+      ],
+      "terminal_plan": {
+        "1": [
+          {
+            "seed": 1173707069,
+            "times": [
+              970,
+              879,
+              799,
+              705,
+              651,
+              537,
+              305,
+              87
+            ]
+          },
+          {
+            "seed": 1330074184,
+            "times": [
+              999,
+              828,
+              605,
+              587,
+              524,
+              307,
+              266,
+              20
+            ]
+          }
+        ],
+        "2": [
+          {
+            "seed": 1714483183,
+            "times": [
+              994,
+              966,
+              865,
+              433,
+              320,
+              174,
+              36,
+              21
+            ]
+          },
+          {
+            "seed": 1597300658,
+            "times": [
+              877,
+              762,
+              737,
+              572,
+              483,
+              231,
+              221,
+              178
+            ]
+          }
+        ],
+        "3": [
+          {
+            "seed": 181945301,
+            "times": [
+              688,
+              601,
+              518,
+              486,
+              432,
+              403,
+              283,
+              228
+            ]
+          },
+          {
+            "seed": 202119871,
+            "times": [
+              754,
+              691,
+              683,
+              561,
+              510,
+              358,
+              328,
+              194
+            ]
+          }
+        ],
+        "4": [
+          {
+            "seed": 1138711673,
+            "times": [
+              836,
+              819,
+              659,
+              521,
+              500,
+              343,
+              32,
+              28
+            ]
+          },
+          {
+            "seed": 675456227,
+            "times": [
+              901,
+              824,
+              731,
+              667,
+              524,
+              486,
+              218,
+              137
+            ]
+          }
+        ]
+      },
+      "nominal_seconds": 7124.595546722412,
+      "planning_seconds": 9505.744433403015,
+      "measured_update_seconds": 0.8637196540832519,
+      "measured_reverse_step_seconds": 0.283339786529541,
+      "whole_chain_cost_is_extrapolated": true
+    },
+    {
+      "id": "ACM_HAN_full7_2026111212",
+      "dataset": "ACM_HAN_full7",
+      "train_seed": 2026111212,
+      "config": {
+        "model": {
+          "layers": 8,
+          "width": 256,
+          "edge_width": 64,
+          "global_width": 128,
+          "heads": 8,
+          "ff_node": 256,
+          "ff_edge": 64,
+          "ff_global": 256,
+          "dropout": 0.1,
+          "cn_hidden": 32,
+          "joint_width": 128,
+          "max_wedges": 2000000,
+          "max_query_paths": 2000000
+        },
+        "optimizer": {
+          "type": "AdamW",
+          "lr": 0.0002,
+          "weight_decay": 1e-12,
+          "betas": [
+            0.9,
+            0.999
+          ],
+          "eps": 1e-08,
+          "amsgrad": false
+        },
+        "precision": "FP32 network/stable CE; float64 probability kernel",
+        "T": 1000,
+        "rounds": 1,
+        "schedule_offset": 0.008,
+        "tf32": false,
+        "version": "typed_structure_192_oabc_v1_1",
+        "formal_authorized": true,
+        "inputs_per_update": 1,
+        "engineering_only": false,
+        "max_updates_per_dataset_arm": 3000,
+        "seed": 2026111212,
+        "noise_times": [
+          1,
+          500,
+          1000
+        ],
+        "threads": 1,
+        "tolerances": {
+          "float64_features": 1e-10,
+          "fp32_atol": 2e-06,
+          "fp32_rtol": 1e-05
+        },
+        "query_contract": "R1 complete movable slots; CE sum/full schema S; one input/update",
+        "runtime": "late_final_single_input_v1",
+        "dataset": "ACM_HAN_full7",
+        "steps": 3000,
+        "readout": "EMA0.99",
+        "arms": [
+          "A"
+        ],
+        "source_note": "Original A scientific settings; new data from bound small_192.npz; no roles/dictionary. Inactive historical E and dataset metadata removed before training."
+      },
+      "data": "data/external/new_hetero_20261112/prepared/ACM_HAN_full7/small_192.npz",
+      "type_names": [
+        "Paper",
+        "Author",
+        "Term",
+        "Venue",
+        "Affiliation",
+        "Subject",
+        "Conference"
+      ],
+      "terminal_plan": {
+        "1": [
+          {
+            "seed": 815895184,
+            "times": [
+              999,
+              862,
+              836,
+              549,
+              543,
+              531,
+              408,
+              90
+            ]
+          },
+          {
+            "seed": 224535085,
+            "times": [
+              826,
+              727,
+              714,
+              656,
+              635,
+              358,
+              302,
+              253
+            ]
+          }
+        ],
+        "2": [
+          {
+            "seed": 52856572,
+            "times": [
+              805,
+              739,
+              607,
+              382,
+              344,
+              329,
+              328,
+              45
+            ]
+          },
+          {
+            "seed": 2124659650,
+            "times": [
+              959,
+              955,
+              789,
+              598,
+              593,
+              549,
+              256,
+              227
+            ]
+          }
+        ],
+        "3": [
+          {
+            "seed": 600841732,
+            "times": [
+              766,
+              696,
+              575,
+              573,
+              354,
+              154,
+              48,
+              47
+            ]
+          },
+          {
+            "seed": 767178269,
+            "times": [
+              834,
+              734,
+              672,
+              666,
+              567,
+              509,
+              276,
+              243
+            ]
+          }
+        ],
+        "4": [
+          {
+            "seed": 740591480,
+            "times": [
+              950,
+              860,
+              829,
+              488,
+              289,
+              204,
+              80,
+              11
+            ]
+          },
+          {
+            "seed": 1662973487,
+            "times": [
+              934,
+              775,
+              730,
+              704,
+              670,
+              211,
+              131,
+              13
+            ]
+          }
+        ]
+      },
+      "nominal_seconds": 7124.595546722412,
+      "planning_seconds": 9505.744433403015,
+      "measured_update_seconds": 0.8637196540832519,
+      "measured_reverse_step_seconds": 0.283339786529541,
+      "whole_chain_cost_is_extrapolated": true
+    }
+  ],
+  "sample_seeds": [
+    2026111221,
+    2026111222,
+    2026111223,
+    2026111224
+  ],
+  "terminal_updates": 4,
+  "bindings": {
+    "research_branches/new_datasets_20261112/prepare.py": "c2a5ca3958627abf92ce0d58c9e3f0c8aae93ce4ed4a743ffee2f13002dda4ca",
+    "research_branches/cn_multiseed_20261104/research_branches/typed_structure_early_cn_expansion_review/experiments/typed_structure_early_cn_expansion_v1/package/hsgd/__init__.py": "a4737e1651429fcffe97f6d5c2b81c056b7caca1b87e880ae88e8152c34abaa2",
+    "research_branches/cn_multiseed_20261104/research_branches/typed_structure_early_cn_expansion_review/experiments/typed_structure_early_cn_expansion_v1/package/hsgd/bw_preflight/__init__.py": "486d75e373229cd7c8c0f780a7943361a5244e8e1cbd99002cbc04526c362771",
+    "research_branches/cn_multiseed_20261104/research_branches/typed_structure_early_cn_expansion_review/experiments/typed_structure_early_cn_expansion_v1/package/hsgd/kernel.py": "e398606416f2dd6b58c94c67c423bd81c0f04b938b3144989f6044b69a416c74",
+    "research_branches/cn_multiseed_20261104/research_branches/typed_structure_early_cn_expansion_review/experiments/typed_structure_early_cn_expansion_v1/package/hsgd/holders.py": "8ae8714419a2c20d94ccdfa388aaefb409b5b8facea3aac0d6585b6cb0bfde07",
+    "research_branches/cn_multiseed_20261104/research_branches/typed_structure_early_cn_expansion_review/experiments/typed_structure_early_cn_expansion_v1/package/hsgd/vendor/__init__.py": "a9d1e40ec3e568dbe891006f6f0d913b5c508bc43af0fe62f31177bac0211f72",
+    "research_branches/cn_multiseed_20261104/research_branches/typed_structure_early_cn_expansion_review/experiments/typed_structure_early_cn_expansion_v1/package/hsgd/vendor/tie_extrema.py": "367beb31ccfcdb142442d5d463744f3682227f93e56ba5adba101166a537ce99",
+    "research_branches/cn_multiseed_20261104/research_branches/typed_structure_early_cn_expansion_review/experiments/typed_structure_early_cn_expansion_v1/package/hsgd/vendor/layers.py": "b76dc91aa623bce78a98d610dd26a15c3e0ca6e36bfbfdc7669533d5425b8419",
+    "research_branches/cn_multiseed_20261104/research_branches/typed_structure_early_cn_expansion_review/experiments/typed_structure_early_cn_expansion_v1/package/hsgd/vendor/transconv_layer.py": "de76c4fa8b1d9b02c03149f9b43bd4b7a0b884c7adbb1f794d498241ec288074",
+    "research_branches/cn_multiseed_20261104/research_branches/typed_structure_early_cn_expansion_review/experiments/typed_structure_early_cn_expansion_v1/package/hsgd/vendor/conv_transformer_model.py": "996febc1dac0ccf77d3705d9cccbd25e51c4cd960bcf1f2fe840f70a6b7a74ed",
+    "research_branches/cn_multiseed_20261104/research_branches/typed_structure_early_cn_expansion_review/experiments/typed_structure_early_cn_expansion_v1/package/hsgd/model.py": "9485ce26bd2a629a17d25c35992aa55abe92f5100b7fdd2ca69d230f465658e7",
+    "research_branches/cn_multiseed_20261104/research_branches/typed_structure_early_cn_expansion_review/experiments/typed_structure_early_cn_expansion_v1/package/hsgd/noising.py": "c8c4586ec5e9dd55ba6bb50c68237130b1cf6af0cb6def5374325906fa7ebd08",
+    "research_branches/cn_multiseed_20261104/research_branches/typed_structure_early_cn_expansion_review/experiments/typed_structure_early_cn_expansion_v1/package/hsgd/slots.py": "f69709a6c63924e5d5875dbd71a3ed038fdbabe12c76b40fd8cbdbe48a8e5eb6",
+    "research_branches/cn_multiseed_20261104/research_branches/typed_structure_early_cn_expansion_review/experiments/typed_structure_early_cn_expansion_v1/package/hsgd/bw_preflight/common.py": "c6068da392bd551977c514118ba12d092a54b43361eb2866e9d1deef932a95c9",
+    "research_branches/cn_multiseed_20261104/research_branches/typed_structure_early_cn_expansion_review/experiments/typed_structure_early_cn_expansion_v1/package/hsgd/vendor/sample_edges_utils_typed.py": "7653a2dfb4a88be7a0e4f76cdb04325e69cf927071625b22b544a87df24996dc",
+    "research_branches/cn_multiseed_20261104/research_branches/typed_structure_early_cn_expansion_review/experiments/typed_structure_early_cn_expansion_v1/package/hsgd/computational.py": "d149a3a01b7932039356fc1f0393ae1a648295fc50e7a7312b4d11278180c1b9",
+    "research_branches/cn_multiseed_20261104/research_branches/typed_structure_early_cn_expansion_review/experiments/typed_structure_early_cn_expansion_v1/package/hsgd/runtime.py": "87cdb9c083516fa693acf6877680f667221f1f78e166bb1d967dd36b412c7046",
+    "research_branches/cn_multiseed_20261104/research_branches/typed_structure_early_cn_expansion_review/experiments/typed_structure_early_cn_expansion_v1/package/features.py": "7f83323b427d4a1e0563f50431df7c8cbd5b3e75a9fd08559285eaf145b0d888",
+    "research_branches/cn_multiseed_20261104/research_branches/typed_structure_early_cn_expansion_review/experiments/typed_structure_early_cn_expansion_v1/package/role_dictionary.py": "757f51187edea9261f13d8884a25464a4dbe2e886f8abd14df665bfa85029a03",
+    "research_branches/cn_multiseed_20261104/research_branches/typed_structure_early_cn_expansion_review/experiments/typed_structure_early_cn_expansion_v1/package/model_variants.py": "ab80c709c9a25ae6e803d8ea9059030d5a378dae8986ecdf7f27d34b96b64587",
+    "research_branches/cn_multiseed_20261104/research_branches/typed_structure_early_cn_expansion_review/experiments/typed_structure_early_cn_expansion_v1/boundary_transactions.py": "f79246fd1ff85d416a82ac3b285d7b56120a435e839b06077f40f2bb2150f349",
+    "research_branches/cn_multiseed_20261104/experiments/o_cn_matched_execute_v1/observers.py": "ec8ce7562094f8b1a662a69c46aae05a7f6853a2323265cd2e022c05f03bcdf1",
+    "research_branches/terminal_structure_audit_20261109/transition_objective.py": "6ceba831ae49351aa50fa0b85bc5481251db90593bec0e24159f75337163f454",
+    "research_branches/cn_multiseed_20261104/research_branches/typed_structure_early_cn_expansion_review/experiments/typed_structure_early_cn_expansion_v1/ema.py": "79f9cda3d67519ee9fe6407fd5ff7b7cfec8d7c981af81f350437eead7834ad1",
+    "research_branches/cn_multiseed_20261104/research_branches/typed_structure_early_cn_expansion_review/experiments/typed_structure_early_cn_expansion_v1/integration.py": "d939dc41494c5f2f2c934079217aac00aea5800efc8593e32a00461407149680",
+    "research_branches/cn_multiseed_20261104/research_branches/typed_structure_early_cn_expansion_review/experiments/typed_structure_early_cn_expansion_v1/package/prepare.py": "e7bec69358acdb488e40e3ba8f1a276d92f049a50d887e6d51b2aec0226b65e4",
+    "research_branches/cn_multiseed_20261104/research_branches/typed_structure_early_cn_expansion_review/experiments/typed_structure_early_cn_expansion_v1/package/hsgd/losses.py": "9dc175d9fa591221bb3c7118151f86b86ab679447e509483f611b69a4a56c8b6",
+    "research_branches/cn_multiseed_20261104/research_branches/typed_structure_early_cn_expansion_review/experiments/typed_structure_early_cn_expansion_v1/package/normal2.py": "b6799b75f787b1e48150ec42dfe815f3d3ac586595d91b7f0a4d86d8c3ae5d81",
+    "research_branches/cn_multiseed_20261104/research_branches/typed_structure_early_cn_expansion_review/experiments/typed_structure_early_cn_expansion_v1/package/probe.py": "dac368c5ead6a9f5d6d0cc7ebdec9f5842ddff522f54a656d2777e44d0122e05",
+    "research_branches/new_datasets_20261112/support.py": "ba53da0083f537c2ea0b80dfac8fe1d442b5e66028c25fea8cb63c8aadb32afe",
+    "research_branches/new_datasets_20261112/train.py": "f85ad1bfaf182da04cec859824222aa4b2f6f1947e6a67e71a5e157d642209b6",
+    "research_branches/new_datasets_20261112/assets.py": "a27e17c0183f1e58f0217ee5ef3110200a6dbe7c0c279f29f8731b82b71797c4",
+    "research_branches/new_datasets_20261112/job.py": "c38372d6744afb97a10a1b376479e27a0a0e51c8c7ad1e55deb1999be0c38af1",
+    "research_branches/new_datasets_20261112/preflight.py": "e16ed64e3d59b37574c339a01864a7130fcec0d04c36c1c6b01ec010aaf141de",
+    "research_branches/new_datasets_20261112/launch.py": "9879af4bc1cd9b4c17a6481c8d4e8e44012f7bf5e588349e90c4c8eaaa545a15",
+    "research_branches/new_datasets_20261112/terminal_worker.py": "a763278a320f5f1fb368a92d77b5a8ee8aa37b28f1fa99c997f730104880ab85",
+    "research_branches/new_datasets_20261112/evaluate.py": "9e516b7965627e69379657464d4b086c55716fc58d96bb910be7d380157a1dd7",
+    "research_branches/new_datasets_20261112/metrics.py": "edd1a1503303772e1c2b56443196b7279bbbe70183b4dbe63887c80cd56b1cea",
+    "research_branches/new_datasets_20261112/cpu_check.py": "9ec8ee7a7fef4008ff11db693478ddadc7c10c38bca0402999198aa4e713b218",
+    "data/external/new_hetero_20261112/prepared/DBLP_HGEN/small_192.npz": "1a171126cc200943366a16cf8031578cebe8278be306463c41b8d8262b3b3ed8",
+    "data/external/new_hetero_20261112/prepared/DBLP_HGEN/full_graph.npz": "9681c413e4871ff8b2bebc51f974bb9a99f0775cd9d95e168711e68e32a81747",
+    "data/external/new_hetero_20261112/prepared/DBLP_HGEN/audit.json": "87fc2e4ff2f21f6159aa72fa9687db5c7cf56e17004ef76dd78c7734e9d427e9",
+    "data/external/new_hetero_20261112/prepared/ACM_HAN_full7/small_192.npz": "84579534bf9c2725a047a2cccec47f8e440b2bc7441ad0df9513b02df3a240ff",
+    "data/external/new_hetero_20261112/prepared/ACM_HAN_full7/full_graph.npz": "294d885ba643fa6579e37e759961aeeec1762276de5ba0f0b04d71d0be975d95",
+    "data/external/new_hetero_20261112/prepared/ACM_HAN_full7/audit.json": "77418dca829ebc137ebc9cddb7dbf63109e0d7be9586b11834005b3f1071c58d",
+    "results/new_dataset_pilot_20261112T150000/contracts/ACM_HAN_full7_2026111212.json": "ff22b9dafe89a4e46d4963d024e38bff3dc81da5e8f243bbd3e573e5ea29eaa3",
+    "results/new_dataset_pilot_20261112T150000/contracts/ACM_HAN_full7_2026111211.json": "55f64acb9a037b7bf7496d0678475ebd31b6eb6ad412740fe72a938a6d06316d",
+    "results/new_dataset_pilot_20261112T150000/contracts/DBLP_HGEN_2026111211.json": "7ec3f6943adbaa0eb89760f3891cbe9b11f0d3d14451a4390d346bedb3a1f3e4",
+    "results/new_dataset_pilot_20261112T150000/contracts/DBLP_HGEN_2026111212.json": "cbb0c56f0462abd4f4f18a1140e7133d8e9f012b35007e194ec16c374e818d40",
+    "research_branches/one_step_vs_terminal_plan_20261111/update_preflight.py": "d9556221ffb373d126ab098be2d92c75e803377a4aae25c19b158f9df26e1780",
+    "research_branches/one_step_vs_terminal_plan_20261111/gpu_preflight.py": "964e62bb2a3de7b82f954ca4f0cf9b0f87fabda2f13633b06fca12a09c7619ab",
+    "research_branches/one_step_vs_terminal_plan_20261111/heat_solver_candidate.py": "23e6e429688a4b5a37d5ee0585eb822e0bc10de6edec0bed55121ccf53d6b145",
+    "research_branches/terminal_structure_real_20261109/worker.py": "13b68de86c42674ce4c6d40c6d3ab17acc1d0db5bfdd9b1130ecfcd89ebc172a",
+    "research_branches/typed_heat_audit_20261111/run.py": "314dcca111374a943ee32e406f864e0807a8f9381cd007de10635ea192b382cb",
+    "research_branches/typed_heat_degree_audit_20261111/run.py": "42a0e94662b29a679c2639a61de3816c45843ee9a6979cd37f8527bf2d17bdf0",
+    "research_branches/cn_multiseed_20261104/experiments/late_final_single_input_v1/single_input.py": "2fe0ead3c55f858f1233a2702cf4e9a698364465238ec48d482a389de290fa6f",
+    "research_branches/seed_coverage_repair_release/experiments/seed_coverage_repair_v1/lcc_eval/vendor/frozen_metrics.py": "c0f52c195ab8320a841e682837f3cab4ac55c0126b6c5f779f8986a123cbbe6a",
+    "research_branches/seed_coverage_repair_release/experiments/seed_coverage_repair_v1/lcc_eval/vendor/aligned_evaluate.py": "7bb7b8e4545732d0753faf48643719a337e9890659a5e8ebd41bf64935de2ed7",
+    "research_branches/seed_coverage_repair_release/experiments/seed_coverage_repair_v1/lcc_eval/vendor/hgen_utils.py": "f8090bf20551d4439370e20b53d9bc46000704d16cf9e44efff8a6e05dc6a689",
+    "research_branches/new_datasets_20261112/seal.py": "a39754381f0dfae3a54093ed89a8e95fd4f30f6c23a92fbdaaf1281f6f9e67cc"
+  },
+  "formal_CE_models": 4,
+  "CE_updates": 12000,
+  "terminal_updates_total": 16,
+  "training_chains": 32,
+  "evaluation_chains": 32,
+  "T": 1000,
+  "R": 1,
+  "initialization": "fresh A lateCN per dataset and seed; terminal paired from its exact CE3000 EMA, fresh AdamW and EMA",
+  "readouts": "baseline: CE3000 EMA; terminal: fixed raw after 4 updates, matching established terminal protocol; save both raw/EMA; no best checkpoint",
+  "score": "unchanged type-equal joint heat-degree MMD + declared-family mean count risk; reference-only frozen scaling; inactive families remain in original denominator",
+  "bias": "clean-head terminal LOO surrogate, not unbiased transition policy gradient or GDPO replication",
+  "evaluation": "complete raw graph primary; LCC separately; per-training-model four draws then across two training seeds; all metrics and costs retained",
+  "gate": "CPU generic metrics and historical 4-type equivalence; finite temporary update; exact saved/load state and next input; EMA restore; active coverage; fits wall/GPU budget. No effect threshold.",
+  "limits": [
+    "small induced samples are type-balanced connected regions, not representative random full graphs",
+    "full source data prepared; full-graph GPU training NOT included or demonstrated",
+    "single-reference generation; no independent graph test set",
+    "fresh dataset schemas change parameter dimensions; cross-dataset model initial weights not claimed identical",
+    "CUDA recomputed update bitwise equivalence not certified",
+    "DBLP bipartite support has no triangles/CN on legal edges; not evidence of CN structural benefit",
+    "ACM directions/weights simplified for current undirected binary model; source retained",
+    "no author baseline results or multi-graph generalization claim"
+  ],
+  "budget_gate": {
+    "planning_GPU_hours": 11.102198903891775,
+    "longest_minutes": 174.21448787053427,
+    "remaining_science_minutes": 188.74721959431966,
+    "margin": "25% concurrent throughput margin plus 10min/model loading/checkpoint/validation; CPU evaluation after GPU release"
+  },
+  "git_HEAD": "df5c8898d91422b5fced712e718fc8f32290de73",
+  "working_tree": "pre-existing dirty tree; runtime source identified by file hashes and frozen_source.zip, not HEAD alone",
+  "seal_note": "Added explicit hashes for importlib/AST-loaded sources; removed inactive inherited E/dataset metadata, no tensor/optimizer/kernel/CE changes."
+}

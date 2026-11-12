@@ -1,0 +1,23 @@
+{
+  "status": "passed",
+  "CPU_synthetic_only": true,
+  "normal_O_A": true,
+  "continuous_vs_resume_full_state": true,
+  "EMA_sampling_T1000": true,
+  "two_terminal_training_chains": true,
+  "feedback_update": true,
+  "no_real_graph_or_GPU": true,
+  "real_graph_training": false,
+  "GPU_used": false,
+  "source_core_changes": "none; five interpreter paths relocated",
+  "new_adapter": "server/runtime.py",
+  "large_graph_status": "not yet validated",
+  "limits": [
+    "CPU synthetic single-device only",
+    "CUDA repeated-update bitwise identity unverified",
+    "server wall/GPU guard not exercised on an actual GPU",
+    "dense spectral score scalability unverified",
+    "sample recovery boundary saved but portable CLI does not resume a partial sampling chain",
+    "historical launchers still require historical assets and must not be used as server launchers"
+  ]
+}

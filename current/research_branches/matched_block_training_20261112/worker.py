@@ -1,0 +1,218 @@
+"""Matched R10/R20 adaptation: full sweeps in rollout, feedback and validation. Reuses audited production maths.
+
+T_eager collects new trajectories at each round's frozen current raw policy.
+Its clean-head terminal update is a biased surrogate, not transition REINFORCE.
+"""
+import os
+for k in ('OMP_NUM_THREADS','MKL_NUM_THREADS','OPENBLAS_NUM_THREADS'): os.environ[k]='1'
+import sys,time,json,random,signal,traceback,importlib.util
+from pathlib import Path
+ROOT=Path(__file__).resolve().parents[2]
+sys.path.insert(0,str(ROOT/'research_branches/one_step_vs_terminal_plan_20261111'))
+spec=importlib.util.spec_from_file_location('pilot_support',ROOT/'research_branches/one_step_vs_terminal_plan_20261111/update_preflight.py')
+s=importlib.util.module_from_spec(spec);spec.loader.exec_module(s)
+base,w,np,torch=s.base,s.w,s.np,s.torch
+from heat_solver_candidate import heat as repaired_heat
+base.heat.heat=repaired_heat
+import sweep
+
+def main():
+    out=Path(sys.argv[1]); ds,arm=sys.argv[2:4]; folder=out/(ds+'_'+arm);folder.mkdir(exist_ok=False)
+    rounds=int(arm[1:]); assert rounds in (10,20)
+    protocol=json.loads((out/'protocol.json').read_text()); start=float(os.environ['TASK_ALLOCATION_EPOCH']); updates=[]; calls=backwards=0; boundary=None
+    signal.signal(signal.SIGTERM,lambda *_:(_ for _ in ()).throw(TimeoutError('owned watchdog stop')))
+    def save(name,x):base.write(folder/name,x)
+    def check():
+        if time.time()>=protocol['science_stop_epoch']:raise TimeoutError('science deadline')
+    def progress(phase,**kw):save('progress.json',dict(phase=phase,elapsed=time.time()-start,at_epoch=time.time(),**kw))
+    receipt=dict(status='running',dataset=ds,arm=arm,start_epoch=start,device=os.environ['CUDA_VISIBLE_DEVICES'])
+    try:
+        torch.set_num_threads(1);torch.use_deterministic_algorithms(True)
+        torch.backends.cuda.matmul.allow_tf32=False;torch.backends.cudnn.allow_tf32=False;torch.set_float32_matmul_precision('highest')
+        for path,h in protocol['bindings'].items():assert base.sha(path)==h,path
+        row=protocol['parents'][ds];z=torch.load(row['readout'],map_location='cpu');cfg=z['binding']['config']
+        assert z['updates']==3000 and z['readout']=='ema_0.99' and z['train_seed']==row['train_seed']
+        data=np.load(row['data']);edges=data['edges'];edges=edges.T if edges.shape[0]!=2 else edges
+        case=w.common.make_case(data['types'],edges,tuple(map(tuple,data['schema'])))
+        m=w.StructuralDenoiser(case,cfg,'A').cuda();m.load_state_dict(z['model'],strict=True);m.eval();del z
+        binding=dict(dataset=ds,train_seed=row['train_seed'],parent_readout_sha256=protocol['bindings'][row['readout']],
+            protocol_sha256=base.sha(out/'protocol.json'),new_optimizer=True,new_EMA=True,parent_updates=3000)
+        optim_cfg={k:v for k,v in cfg['optimizer'].items() if k!='type'};optim_cfg['lr']=1e-5
+        o=torch.optim.AdamW(m.parameters(),**optim_cfg);e=s.ParameterEMA(m,.99)
+        random.seed(row['train_seed']);np.random.seed(row['train_seed']);torch.manual_seed(row['train_seed']);torch.cuda.manual_seed_all(row['train_seed'])
+        train_rng=np.random.default_rng(np.random.SeedSequence([2026111401,row['train_seed']]))
+        assert arm in ('R10','R20')
+        oldfolder=Path(protocol['resume_parent'])/(ds+'_T_eager')
+        loaded=torch.load(oldfolder/'final_complete.pt',map_location='cpu',weights_only=False)
+        previous_updates=int(loaded['updates'])
+        assert loaded['recovery']['exact_resume_allowed'] and previous_updates==protocol['resume_updates'][ds]
+        original_binding=loaded['binding']
+        s.restore_payload(loaded,m,o,e,original_binding,lambda x:s.rng_restore(x,train_rng,'cuda'))
+        m.eval();o.zero_grad(set_to_none=True)
+        boundary=s.TrainingBoundary(m,o,e,train_rng,'cuda',previous_updates)
+        actual=boundary.checkpoint(original_binding)
+        comparison={k:v for k,v in loaded.items() if k!='pilot_progress'}
+        assert s.state_digest(actual)==s.state_digest(comparison), 'restored full boundary differs'
+        initial_hash=json.loads((oldfolder/'binding.json').read_text())['initial_state_hash']
+        resume_hash=s.state_digest(actual)
+        binding.update(new_optimizer=False,new_EMA=False,resume_source=str(oldfolder/'final_complete.pt'),
+            resume_source_sha256=base.sha(oldfolder/'final_complete.pt'),resumed_updates=previous_updates,
+            original_binding=original_binding,rounds=rounds,training_full_sweep=True,score_solver='evd; unchanged heat definition/tolerances')
+        torch.save(boundary.checkpoint(binding),folder/'resumed_complete.pt')
+        (folder/'updates.jsonl').write_bytes((oldfolder/'updates.jsonl').read_bytes())
+        assert len((folder/'updates.jsonl').read_text().splitlines())==previous_updates
+        save('resume_check.json',dict(full_boundary_exact=True,original_random_state_exact=True,
+            previous_updates=previous_updates,resume_state_hash=resume_hash,CUDA_recomputation_bitwise_not_certified=True))
+        ids,fam,query=w.common.plan_for(case,2026111402,1).block(0)
+        labels=np.isin(ids,case['clean_ids']).astype(np.uint8);scorer=base.Score(ds,case,query,fam,labels)
+        assert sum(scorer(labels)[:2])<1e-12
+        save('binding.json',dict(**binding,optimizer=optim_cfg,config=cfg,initial_state_hash=initial_hash,resume_state_hash=resume_hash,
+            model_hash=s.state_digest(m.state_dict()),active_slots=len(ids),reference_edges=int(labels.sum()),
+            loaded_complete_state_exact=True,recomputed_CUDA_update_bitwise_not_certified=True))
+        save('environment.json',w.common.environment('cuda'));del actual,comparison,loaded
+        params=list(m.parameters())
+        def checkpoint(name):
+            state=boundary.checkpoint(binding)
+            state['pilot_progress']=dict(arm=arm,completed_updates=boundary.completed,
+                main_input_root=2026111401,hard_root=2026111404,terminal_plan=protocol['terminal_plan'][ds],
+                elapsed_from_worker=time.time()-start,absolute_deadline=protocol['science_stop_epoch'])
+            tmp=folder/(name+'.tmp');torch.save(state,tmp);tmp.replace(folder/name)
+        def make_input(position,rng_,force_t=None):
+            return w.common.train_input(case,1000,1,row['train_seed'],position,rng_,force_t=force_t)
+        def forward(inp):
+            nonlocal calls
+            check();logits,p=w.runtime.predict(m,case['space'].types,inp['edges'],inp['edge_families'],inp['query'],inp['f'],inp['t']/1000,details=True);calls+=1
+            w.common.check_prob_device(p,inp['f'],case,m.prior);return logits,p
+        def sample(ss,directory,selected=()):
+            directory.mkdir(exist_ok=False);before=s.state_digest(m.state_dict());rng_before=s.state_digest(s.rng_capture(train_rng,'cuda'))
+            generator=s.RecordedGenerator(ss,case['space'].total)
+            families=np.repeat(np.arange(case['n_families']),case['space'].counts)
+            state=(generator.random(case['space'].total)<case['prior'][families]).astype(np.uint8)
+            chain=w.SamplingBoundary(state,1000,generator,'cuda');kernel=w.MarginalKernel(case['prior'],w.common.schedule(1000))
+            ident=dict(dataset=ds,arm=arm,train_seed=row['train_seed'],sample_seed=ss,readout='fixed raw',
+                model_hash=before,updates=boundary.completed,T=1000,R=rounds,initial_hash=s.digest(state),protocol_sha256=base.sha(out/'protocol.json'))
+            base.write(directory/'identity.json',ident);tick=time.time();original_plan=w.common.plan_for;plans=[];snapshots=[]
+            def plan(*args,**kwargs):
+                p=s.RecordedPlan(original_plan(*args,**kwargs));plans.append(p);return p
+            w.common.plan_for=plan
+            try:
+                for t in range(1000,0,-1):
+                    check();plans.clear();draw_calls=generator.calls
+                    if t in selected:
+                        assert chain.next_t==t
+                        path=directory/f'Xt_{t:04d}.npz';np.savez_compressed(path,xt=chain.state,t=t,sample_seed=ss,rounds=rounds);snapshots.append(path)
+                    def validate(candidate,record):
+                        assert generator.calls==draw_calls+1 and len(plans)==1 and plans[0].blocks==rounds
+                        assert record['exact_coverage'] and record['covered_slots']==len(ids)
+                        assert not np.any(candidate[~np.repeat(case['active'],case['space'].counts)])
+                    rec=chain.advance(lambda x,at:w.runtime.reverse_step(m,case,x,kernel,at,rounds,ss,generator,'cuda',check_time=check),validate)
+                    rec.update(uniform_hash=generator.last_sha,query_hash=plans[0].h.hexdigest())
+                    with (directory/'steps.jsonl').open('a') as log:log.write(json.dumps(rec)+'\n')
+                    if t%100==0 or t==1:
+                        torch.save(chain.checkpoint(ident),directory/'latest_complete.pt')
+                        progress('sampling',chain=directory.name,next_t=chain.next_t,updates=boundary.completed)
+                ee,ff=w.common.state_edges(case,chain.state)
+                np.savez_compressed(directory/'graph.npz',types=case['space'].types,edges=ee,families=ff,schema=np.array(case['space'].pairs))
+                assert before==s.state_digest(m.state_dict())
+                assert rng_before==s.state_digest(s.rng_capture(train_rng,'cuda'))
+                assert chain.next_t==0 and generator.calls==1001 and len(snapshots)==len(selected)
+                base.write(directory/'summary.json',dict(status='complete',seconds=time.time()-tick,graph_sha256=base.sha(directory/'graph.npz'),steps=1000,model_unchanged=True))
+                return chain.state[ids].copy(),snapshots
+            except BaseException:
+                torch.save(chain.checkpoint(ident),directory/'stopped_complete.pt');raise
+            finally:w.common.plan_for=original_plan
+        def commit_update(records,tick):
+            nonlocal backwards
+            grads=[p.grad for p in params if p.grad is not None]
+            assert grads and all(torch.isfinite(g).all() for g in grads)
+            norm=float(torch.nn.utils.clip_grad_norm_(params,1,error_if_nonfinite=True))
+            boundary.mark_optimizer_started();o.step();e.update(m,boundary.completed+1);e.at_update_boundary=True
+            assert all(torch.isfinite(p).all() for p in params)
+            return dict(update=boundary.completed+1,seconds=time.time()-tick,gradient_norm_before_clip=norm,
+                clip_scale=min(1.,1/(norm+1e-6)),records=records)
+        # Fixed endpoint validation; inputs never used for updates or model selection.
+        validation_rng_before=s.state_digest(s.rng_capture(train_rng,'cuda'))
+        fixed=[make_input(910000+j,np.random.default_rng(np.random.SeedSequence([2026111511,row['train_seed'],j])),t)
+               for j,t in enumerate([1,75,250,550,800,1000])]
+        assert validation_rng_before==s.state_digest(s.rng_capture(train_rng,'cuda'))
+        def evaluate():
+            rows=[]
+            with torch.no_grad():
+                for inp in fixed:
+                    full_logits,full_p,_=sweep.predict_all(m,case,inp['edges'],inp['edge_families'],inp['t'],rounds,2026111511,check)
+                    ix=torch.as_tensor(inp['ids'],device='cuda');logits,p=full_logits[ix],full_p[ix];terms=s.supported_binary_ce(logits,torch.as_tensor(inp['labels'],device='cuda'),m.prior[torch.as_tensor(inp['f'],device='cuda')]).cpu().numpy()
+                    pp=p.cpu().double().numpy();groups=[]
+                    for f in range(case['n_families']):
+                        pos=(inp['f']==f)&(inp['labels']==1);neg=(inp['f']==f)&(inp['labels']==0)
+                        groups.append(dict(family=f,positive_n=int(pos.sum()),negative_n=int(neg.sum()),positive_CE=float(terms[pos].mean()) if pos.any() else None,
+                            negative_CE=float(terms[neg].mean()) if neg.any() else None,expected_edges=float(pp[inp['f']==f].sum())))
+                    rows.append(dict(t=inp['t'],CE=float(terms.sum()/case['space'].total),input_hash=s.input_hash([inp]),relations=groups))
+            return rows
+        def evaluate_stage():
+            stage=folder/f'stage_{boundary.completed}'
+            stage.mkdir(exist_ok=False)
+            before=s.state_digest(boundary.checkpoint(binding))
+            with boundary.validation():
+                base.write(stage/'validation_raw.json',evaluate())
+                base.write(stage/'validation_EMA.json',s.ema_validation(lambda model:evaluate(),m,e,boundary=boundary))
+            assert before==s.state_digest(boundary.checkpoint(binding))
+            torch.save(boundary.checkpoint(binding),stage/'final_complete.pt')
+            base.write(stage/'binding.json',json.loads((folder/'binding.json').read_text()))
+            base.write(stage/'training_summary.json',dict(updates=boundary.completed,prior_updates=previous_updates,
+                new_updates=boundary.completed-previous_updates,training_seconds=time.time()-training_start,
+                allocation_before_final_evaluation_seconds=time.time()-start,forwards=calls,VJPs=backwards,
+                primary_readout='fixed raw',EMA_updates=e.updates))
+            for ss in protocol['sample_seeds']:sample(ss,stage/f'final_sample_{ss}')
+            assert before==s.state_digest(boundary.checkpoint(binding))
+            progress('evaluation_stage_complete',updates=boundary.completed)
+        training_start=time.time()
+        if arm in ('R10','R20'):
+            for u in range(previous_updates+1,protocol['final_updates']+1):
+                batch=[];policy_hash=s.state_digest(m.state_dict());checkpoint('latest_complete.pt')
+                for plan in protocol['terminal_plan'][ds][str(u)]:
+                    bits,paths=sample(plan['seed'],folder/f'train_round{u}_seed{plan["seed"]}',plan['times'])
+                    assert s.state_digest(m.state_dict())==policy_hash
+                    batch.append((bits,paths,scorer(bits)[:2]))
+                costs=np.array([sum(v[2]) for v in batch]);a=2*costs-costs.sum()
+                base.write(folder/f'round{u}_batch.json',dict(policy_hash=policy_hash,costs=costs.tolist(),advantages=a.tolist(),
+                    new_on_policy_trajectories=True,clean_head_estimator_is_biased=True))
+                tick=time.time();o.zero_grad(set_to_none=True)
+                with boundary.step(u):
+                    before=s.state_digest(s.rng_capture(train_rng,'cuda'))
+                    for k,(bits,paths,_) in enumerate(batch):
+                        for path in paths:
+                            z=np.load(path);ee,ff=w.common.state_edges(case,z['xt']);t=int(z['t']);ss=int(z['sample_seed'])
+                            assert int(z['rounds'])==rounds
+                            target_full=np.zeros(case['space'].total,dtype=np.uint8);target_full[ids]=bits
+                            historical=json.loads((path.parent/'steps.jsonl').read_text().splitlines()[1000-t])
+                            assert historical['time']==t and historical['blocks']==rounds
+                            result=sweep.feedback(m,case,ee,ff,t,rounds,ss,target_full,.01*float(a[k])/16,historical['query_hash'],check)
+                            calls+=rounds;backwards+=result['block_backwards']
+                            with (folder/'feedback_sweeps.jsonl').open('a') as log:log.write(json.dumps(dict(update=u,t=t,sample_seed=ss,**result))+'\n')
+                    assert before==s.state_digest(s.rng_capture(train_rng,'cuda'))
+                    rec=commit_update([dict(terminal_costs=costs.tolist(),advantages=a.tolist(),trajectories=2,selected_times=16,
+                        on_policy_collection=True,policy_hash=policy_hash,rounds=rounds,all_blocks_each_selected_state=True)],tick)
+                rec.update(main_rng_hash=s.state_digest(s.rng_capture(train_rng,'cuda')),EMA_updates=e.updates)
+                with (folder/'updates.jsonl').open('a') as f:f.write(json.dumps(rec)+'\n')
+                checkpoint('latest_complete.pt');checkpoint(f'update_{u:04d}_complete.pt');progress('terminal_update_complete',updates=u)
+                if u in protocol['evaluate_at_updates']:evaluate_stage()
+        else:assert arm=='baseline'
+        training_seconds=time.time()-training_start
+        checkpoint('final_complete.pt')
+        save('training_summary.json',dict(updates=boundary.completed,prior_updates=previous_updates,new_updates=boundary.completed-previous_updates,training_seconds=training_seconds,
+            allocation_before_final_evaluation_seconds=time.time()-start,forwards=calls,VJPs=backwards,raw_model_hash=s.state_digest(m.state_dict()),
+            primary_readout='fixed final raw',EMA_updates=e.updates))
+        for path,h in protocol['bindings'].items():assert base.sha(path)==h,path
+        receipt.update(status='complete',updates=boundary.completed,forwards=calls,VJPs=backwards)
+    except BaseException:
+        receipt.update(status='failed',traceback=traceback.format_exc());save('failure.json',receipt)
+        if boundary is not None:
+            try:checkpoint('stopped_complete.pt')
+            except BaseException:save('nonresumable_failure.json',dict(error=traceback.format_exc(),use_previous_complete_checkpoint=True))
+        raise
+    finally:
+        receipt.update(end_epoch=time.time(),seconds=time.time()-start,peak_allocated_MiB=torch.cuda.max_memory_allocated()/2**20 if torch.cuda.is_initialized() else 0)
+        save('receipt.json',receipt)
+
+if __name__=='__main__':main()
+
