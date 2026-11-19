@@ -1,0 +1,24 @@
+{
+  "version": "xt_wedge_closing_edge_calibration_v1",
+  "status": "isolated_CPU_verified_candidate_not_production",
+  "architecture": "original_A_late_CN",
+  "baseline": "original_CE_plus_frozen_PB",
+  "loss": "sumCE/full_schema_slots + PB + closure_calibration",
+  "closure_weight": 1.0,
+  "grouping": ["closing_edge_relation", "closing_edge_state_in_Xt"],
+  "context": "same frozen full Xt used by existing single denoiser call",
+  "group_loss": "0.5 * (sum(CN_Xt*(p0-y0))/sum(CN_Xt))**2",
+  "reduction": "mean over nonempty positive-wedge groups",
+  "fixed_support": "unchanged; fixed relations excluded from loss",
+  "query_coverage": "exact full movable R1 support only",
+  "reference_use": "training X0 labels only; no clean topology in model inputs",
+  "sampling": "unchanged R1/T1000; auxiliary loss absent at inference",
+  "formal_training_started": false,
+  "limitations": [
+    "calibrates closing edges on an Xt skeleton, not all-clean triangle expectations",
+    "zero-CN slots receive no direct gradient from this auxiliary",
+    "does not enforce connectivity, hubs, or joint relation degrees",
+    "adds auxiliary strength, not a constant-strength ablation",
+    "CPU dense adjacency reference for 192 nodes; no large-graph performance claim"
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "scope": "Read-only exact cross decomposition of previously saved toy states; user accepts slower progress and requests continuation",
+  "limits": {"seconds": 60,"CPU_threads": 1,"address_space_GiB": 2,"GPU_hours": 0},
+  "seed": 2026110902,
+  "parameter_steps": [0,20],
+  "time": 1,
+  "source": "multiobjective_equalstep_cpu_20261110, frozen 4-node 64-state model",
+  "panels": "Old/new t1 generated-state occupancy x old/new predictor; qref t1 x both predictors separately, six exact panels total",
+  "decomposition": "R11-R00 = (R01-R00) + (R10-R00) + (R11-R01-R10+R00); also report symmetric half-interaction allocation without causal uniqueness claim",
+  "metrics": ["five existing structural costs", "old aggregate cost", "connected probability", "triangle count MAE", "terminal entropy/isomorph collision descriptive only"],
+  "grouping": "All 64 input Xt states; predefined groups by current Xt edge count and connected-component count, no reference node alignment or selected worst-state subset",
+  "checks": "t1 P equals clean distribution; independent product-Bernoulli recomputation; stored old/new terminal distributions reproduced; source hashes unchanged; exact decomposition sum",
+  "forbidden": ["parameter updates", "real model forward/backward", "new sampled graphs", "GPU", "threshold changes", "new candidate rollout", "formal training"]
+}

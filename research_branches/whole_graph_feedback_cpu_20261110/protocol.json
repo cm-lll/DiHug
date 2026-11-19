@@ -1,0 +1,23 @@
+{
+  "scope": "CPU finite verification only; no production model, training, reverse chains or GPU",
+  "wall_seconds": 180,
+  "RSS_GiB": 2,
+  "threads": 1,
+  "fixture": {"types": [0,0,0,1,1], "reference_edges": [[0,1],[0,3],[1,3]], "legal_slots": 10, "enumerated_graphs": 1024},
+  "score": "Reuse frozen 20261108 JointLocalScore: per-type joint relation-degree and typed-triangle MMD. No connectivity term; not the later proposed assignment score.",
+  "profiles": ["sparse_p03", "uncertain_p30", "reference_confident_p95_p01"],
+  "batch_sizes": [4,16,64],
+  "evaluation_batches": 128,
+  "development_samples": 2048,
+  "development_seed": 2026111011,
+  "evaluation_seed": 2026111012,
+  "jacobian_seed": 2026111013,
+  "temperature": 1.0,
+  "rebar_coefficient": "One analytic covariance coefficient per probability profile, fitted on independent development samples in logit space then frozen. No clipping, temperature search or evaluation-based selection.",
+  "methods": ["raw_score_function", "detached_soft_baseline", "leave_one_out", "REBAR_development_coefficient", "deterministic_soft_gradient_as_biased_reference"],
+  "references": ["exact enumeration logit gradient", "all-coordinate conditional differences (exact variance reference, no sampled-edge estimator)"],
+  "parameter_mapping": "Fixed synthetic 10x4 Jacobian with a common column and three random columns; algebra only, not the actual neural model",
+  "timing": "Standalone K=16 estimators, 2 warmups and 12 paired timed repeats, includes random generation and score computation; no model cost. Variance*time is a diagnostic proxy, not equal-wall training evidence.",
+  "decision": "Report all probability profiles and batch sizes, exact bias checks, MSE and descent direction rates, sparse rare-event misses, estimator time. No automatic training; mathematical correctness alone is insufficient.",
+  "non_goals": ["new structural objective selection", "RELAX fitting", "formal learning", "real graph generation", "connectivity guarantee", "CE mixture selection"]
+}

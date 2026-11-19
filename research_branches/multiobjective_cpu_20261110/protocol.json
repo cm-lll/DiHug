@@ -1,0 +1,18 @@
+{
+  "scope": "Single bounded CPU continuation authorized by user; exact finite model only",
+  "limits": {"seconds": 180, "threads": 1, "address_space_GiB": 2, "GPU_hours": 0},
+  "reuse": "All three saved step-zero states and all old equal-weight/CE curves in one_step_to_terminal_cpu_20261110; original model, qref and reverse kernel unchanged",
+  "seeds": [2026110901,2026110902,2026110903],
+  "updates_each": 20,
+  "learning_rate": 0.2,
+  "objectives": ["relation_count", "anonymous_joint_degree", "triangle001", "triangle011", "components"],
+  "gradient_scaling": "Raw gradients of the existing normalized costs, no per-objective gradient normalization or tuned coefficient",
+  "direction": "Minimum Euclidean norm convex combination of five exact gradients; plain theta -= 0.2 * combination",
+  "solver": "Enumerate all 31 nonempty simplex faces, affine least squares with rcond=1e-12, reject infeasible barycentric coefficients, verify simplex and full KKT inequality residual <=1e-8 after common Gram scaling. No ridge. Roundoff-only negative coefficients >=-1e-10 may be clipped and rechecked.",
+  "no_line_search": true,
+  "zero_direction": "Norm <=1e-12 is recorded as numerical stationarity; no fallback or artificial rescaling",
+  "gate": "Synthetic solver cases including duplicates/opposing gradients; all five objective finite differences <=1e-7 at each starting state; source/state identity checks",
+  "record": "Every update coefficients, gradient norms, directional and actual five-objective changes, displacement and KKT residual; every state full terminal distribution and per-objective risks; no best-step selection",
+  "success_interpretation": "Joint local improvement alone insufficient; assess terminal structure costs, diversity and progress versus reused equal-weight comparator. Magnitudes may be smaller; equal learning rate is not equal displacement or compute. Splitting two triangle types and using multiobjective direction jointly change the optimization rule; not isolated effects.",
+  "forbidden": ["real model calls", "GPU", "production training", "new sampled graphs", "weight/step search", "projection accept-reject protection", "AdamW claims", "automatic follow-on experiments"]
+}

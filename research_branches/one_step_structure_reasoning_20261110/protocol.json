@@ -1,0 +1,9 @@
+{
+  "scope": "User-requested derivation and finite CPU verification of one-forward clean-graph hard structural risk. No production neural model, GPU, parameter optimization, replay or new generated graphs.",
+  "limits": {"seconds": 180, "CPU_threads": 1, "RSS_GiB": 1},
+  "data": "Reuse existing 64-state typed finite diffusion, its reference score, production kernel, three frozen arithmetic predictor initializations. Input distribution is forward q(Xt|reference), NOT frozen on-policy state occupancy from the older single-step illustration.",
+  "checks": ["exact forward-input clean risk vs score-function gradient and central finite differences", "edge conditional cost difference vs exact logit gradient for every finite Xt", "full-cost and all-coordinate conditional estimators have same mean; compute exact variance, no assumed universal reduction", "uniform one-coordinate inclusion correction unbiased", "single-step gradient and complete reverse-chain gradient separately", "pure structural target has same per-input minimizer set; valid zero-cost deterministic reference is an objective witness, not an implemented A predictor", "coupled good-output mixture vs independent-edge draw from its correct marginals on a two-slot example"],
+  "fixed_hypothetical_derivative_step": 0.00001,
+  "not_executed": ["optimizer updates even on the toy predictor", "real graph resampling", "new aggregate production score", "CE weight selection", "entropy weight search", "full-chain training", "role module", "GPU model calls"],
+  "decision": "Check mathematical feasibility and missing guarantees; do not equate unbiased local-risk gradients with reverse-chain or diversity improvement. No automatic formal training."
+}

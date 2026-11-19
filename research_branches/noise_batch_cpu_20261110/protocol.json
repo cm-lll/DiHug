@@ -1,0 +1,18 @@
+{
+  "scope": "User asks to draw more forward-noise inputs; bounded toy CPU comparison instead of previously proposed generated-state objective",
+  "limits": {"CPU_seconds": 180,"threads": 1,"address_space_GiB": 2,"GPU_hours": 0},
+  "initializations": [2026110901,2026110902,2026110903],
+  "noise_streams": [2026111001,2026111002,2026111003],
+  "batch_sizes": [1,8,32],
+  "updates": 20,
+  "maximum_toy_updates": 540,
+  "sampling": "IID joint (t,Xt) from uniform t=1,2,3 and original qref(Xt). Each initialization/stream has a pre-drawn 20x32 bank; batch sizes use nested prefixes. Independent NumPy SeedSequence([initialization,noise_stream]); no resampling based on outcomes.",
+  "inner_hard_graphs": "Exactly enumerate all 64 clean-output hard graphs; only forward-noise input sampling is changed, not hard-output sampling",
+  "candidate": "Same five raw-cost minimum-norm combination and same per-update old equal-weight displacement lengths as multiobjective_equalstep_cpu_20261110",
+  "exact_control": "Reuse all exact-qref equal-step states/curves; exact integration has no input Monte Carlo variance but is not necessarily the best finite optimization trajectory",
+  "loss_normalization": "Arithmetic average over sampled inputs; do not sum or multiply by batch size",
+  "stopping": "Preserve prior rule: direction norm <=1e-12 stops affected trajectory, no invented direction or recovery. Nonfinite/KKT/state failure stops affected trajectory, save partial results. No retries, no best endpoint selection.",
+  "record": "Noise bank/hash, every t/state, per-step empirical gradient error to exact gradient, exact-risk changes, step length and costs, final exact reverse distribution and full structural/diversity metrics. Separate noise-stream variation from initialization differences.",
+  "interpretation": "Unbiased empirical cost gradients do not imply unbiased nonlinear MGDA direction. Equal optimizer steps are not equal exposure or compute. Toy exact input coverage was already complete; this test cannot prove more sampling repairs production models.",
+  "not_run": ["GPU", "real O/A calls", "new production graphs", "formal training", "generated-state auxiliary objective", "new weights", "larger batch or longer trajectory search"]
+}

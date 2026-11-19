@@ -1,0 +1,15 @@
+{
+  "scope": "Primary-source review and bounded exact CPU terminal-risk mechanism trial; not a production-model experiment",
+  "user_authorization": "Carefully research, then begin a justified bounded attempt",
+  "limits": {"CPU_threads": 1, "CPU_wall_seconds": 180, "address_space_GiB": 2, "GPU_hours": 0},
+  "graph": {"node_types": [0,0,1,1], "unordered_slots": [[0,1],[0,2],[0,3],[1,2],[1,3],[2,3]], "reference_bits": [1,1,0,1,0,1], "family_priors": [0.35,0.45,0.25]},
+  "noise": {"cumulative_retention": [1.0,0.65,0.25,0.0], "reverse": "Per-clean-state normalized production Bayes posterior mixed with predicted clean Bernoulli probability"},
+  "predictor": "Toy shared linear clean-edge logits from relation, current edge, degree, common-neighbor and time features; no reference or node IDs as predictor inputs; NOT O/A network",
+  "reference_score": "Four equal blocks: relation-count normalized square, per-type anonymous joint relation-degree L1 assignment, typed-triangle normalized square, component-count normalized square. Toy engineering scales only, not adopted PubMed objective.",
+  "initializations": [2026110901,2026110902,2026110903],
+  "checks": ["production kernel and independent Bayes equality including t=1 and fixed support", "transition normalization", "exact terminal-risk finite differences", "exact transition policy-gradient identity", "constant-cost invariance versus eager gradient", "type permutation invariance", "soft expected triangle equality and missing variance", "on-policy single-step clean risk versus terminal gradient"],
+  "trial": {"arms": ["exact_terminal_risk", "eager_terminal_cost_surrogate", "reference_edge_CE"], "updates_per_arm": 40, "optimizer": "plain gradient descent", "learning_rate": 0.2, "no_search": true, "evaluations": [0,10,20,30,40]},
+  "gate": "Only run toy optimization if all exact-kernel/gradient/support tests pass within 1e-8; finite-difference tolerance 1e-6. Eager bias is an expected measured limitation, not an implementation failure.",
+  "not_authorized_by_this_protocol": ["production training", "GPU model calls", "real T1000 chains", "replace official CE/model/kernel", "prebuild good-graph teacher library", "run external repository code"],
+  "decision": "Do not promote a biased surrogate merely because toy score falls. Retain all initialization results and diversity costs. Next real work must first bind exact objective and estimate trajectory cost."
+}

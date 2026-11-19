@@ -1,0 +1,11 @@
+{
+  "scope": "CPU decomposition of saved finite states plus primary-literature audit; no new optimization trajectory or production computation",
+  "limits": {"seconds": 180, "threads": 1, "address_space_GiB": 2, "GPU_hours": 0},
+  "states": "All 15 saved structure-arm states: three fixed arithmetic initializations times updates 0,5,10,15,20",
+  "scores": "Existing four-block score unchanged; split typed triangle into 001 and 011 solely for diagnostic reporting",
+  "comparisons": ["gradient of each expected cost in free clean logits and shared toy parameters", "signed effect of each component gradient on triangle cost", "common strict first-order descent feasibility for four blocks and five split blocks"],
+  "LP": "Normalize each nonzero gradient to Euclidean unit norm; maximize margin s subject to g_i.d <= -s and |d_j|<=1. No regularizer or tolerance relaxation. Positive margin plus explicit residual check is an existence witness, not a production optimizer.",
+  "finite_check": "For shared-parameter witnesses, normalize d to unit L2 and evaluate exact costs at theta +/- 1e-4. Save both changes; do not retain or train the candidate.",
+  "interpretation": "Absent first-order common descent is local and parametrization dependent, not proof of global graph infeasibility. Existing average descent may trade off metrics even when common descent exists.",
+  "not_run": ["new training", "real model calls", "GPU", "new generated graphs", "loss weight search", "GDPO execution", "projection protection adoption"]
+}

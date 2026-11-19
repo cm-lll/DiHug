@@ -1,0 +1,81 @@
+"""Independent resource watchdog and authorized process ownership ledger; no model imports."""
+import os,sys,json,time,signal,subprocess,argparse,hashlib
+from pathlib import Path
+OUT=Path(os.environ['STRUCTURE_RUN']);ROOT=Path(__file__).resolve().parents[1]
+def read(p):return json.loads(p.read_text())
+def save(p,d):
+    q=p.with_suffix('.tmp');q.write_text(json.dumps(d,indent=2)+'\n');q.replace(p)
+def ticks(pid):
+    try:return Path(f'/proc/{pid}/stat').read_text().split()[21]
+    except FileNotFoundError:return None
+def same(row):return ticks(row['pid'])==row['start_ticks']
+def usage():
+    t=time.time();return sum((x.get('released_epoch',t)-x['acquired_epoch']) for p in (OUT/'leases').glob('*.json') for x in [read(p)])/3600
+def parent_usage():
+    t=time.time();parent=Path(read(OUT/'ledger.json')['parent_run'])
+    return sum(x.get('released_epoch',t)-x['acquired_epoch'] for p in (parent/'leases').glob('*.json') for x in [read(p)])/3600
+def watch(parent):
+    ledger=read(OUT/'ledger.json');stopping=None
+    while True:
+        rows=[read(p) for p in (OUT/'leases').glob('*.json')];live=[x for x in rows if 'released_epoch' not in x and same(x)]
+        if ticks(parent) is None and not live:break
+        used=usage();t=time.time();n=max(1,len(live))
+        # 60s grace is charged to the quota; request stop before the hard cap.
+        combined=used+parent_usage()
+        request=ticks(parent) is None or t>=ledger['science_stop_epoch']-60 or used>=ledger['GPU_hours_limit']-n*60/3600 or combined>=ledger['combined_GPU_hours_limit']-8*60/3600
+        if request and stopping is None:
+            stopping=t;(OUT/'STOP_SCIENCE').touch()
+            for x in live:os.killpg(x['pid'],signal.SIGTERM)
+        hard=t>=ledger['science_stop_epoch'] or used>=ledger['GPU_hours_limit'] or combined>=ledger['combined_GPU_hours_limit'] or stopping is not None and t-stopping>=55
+        if hard:
+            for x in live:os.killpg(x['pid'],signal.SIGKILL)
+        save(OUT/'watchdog.json',dict(epoch=t,used_GPU_hours=used,combined_GPU_hours=combined,live=[x['id'] for x in live],stop_requested=stopping,hard_stop=hard))
+        time.sleep(2)
+def spawn(module,gpu,ident,extra):
+    # Empty allocation immediately before launch; a transient 1% utilization is not a veto.
+    occupied=subprocess.check_output(['nvidia-smi','-i',str(gpu),'--query-compute-apps=pid','--format=csv,noheader'],text=True).strip()
+    if occupied:raise RuntimeError('GPU has another compute process: '+str(gpu)+' '+occupied)
+    memory=int(subprocess.check_output(['nvidia-smi','-i',str(gpu),'--query-gpu=memory.used','--format=csv,noheader,nounits'],text=True).strip())
+    if memory>128:raise RuntimeError('GPU not empty: '+str(gpu))
+    env=dict(os.environ,CUDA_VISIBLE_DEVICES=str(gpu),OMP_NUM_THREADS='1',MKL_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1')
+    log=(OUT/'logs'/(ident+'.log')).open('x');start=time.time()
+    p=subprocess.Popen([sys.executable,'-u','-m',module,*extra],cwd=ROOT,env=env,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
+    path=OUT/'leases'/(ident+'.json');save(path,dict(id=ident,pid=p.pid,start_ticks=ticks(p.pid),gpu=gpu,acquired_epoch=start))
+    return p,log,path
+def finish(item):
+    p,log,path=item;r=read(path);r.update(released_epoch=time.time(),returncode=p.returncode);save(path,r);log.close()
+def main():
+    ap=argparse.ArgumentParser();ap.add_argument('mode',choices=['formal','watch']);ap.add_argument('--parent',type=int);ap.add_argument('--attempt',type=int,default=1);a=ap.parse_args()
+    if a.mode=='watch':return watch(a.parent)
+    if not read(OUT/'approval.json').get('deadline_confirmed') or not read(OUT/'ledger.json').get('deadline_confirmed'):raise PermissionError('extension deadline not confirmed; no GPU launch')
+    lock=OUT/(a.mode+str(a.attempt)+'_started.json')
+    with lock.open('x') as f:json.dump(dict(pid=os.getpid(),epoch=time.time()),f)
+    monitor=subprocess.Popen([sys.executable,'-m','runtime.supervise_formal','watch','--parent',str(os.getpid())],cwd=ROOT,start_new_session=True)
+    jobs=[]
+    try:
+        if not read(OUT/'budget.json')['fits'] or not read(OUT/'prepared/receipt.json')['passed']:raise RuntimeError('assets/budget gate not passed')
+        approval=read(OUT/'approval.json');approval['launcher_pid']=os.getpid();save(OUT/'approval.json',approval)
+        if time.time()+max(x['device_minutes'] for x in read(OUT/'budget.json')['tasks'])*60>=read(OUT/'ledger.json')['science_stop_epoch']-120:raise RuntimeError('admission stale: remaining wall budget insufficient')
+        tasks=read(OUT/'tasks.json')
+        for job in tasks:jobs.append(spawn('runtime.formal_worker',job['gpu'],job['task_id'],['--task',job['task_id']]))
+        active=jobs[:]
+        while active:
+            for item in active[:]:
+                if item[0].poll() is not None:finish(item);active.remove(item)
+            save(OUT/'launcher_progress.json',dict(epoch=time.time(),active=[read(x[2])['id'] for x in active],GPU_hours=usage()))
+            if active:time.sleep(5)
+        save(OUT/'launcher_summary.json',dict(finished_epoch=time.time(),GPU_hours=usage(),combined_GPU_hours=usage()+parent_usage(),returncodes={read(x[2])['id']:x[0].returncode for x in jobs}))
+        with (OUT/'logs/evaluation.log').open('w') as f:
+            p=subprocess.run([sys.executable,'-u','-m','runtime.evaluate_formal'],cwd=ROOT,stdout=f,stderr=subprocess.STDOUT,timeout=max(1,read(OUT/'ledger.json')['deadline_epoch']-time.time()-45),env=dict(os.environ,CUDA_VISIBLE_DEVICES='',OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1',MKL_NUM_THREADS='1'))
+            save(OUT/'evaluation_exit.json',dict(returncode=p.returncode,epoch=time.time()))
+        subprocess.run([sys.executable,'-u','-m','runtime.finalize_cpu'],cwd=ROOT,timeout=30,check=True)
+        subprocess.run([sys.executable,'-u','-m','runtime.combined_report'],cwd=ROOT,timeout=60,check=True,env=dict(os.environ,CUDA_VISIBLE_DEVICES='',OMP_NUM_THREADS='1'))
+    finally:
+        for p,log,path in jobs:
+            if p.poll() is None:
+                os.killpg(p.pid,signal.SIGTERM)
+                try:p.wait(timeout=30)
+                except subprocess.TimeoutExpired:os.killpg(p.pid,signal.SIGKILL);p.wait()
+                finish((p,log,path))
+        monitor.terminate();monitor.wait(timeout=10)
+if __name__=='__main__':sys.exit(main() or 0)

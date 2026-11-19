@@ -1,0 +1,11 @@
+{
+  "scope": "CPU-only reuse of eight saved paths; no model calls, new random graphs, updates or GPU",
+  "limits": {"threads": 1, "wall_seconds": 600, "RSS_GiB": 2},
+  "source": "results/terminal_structure_real_20261109T233600",
+  "candidate": "For each existing terminal cost separately, subtract the same frozen cost evaluated on pre-transition Xt: (C(X0)-C(Xt))*score_t. No fitted coefficient, critic or cost scalarization.",
+  "comparators": ["uncentered terminal score", "existing other-three-path LOO baseline"],
+  "real_panel": "All two datasets, four paths each, eight saved uniformly selected times each. Preserve 1000/8 time inclusion factor. Descriptive moments and disjoint-pair directions only; four paths cannot establish population variance reduction.",
+  "exact_panel": "Reuse original finite 64-state/3-step kernel, three predefined arithmetic parameter initializations, no optimization. Dynamic programming calculates exact full-path gradient mean and variance for zero baseline, population constant baseline, pre-state cost, and conditional terminal-value baseline (oracle feasibility reference, not deployable).",
+  "checks": ["baseline gradients equal exact terminal-risk derivative", "independent per-step score second moment matches full recursion for zero cross-score test", "reference self-cost zero", "terminal scores reproduce previous results", "saved tensor times and snapshots bind", "Gram finite and positive semidefinite within floating-point tolerance", "original LOO diagnostics reproduced", "input hashes unchanged"],
+  "decision": "Do not adopt solely from smaller estimated gradient norm or higher pair cosine. Report all seven costs and failures; no automatic training or GPU budget reuse."
+}

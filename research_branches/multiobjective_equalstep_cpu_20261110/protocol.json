@@ -1,0 +1,15 @@
+{
+  "scope": "User-approved CPU equal-step-length comparison; no production compute",
+  "limits": {"seconds": 180, "threads": 1, "address_space_GiB": 2, "GPU_hours": 0},
+  "initializations": [2026110901,2026110902,2026110903],
+  "updates_each": 20,
+  "direction": "Unchanged five-objective exact raw-gradient minimum-norm convex combination from multiobjective_cpu_20261110",
+  "step_length": "At seed s and update k, use the exact recorded displacement_norm of old exact_forward_clean_structure at the same seed and update. Delta=-length*gstar/||gstar||. Diagnostic comparator schedule, not a deployable self-contained adaptive rule.",
+  "initial_state": "Bit-identical saved old step-zero parameters",
+  "fixed": ["five costs", "qref training distribution", "model features and shared parameters", "forward and reverse kernels", "20 update endpoint"],
+  "zero_direction": "If norm <= 1e-12, stop affected seed and preserve partial evidence; do not invent a direction or silently claim matched length",
+  "checks": "Prior solver and gradient gates reused with source hashes. Verify first original step length from exact gradient, every committed step length <=1e-12 absolute error, solver KKT <=1e-8, all finite. Independent product-probability audit after execution.",
+  "acceptance": "No per-step loss acceptance/rejection, backtracking or search. Record adverse changes and retain the prescribed step.",
+  "outputs": "All 63 parameter/distribution states; all 60 updates and component costs; reused equal-weight, raw-MGDA and CE endpoints; mean/sample SD over three arithmetic initializations; diversity and connectivity",
+  "not_authorized": ["GPU", "real network", "new sampled graphs", "formal training", "longer optimization", "additional seed or candidate", "changing thresholds or weights", "follow-on experiment"]
+}
