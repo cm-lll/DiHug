@@ -1,0 +1,7 @@
+# 确认入口工程修复（科学0）
+
+cache_accounted在消费旧manifest时错误套用了当前进程loaded_sources集合，要求新消费者也在旧生产者清单；已保留失败。v2直接逐文件读取旧manifest全部SHA，本票绑定/后续校验继续使用完整依赖集合，未缓存或跳过旧内容哈希。
+
+confirmation_prefix在新起点16步全候选检查时遇到非relocation动作，被旧R22独立编辑检查器拒绝；发生在工程阶段，0科学第一阶段终点。先检查生成器的实际动作支持和固定库存合法性，再修复检查器；不更换seed、缩减候选或隐式修改生成算法。原失败与源保持。
+
+缓存v2的样本/seed/预算和原CONFIRMATION_CACHE_ACCOUNTING一致，输出cache_accounted_v2。所有工程修复来源留痕，不当作原失败门通过。

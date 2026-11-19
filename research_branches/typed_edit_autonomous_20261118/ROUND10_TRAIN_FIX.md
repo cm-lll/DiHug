@@ -1,0 +1,5 @@
+# R10训练入口命名遮蔽修复
+
+round10_train.py在main构造manifest时，末尾用于暂存r.OUT的局部previous遮蔽了导入的round08_train模块，触发UnboundLocalError。失败发生在读取训练数据/模型构造/工程更新之前，科学及工程optimizer更新均0；保留原源及r10_train/failure.json，不当科学质量失败。
+
+新round10_train_fix.py仅把该局部临时变量改名saved_output并更换独立输出目录r10_train_fix；冻结原源与本修复说明的hash。科学模型/数据/批次/seed/预算/门不变。部署入口尚未运行，改为导入修复版并绑定其权重。照原工程门、1600科学和1600重放执行，不放宽任何标准。

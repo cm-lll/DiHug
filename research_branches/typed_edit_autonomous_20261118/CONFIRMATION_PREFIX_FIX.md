@@ -1,0 +1,7 @@
+# 第一阶段独立检查器支持原混合候选
+
+原冻结gpu_role_guided_edit.py random_candidates(role_phase=True, legacy_pool)明确把relocation和switch合并后抽取随机候选，另加targeted relocation。confirmation_prefix工程在全候选检查中遇到switch，旧R22检查器仅允许action3，报错；原生成器并未改动。
+
+prefix_v2独立edit允许noop/relocation/switch，switch额外检查所有节点净度变化为0，所有非noop新旧有效边数量相同；相同简单性/不存在重复边约束保持。merging使用该检查器，剪枝与穷举仍须逐候选精确一致。原CPU16步重现、GPU整数度/覆盖、特征/分数及全路径CPU验收保持。
+
+不改变生成器、评分、随机流、预算、到达门；不是新增switch算法或新科学配方。旧prefix失败保留，0科学输出。新输出prefix_v2，确认后文中第一阶段应准确称包含targeted relocation与随机relocation/switch，而非绝对只有relocation。
